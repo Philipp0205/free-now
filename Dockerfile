@@ -15,6 +15,5 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist dist
 COPY public public
 RUN mkdir -p /data
-VOLUME ["/data"]
 EXPOSE 3000
 CMD ["node", "--disable-warning=ExperimentalWarning", "dist/server.js"]
