@@ -608,7 +608,7 @@ function sheet() {
             state.placeDraft = value;
           }, { placeholder: "Optional", maxlength: "80" })
         : null,
-      shareToggle(),
+      shareToggle(planning ? "Use my location" : "Share where I am"),
       el("div", { class: "stack", style: "margin-top:14px" }, [
         el("button", { class: "btn", type: "submit", text: planning ? "Add plan" : "I'm free" }),
         !planning && mySocial()
@@ -791,7 +791,7 @@ function mapCard(pin) {
   ]);
 }
 
-function shareToggle() {
+function shareToggle(label) {
   return el("label", { class: "share-toggle" }, [
     el("input", {
       type: "checkbox",
@@ -801,7 +801,7 @@ function shareToggle() {
         localStorage.setItem(SHARE_KEY, state.shareLocation ? "1" : "0");
       },
     }),
-    el("span", { text: "Share where I am" }),
+    el("span", { text: label }),
   ]);
 }
 
