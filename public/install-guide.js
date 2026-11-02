@@ -248,3 +248,72 @@ function desktopGuide() {
 function step(title, detail, done) {
   return { title, detail, done: Boolean(done) };
 }
+
+/** What to show when this device is not fully subscribed. Null means it already is. */
+export function pushReminder(signals, device = {}) {
+  const permission = signals.permission;
+  const active = permission === "granted" && Boolean(device.hasSubscription) && Boolean(device.serverKnows);
+  if (active) return null;
+  if (permission === "denied") {
+    return {
+      kind: "denied",
+      title: "Notifications are blocked",
+      lede: "Hangry can't notify this phone until you allow it in settings.",
+      steps: deniedSteps(signals),
+    };
+  }
+  if (!canSubscribeHere(signals)) {
+    return {
+      kind: "guide",
+      title: "Turn on notifications",
+      lede: guideLede(signals),
+      steps: [],
+    };
+  }
+  return {
+    kind: "enable",
+    title: "Turn on notifications",
+    lede: "Hangry can only reach this phone after you allow notifications.",
+    steps: [],
+  };
+}
+
+export function pushTestMessage(count) {
+  const n = Number(count) || 0;
+  if (n <= 0) return "0 devices subscribed, turn on notifications first";
+  if (n === 1) return "Test sent to 1 device";
+  return `Test sent to ${n} devices`;
+}
+
+function canSubscribeHere(signals) {
+  if (signals.permission === "unsupported") return false;
+  if (signals.platform === "ios") return Boolean(signals.standalone && signals.safari && !signals.inApp);
+  if (signals.platform === "android") return signals.canInstall !== false && !signals.inApp;
+  return true;
+}
+
+function deniedSteps(signals) {
+  if (signals.platform === "ios") {
+    return [
+      "Open iPhone Settings → Notifications → Hangry and turn Allow Notifications on.",
+      "If Hangry is not listed, add it to the Home Screen and open it from the icon.",
+    ];
+  }
+  if (signals.platform === "android") {
+    return [
+      "Android Settings → Apps → Hangry → Notifications, and turn them on.",
+      "Set Battery to Unrestricted.",
+    ];
+  }
+  return ["Allow notifications for this site in the browser's site settings."];
+}
+
+function guideLede(signals) {
+  if (signals.platform === "ios") {
+    return "iPhone notifications need the Home Screen app. A Safari tab can't receive them.";
+  }
+  if (signals.platform === "android" && (signals.canInstall === false || signals.inApp)) {
+    return "For notifications, open Hangry in Chrome and tap Install app.";
+  }
+  return "This browser can't receive Hangry notifications yet.";
+}
