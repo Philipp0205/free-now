@@ -127,6 +127,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       socialTtlMs: deps.config.socialTtlMs,
       tz: deps.config.tz,
       devMode: !deps.config.vapid,
+      mapTileUrl: deps.config.mapTileUrl,
+      mapTileAttribution: deps.config.mapTileAttribution,
     });
     return;
   }

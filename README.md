@@ -73,6 +73,8 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `VAPID_SUBJECT` | `mailto:admin@localhost` | Contact URL sent to the push service. `mailto:` or `https:`. |
 | `SOCIAL_TTL_MS` | `7200000` | How long a social stays active (2 hours). |
 | `APP_TZ` | `UTC` | Timezone that decides what "tomorrow" means. Example: `Europe/Berlin`. |
+| `MAP_TILE_URL` | Esri World Dark Gray | HTTPS tile template with `{z}`, `{x}`, and `{y}`. `{s}` is a subdomain and `{r}` is retina when the template contains them. |
+| `MAP_TILE_ATTRIBUTION` | `© Esri, HERE, Garmin, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 
@@ -168,7 +170,9 @@ Sharing a place is off until someone turns on **Share where I am** when going fr
 
 A tomorrow plan can also name a place in words. A push may include that name. It never includes coordinates.
 
-The Map tab (not a switch on Now) shows two kinds of pins on a Leaflet map with OpenStreetMap tiles: friends who are free and shared a location, and plans that have a location. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
+A card with a place does not embed a map. It shows a short line — the place name, or "nearby" — plus the distance when this phone has already allowed location, and an Open in Maps action.
+
+The Map tab (not a switch on Now) shows the same places on a Leaflet map. The default basemap is Esri World Dark Gray: a dark street map with no API key. CARTO Dark Matter (`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png`) now answers with an API-key watermark, so it is not the default. Set `MAP_TILE_URL` and `MAP_TILE_ATTRIBUTION` together to switch later, for example to CARTO or Stadia once you have a key. The attribution has to match the tiles. Pink pins are friends who are free. Yellow pins are plans. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
 
 ## Limitations
 

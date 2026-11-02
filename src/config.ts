@@ -16,9 +16,16 @@ export type Config = {
   tz: string;
   /** Same note will not push again until this gap has passed. */
   renotifyMs: number;
+  mapTileUrl: string;
+  mapTileAttribution: string;
 };
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
+// CARTO Dark Matter's public raster CDN now returns an API-key watermark.
+// Esri World Dark Gray is a no-key dark street map. Override both env vars
+// to switch to CARTO, Stadia, or OpenFreeMap later.
+const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+const DEFAULT_MAP_TILE_ATTRIBUTION = "© Esri, HERE, Garmin, OpenStreetMap contributors";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Config {
   const port = readPort(env.PORT);
@@ -37,6 +44,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     socialTtlMs,
     tz,
     renotifyMs: 30_000,
+    mapTileUrl: readTileUrl(env.MAP_TILE_URL),
+    mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
   };
 }
 
@@ -71,6 +80,21 @@ function readTtl(value: string | undefined): number {
     throw new Error("SOCIAL_TTL_MS must be between 1 minute and 7 days");
   }
   return ttl;
+}
+
+function readTileUrl(value: string | undefined): string {
+  const raw = value?.trim() || DEFAULT_MAP_TILE_URL;
+  if (!raw.startsWith("https://") || !raw.includes("{z}") || !raw.includes("{x}") || !raw.includes("{y}")) {
+    throw new Error("MAP_TILE_URL must be an https template containing {z}, {x}, and {y}");
+  }
+  if (raw.length > 400) throw new Error("MAP_TILE_URL is too long");
+  return raw;
+}
+
+function readAttribution(value: string | undefined): string {
+  const raw = value?.trim() || DEFAULT_MAP_TILE_ATTRIBUTION;
+  if (raw.length > 240) throw new Error("MAP_TILE_ATTRIBUTION is too long");
+  return raw;
 }
 
 function readVapid(env: NodeJS.ProcessEnv): VapidConfig | null {
