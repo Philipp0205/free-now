@@ -164,7 +164,7 @@ railway.json    Dockerfile builder and health check
 
 ## Location
 
-Sharing a place is off until someone turns on **Share where I am**. That switch is in the free-now sheet and on a tomorrow plan, and the device remembers it. While it is on, Hangry takes one reading at the moment you publish. It does not watch your location in the background. The coordinates are rounded to about 100 metres and deleted with the social or plan when it expires. If location is denied, the social or plan is still created.
+Sharing a place is off until someone turns on **Share where I am** when going free, or **Use my location** on a tomorrow plan. The device remembers that choice. While it is on, Hangry takes one reading at the moment you publish. It does not watch your location in the background. The coordinates are rounded to about 100 metres and deleted with the social or plan when it expires. If location is denied, the social or plan is still created.
 
 A tomorrow plan can also name a place in words. A push may include that name. It never includes coordinates.
 
