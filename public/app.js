@@ -1,3 +1,5 @@
+import { installGuide, readInstallSignals } from "./install-guide.js";
+
 const TOKEN_KEY = "fn_token";
 const IOS_HINT_KEY = "fn_ios_hint_off";
 const SHARE_KEY = "fn_share_location";
@@ -22,10 +24,13 @@ const state = {
   error: "",
   banner: null,
   bannerTimer: 0,
+  iosHintOpen: false,
+  confirm: null,
   latestNotifId: null,
   bootstrappedNotifs: false,
   focusSheet: false,
   installEvent: null,
+  installOpen: false,
   pushBusy: false,
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
@@ -121,7 +126,7 @@ async function refresh({ initial = false } = {}) {
   });
   if (signature === state.signature) return;
   state.signature = signature;
-  if (state.sheet || isTyping()) return;
+  if (state.sheet || state.installOpen || isTyping()) return;
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
@@ -207,7 +212,9 @@ function view() {
   } else {
     root.append(shell());
   }
+  if (state.installOpen) root.append(installGuideView());
   if (state.banner) root.append(banner(state.banner));
+  if (state.confirm) root.append(confirmSheet());
   if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
   return root;
 }
@@ -252,6 +259,12 @@ function welcome() {
               state.error = "";
               render();
             },
+          }),
+          el("button", {
+            class: "btn ghost",
+            type: "button",
+            text: "Install for notifications",
+            onclick: openInstallGuide,
           }),
         ]),
   ]);
@@ -316,6 +329,7 @@ function home() {
     ]),
   ];
   if (showIosHint()) parts.push(iosHint());
+  if (showChromeHint()) parts.push(chromeHint());
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
@@ -493,18 +507,31 @@ function youScreen() {
     ]),
     el("div", { class: "panel" }, [
       el("h3", { text: "Notifications" }),
+      notificationStatus(),
       el("p", {
         text: state.meta?.devMode
           ? "Add VAPID keys to deliver real phone notifications. Until then, alerts stay in this app — enough for two browser profiles."
-          : "Turn on notifications so a join actually reaches your pocket. On iPhone this only works after you add Hangry to the Home Screen (iOS 16.4+).",
+          : "Install Hangry on your phone, then allow notifications, so a join reaches your pocket.",
       }),
       el("button", {
-        class: "btn",
+        class: "btn secondary",
         type: "button",
-        text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Turn on notifications" : "Push needs VAPID keys",
-        disabled: state.pushBusy || !state.meta?.vapidPublicKey,
-        onclick: onEnablePush,
+        text: currentGuide().status === "on"
+          ? "Notification status"
+          : currentGuide().status === "denied"
+            ? "How to turn them back on"
+            : "How to turn on notifications",
+        onclick: openInstallGuide,
       }),
+      currentGuide().status === "on" || currentGuide().status === "denied"
+        ? null
+        : el("button", {
+            class: "btn",
+            type: "button",
+            text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Enable notifications" : "Push needs VAPID keys",
+            disabled: state.pushBusy || !state.meta?.vapidPublicKey,
+            onclick: onEnablePush,
+          }),
       state.meta?.vapidPublicKey
         ? el("button", {
             class: "btn ghost",
@@ -630,20 +657,146 @@ function banner(note) {
   ]);
 }
 
+function currentSignals() {
+  const standalone = window.matchMedia("(display-mode: standalone)").matches
+    || window.matchMedia("(display-mode: fullscreen)").matches
+    || window.navigator.standalone === true;
+  const notificationPermission = "Notification" in window ? Notification.permission : "unsupported";
+  return readInstallSignals({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints || 0,
+    standalone,
+    notificationPermission,
+  });
+}
+
+function currentGuide() {
+  return installGuide(currentSignals());
+}
+
+function notificationStatus() {
+  const guide = currentGuide();
+  if (guide.status === "on") return el("p", { class: "status-on", text: "Notifications on" });
+  if (guide.status === "denied") return el("p", { class: "status-off", text: "Notifications blocked" });
+  return null;
+}
+
+function openInstallGuide() {
+  state.installOpen = true;
+  state.error = "";
+  render();
+}
+
+function closeInstallGuide() {
+  state.installOpen = false;
+  render();
+}
+
+function installGuideView() {
+  const guide = currentGuide();
+  const signals = currentSignals();
+  const actions = [];
+  if (state.installEvent && !signals.standalone) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: onInstall }));
+  }
+  if (canEnableNotifications(signals, guide)) {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: state.pushBusy ? "Waiting…" : "Enable notifications",
+      disabled: state.pushBusy,
+      onclick: onEnablePush,
+    }));
+  }
+  if (guide.offerCopyLink) {
+    actions.unshift(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallGuide }));
+  return el("div", { class: "guide-scrim" }, [
+    el("section", { class: "guide", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-title" }, [
+      el("div", { class: "guide-head" }, [
+        el("h2", {
+          id: "install-title",
+          text: guide.status === "on" || guide.status === "denied" ? "Notifications" : guide.headline,
+        }),
+      ]),
+      guide.status === "on" ? el("p", { class: "status-on", text: "Notifications on" }) : null,
+      guide.status === "denied" ? el("p", { class: "status-off", text: "Notifications blocked" }) : null,
+      el("p", { class: "lede", text: guide.lede }),
+      ...guide.groups.map((group) => el("section", { class: "guide-group" }, [
+        group.label ? el("h3", { text: group.label }) : null,
+        group.steps.length
+          ? el("ol", { class: "guide-steps" }, group.steps.map((item, index) => el("li", { class: item.done ? "done" : "" }, [
+              el("span", { class: "n", text: item.done ? "✓" : String(index + 1) }),
+              el("div", {}, [
+                el("strong", { text: item.title }),
+                el("p", { text: item.detail }),
+              ]),
+            ])))
+          : null,
+        group.reenable.length
+          ? el("ol", { class: "guide-reenable" }, group.reenable.map((line) => el("li", { text: line })))
+          : null,
+        group.note ? el("p", { class: "guide-note", text: group.note }) : null,
+      ])),
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
+}
+
+function canEnableNotifications(signals, guide) {
+  if (!state.meta?.vapidPublicKey) return false;
+  if (guide.status === "on" || guide.status === "denied" || guide.status === "wrong-browser") return false;
+  if (signals.permission !== "default") return false;
+  if (signals.platform === "ios") return signals.standalone && signals.safari;
+  if (signals.platform === "android") return !signals.inApp;
+  return false;
+}
+
 function iosHint() {
   return el("div", { class: "ios-hint" }, [
-    el("span", {
-      text: "On iPhone, push only works from the Home Screen app. Tap Share, then Add to Home Screen. Requires iOS 16.4 or newer.",
-    }),
+    el("div", { class: "ios-hint-body" }, [
+      el("button", {
+        type: "button",
+        text: "Add to Home Screen for notifications",
+        onclick: openInstallGuide,
+      }),
+    ]),
     el("button", {
+      class: "ios-dismiss",
       type: "button",
       "aria-label": "Dismiss",
       text: "×",
       onclick: () => {
         localStorage.setItem(IOS_HINT_KEY, "1");
+        state.iosHintOpen = false;
         render();
       },
     }),
+  ]);
+}
+
+function showChromeHint() {
+  const signals = currentSignals();
+  return signals.platform === "android" && signals.canInstall === false;
+}
+
+function chromeHint() {
+  return el("div", { class: "ios-hint" }, [
+    el("div", { class: "ios-hint-body" }, [
+      el("p", { text: "For notifications, open Hangry in Chrome and tap Install app." }),
+      el("button", {
+        type: "button",
+        text: "Copy link",
+        onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+      }),
+    ]),
   ]);
 }
 
@@ -710,6 +863,7 @@ function collectPins() {
 
 let leafletPromise = null;
 let liveMap = null;
+const PIN_PX = 36;
 
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
@@ -758,9 +912,9 @@ async function mountMap() {
     const marker = L.marker([pin.lat, pin.lng], {
       icon: L.divIcon({
         className: `pin pin-${pin.kind}`,
-        html: `<span>${escapeHtml(pin.initial || "")}</span>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
+        html: `<span class="pin-letter">${escapeHtml(pin.initial || "")}</span>`,
+        iconSize: [PIN_PX, PIN_PX],
+        iconAnchor: [PIN_PX / 2, PIN_PX / 2],
       }),
     });
     marker.on("click", () => showMapCard(pin));
@@ -1070,22 +1224,28 @@ async function onJoinCircle(event) {
 async function onFree(event) {
   event.preventDefault();
   const where = await sharedPoint();
+  const locationNote = state.error;
+  if (locationNote) render();
   await run(async () => {
     await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...where } });
     state.sheet = null;
+    state.error = locationNote;
     await refresh({ initial: true });
-  });
+  }, locationNote);
 }
 
 async function onCreatePlan(event) {
   event.preventDefault();
   const where = await sharedPoint();
+  const locationNote = state.error;
+  if (locationNote) render();
   await run(async () => {
     await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place: state.placeDraft, ...where } });
     state.sheet = null;
     state.placeDraft = "";
+    state.error = locationNote;
     await refresh({ initial: true });
-  });
+  }, locationNote);
 }
 
 async function joinSocial(social) {
@@ -1097,12 +1257,62 @@ async function joinSocial(social) {
 
 async function endSocial(social) {
   if (!social) return;
-  if (!window.confirm("End this and tell friends you're no longer free?")) return;
-  await run(async () => {
-    await api(`/api/socials/${social.id}`, { method: "DELETE" });
-    state.sheet = null;
-    await refresh({ initial: true });
-  });
+  state.confirm = {
+    title: "End this?",
+    body: "Friends will no longer see you as free.",
+    confirmLabel: "End",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/socials/${social.id}`, { method: "DELETE" });
+        state.sheet = null;
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
+}
+
+function confirmSheet() {
+  const pending = state.confirm;
+  if (!pending) return el("div");
+  return el("div", {}, [
+    el("button", {
+      class: "scrim",
+      type: "button",
+      "aria-label": "Cancel",
+      onclick: () => {
+        state.confirm = null;
+        render();
+      },
+    }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": pending.title }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: pending.title }),
+      el("p", { class: "help", text: pending.body }),
+      el("div", { class: "stack" }, [
+        el("button", {
+          class: "btn danger",
+          type: "button",
+          text: pending.confirmLabel,
+          onclick: () => {
+            const action = pending.action;
+            state.confirm = null;
+            render();
+            void action();
+          },
+        }),
+        el("button", {
+          class: "btn ghost",
+          type: "button",
+          text: "Cancel",
+          onclick: () => {
+            state.confirm = null;
+            render();
+          },
+        }),
+      ]),
+    ]),
+  ]);
 }
 
 async function joinPlan(plan) {
@@ -1203,8 +1413,8 @@ async function onLogout() {
   render();
 }
 
-async function run(fn) {
-  state.error = "";
+async function run(fn, keepError = "") {
+  state.error = keepError;
   try {
     await fn();
   } catch (error) {

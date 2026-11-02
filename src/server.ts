@@ -1,6 +1,6 @@
 import http from "node:http";
 import { loadConfig } from "./config.js";
-import { openDb, sweep } from "./db.js";
+import { clearExpiredLocations, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
 import { createNoopPushSender, createWebPushSender } from "./push.js";
 import { addDays, isoDate } from "./time.js";
@@ -12,12 +12,19 @@ const push = config.vapid ? createWebPushSender(config.vapid) : createNoopPushSe
 function sweepNow(): void {
   const now = Date.now();
   const today = isoDate(now, config.tz);
-  sweep(db, now, addDays(today, -2));
+  sweep(db, now, addDays(today, -2), today);
+}
+
+function clearLocationsNow(): void {
+  const now = Date.now();
+  clearExpiredLocations(db, now, isoDate(now, config.tz));
 }
 
 sweepNow();
 const sweepTimer = setInterval(sweepNow, 60 * 60 * 1000);
+const locationTimer = setInterval(clearLocationsNow, 60 * 1000);
 sweepTimer.unref?.();
+locationTimer.unref?.();
 
 const server = http.createServer(
   createApp({
@@ -46,6 +53,7 @@ server.listen(config.port, "0.0.0.0", () => {
 
 function shutdown(): void {
   clearInterval(sweepTimer);
+  clearInterval(locationTimer);
   server.close(() => {
     db.close();
     process.exit(0);

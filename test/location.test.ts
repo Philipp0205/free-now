@@ -8,7 +8,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { openDb } from "../src/db.js";
+import { clearExpiredLocations, insertCircle, insertPlan, insertSocial, insertUser, listActiveSocials, openDb, sweep } from "../src/db.js";
 import type { PushPayload, PushSender } from "../src/push.js";
 
 const START = Date.parse("2026-06-01T15:00:00.000Z");
@@ -133,6 +133,106 @@ test("map tiles default to a dark basemap and can be overridden", async () => {
     assert.equal(meta.mapTileUrl, defaults.mapTileUrl);
     assert.equal(meta.mapTileAttribution, defaults.mapTileAttribution);
   });
+});
+
+test("an expired social row has NULL coordinates while the row remains", () => {
+  const db = openDb(":memory:");
+  const now = 1_000_000;
+  insertUser(db, { id: "u", name: "Alex", token_hash: "h", buzz_token: "b", created_at: now });
+  insertCircle(db, {
+    id: "c",
+    name: "friends",
+    invite_code: "ABCD2345",
+    created_by: "u",
+    created_at: now,
+  }, "u", now);
+  insertSocial(db, {
+    id: "s",
+    circleId: "c",
+    creatorId: "u",
+    note: "hi",
+    createdAt: now - 120_000,
+    expiresAt: now - 1,
+    lat: 52.52,
+    lng: 13.405,
+  });
+  insertSocial(db, {
+    id: "live",
+    circleId: "c",
+    creatorId: "u",
+    note: "still",
+    createdAt: now,
+    expiresAt: now + 60_000,
+    lat: 52.52,
+    lng: 13.405,
+  });
+  sweep(db, now, "2026-05-01", "2026-06-02");
+  const row = db.prepare("SELECT lat, lng, note FROM socials WHERE id = ?").get("s") as {
+    lat: number | null;
+    lng: number | null;
+    note: string;
+  };
+  assert.equal(row.lat, null);
+  assert.equal(row.lng, null);
+  assert.equal(row.note, "hi");
+  const live = db.prepare("SELECT lat, lng FROM socials WHERE id = ?").get("live") as { lat: number; lng: number };
+  assert.equal(live.lat, 52.52);
+  assert.equal(live.lng, 13.405);
+  const count = db.prepare("SELECT COUNT(*) AS n FROM socials").get() as { n: number | bigint };
+  assert.equal(Number(count.n), 2);
+
+  insertSocial(db, {
+    id: "read",
+    circleId: "c",
+    creatorId: "u",
+    note: "later",
+    createdAt: now - 10_000,
+    expiresAt: now,
+    lat: 48.137,
+    lng: 11.575,
+  });
+  assert.equal(listActiveSocials(db, "c", now).some((social) => social.id === "read"), false);
+  const stripped = db.prepare("SELECT lat, lng FROM socials WHERE id = ?").get("read") as {
+    lat: number | null;
+    lng: number | null;
+  };
+  assert.equal(stripped.lat, null);
+  assert.equal(stripped.lng, null);
+  db.close();
+});
+
+test("a plan drops its pin once that day is over and keeps a typed place", () => {
+  const db = openDb(":memory:");
+  const now = 1_000_000;
+  insertUser(db, { id: "u", name: "Alex", token_hash: "h", buzz_token: "b", created_at: now });
+  insertCircle(db, {
+    id: "c",
+    name: "friends",
+    invite_code: "ABCD2345",
+    created_by: "u",
+    created_at: now,
+  }, "u", now);
+  insertPlan(db, {
+    id: "p",
+    circleId: "c",
+    creatorId: "u",
+    note: "Walk",
+    forDate: "2026-06-01",
+    createdAt: now,
+    lat: 52.52,
+    lng: 13.405,
+    place: "Roof",
+  });
+  clearExpiredLocations(db, now, "2026-06-02");
+  const row = db.prepare("SELECT lat, lng, place FROM plans WHERE id = ?").get("p") as {
+    lat: number | null;
+    lng: number | null;
+    place: string;
+  };
+  assert.equal(row.lat, null);
+  assert.equal(row.lng, null);
+  assert.equal(row.place, "Roof");
+  db.close();
 });
 
 test("an older database gains location columns", () => {
