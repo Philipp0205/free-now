@@ -23,6 +23,8 @@ const state = {
   error: "",
   banner: null,
   bannerTimer: 0,
+  iosHintOpen: false,
+  confirm: null,
   latestNotifId: null,
   bootstrappedNotifs: false,
   focusSheet: false,
@@ -204,6 +206,7 @@ function view() {
   }
   if (state.installOpen) root.append(installGuideView());
   if (state.banner) root.append(banner(state.banner));
+  if (state.confirm) root.append(confirmSheet());
   if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
   return root;
 }
@@ -740,18 +743,21 @@ function canEnableNotifications(signals, guide) {
 
 function iosHint() {
   return el("div", { class: "ios-hint" }, [
+    el("div", { class: "ios-hint-body" }, [
+      el("button", {
+        type: "button",
+        text: "Add to Home Screen for notifications",
+        onclick: openInstallGuide,
+      }),
+    ]),
     el("button", {
-      class: "link",
-      type: "button",
-      text: "Notifications on iPhone need the Home Screen app. See how.",
-      onclick: openInstallGuide,
-    }),
-    el("button", {
+      class: "ios-dismiss",
       type: "button",
       "aria-label": "Dismiss",
       text: "×",
       onclick: () => {
         localStorage.setItem(IOS_HINT_KEY, "1");
+        state.iosHintOpen = false;
         render();
       },
     }),
@@ -957,12 +963,62 @@ async function joinSocial(social) {
 
 async function endSocial(social) {
   if (!social) return;
-  if (!window.confirm("End this and tell friends you're no longer free?")) return;
-  await run(async () => {
-    await api(`/api/socials/${social.id}`, { method: "DELETE" });
-    state.sheet = null;
-    await refresh({ initial: true });
-  });
+  state.confirm = {
+    title: "End this?",
+    body: "Friends will no longer see you as free.",
+    confirmLabel: "End",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/socials/${social.id}`, { method: "DELETE" });
+        state.sheet = null;
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
+}
+
+function confirmSheet() {
+  const pending = state.confirm;
+  if (!pending) return el("div");
+  return el("div", {}, [
+    el("button", {
+      class: "scrim",
+      type: "button",
+      "aria-label": "Cancel",
+      onclick: () => {
+        state.confirm = null;
+        render();
+      },
+    }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": pending.title }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: pending.title }),
+      el("p", { class: "help", text: pending.body }),
+      el("div", { class: "stack" }, [
+        el("button", {
+          class: "btn danger",
+          type: "button",
+          text: pending.confirmLabel,
+          onclick: () => {
+            const action = pending.action;
+            state.confirm = null;
+            render();
+            void action();
+          },
+        }),
+        el("button", {
+          class: "btn ghost",
+          type: "button",
+          text: "Cancel",
+          onclick: () => {
+            state.confirm = null;
+            render();
+          },
+        }),
+      ]),
+    ]),
+  ]);
 }
 
 async function joinPlan(plan) {

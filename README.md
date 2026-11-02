@@ -72,7 +72,7 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `VAPID_PRIVATE_KEY` | unset | Web Push private key. Set both, or neither. |
 | `VAPID_SUBJECT` | `mailto:admin@localhost` | Contact URL sent to the push service. `mailto:` or `https:`. |
 | `SOCIAL_TTL_MS` | `7200000` | How long a social stays active (2 hours). |
-| `APP_TZ` | `UTC` | Timezone that decides what "tomorrow" means. Example: `Europe/Berlin`. |
+| `APP_TZ` | `Europe/Berlin` | Timezone that decides what "tomorrow" means. Override it if the circle lives elsewhere. |
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 
@@ -174,7 +174,7 @@ The hostname is not decided yet. When it is, point it at Railway like this:
 
 - Requires iOS or iPadOS **16.4 or newer**.
 - The app must be added to the Home Screen and opened from that icon. A Safari tab can load the UI and can register a service worker, but it will not show Web Push.
-- Permission has to be granted from a tap inside the installed app (You → Turn on notifications). iOS ignores permission requests that are not from a user gesture.
+- Permission has to be granted from a tap inside the installed app (You → Enable notifications). iOS ignores permission requests that are not from a user gesture.
 - Apple can delay or drop pushes if the installed app has not been opened for a while.
 - Notification actions, images, and vibration are more limited than on Android.
 - There is no App Store build. That is the point of the PWA.
@@ -202,4 +202,4 @@ railway.json    Dockerfile builder and health check
 - The buzzer token and recovery code are the same secret, stored in the database so it can be shown again. Protect the SQLite file.
 - Clearing site data without saving that secret signs you out for good.
 - Invite codes are unguessable enough for a circle of friends and are not rate-limited.
-- "Tomorrow" follows `APP_TZ`, not each phone's timezone.
+- "Tomorrow" follows `APP_TZ` (Europe/Berlin unless you set it), not each phone's timezone.
