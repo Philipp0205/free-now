@@ -34,7 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     : path.join(cwd, "data", "free-now.sqlite");
   const publicBaseUrl = readBaseUrl(env.PUBLIC_BASE_URL);
   const socialTtlMs = readTtl(env.SOCIAL_TTL_MS);
-  const tz = (env.APP_TZ?.trim() || "UTC");
+  const tz = (env.APP_TZ?.trim() || "Europe/Berlin");
   assertTimeZone(tz);
   return {
     port,

@@ -174,7 +174,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     }
     const buzzer = token ? getUserByBuzzToken(deps.db, token) : undefined;
     if (!buzzer) throw new HttpError(404, "unknown token");
-    const note = cleanNote(body.note, false);
+    // A bare buzz keeps the live note. Only a note field in the body replaces it.
+    const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
     const result = await publishSocial(deps, buzzer, note, readPoint(body));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
@@ -379,7 +380,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 async function publishSocial(
   deps: AppDeps,
   user: UserRow,
-  note: string,
+  note: string | undefined,
   point?: { lat: number; lng: number } | null,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id);
@@ -388,6 +389,10 @@ async function publishSocial(
   let created = false;
   let socialId: string;
   let shouldNotify = true;
+  // A missing note on a live social keeps the current text. The original
+  // createdAt stays put; expiry moves to now + TTL so the window is a full
+  // TTL from this buzz and the two timestamps still describe one social.
+  const nextNote = note === undefined ? (existing?.note ?? "") : note;
   if (!existing) {
     created = true;
     socialId = crypto.randomUUID();
@@ -395,7 +400,7 @@ async function publishSocial(
       id: socialId,
       circleId: circle.id,
       creatorId: user.id,
-      note,
+      note: nextNote,
       createdAt: now,
       expiresAt: now + deps.config.socialTtlMs,
       lat: point?.lat ?? null,
@@ -404,19 +409,19 @@ async function publishSocial(
   } else {
     socialId = existing.id;
     const gap = now - existing.last_notified_at;
-    const noteChanged = existing.note !== note;
+    const noteChanged = existing.note !== nextNote;
     shouldNotify = noteChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs;
     updateSocial(
       deps.db,
       existing.id,
-      note,
+      nextNote,
       now + deps.config.socialTtlMs,
       shouldNotify ? now : existing.last_notified_at,
       point,
     );
   }
   if (shouldNotify) {
-    const title = socialTitle(note);
+    const title = socialTitle(nextNote);
     const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
     await notifyUsers(
       deps.db,

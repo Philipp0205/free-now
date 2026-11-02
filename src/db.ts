@@ -375,6 +375,7 @@ export function updateSocial(
 }
 
 export function listActiveSocials(db: DatabaseSync, circleId: string, now: number): SocialRow[] {
+  clearExpiredSocialPoints(db, now);
   return all<SocialRow>(
     db,
     `${SOCIAL_SELECT} WHERE s.circle_id = ? AND s.expires_at > ? ORDER BY s.created_at DESC`,
@@ -451,6 +452,7 @@ export function insertPlan(
 }
 
 export function listVisiblePlans(db: DatabaseSync, circleId: string, today: string, through: string): PlanRow[] {
+  clearExpiredPlanPoints(db, today);
   return all<PlanRow>(
     db,
     `${PLAN_SELECT} WHERE p.circle_id = ? AND p.for_date >= ? AND p.for_date <= ? ORDER BY p.for_date ASC, p.created_at ASC`,
@@ -560,7 +562,26 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: 
   db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(readAt, userId);
 }
 
-export function sweep(db: DatabaseSync, now: number, planCutoff: string): void {
+function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
+  db.prepare(
+    "UPDATE socials SET lat = NULL, lng = NULL WHERE expires_at <= ? AND (lat IS NOT NULL OR lng IS NOT NULL)",
+  ).run(now);
+}
+
+function clearExpiredPlanPoints(db: DatabaseSync, today: string): void {
+  // A typed place is not derived from the pin, so it stays after the coordinates go.
+  db.prepare(
+    "UPDATE plans SET lat = NULL, lng = NULL WHERE for_date < ? AND (lat IS NOT NULL OR lng IS NOT NULL)",
+  ).run(today);
+}
+
+export function clearExpiredLocations(db: DatabaseSync, now: number, today: string): void {
+  clearExpiredSocialPoints(db, now);
+  clearExpiredPlanPoints(db, today);
+}
+
+export function sweep(db: DatabaseSync, now: number, planCutoff: string, today = ""): void {
+  if (today) clearExpiredLocations(db, now, today);
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
   db.prepare("DELETE FROM socials WHERE expires_at < ?").run(weekAgo);

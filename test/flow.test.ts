@@ -225,9 +225,33 @@ test("buzz token starts a social and notifies the circle", async () => {
 
     const bare = await fetch(`http://127.0.0.1:${ctx.port}/api/buzz/${alex.buzzToken}`, { method: "POST" });
     assert.equal(bare.status, 200);
-    const bareJson = (await bare.json()) as { social: { note: string } };
-    assert.equal(bareJson.social.note, "");
+    const bareJson = (await bare.json()) as { social: { note: string; createdAt: number; expiresAt: number } };
+    assert.equal(bareJson.social.note, "Rooftop coffee??");
+    assert.equal(bareJson.social.createdAt, buzzed.json.social.createdAt);
   });
+});
+
+test("a bare buzz keeps the note and extends expiry without moving the start", async () => {
+  await withApp(async (ctx) => {
+    const alex = await signUp(ctx, "Alex");
+    await api(ctx, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const started = await api(ctx, "POST", `/api/buzz/${alex.buzzToken}`, {
+      body: { note: "Rooftop coffee??" },
+      status: 201,
+    });
+    ctx.advance(13_000);
+    const again = await api(ctx, "POST", `/api/buzz/${alex.buzzToken}`, { status: 200 });
+    assert.equal(again.json.social.note, "Rooftop coffee??");
+    assert.equal(again.json.social.createdAt, started.json.social.createdAt);
+    assert.equal(again.json.social.expiresAt - started.json.social.createdAt, 60_000 + 13_000);
+    assert.equal(again.json.social.expiresAt - (started.json.social.createdAt + 13_000), 60_000);
+    const replaced = await api(ctx, "POST", `/api/buzz/${alex.buzzToken}`, {
+      body: { note: "Park" },
+      status: 200,
+    });
+    assert.equal(replaced.json.social.note, "Park");
+    assert.equal(replaced.json.social.createdAt, started.json.social.createdAt);
+  }, 60_000);
 });
 
 test("tomorrow plans can be joined and disappear after that day", async () => {
@@ -295,6 +319,7 @@ test("recovery code rotates the device session", async () => {
 });
 
 test("config rejects a half-set VAPID pair and reads the public settings", () => {
+  assert.equal(loadConfig({}).tz, "Europe/Berlin");
   assert.throws(() => loadConfig({ VAPID_PUBLIC_KEY: "abc" }), /both VAPID/);
   assert.throws(() => loadConfig({ APP_TZ: "Not/AZone" }), /APP_TZ/);
   const config = loadConfig({ PORT: "8080", APP_TZ: "Europe/Berlin", PUBLIC_BASE_URL: "https://hangry.example/" }, "/tmp");
