@@ -374,9 +374,8 @@ function socialCard(social) {
   const joined = social.joined.some((person) => person.id === state.me.user.id);
   const people = [social.creator, ...social.joined];
   const names = social.joined.map((person) => person.name);
-  return el("article", { class: social.location ? "card card-now has-loc" : "card card-now" }, [
+  return el("article", { class: "card card-now" }, [
     el("div", { class: "card-bg" }),
-    social.location ? locationThumb(social.location, social.note || social.creator.name) : null,
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
       : el("button", {
@@ -390,6 +389,7 @@ function socialCard(social) {
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || "Free now" }),
       el("p", { text: `${social.creator.name} · ${remaining(social.expiresAt)}` }),
+      placeLine(social.location, ""),
       el("p", { text: names.length ? `${names.join(", ")} joined` : "Waiting for friends" }),
     ]),
   ]);
@@ -399,9 +399,8 @@ function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const joined = plan.joined.some((person) => person.id === state.me.user.id);
   const people = [plan.creator, ...plan.joined];
-  return el("article", { class: plan.location ? "card card-photo has-loc" : "card card-photo", style: `--photo:url("${bgFor(plan.id)}")` }, [
+  return el("article", { class: "card card-photo", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
-    plan.location ? locationThumb(plan.location, plan.place || plan.note) : null,
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
       : el("button", {
@@ -414,7 +413,8 @@ function planCard(plan) {
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
-      el("p", { text: [plan.whenLabel, plan.creator.name, plan.place].filter(Boolean).join(" · ") }),
+      el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
+      placeLine(plan.location, plan.place),
     ]),
   ]);
 }
@@ -683,6 +683,7 @@ function collectPins() {
       lat: social.location.lat,
       lng: social.location.lng,
       title: social.creator.name,
+      initial: initial(social.creator.name),
       note: social.note || "Free now",
       time: remaining(social.expiresAt),
       canJoin: !mine && !joined,
@@ -698,6 +699,7 @@ function collectPins() {
       lat: plan.location.lat,
       lng: plan.location.lng,
       title: plan.creator.name,
+      initial: initial(plan.creator.name),
       note: plan.place ? `${plan.note} · ${plan.place}` : plan.note,
       time: plan.whenLabel,
       canJoin: !mine && !joined,
@@ -741,16 +743,24 @@ async function mountMap() {
   const pins = collectPins();
   if (!pins.length) return;
   const map = L.map(host, { zoomControl: false });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom: 19,
+  L.control.zoom({ position: "topright" }).addTo(map);
+  const tileUrl = state.meta?.mapTileUrl
+    || "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+  const tileAttribution = state.meta?.mapTileAttribution
+    || "© Esri, HERE, Garmin, OpenStreetMap contributors";
+  L.tileLayer(tileUrl, {
+    attribution: tileAttribution,
+    subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
+    detectRetina: tileUrl.includes("{r}"),
+    maxZoom: 20,
   }).addTo(map);
   for (const pin of pins) {
     const marker = L.marker([pin.lat, pin.lng], {
       icon: L.divIcon({
         className: `pin pin-${pin.kind}`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
+        html: `<span>${escapeHtml(pin.initial || "")}</span>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
       }),
     });
     marker.on("click", () => showMapCard(pin));
@@ -838,20 +848,35 @@ function rememberViewerLocation() {
   }).catch(() => {});
 }
 
-function locationThumb(location, label) {
-  const tile = osmTile(location.lat, location.lng, 15);
-  const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, location)) : "";
+function placeLine(location, placeName) {
+  const named = typeof placeName === "string" ? placeName.trim() : "";
+  if (!location && !named) return null;
+  const distance = location && state.viewerLocation
+    ? formatDistance(haversine(state.viewerLocation, location))
+    : "";
+  const where = named || "nearby";
+  const text = distance ? `${where} · ${distance}` : where;
+  if (!location) return el("p", { class: "place-line static", text });
   return el("a", {
-    class: "loc-thumb",
-    href: mapsHref(location.lat, location.lng, label),
+    class: "place-line",
+    href: mapsHref(location.lat, location.lng, named || "Hangry"),
     target: mapsExternal() ? "_blank" : null,
     rel: mapsExternal() ? "noreferrer" : null,
-    style: `background-image:url("${tile.url}")`,
+    "aria-label": `Open in Maps, ${text}`,
   }, [
-    el("span", { class: "loc-pin", style: `left:${tile.left}%;top:${tile.top}%` }),
-    el("span", { class: "loc-meta", text: distance ? `${distance} · Open in Maps` : "Open in Maps" }),
-    el("span", { class: "osm-mini", text: "© OpenStreetMap" }),
+    el("span", { class: "place-pin", "aria-hidden": "true" }),
+    el("span", { text }),
   ]);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char]);
 }
 
 function mapsLink(lat, lng, label, text) {
@@ -875,20 +900,6 @@ function mapsHref(lat, lng, label) {
   if (ios) return `https://maps.apple.com/?ll=${lat},${lng}&q=${name}`;
   if (/android/i.test(navigator.userAgent)) return `geo:${lat},${lng}?q=${lat},${lng}(${name})`;
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-}
-
-function osmTile(lat, lng, zoom) {
-  const n = 2 ** zoom;
-  const x = ((lng + 180) / 360) * n;
-  const latRad = (lat * Math.PI) / 180;
-  const y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
-  const xt = Math.floor(x);
-  const yt = Math.floor(y);
-  return {
-    url: `https://tile.openstreetmap.org/${zoom}/${xt}/${yt}.png`,
-    left: (x - xt) * 100,
-    top: (y - yt) * 100,
-  };
 }
 
 function haversine(a, b) {

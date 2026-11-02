@@ -114,6 +114,27 @@ test("a plan can name a place and share a pin without putting coordinates in the
   });
 });
 
+test("map tiles default to a dark basemap and can be overridden", async () => {
+  const defaults = loadConfig({});
+  assert.equal(
+    defaults.mapTileUrl,
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+  );
+  assert.equal(defaults.mapTileAttribution, "© Esri, HERE, Garmin, OpenStreetMap contributors");
+  const custom = loadConfig({
+    MAP_TILE_URL: "https://tiles.example/{z}/{x}/{y}.png",
+    MAP_TILE_ATTRIBUTION: "© Example",
+  });
+  assert.equal(custom.mapTileUrl, "https://tiles.example/{z}/{x}/{y}.png");
+  assert.equal(custom.mapTileAttribution, "© Example");
+  assert.throws(() => loadConfig({ MAP_TILE_URL: "http://tiles.example/{z}/{x}/{y}.png" }), /MAP_TILE_URL/);
+  await withApp(async (port) => {
+    const meta = await api(port, "GET", "/api/meta");
+    assert.equal(meta.mapTileUrl, defaults.mapTileUrl);
+    assert.equal(meta.mapTileAttribution, defaults.mapTileAttribution);
+  });
+});
+
 test("an older database gains location columns", () => {
   const file = path.join(os.tmpdir(), `hangry-old-${Date.now()}.sqlite`);
   const legacy = new DatabaseSync(file);
