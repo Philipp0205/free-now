@@ -1,3 +1,5 @@
+import { installGuide, readInstallSignals } from "./install-guide.js";
+
 const TOKEN_KEY = "fn_token";
 const IOS_HINT_KEY = "fn_ios_hint_off";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
@@ -25,6 +27,7 @@ const state = {
   bootstrappedNotifs: false,
   focusSheet: false,
   installEvent: null,
+  installOpen: false,
   pushBusy: false,
 };
 
@@ -114,7 +117,7 @@ async function refresh({ initial = false } = {}) {
   });
   if (signature === state.signature) return;
   state.signature = signature;
-  if (state.sheet || isTyping()) return;
+  if (state.sheet || state.installOpen || isTyping()) return;
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
@@ -199,6 +202,7 @@ function view() {
   } else {
     root.append(shell());
   }
+  if (state.installOpen) root.append(installGuideView());
   if (state.banner) root.append(banner(state.banner));
   if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
   return root;
@@ -244,6 +248,12 @@ function welcome() {
               state.error = "";
               render();
             },
+          }),
+          el("button", {
+            class: "btn ghost",
+            type: "button",
+            text: "Install for notifications",
+            onclick: openInstallGuide,
           }),
         ]),
   ]);
@@ -482,18 +492,31 @@ function youScreen() {
     ]),
     el("div", { class: "panel" }, [
       el("h3", { text: "Notifications" }),
+      notificationStatus(),
       el("p", {
         text: state.meta?.devMode
           ? "Add VAPID keys to deliver real phone notifications. Until then, alerts stay in this app — enough for two browser profiles."
-          : "Turn on notifications so a join actually reaches your pocket. On iPhone this only works after you add Hangry to the Home Screen (iOS 16.4+).",
+          : "Install Hangry on your phone, then allow notifications, so a join reaches your pocket.",
       }),
       el("button", {
-        class: "btn",
+        class: "btn secondary",
         type: "button",
-        text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Turn on notifications" : "Push needs VAPID keys",
-        disabled: state.pushBusy || !state.meta?.vapidPublicKey,
-        onclick: onEnablePush,
+        text: currentGuide().status === "on"
+          ? "Notification status"
+          : currentGuide().status === "denied"
+            ? "How to turn them back on"
+            : "How to turn on notifications",
+        onclick: openInstallGuide,
       }),
+      currentGuide().status === "on" || currentGuide().status === "denied"
+        ? null
+        : el("button", {
+            class: "btn",
+            type: "button",
+            text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Enable notifications" : "Push needs VAPID keys",
+            disabled: state.pushBusy || !state.meta?.vapidPublicKey,
+            onclick: onEnablePush,
+          }),
       state.meta?.vapidPublicKey
         ? el("button", {
             class: "btn ghost",
@@ -612,10 +635,107 @@ function banner(note) {
   ]);
 }
 
+function currentSignals() {
+  const standalone = window.matchMedia("(display-mode: standalone)").matches
+    || window.matchMedia("(display-mode: fullscreen)").matches
+    || window.navigator.standalone === true;
+  const notificationPermission = "Notification" in window ? Notification.permission : "unsupported";
+  return readInstallSignals({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints || 0,
+    standalone,
+    notificationPermission,
+  });
+}
+
+function currentGuide() {
+  return installGuide(currentSignals());
+}
+
+function notificationStatus() {
+  const guide = currentGuide();
+  if (guide.status === "on") return el("p", { class: "status-on", text: "Notifications on" });
+  if (guide.status === "denied") return el("p", { class: "status-off", text: "Notifications blocked" });
+  return null;
+}
+
+function openInstallGuide() {
+  state.installOpen = true;
+  state.error = "";
+  render();
+}
+
+function closeInstallGuide() {
+  state.installOpen = false;
+  render();
+}
+
+function installGuideView() {
+  const guide = currentGuide();
+  const signals = currentSignals();
+  const actions = [];
+  if (state.installEvent && !signals.standalone) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: onInstall }));
+  }
+  if (canEnableNotifications(signals, guide)) {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: state.pushBusy ? "Waiting…" : "Enable notifications",
+      disabled: state.pushBusy,
+      onclick: onEnablePush,
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallGuide }));
+  return el("div", { class: "guide-scrim" }, [
+    el("section", { class: "guide", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-title" }, [
+      el("div", { class: "guide-head" }, [
+        el("h2", {
+          id: "install-title",
+          text: guide.status === "on" || guide.status === "denied" ? "Notifications" : guide.headline,
+        }),
+      ]),
+      guide.status === "on" ? el("p", { class: "status-on", text: "Notifications on" }) : null,
+      guide.status === "denied" ? el("p", { class: "status-off", text: "Notifications blocked" }) : null,
+      el("p", { class: "lede", text: guide.lede }),
+      ...guide.groups.map((group) => el("section", { class: "guide-group" }, [
+        group.label ? el("h3", { text: group.label }) : null,
+        group.steps.length
+          ? el("ol", { class: "guide-steps" }, group.steps.map((item, index) => el("li", { class: item.done ? "done" : "" }, [
+              el("span", { class: "n", text: item.done ? "✓" : String(index + 1) }),
+              el("div", {}, [
+                el("strong", { text: item.title }),
+                el("p", { text: item.detail }),
+              ]),
+            ])))
+          : null,
+        group.reenable.length
+          ? el("ol", { class: "guide-reenable" }, group.reenable.map((line) => el("li", { text: line })))
+          : null,
+        group.note ? el("p", { class: "guide-note", text: group.note }) : null,
+      ])),
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
+}
+
+function canEnableNotifications(signals, guide) {
+  if (!state.meta?.vapidPublicKey) return false;
+  if (guide.status === "on" || guide.status === "denied" || guide.status === "wrong-browser") return false;
+  if (signals.permission !== "default") return false;
+  if (signals.platform === "ios") return signals.standalone && signals.safari;
+  if (signals.platform === "android") return !signals.inApp;
+  return false;
+}
+
 function iosHint() {
   return el("div", { class: "ios-hint" }, [
-    el("span", {
-      text: "On iPhone, push only works from the Home Screen app. Tap Share, then Add to Home Screen. Requires iOS 16.4 or newer.",
+    el("button", {
+      class: "link",
+      type: "button",
+      text: "Notifications on iPhone need the Home Screen app. See how.",
+      onclick: openInstallGuide,
     }),
     el("button", {
       type: "button",
