@@ -22,11 +22,11 @@ type Ctx = {
   at: (ms: number) => void;
 };
 
-async function withApp(fn: (ctx: Ctx) => Promise<void>, ttl = TTL): Promise<void> {
+async function withApp(fn: (ctx: Ctx) => Promise<void>, ttl = TTL, pushOverride?: PushSender): Promise<void> {
   const sent: Sent[] = [];
   let now = START;
   const db = openDb(":memory:");
-  const push: PushSender = {
+  const push: PushSender = pushOverride ?? {
     async send(subscription: PushSubscription, payload: PushPayload) {
       sent.push({ endpoint: subscription.endpoint, payload });
     },
@@ -379,4 +379,54 @@ test("serves the installable shell", async () => {
     const health = await api(ctx, "GET", "/api/health");
     assert.equal(health.json.ok, true);
   });
+});
+
+test("push logs name the user and status, and a test reports the device count", async () => {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  const endpoint = "https://push.example/secret-endpoint";
+  try {
+    await withApp(async (ctx) => {
+      const alex = await signUp(ctx, "Alex");
+      const quiet = await api(ctx, "POST", "/api/push/test", { token: alex.token, body: {}, status: 200 });
+      assert.equal(quiet.json.subscriptions, 0);
+      await subscribe(ctx, alex.token, endpoint);
+      const known = await api(ctx, "POST", "/api/push/status", {
+        token: alex.token,
+        body: { endpoint },
+        status: 200,
+      });
+      assert.equal(known.json.known, true);
+      const other = await api(ctx, "POST", "/api/push/status", {
+        token: alex.token,
+        body: { endpoint: "https://push.example/someone-else" },
+        status: 200,
+      });
+      assert.equal(other.json.known, false);
+      const sent = await api(ctx, "POST", "/api/push/test", { token: alex.token, body: {}, status: 200 });
+      assert.equal(sent.json.subscriptions, 1);
+    });
+    await withApp(async (ctx) => {
+      const alex = await signUp(ctx, "Alex");
+      await subscribe(ctx, alex.token, endpoint);
+      await api(ctx, "POST", "/api/push/test", { token: alex.token, body: {}, status: 200 });
+    }, TTL, {
+      async send() {
+        const error = new Error(`gone ${endpoint} p256dh-key`);
+        (error as { statusCode?: number }).statusCode = 410;
+        throw error;
+      },
+    });
+  } finally {
+    console.log = original;
+  }
+  const text = lines.join("\n");
+  assert.match(text, /push subscribe user=\S+ status=ok/);
+  assert.match(text, /push send user=\S+ status=ok/);
+  assert.match(text, /push send user=\S+ status=410/);
+  assert.equal(text.includes("secret-endpoint"), false);
+  assert.equal(text.includes("p256dh"), false);
 });

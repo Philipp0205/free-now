@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installGuide, readInstallSignals } from "../public/install-guide.js";
+import { installGuide, pushReminder, pushTestMessage, readInstallSignals } from "../public/install-guide.js";
 
 const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const IOS_INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 320.0.0.0";
@@ -117,6 +117,60 @@ test("a denied Android phone is shown site permission and battery steps", () => 
   assert.match(text, /Site settings → Notifications/);
   assert.match(text, /Apps → Hangry → Notifications/);
   assert.match(text, /Battery, choose Unrestricted/);
+});
+
+test("a signed-in phone is reminded until this device is subscribed", () => {
+  const desktop = readInstallSignals({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    notificationPermission: "default",
+  });
+  const ask = pushReminder(desktop, { hasSubscription: false, serverKnows: false });
+  assert.equal(ask?.kind, "enable");
+  assert.equal(ask?.title, "Turn on notifications");
+
+  const granted = readInstallSignals({
+    userAgent: ANDROID_CHROME,
+    notificationPermission: "granted",
+    standalone: true,
+  });
+  assert.equal(pushReminder(granted, { hasSubscription: true, serverKnows: true }), null);
+  assert.equal(pushReminder(granted, { hasSubscription: true, serverKnows: false })?.kind, "enable");
+  assert.equal(pushReminder(granted, { hasSubscription: false, serverKnows: false })?.kind, "enable");
+
+  const iosDenied = pushReminder(readInstallSignals({
+    userAgent: IOS_SAFARI,
+    notificationPermission: "denied",
+    standalone: true,
+  }));
+  assert.equal(iosDenied?.kind, "denied");
+  assert.match(iosDenied?.steps.join(" ") ?? "", /iPhone Settings → Notifications → Hangry/);
+
+  const androidDenied = pushReminder(readInstallSignals({
+    userAgent: ANDROID_CHROME,
+    notificationPermission: "denied",
+  }));
+  assert.equal(androidDenied?.kind, "denied");
+  assert.match(androidDenied?.steps.join(" ") ?? "", /Apps → Hangry → Notifications/);
+  assert.match(androidDenied?.steps.join(" ") ?? "", /Unrestricted/);
+
+  const iosTab = pushReminder(readInstallSignals({
+    userAgent: IOS_SAFARI,
+    notificationPermission: "default",
+    standalone: false,
+  }));
+  assert.equal(iosTab?.kind, "guide");
+  assert.match(iosTab?.lede ?? "", /Home Screen app/);
+
+  const firefox = pushReminder(readInstallSignals({
+    userAgent: ANDROID_FIREFOX,
+    notificationPermission: "default",
+  }));
+  assert.equal(firefox?.kind, "guide");
+  assert.match(firefox?.lede ?? "", /open Hangry in Chrome and tap Install app/);
+
+  assert.equal(pushTestMessage(0), "0 devices subscribed, turn on notifications first");
+  assert.equal(pushTestMessage(1), "Test sent to 1 device");
+  assert.equal(pushTestMessage(2), "Test sent to 2 devices");
 });
 
 test("a desktop browser shows both phone guides", () => {
