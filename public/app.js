@@ -1,5 +1,6 @@
 const TOKEN_KEY = "fn_token";
 const IOS_HINT_KEY = "fn_ios_hint_off";
+const SHARE_KEY = "fn_share_location";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 const COLORS = ["#ff375f", "#ff9f0a", "#30d158", "#64d2ff", "#bf5af2", "#ff6482", "#ac8e68", "#5e5ce6"];
 
@@ -26,6 +27,10 @@ const state = {
   focusSheet: false,
   installEvent: null,
   pushBusy: false,
+  shareLocation: localStorage.getItem(SHARE_KEY) === "1",
+  placeDraft: "",
+  viewerLocation: null,
+  mapCard: null,
 };
 
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
@@ -39,6 +44,7 @@ const ICONS = {
   bell: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.2 16.5h11.6l-1.1-1.6a6.8 6.8 0 0 1-1-3.5V9.6a3.7 3.7 0 0 0-7.4 0v1.8c0 1.3-.3 2.5-1 3.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 17.2a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   person: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 19.2c.8-2.8 3.2-4.2 6.4-4.2s5.6 1.4 6.4 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -76,6 +82,7 @@ async function boot() {
     state.booting = false;
     render();
     refresh({ initial: true }).catch(() => {});
+    rememberViewerLocation();
   }
 }
 
@@ -184,6 +191,7 @@ function render() {
     }
   }
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
+  if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
 }
 
 function view() {
@@ -274,6 +282,7 @@ function setup() {
 function shell() {
   const phone = el("div", { class: "phone" });
   if (state.tab === "home") phone.append(home());
+  if (state.tab === "map") phone.append(mapScreen());
   if (state.tab === "circle") phone.append(circleScreen());
   if (state.tab === "alerts") phone.append(alertsScreen());
   if (state.tab === "you") phone.append(youScreen());
@@ -365,8 +374,9 @@ function socialCard(social) {
   const joined = social.joined.some((person) => person.id === state.me.user.id);
   const people = [social.creator, ...social.joined];
   const names = social.joined.map((person) => person.name);
-  return el("article", { class: "card card-now" }, [
+  return el("article", { class: social.location ? "card card-now has-loc" : "card card-now" }, [
     el("div", { class: "card-bg" }),
+    social.location ? locationThumb(social.location, social.note || social.creator.name) : null,
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
       : el("button", {
@@ -389,8 +399,9 @@ function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const joined = plan.joined.some((person) => person.id === state.me.user.id);
   const people = [plan.creator, ...plan.joined];
-  return el("article", { class: "card card-photo", style: `--photo:url("${bgFor(plan.id)}")` }, [
+  return el("article", { class: plan.location ? "card card-photo has-loc" : "card card-photo", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
+    plan.location ? locationThumb(plan.location, plan.place || plan.note) : null,
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
       : el("button", {
@@ -403,7 +414,7 @@ function planCard(plan) {
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
-      el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
+      el("p", { text: [plan.whenLabel, plan.creator.name, plan.place].filter(Boolean).join(" · ") }),
     ]),
   ]);
 }
@@ -538,6 +549,7 @@ function tabbar() {
   const unread = state.notifications.filter((note) => !note.readAt).length;
   const tabs = [
     ["home", "Now", "home"],
+    ["map", "Map", "map"],
     ["circle", "Circle", "compass"],
     ["create", "Create", "plus"],
     ["alerts", "Alerts", "bell"],
@@ -591,6 +603,12 @@ function sheet() {
         placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
         maxlength: "80",
       }),
+      planning
+        ? field("Place", "sheet-place", state.placeDraft, (value) => {
+            state.placeDraft = value;
+          }, { placeholder: "Optional", maxlength: "80" })
+        : null,
+      shareToggle(),
       el("div", { class: "stack", style: "margin-top:14px" }, [
         el("button", { class: "btn", type: "submit", text: planning ? "Add plan" : "I'm free" }),
         !planning && mySocial()
@@ -637,6 +655,257 @@ function showIosHint() {
   return ios && !standalone;
 }
 
+function mapScreen() {
+  const pins = collectPins();
+  return el("div", { class: "map-screen" }, [
+    el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Map" })]),
+    pins.length
+      ? el("div", { class: "map-wrap" }, [
+          el("div", { id: "hangry-map", class: "hangry-map" }),
+          el("div", { id: "map-card-host" }),
+        ])
+      : el("div", { class: "map-empty" }, [
+          el("h2", { text: "No places yet" }),
+          el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
+        ]),
+  ]);
+}
+
+function collectPins() {
+  const pins = [];
+  for (const social of state.socials) {
+    if (!social.location) continue;
+    const mine = social.creator.id === state.me.user.id;
+    const joined = social.joined.some((person) => person.id === state.me.user.id);
+    pins.push({
+      kind: "social",
+      id: social.id,
+      lat: social.location.lat,
+      lng: social.location.lng,
+      title: social.creator.name,
+      note: social.note || "Free now",
+      time: remaining(social.expiresAt),
+      canJoin: !mine && !joined,
+    });
+  }
+  for (const plan of state.plans) {
+    if (!plan.location) continue;
+    const mine = plan.creator.id === state.me.user.id;
+    const joined = plan.joined.some((person) => person.id === state.me.user.id);
+    pins.push({
+      kind: "plan",
+      id: plan.id,
+      lat: plan.location.lat,
+      lng: plan.location.lng,
+      title: plan.creator.name,
+      note: plan.place ? `${plan.note} · ${plan.place}` : plan.note,
+      time: plan.whenLabel,
+      canJoin: !mine && !joined,
+    });
+  }
+  return pins;
+}
+
+let leafletPromise = null;
+let liveMap = null;
+
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    if (!document.querySelector("link[data-leaflet]")) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "/vendor/leaflet/leaflet.css";
+      link.dataset.leaflet = "1";
+      document.head.append(link);
+    }
+    const script = document.createElement("script");
+    script.src = "/vendor/leaflet/leaflet.js";
+    script.onload = () => resolve(window.L);
+    script.onerror = () => reject(new Error("map failed to load"));
+    document.body.append(script);
+  });
+  return leafletPromise;
+}
+
+async function mountMap() {
+  const host = document.getElementById("hangry-map");
+  if (!host || state.tab !== "map") return;
+  const L = await loadLeaflet();
+  if (!host.isConnected || state.tab !== "map") return;
+  if (liveMap) {
+    liveMap.remove();
+    liveMap = null;
+  }
+  const pins = collectPins();
+  if (!pins.length) return;
+  const map = L.map(host, { zoomControl: false });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  }).addTo(map);
+  for (const pin of pins) {
+    const marker = L.marker([pin.lat, pin.lng], {
+      icon: L.divIcon({
+        className: `pin pin-${pin.kind}`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      }),
+    });
+    marker.on("click", () => showMapCard(pin));
+    marker.addTo(map);
+  }
+  if (state.viewerLocation) {
+    map.setView([state.viewerLocation.lat, state.viewerLocation.lng], 14);
+  } else {
+    map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [36, 36], maxZoom: 15 });
+  }
+  liveMap = map;
+  setTimeout(() => map.invalidateSize(), 60);
+}
+
+function showMapCard(pin) {
+  const host = document.getElementById("map-card-host");
+  if (!host) return;
+  host.replaceChildren(mapCard(pin));
+}
+
+function mapCard(pin) {
+  const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, pin)) : "";
+  return el("article", { class: "map-card" }, [
+    el("strong", { text: pin.title }),
+    el("p", { text: pin.note }),
+    el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+    el("div", { class: "map-card-actions" }, [
+      pin.canJoin
+        ? el("button", {
+            class: "btn",
+            type: "button",
+            text: "Join",
+            onclick: () => (pin.kind === "plan" ? joinPlan({ id: pin.id }) : joinSocial({ id: pin.id })),
+          })
+        : null,
+      mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
+    ]),
+  ]);
+}
+
+function shareToggle() {
+  return el("label", { class: "share-toggle" }, [
+    el("input", {
+      type: "checkbox",
+      checked: state.shareLocation,
+      onchange: (event) => {
+        state.shareLocation = event.target.checked;
+        localStorage.setItem(SHARE_KEY, state.shareLocation ? "1" : "0");
+      },
+    }),
+    el("span", { text: "Share where I am" }),
+  ]);
+}
+
+async function sharedPoint() {
+  if (!state.shareLocation) return { lat: null, lng: null };
+  if (!navigator.geolocation) {
+    state.error = "This browser can't share location. The rest still works.";
+    return { lat: null, lng: null };
+  }
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 0,
+      });
+    });
+    state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    return state.viewerLocation;
+  } catch {
+    state.error = "Location stayed off. Everything else still works.";
+    return { lat: null, lng: null };
+  }
+}
+
+function rememberViewerLocation() {
+  if (!navigator.geolocation || !navigator.permissions?.query) return;
+  navigator.permissions.query({ name: "geolocation" }).then((status) => {
+    if (status.state !== "granted") return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      if (state.tab === "home" || state.tab === "map") render();
+    }, () => {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 });
+  }).catch(() => {});
+}
+
+function locationThumb(location, label) {
+  const tile = osmTile(location.lat, location.lng, 15);
+  const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, location)) : "";
+  return el("a", {
+    class: "loc-thumb",
+    href: mapsHref(location.lat, location.lng, label),
+    target: mapsExternal() ? "_blank" : null,
+    rel: mapsExternal() ? "noreferrer" : null,
+    style: `background-image:url("${tile.url}")`,
+  }, [
+    el("span", { class: "loc-pin", style: `left:${tile.left}%;top:${tile.top}%` }),
+    el("span", { class: "loc-meta", text: distance ? `${distance} · Open in Maps` : "Open in Maps" }),
+    el("span", { class: "osm-mini", text: "© OpenStreetMap" }),
+  ]);
+}
+
+function mapsLink(lat, lng, label, text) {
+  return el("a", {
+    class: "map-link",
+    href: mapsHref(lat, lng, label),
+    target: mapsExternal() ? "_blank" : null,
+    rel: mapsExternal() ? "noreferrer" : null,
+    text,
+  });
+}
+
+function mapsExternal() {
+  return !/android/i.test(navigator.userAgent);
+}
+
+function mapsHref(lat, lng, label) {
+  const name = encodeURIComponent(label || "Hangry");
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (ios) return `https://maps.apple.com/?ll=${lat},${lng}&q=${name}`;
+  if (/android/i.test(navigator.userAgent)) return `geo:${lat},${lng}?q=${lat},${lng}(${name})`;
+  return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+}
+
+function osmTile(lat, lng, zoom) {
+  const n = 2 ** zoom;
+  const x = ((lng + 180) / 360) * n;
+  const latRad = (lat * Math.PI) / 180;
+  const y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
+  const xt = Math.floor(x);
+  const yt = Math.floor(y);
+  return {
+    url: `https://tile.openstreetmap.org/${zoom}/${xt}/${yt}.png`,
+    left: (x - xt) * 100,
+    top: (y - yt) * 100,
+  };
+}
+
+function haversine(a, b) {
+  const radius = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function formatDistance(meters) {
+  if (meters < 950) return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
+  const km = meters / 1000;
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+}
+
 function field(label, id, value, onValue, attrs = {}) {
   return el("label", { class: "field" }, [
     el("span", { text: label }),
@@ -679,6 +948,7 @@ function el(tag, attrs = {}, children = []) {
     else if (key === "style") node.setAttribute("style", value);
     else if (key.startsWith("on") && typeof value === "function") node.addEventListener(key.slice(2), value);
     else if (key === "disabled") node.disabled = Boolean(value);
+    else if (key === "checked") node.checked = Boolean(value);
     else node.setAttribute(key, String(value));
   }
   for (const child of [].concat(children)) {
@@ -692,7 +962,10 @@ function openSheet(name) {
   state.sheet = name;
   state.error = "";
   if (name === "free") state.noteDraft = mySocial()?.note ?? "";
-  if (name === "plan") state.noteDraft = "";
+  if (name === "plan") {
+    state.noteDraft = "";
+    state.placeDraft = "";
+  }
   state.focusSheet = name === "free" || name === "plan";
   render();
 }
@@ -785,8 +1058,9 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
+  const where = await sharedPoint();
   await run(async () => {
-    await api("/api/socials", { method: "POST", body: { note: state.noteDraft } });
+    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...where } });
     state.sheet = null;
     await refresh({ initial: true });
   });
@@ -794,9 +1068,11 @@ async function onFree(event) {
 
 async function onCreatePlan(event) {
   event.preventDefault();
+  const where = await sharedPoint();
   await run(async () => {
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft } });
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place: state.placeDraft, ...where } });
     state.sheet = null;
+    state.placeDraft = "";
     await refresh({ initial: true });
   });
 }

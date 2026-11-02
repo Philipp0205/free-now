@@ -27,6 +27,8 @@ export type SocialRow = {
   created_at: number;
   expires_at: number;
   last_notified_at: number;
+  lat: number | null;
+  lng: number | null;
 };
 
 export type JoinRow = {
@@ -43,6 +45,9 @@ export type PlanRow = {
   note: string;
   for_date: string;
   created_at: number;
+  lat: number | null;
+  lng: number | null;
+  place: string;
 };
 
 export type PushSubRow = {
@@ -100,7 +105,9 @@ CREATE TABLE IF NOT EXISTS socials (
   note TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
-  last_notified_at INTEGER NOT NULL
+  last_notified_at INTEGER NOT NULL,
+  lat REAL,
+  lng REAL
 );
 
 CREATE TABLE IF NOT EXISTS social_joins (
@@ -116,7 +123,10 @@ CREATE TABLE IF NOT EXISTS plans (
   creator_id TEXT NOT NULL REFERENCES users(id),
   note TEXT NOT NULL,
   for_date TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  lat REAL,
+  lng REAL,
+  place TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS plan_joins (
@@ -180,7 +190,18 @@ export function openDb(dbPath: string): DatabaseSync {
   }
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec(SCHEMA);
+  ensureColumn(db, "socials", "lat", "lat REAL");
+  ensureColumn(db, "socials", "lng", "lng REAL");
+  ensureColumn(db, "plans", "lat", "lat REAL");
+  ensureColumn(db, "plans", "lng", "lng REAL");
+  ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
   return db;
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
+  if (rows.some((row) => row.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }
 
 export function withTx(db: DatabaseSync, fn: () => void): void {
@@ -298,11 +319,13 @@ export function insertSocial(
     note: string;
     createdAt: number;
     expiresAt: number;
+    lat: number | null;
+    lng: number | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     social.id,
     social.circleId,
@@ -311,6 +334,8 @@ export function insertSocial(
     social.createdAt,
     social.expiresAt,
     social.createdAt,
+    social.lat,
+    social.lng,
   );
 }
 
@@ -333,13 +358,20 @@ export function updateSocial(
   note: string,
   expiresAt: number,
   lastNotifiedAt: number,
+  point?: { lat: number; lng: number } | null,
 ): void {
-  db.prepare("UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ? WHERE id = ?").run(
-    note,
-    expiresAt,
-    lastNotifiedAt,
-    id,
-  );
+  if (point === undefined) {
+    db.prepare("UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ? WHERE id = ?").run(
+      note,
+      expiresAt,
+      lastNotifiedAt,
+      id,
+    );
+    return;
+  }
+  db.prepare(
+    "UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, lat = ?, lng = ? WHERE id = ?",
+  ).run(note, expiresAt, lastNotifiedAt, point?.lat ?? null, point?.lng ?? null, id);
 }
 
 export function listActiveSocials(db: DatabaseSync, circleId: string, now: number): SocialRow[] {
@@ -390,11 +422,32 @@ export function deleteSocial(db: DatabaseSync, id: string, creatorId: string): n
 
 export function insertPlan(
   db: DatabaseSync,
-  plan: { id: string; circleId: string; creatorId: string; note: string; forDate: string; createdAt: number },
+  plan: {
+    id: string;
+    circleId: string;
+    creatorId: string;
+    note: string;
+    forDate: string;
+    createdAt: number;
+    lat: number | null;
+    lng: number | null;
+    place: string;
+  },
 ): void {
   db.prepare(
-    "INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(plan.id, plan.circleId, plan.creatorId, plan.note, plan.forDate, plan.createdAt);
+    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    plan.id,
+    plan.circleId,
+    plan.creatorId,
+    plan.note,
+    plan.forDate,
+    plan.createdAt,
+    plan.lat,
+    plan.lng,
+    plan.place,
+  );
 }
 
 export function listVisiblePlans(db: DatabaseSync, circleId: string, today: string, through: string): PlanRow[] {
@@ -517,13 +570,14 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string): void {
 
 const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, s.note,
-         s.created_at, s.expires_at, s.last_notified_at
+         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
 
 const PLAN_SELECT = `
-  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at
+  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at,
+         p.lat, p.lng, p.place
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
