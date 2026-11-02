@@ -115,20 +115,6 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
     await page.goto(baseUrl);
     await signUp(page, "Alex");
     assert.match(await viewportContent(page), /interactive-widget=resizes-content/);
-
-    await page.evaluate(() => { window.__scrolls = []; });
-    await page.locator("#invite-code").click();
-    await setViewport(page, { height: null, offsetTop: 0 });
-    const full = await page.evaluate(() => window.innerHeight);
-    await setViewport(page, { height: full - 320, offsetTop: 0 });
-    await page.waitForTimeout(FIELD_REVEAL_MS + 250);
-    const joinScrolls = await page.evaluate(() => window.__scrolls || []);
-    assert.ok(
-      joinScrolls.some((entry) => entry.id === "invite-code" && entry.block === "nearest"),
-      `expected invite field to scroll into view, got ${JSON.stringify(joinScrolls)}`,
-    );
-    await setViewport(page, { height: null, offsetTop: 0 });
-
     await createCircle(page);
     const homeBar = await page.locator(".tabbar").boundingBox();
     assert.ok(homeBar);
@@ -203,6 +189,52 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
     assert.deepEqual(errors, []);
   } finally {
     await page.close();
+  }
+});
+
+test("join form clears a 280px keyboard on a 360x640 phone", { timeout: 90_000 }, async () => {
+  const pixel = devices["Pixel 7"];
+  const context = await browser.newContext({
+    viewport: { width: 360, height: 640 },
+    deviceScaleFactor: 1,
+    isMobile: true,
+    hasTouch: true,
+    userAgent: pixel.userAgent,
+  });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.goto(baseUrl);
+    await signUp(page, "Jo");
+    await page.locator("#invite-code").click();
+    // Content-resize: a 280px keyboard shrinks the layout viewport from 640 to 360.
+    await page.setViewportSize({ width: 360, height: 360 });
+    await page.waitForTimeout(FIELD_REVEAL_MS + 250);
+    const placed = await page.evaluate(() => {
+      const input = document.getElementById("invite-code")?.getBoundingClientRect();
+      const button = [...document.querySelectorAll("button")].find((node) => node.textContent === "Join circle")?.getBoundingClientRect();
+      const view = window.visualViewport?.height ?? window.innerHeight;
+      return {
+        view,
+        innerHeight: window.innerHeight,
+        inputTop: input?.top ?? null,
+        inputBottom: input?.bottom ?? null,
+        buttonTop: button?.top ?? null,
+        buttonBottom: button?.bottom ?? null,
+      };
+    });
+    assert.ok(placed.view <= 360, JSON.stringify(placed));
+    assert.ok(placed.buttonTop != null && placed.buttonBottom != null, JSON.stringify(placed));
+    assert.ok(placed.buttonTop >= -1, JSON.stringify(placed));
+    assert.ok(placed.buttonBottom <= placed.view + 1, JSON.stringify(placed));
+    assert.ok(placed.inputTop != null && placed.inputTop >= -1, JSON.stringify(placed));
+    assert.ok(placed.inputBottom != null && placed.inputBottom <= placed.view + 1, JSON.stringify(placed));
+    await shot(page, "mobile_join_form_keyboard");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+    await context.close();
   }
 });
 

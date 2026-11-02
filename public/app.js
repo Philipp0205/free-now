@@ -201,10 +201,39 @@ function syncKeyboardInset() {
 
 function scheduleReveal(node) {
   window.clearTimeout(revealTimer);
-  revealTimer = window.setTimeout(() => {
-    if (!node.isConnected || document.activeElement !== node) return;
+  revealTimer = window.setTimeout(() => revealField(node), FIELD_REVEAL_MS);
+}
+
+function revealField(node) {
+  if (!node.isConnected || document.activeElement !== node) return;
+  if (node.closest(".sheet")) {
     node.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, FIELD_REVEAL_MS);
+    return;
+  }
+  const form = node.closest("form");
+  if (form) {
+    scrollBottomIntoView(form);
+    return;
+  }
+  node.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/** Minimum scroll so the form's bottom edge, including its submit button, clears the keyboard. */
+function scrollBottomIntoView(element) {
+  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+  const overflow = element.getBoundingClientRect().bottom - (viewHeight - 12);
+  if (overflow <= 1) return;
+  scrollParent(element).scrollBy({ top: overflow, left: 0 });
+}
+
+function scrollParent(element) {
+  let node = element.parentElement;
+  while (node) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) return node;
+    node = node.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
 }
 
 function onViewportResize() {
