@@ -1,0 +1,33 @@
+services:
+  free-now:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DB_PATH: /data/free-now.sqlite
+      PUBLIC_BASE_URL: http://localhost:3000
+      # Production: set this to the custom domain once it is chosen.
+      APP_TZ: UTC
+      # Uncomment after `npm run vapid` and paste the keys.
+      # VAPID_PUBLIC_KEY: ""
+      # VAPID_PRIVATE_KEY: ""
+      # VAPID_SUBJECT: mailto:you@example.com
+    volumes:
+      - free-now-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  free-now-data:
