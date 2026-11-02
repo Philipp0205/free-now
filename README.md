@@ -114,11 +114,12 @@ If you previously tapped Don't Allow: open iPhone Settings → Notifications →
 If a push never arrives, check both of these:
 
 - The site's notification permission is Allow. In Chrome, tap the lock icon → Permissions → Notifications, or menu **⋮** → Settings → Site settings → Notifications.
-- Hangry is allowed to run in the background. Android Settings → Apps → Hangry → Battery → **Unrestricted**.
+- Hangry is allowed to notify you. Android Settings → Apps → Hangry → Notifications, then set Battery to **Unrestricted**.
 
 ### Troubleshooting
 
 - **Opened from Instagram or WhatsApp.** Those in-app browsers cannot install Hangry or receive its pushes. Use the menu and open the link in Safari (iPhone) or Chrome (Android).
+- **Added from Firefox, or another browser that is not Chrome.** A home-screen shortcut from Firefox does not receive Hangry's notifications. Copy the link, open it in Chrome, and tap **Install app**. Then open Android Settings → Apps → Hangry, turn Notifications on, and set Battery to **Unrestricted**.
 - **Still looking at a Safari tab.** iOS only delivers Web Push to the Home Screen app, and only on iOS 16.4 or newer.
 - **The install prompt never appears.** On Android, use Chrome's three-dot menu **⋮** → Install app or Add to Home screen. The site has to be HTTPS (localhost is the only exception).
 - **Don't Allow.** Follow the re-enable steps for that phone above. The Enable button cannot override a blocked permission.

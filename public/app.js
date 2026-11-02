@@ -317,6 +317,7 @@ function home() {
     ]),
   ];
   if (showIosHint()) parts.push(iosHint());
+  if (showChromeHint()) parts.push(chromeHint());
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
@@ -687,6 +688,14 @@ function installGuideView() {
       onclick: onEnablePush,
     }));
   }
+  if (guide.offerCopyLink) {
+    actions.unshift(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+    }));
+  }
   actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallGuide }));
   return el("div", { class: "guide-scrim" }, [
     el("section", { class: "guide", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-title" }, [
@@ -746,6 +755,24 @@ function iosHint() {
         render();
       },
     }),
+  ]);
+}
+
+function showChromeHint() {
+  const signals = currentSignals();
+  return signals.platform === "android" && signals.canInstall === false;
+}
+
+function chromeHint() {
+  return el("div", { class: "ios-hint" }, [
+    el("div", { class: "ios-hint-body" }, [
+      el("p", { text: "For notifications, open Hangry in Chrome and tap Install app." }),
+      el("button", {
+        type: "button",
+        text: "Copy link",
+        onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+      }),
+    ]),
   ]);
 }
 
