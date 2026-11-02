@@ -23,9 +23,17 @@ export function readInstallSignals({
     platform: kind,
     inApp,
     safari,
+    canInstall: !android || androidCanInstall(userAgent),
     standalone: Boolean(standalone),
     permission: notificationPermission,
   };
+}
+
+function androidCanInstall(userAgent) {
+  if (/Firefox|Fennec|Focus\/|Klar\//i.test(userAgent)) return false;
+  if (/DuckDuckGo|UCBrowser|Opera Mini|MiuiBrowser/i.test(userAgent)) return false;
+  if (/; wv\)/.test(userAgent)) return false;
+  return /Chrome\/|Chromium\/|EdgA\/|Edg\/|SamsungBrowser|OPR\/|Brave|Vivaldi/i.test(userAgent);
 }
 
 export function installGuide(signals) {
@@ -116,6 +124,14 @@ function iosGuide(signals) {
 function androidGuide(signals) {
   const installed = signals.standalone;
   const allowed = signals.permission === "granted";
+  if (signals.inApp) {
+    return chromeInstead(
+      "Instagram, WhatsApp, and other in-app browsers can't install Hangry or deliver its notifications. Open this page in Chrome first.",
+    );
+  }
+  if (signals.canInstall === false) {
+    return chromeInstead("For notifications, open Hangry in Chrome and tap Install app.");
+  }
   if (installed && allowed) {
     return {
       platform: "android",
@@ -125,7 +141,7 @@ function androidGuide(signals) {
       groups: [{
         label: null,
         steps: [],
-        note: "If a push never arrives, set this site's notification permission to Allow, and set Hangry's battery use to Unrestricted so Android does not pause it.",
+        note: "If a push never arrives, open Android Settings → Apps → Hangry → Notifications and turn them on, and set Hangry's battery use to Unrestricted.",
         reenable: [],
       }],
     };
@@ -148,20 +164,6 @@ function androidGuide(signals) {
       }],
     };
   }
-  if (signals.inApp) {
-    return {
-      platform: "android",
-      status: "wrong-browser",
-      headline: "Open Hangry in Chrome",
-      lede: "Instagram, WhatsApp, and other in-app browsers can't install Hangry or deliver its notifications. Open this page in Chrome first.",
-      groups: [{
-        label: null,
-        steps: androidSteps(false, false),
-        note: androidNote(),
-        reenable: [],
-      }],
-    };
-  }
   return {
     platform: "android",
     status: "install",
@@ -170,6 +172,22 @@ function androidGuide(signals) {
     groups: [{
       label: null,
       steps: androidSteps(installed, allowed),
+      note: androidNote(),
+      reenable: [],
+    }],
+  };
+}
+
+function chromeInstead(lede) {
+  return {
+    platform: "android",
+    status: "wrong-browser",
+    headline: "Open Hangry in Chrome",
+    lede,
+    offerCopyLink: true,
+    groups: [{
+      label: null,
+      steps: androidSteps(false, false),
       note: androidNote(),
       reenable: [],
     }],
@@ -202,12 +220,19 @@ function androidSteps(installed, allowed) {
 }
 
 function androidNote() {
-  return "If a push still doesn't arrive, set this site's notification permission to Allow, and set Hangry's battery use to Unrestricted (Android Settings → Apps → Hangry → Battery).";
+  return "If a push still doesn't arrive, open Android Settings → Apps → Hangry → Notifications and turn them on, set this site's notification permission to Allow, and set Battery to Unrestricted.";
 }
 
 function desktopGuide() {
   const ios = iosGuide({ platform: "ios", inApp: false, safari: true, standalone: false, permission: "default" });
-  const android = androidGuide({ platform: "android", inApp: false, safari: false, standalone: false, permission: "default" });
+  const android = androidGuide({
+    platform: "android",
+    inApp: false,
+    safari: false,
+    canInstall: true,
+    standalone: false,
+    permission: "default",
+  });
   return {
     platform: "other",
     status: "install",
