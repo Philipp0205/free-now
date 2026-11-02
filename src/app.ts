@@ -173,7 +173,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const buzzer = token ? getUserByBuzzToken(deps.db, token) : undefined;
     if (!buzzer) throw new HttpError(404, "unknown token");
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, buzzer, note);
+    const result = await publishSocial(deps, buzzer, note, readPoint(body));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
@@ -243,7 +243,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, me, note);
+    const result = await publishSocial(deps, me, note, readPoint(body));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
@@ -283,7 +283,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/plans") {
     const note = cleanNote(body.note, true);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note) });
+    const place = cleanPlace(body.place);
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body)) });
     return;
   }
 
@@ -377,6 +378,7 @@ async function publishSocial(
   deps: AppDeps,
   user: UserRow,
   note: string,
+  point?: { lat: number; lng: number } | null,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id);
   const now = deps.now();
@@ -394,6 +396,8 @@ async function publishSocial(
       note,
       createdAt: now,
       expiresAt: now + deps.config.socialTtlMs,
+      lat: point?.lat ?? null,
+      lng: point?.lng ?? null,
     });
   } else {
     socialId = existing.id;
@@ -406,6 +410,7 @@ async function publishSocial(
       note,
       now + deps.config.socialTtlMs,
       shouldNotify ? now : existing.last_notified_at,
+      point,
     );
   }
   if (shouldNotify) {
@@ -466,7 +471,13 @@ function leaveSocial(deps: AppDeps, user: UserRow, rawId: string) {
   return socialPayload(deps.db, social);
 }
 
-async function publishPlan(deps: AppDeps, user: UserRow, note: string) {
+async function publishPlan(
+  deps: AppDeps,
+  user: UserRow,
+  note: string,
+  place: string,
+  point?: { lat: number; lng: number } | null,
+) {
   const circle = requireCircle(deps, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
@@ -482,6 +493,9 @@ async function publishPlan(deps: AppDeps, user: UserRow, note: string) {
     note,
     forDate: tomorrow,
     createdAt: now,
+    lat: point?.lat ?? null,
+    lng: point?.lng ?? null,
+    place,
   });
   const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
   await notifyUsers(
@@ -491,7 +505,7 @@ async function publishPlan(deps: AppDeps, user: UserRow, note: string) {
     recipients.map((member) => ({
       userId: member.id,
       title: "Tomorrow",
-      body: `${user.name}: ${note}`,
+      body: place ? `${user.name}: ${note} · ${place}` : `${user.name}: ${note}`,
       kind: "plan",
       refId: id,
       tag: `plan:${id}`,
@@ -584,6 +598,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
     note: social.note,
     createdAt: social.created_at,
     expiresAt: social.expires_at,
+    location: pointPayload(social.lat, social.lng),
     creator: { id: social.creator_id, name: social.creator_name },
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
@@ -597,9 +612,11 @@ function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: s
   return {
     id: plan.id,
     note: plan.note,
+    place: plan.place ?? "",
     forDate: plan.for_date,
     whenLabel: whenLabel(plan.for_date, today, tomorrow),
     createdAt: plan.created_at,
+    location: pointPayload(plan.lat, plan.lng),
     creator: { id: plan.creator_id, name: plan.creator_name },
     joined: listPlanJoins(db, plan.id).map((join) => ({
       id: join.id,
@@ -667,6 +684,40 @@ function cleanLabel(value: unknown, label: string, max: number): string {
     throw new HttpError(400, `${label} must be 1–${max} characters`);
   }
   return text;
+}
+
+function pointPayload(lat: number | null, lng: number | null): { lat: number; lng: number } | null {
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+/** ~100 m. Undefined means the client did not mention location, so a refresh keeps the saved pin. */
+function readPoint(body: Record<string, unknown>): { lat: number; lng: number } | null | undefined {
+  const hasLat = Object.prototype.hasOwnProperty.call(body, "lat");
+  const hasLng = Object.prototype.hasOwnProperty.call(body, "lng");
+  if (!hasLat && !hasLng) return undefined;
+  if (body.lat == null && body.lng == null) return null;
+  if (!hasLat || !hasLng || body.lat == null || body.lng == null) {
+    throw new HttpError(400, "lat and lng are both required");
+  }
+  const lat = roundCoord(body.lat, "lat");
+  const lng = roundCoord(body.lng, "lng");
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) throw new HttpError(400, "location is out of range");
+  return { lat, lng };
+}
+
+function roundCoord(value: unknown, label: string): number {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number)) throw new HttpError(400, `${label} is not a number`);
+  return Math.round(number * 1000) / 1000;
+}
+
+function cleanPlace(value: unknown): string {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string") throw new HttpError(400, "place must be a string");
+  const place = value.replace(/[\r\n\t]+/g, " ").replace(/[\u0000-\u001f]/g, "").trim();
+  if (place.length > 80) throw new HttpError(400, "place is too long (80)");
+  return place;
 }
 
 function cleanNote(value: unknown, required: boolean): string {

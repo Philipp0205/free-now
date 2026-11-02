@@ -162,6 +162,14 @@ railway.json    Dockerfile builder and health check
 
 `POST /api/buzz/<token>` is the only unauthenticated write, and the token is the credential. Everything else uses `Authorization: Bearer <device token>`.
 
+## Location
+
+Sharing a place is off until someone turns on **Share where I am**. That switch is in the free-now sheet and on a tomorrow plan, and the device remembers it. While it is on, Hangry takes one reading at the moment you publish. It does not watch your location in the background. The coordinates are rounded to about 100 metres and deleted with the social or plan when it expires. If location is denied, the social or plan is still created.
+
+A tomorrow plan can also name a place in words. A push may include that name. It never includes coordinates.
+
+The Map tab (not a switch on Now) shows two kinds of pins on a Leaflet map with OpenStreetMap tiles: friends who are free and shared a location, and plans that have a location. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
+
 ## Limitations
 
 - One circle per person. Joining another means leaving the first. The last person to leave deletes the circle.
@@ -174,3 +182,4 @@ railway.json    Dockerfile builder and health check
 - Clearing site data without saving that secret signs you out for good.
 - Invite codes are unguessable enough for a circle of friends and are not rate-limited.
 - "Tomorrow" follows `APP_TZ`, not each phone's timezone.
+- Location is optional, rounded to about 100 metres, and removed when the social or plan expires. There is no background tracking.
