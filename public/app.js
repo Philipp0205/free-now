@@ -1,4 +1,4 @@
-import { installGuide, readInstallSignals } from "./install-guide.js";
+import { installGuide, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 
 const TOKEN_KEY = "fn_token";
 const IOS_HINT_KEY = "fn_ios_hint_off";
@@ -32,6 +32,8 @@ const state = {
   installEvent: null,
   installOpen: false,
   pushBusy: false,
+  pushReminder: null,
+  pushSnooze: false,
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
   viewerLocation: null,
@@ -88,6 +90,7 @@ async function boot() {
     render();
     refresh({ initial: true }).catch(() => {});
     rememberViewerLocation();
+    void considerPushReminder();
   }
 }
 
@@ -213,6 +216,9 @@ function view() {
     root.append(shell());
   }
   if (state.installOpen) root.append(installGuideView());
+  if (state.pushReminder && !state.pushSnooze && !state.sheet && !state.confirm && !state.installOpen) {
+    root.append(pushReminderSheet());
+  }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
   if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
@@ -1179,8 +1185,10 @@ async function onStart(event) {
         state.error = error.message;
       }
     }
+    state.pushSnooze = false;
     render();
     refresh({ initial: true }).catch(() => {});
+    void considerPushReminder();
   } catch (error) {
     state.error = error.message;
     render();
@@ -1196,8 +1204,10 @@ async function onRecover(event) {
     state.token = data.token;
     state.sheet = null;
     state.me = await api("/api/me");
+    state.pushSnooze = false;
     render();
     refresh({ initial: true }).catch(() => {});
+    void considerPushReminder();
   } catch (error) {
     state.error = error.message;
     render();
@@ -1340,7 +1350,12 @@ async function onRename(event) {
 }
 
 async function onEnablePush() {
-  if (!state.meta?.vapidPublicKey) return;
+  if (!state.meta?.vapidPublicKey) {
+    state.error = "Push needs VAPID keys";
+    render();
+    scheduleErrorClear();
+    return;
+  }
   state.pushBusy = true;
   render();
   try {
@@ -1357,6 +1372,7 @@ async function onEnablePush() {
       body: { endpoint: json.endpoint, keys: json.keys },
     });
     state.error = "Notifications are on";
+    state.pushReminder = null;
   } catch (error) {
     state.error = error.message || "Could not enable notifications";
   } finally {
@@ -1364,14 +1380,83 @@ async function onEnablePush() {
     render();
     scheduleErrorClear();
   }
+  void considerPushReminder();
 }
 
 async function onTestPush() {
   await run(async () => {
-    await api("/api/push/test", { method: "POST", body: {} });
+    const result = await api("/api/push/test", { method: "POST", body: {} });
     await refresh({ initial: true });
-    state.error = "Test sent";
+    state.error = pushTestMessage(result?.subscriptions);
   });
+}
+
+async function considerPushReminder() {
+  if (!state.token || !state.me || state.pushSnooze) return;
+  const signals = currentSignals();
+  if (signals.permission !== "granted") {
+    state.pushReminder = pushReminder(signals, { hasSubscription: false, serverKnows: false });
+    render();
+    return;
+  }
+  const endpoint = await localSubscriptionEndpoint();
+  let serverKnows = false;
+  if (endpoint) {
+    try {
+      const status = await api("/api/push/status", { method: "POST", body: { endpoint } });
+      serverKnows = Boolean(status?.known);
+    } catch {
+      serverKnows = false;
+    }
+  }
+  state.pushReminder = pushReminder(signals, { hasSubscription: Boolean(endpoint), serverKnows });
+  render();
+}
+
+function localSubscriptionEndpoint() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return Promise.resolve("");
+  const ready = navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription());
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 1500));
+  return Promise.race([ready, timeout]).then((subscription) => subscription?.endpoint || "").catch(() => "");
+}
+
+function pushReminderSheet() {
+  const reminder = state.pushReminder;
+  if (!reminder) return el("div");
+  const snooze = () => {
+    state.pushSnooze = true;
+    render();
+  };
+  const actions = [];
+  if (reminder.kind === "enable") {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: state.pushBusy ? "Waiting…" : "Turn on notifications",
+      disabled: state.pushBusy,
+      onclick: () => onEnablePush(),
+    }));
+  } else if (reminder.kind === "guide") {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Open the install guide",
+      onclick: openInstallGuide,
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: snooze }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: snooze }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": reminder.title }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: reminder.title }),
+      el("p", { class: "help", text: reminder.lede }),
+      reminder.steps?.length
+        ? el("ol", { class: "guide-reenable" }, reminder.steps.map((line) => el("li", { text: line })))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 async function onInstall() {
