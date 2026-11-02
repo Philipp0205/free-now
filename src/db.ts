@@ -1,0 +1,542 @@
+import fs from "node:fs";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
+export type UserRow = {
+  id: string;
+  name: string;
+  token_hash: string;
+  buzz_token: string;
+  created_at: number;
+};
+
+export type CircleRow = {
+  id: string;
+  name: string;
+  invite_code: string;
+  created_by: string;
+  created_at: number;
+};
+
+export type SocialRow = {
+  id: string;
+  circle_id: string;
+  creator_id: string;
+  creator_name: string;
+  note: string;
+  created_at: number;
+  expires_at: number;
+  last_notified_at: number;
+};
+
+export type JoinRow = {
+  id: string;
+  name: string;
+  joined_at: number;
+};
+
+export type PlanRow = {
+  id: string;
+  circle_id: string;
+  creator_id: string;
+  creator_name: string;
+  note: string;
+  for_date: string;
+  created_at: number;
+};
+
+export type PushSubRow = {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+};
+
+export type NotificationRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  kind: string;
+  ref_id: string | null;
+  created_at: number;
+  read_at: number | null;
+};
+
+export type MemberRow = {
+  id: string;
+  name: string;
+  joined_at: number;
+};
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  buzz_token TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS circles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  invite_code TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS memberships (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+  joined_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS socials (
+  id TEXT PRIMARY KEY,
+  circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES users(id),
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  last_notified_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS social_joins (
+  social_id TEXT NOT NULL REFERENCES socials(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY (social_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+  creator_id TEXT NOT NULL REFERENCES users(id),
+  note TEXT NOT NULL,
+  for_date TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan_joins (
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY (plan_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS push_subs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  ref_id TEXT,
+  created_at INTEGER NOT NULL,
+  read_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_membership_circle ON memberships(circle_id);
+CREATE INDEX IF NOT EXISTS idx_socials_circle ON socials(circle_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_plans_circle ON plans(circle_id, for_date);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subs(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, created_at DESC);
+`;
+
+let sqliteWarningPatched = false;
+
+function quietSqliteWarning(): void {
+  if (sqliteWarningPatched) return;
+  sqliteWarningPatched = true;
+  const emit = process.emit.bind(process) as (event: string | symbol, ...args: unknown[]) => boolean;
+  process.emit = ((event: string | symbol, ...args: unknown[]) => {
+    if (event === "warning") {
+      const warning = args[0] as { message?: string } | undefined;
+      if (warning?.message?.includes("SQLite is an experimental")) return false;
+    }
+    return emit(event, ...args);
+  }) as typeof process.emit;
+}
+
+export function openDb(dbPath: string): DatabaseSync {
+  quietSqliteWarning();
+  if (dbPath !== ":memory:") {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  }
+  const db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA foreign_keys = ON");
+  if (dbPath !== ":memory:") {
+    db.exec("PRAGMA journal_mode = WAL");
+  }
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec(SCHEMA);
+  return db;
+}
+
+export function withTx(db: DatabaseSync, fn: () => void): void {
+  db.exec("BEGIN");
+  try {
+    fn();
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    throw error;
+  }
+}
+
+export function insertUser(db: DatabaseSync, user: UserRow): void {
+  db.prepare(
+    "INSERT INTO users (id, name, token_hash, buzz_token, created_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(user.id, user.name, user.token_hash, user.buzz_token, user.created_at);
+}
+
+export function getUserByTokenHash(db: DatabaseSync, tokenHash: string): UserRow | undefined {
+  return one<UserRow>(db, "SELECT * FROM users WHERE token_hash = ?", tokenHash);
+}
+
+export function getUserByBuzzToken(db: DatabaseSync, buzzToken: string): UserRow | undefined {
+  return one<UserRow>(db, "SELECT * FROM users WHERE buzz_token = ?", buzzToken);
+}
+
+export function getUserById(db: DatabaseSync, id: string): UserRow | undefined {
+  return one<UserRow>(db, "SELECT * FROM users WHERE id = ?", id);
+}
+
+export function updateUserName(db: DatabaseSync, id: string, name: string): void {
+  db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, id);
+}
+
+export function rotateSession(db: DatabaseSync, id: string, tokenHash: string): void {
+  db.prepare("UPDATE users SET token_hash = ? WHERE id = ?").run(tokenHash, id);
+}
+
+export function rotateBuzzToken(db: DatabaseSync, id: string, buzzToken: string): void {
+  db.prepare("UPDATE users SET buzz_token = ? WHERE id = ?").run(buzzToken, id);
+}
+
+export function insertCircle(db: DatabaseSync, circle: CircleRow, userId: string, joinedAt: number): void {
+  withTx(db, () => {
+    db.prepare(
+      "INSERT INTO circles (id, name, invite_code, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(circle.id, circle.name, circle.invite_code, circle.created_by, circle.created_at);
+    db.prepare("INSERT INTO memberships (user_id, circle_id, joined_at) VALUES (?, ?, ?)").run(
+      userId,
+      circle.id,
+      joinedAt,
+    );
+  });
+}
+
+export function getCircleByCode(db: DatabaseSync, code: string): CircleRow | undefined {
+  return one<CircleRow>(db, "SELECT * FROM circles WHERE invite_code = ?", code);
+}
+
+export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | undefined {
+  return one<CircleRow>(
+    db,
+    `SELECT c.* FROM circles c
+     JOIN memberships m ON m.circle_id = c.id
+     WHERE m.user_id = ?`,
+    userId,
+  );
+}
+
+export function listMembers(db: DatabaseSync, circleId: string): MemberRow[] {
+  return all<MemberRow>(
+    db,
+    `SELECT u.id, u.name, m.joined_at
+     FROM memberships m
+     JOIN users u ON u.id = m.user_id
+     WHERE m.circle_id = ?
+     ORDER BY m.joined_at ASC`,
+    circleId,
+  );
+}
+
+export function addMember(db: DatabaseSync, circleId: string, userId: string, joinedAt: number): void {
+  db.prepare("INSERT INTO memberships (user_id, circle_id, joined_at) VALUES (?, ?, ?)").run(
+    userId,
+    circleId,
+    joinedAt,
+  );
+}
+
+export function removeMember(db: DatabaseSync, circleId: string, userId: string): void {
+  withTx(db, () => {
+    db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
+    const row = one<{ n: number | bigint }>(
+      db,
+      "SELECT COUNT(*) AS n FROM memberships WHERE circle_id = ?",
+      circleId,
+    );
+    if (!row || Number(row.n) === 0) {
+      db.prepare("DELETE FROM circles WHERE id = ?").run(circleId);
+    }
+  });
+}
+
+export function insertSocial(
+  db: DatabaseSync,
+  social: {
+    id: string;
+    circleId: string;
+    creatorId: string;
+    note: string;
+    createdAt: number;
+    expiresAt: number;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    social.id,
+    social.circleId,
+    social.creatorId,
+    social.note,
+    social.createdAt,
+    social.expiresAt,
+    social.createdAt,
+  );
+}
+
+export function getActiveSocialByCreator(
+  db: DatabaseSync,
+  creatorId: string,
+  now: number,
+): SocialRow | undefined {
+  return one<SocialRow>(
+    db,
+    `${SOCIAL_SELECT} WHERE s.creator_id = ? AND s.expires_at > ? ORDER BY s.created_at DESC LIMIT 1`,
+    creatorId,
+    now,
+  );
+}
+
+export function updateSocial(
+  db: DatabaseSync,
+  id: string,
+  note: string,
+  expiresAt: number,
+  lastNotifiedAt: number,
+): void {
+  db.prepare("UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ? WHERE id = ?").run(
+    note,
+    expiresAt,
+    lastNotifiedAt,
+    id,
+  );
+}
+
+export function listActiveSocials(db: DatabaseSync, circleId: string, now: number): SocialRow[] {
+  return all<SocialRow>(
+    db,
+    `${SOCIAL_SELECT} WHERE s.circle_id = ? AND s.expires_at > ? ORDER BY s.created_at DESC`,
+    circleId,
+    now,
+  );
+}
+
+export function getSocial(db: DatabaseSync, id: string): SocialRow | undefined {
+  return one<SocialRow>(db, `${SOCIAL_SELECT} WHERE s.id = ?`, id);
+}
+
+export function listSocialJoins(db: DatabaseSync, socialId: string): JoinRow[] {
+  return all<JoinRow>(
+    db,
+    `SELECT u.id, u.name, j.joined_at
+     FROM social_joins j
+     JOIN users u ON u.id = j.user_id
+     WHERE j.social_id = ?
+     ORDER BY j.joined_at ASC`,
+    socialId,
+  );
+}
+
+export function hasSocialJoin(db: DatabaseSync, socialId: string, userId: string): boolean {
+  return Boolean(one(db, "SELECT 1 AS ok FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId));
+}
+
+export function addSocialJoin(db: DatabaseSync, socialId: string, userId: string, joinedAt: number): void {
+  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at) VALUES (?, ?, ?)").run(
+    socialId,
+    userId,
+    joinedAt,
+  );
+}
+
+export function removeSocialJoin(db: DatabaseSync, socialId: string, userId: string): void {
+  db.prepare("DELETE FROM social_joins WHERE social_id = ? AND user_id = ?").run(socialId, userId);
+}
+
+export function deleteSocial(db: DatabaseSync, id: string, creatorId: string): number {
+  const result = db.prepare("DELETE FROM socials WHERE id = ? AND creator_id = ?").run(id, creatorId);
+  return Number(result.changes);
+}
+
+export function insertPlan(
+  db: DatabaseSync,
+  plan: { id: string; circleId: string; creatorId: string; note: string; forDate: string; createdAt: number },
+): void {
+  db.prepare(
+    "INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(plan.id, plan.circleId, plan.creatorId, plan.note, plan.forDate, plan.createdAt);
+}
+
+export function listVisiblePlans(db: DatabaseSync, circleId: string, today: string, through: string): PlanRow[] {
+  return all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE p.circle_id = ? AND p.for_date >= ? AND p.for_date <= ? ORDER BY p.for_date ASC, p.created_at ASC`,
+    circleId,
+    today,
+    through,
+  );
+}
+
+export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string): number {
+  const row = one<{ n: number | bigint }>(
+    db,
+    "SELECT COUNT(*) AS n FROM plans WHERE circle_id = ? AND for_date >= ?",
+    circleId,
+    today,
+  );
+  return Number(row?.n ?? 0);
+}
+
+export function getPlan(db: DatabaseSync, id: string): PlanRow | undefined {
+  return one<PlanRow>(db, `${PLAN_SELECT} WHERE p.id = ?`, id);
+}
+
+export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
+  return all<JoinRow>(
+    db,
+    `SELECT u.id, u.name, j.joined_at
+     FROM plan_joins j
+     JOIN users u ON u.id = j.user_id
+     WHERE j.plan_id = ?
+     ORDER BY j.joined_at ASC`,
+    planId,
+  );
+}
+
+export function hasPlanJoin(db: DatabaseSync, planId: string, userId: string): boolean {
+  return Boolean(one(db, "SELECT 1 AS ok FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId));
+}
+
+export function addPlanJoin(db: DatabaseSync, planId: string, userId: string, joinedAt: number): void {
+  db.prepare("INSERT INTO plan_joins (plan_id, user_id, joined_at) VALUES (?, ?, ?)").run(planId, userId, joinedAt);
+}
+
+export function removePlanJoin(db: DatabaseSync, planId: string, userId: string): void {
+  db.prepare("DELETE FROM plan_joins WHERE plan_id = ? AND user_id = ?").run(planId, userId);
+}
+
+export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
+  const result = db.prepare("DELETE FROM plans WHERE id = ? AND creator_id = ?").run(id, creatorId);
+  return Number(result.changes);
+}
+
+export function upsertPushSub(
+  db: DatabaseSync,
+  sub: { id: string; userId: string; endpoint: string; p256dh: string; auth: string; createdAt: number },
+): void {
+  db.prepare(
+    `INSERT INTO push_subs (id, user_id, endpoint, p256dh, auth, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       user_id = excluded.user_id,
+       p256dh = excluded.p256dh,
+       auth = excluded.auth`,
+  ).run(sub.id, sub.userId, sub.endpoint, sub.p256dh, sub.auth, sub.createdAt);
+}
+
+export function listPushSubs(db: DatabaseSync, userId: string): PushSubRow[] {
+  return all<PushSubRow>(db, "SELECT * FROM push_subs WHERE user_id = ?", userId);
+}
+
+export function deletePushSub(db: DatabaseSync, endpoint: string): void {
+  db.prepare("DELETE FROM push_subs WHERE endpoint = ?").run(endpoint);
+}
+
+export function deletePushSubForUser(db: DatabaseSync, userId: string, endpoint: string): void {
+  db.prepare("DELETE FROM push_subs WHERE user_id = ? AND endpoint = ?").run(userId, endpoint);
+}
+
+export function insertNotification(
+  db: DatabaseSync,
+  note: {
+    id: string;
+    userId: string;
+    title: string;
+    body: string;
+    kind: string;
+    refId: string | null;
+    createdAt: number;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO notifications (id, user_id, title, body, kind, ref_id, created_at, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+  ).run(note.id, note.userId, note.title, note.body, note.kind, note.refId, note.createdAt);
+}
+
+export function listNotifications(db: DatabaseSync, userId: string, limit = 50): NotificationRow[] {
+  return all<NotificationRow>(
+    db,
+    `SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
+    userId,
+    limit,
+  );
+}
+
+export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: number): void {
+  db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(readAt, userId);
+}
+
+export function sweep(db: DatabaseSync, now: number, planCutoff: string): void {
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  db.prepare("DELETE FROM socials WHERE expires_at < ?").run(weekAgo);
+  db.prepare("DELETE FROM plans WHERE for_date < ?").run(planCutoff);
+  db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
+}
+
+const SOCIAL_SELECT = `
+  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, s.note,
+         s.created_at, s.expires_at, s.last_notified_at
+  FROM socials s
+  JOIN users u ON u.id = s.creator_id
+`;
+
+const PLAN_SELECT = `
+  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at
+  FROM plans p
+  JOIN users u ON u.id = p.creator_id
+`;
+
+function one<T>(db: DatabaseSync, sql: string, ...params: Array<string | number>): T | undefined {
+  const row = db.prepare(sql).get(...params);
+  return row ? (copy(row) as T) : undefined;
+}
+
+function all<T>(db: DatabaseSync, sql: string, ...params: Array<string | number>): T[] {
+  return db.prepare(sql).all(...params).map((row) => copy(row) as T);
+}
+
+function copy(row: object): Record<string, unknown> {
+  return { ...row };
+}
