@@ -24,7 +24,7 @@ export async function notifyUsers(
   notices: Notice[],
 ): Promise<void> {
   if (notices.length === 0) return;
-  const deliveries: Array<{ endpoint: string; p256dh: string; auth: string; payload: PushPayload }> = [];
+  const deliveries: Array<{ userId: string; endpoint: string; p256dh: string; auth: string; payload: PushPayload }> = [];
   withTx(db, () => {
     for (const notice of notices) {
       insertNotification(db, {
@@ -38,6 +38,7 @@ export async function notifyUsers(
       });
       for (const sub of listPushSubs(db, notice.userId)) {
         deliveries.push({
+          userId: notice.userId,
           endpoint: sub.endpoint,
           p256dh: sub.p256dh,
           auth: sub.auth,
@@ -57,13 +58,11 @@ export async function notifyUsers(
         { endpoint: delivery.endpoint, p256dh: delivery.p256dh, auth: delivery.auth },
         delivery.payload,
       );
+      console.log(`push send user=${delivery.userId} status=ok`);
     } catch (error) {
       const status = statusOf(error);
-      if (status === 404 || status === 410) {
-        deletePushSub(db, delivery.endpoint);
-      } else {
-        console.error("web push failed", status ?? error);
-      }
+      console.log(`push send user=${delivery.userId} status=${status ?? "error"}`);
+      if (status === 404 || status === 410) deletePushSub(db, delivery.endpoint);
     }
   }
 }

@@ -319,7 +319,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       auth: sub.auth,
       createdAt: deps.now(),
     });
+    console.log(`push subscribe user=${me.id} status=ok`);
     sendJson(res, 204, {});
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/push/status") {
+    const endpoint = typeof body.endpoint === "string" ? body.endpoint : "";
+    const known = endpoint.length > 0 && listPushSubs(deps.db, me.id).some((sub) => sub.endpoint === endpoint);
+    sendJson(res, 200, { known });
     return;
   }
 
