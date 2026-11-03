@@ -216,9 +216,9 @@ Place search goes through the server to Photon, then Nominatim, with a Hangry us
 
 ## Photos
 
-Whoever starts a social or a tomorrow plan can add up to six photos from their phone's gallery in the same sheet. The app shrinks each one to a JPEG of about 1600 px before it uploads. On the card, the photos sit in the middle as a swipeable frame, with the people who are in floating beside it. The expand button opens them full screen.
+Whoever starts a social or a tomorrow plan can add one photo from their phone's gallery in the same sheet. The app shrinks it to a JPEG of about 1600 px before it uploads. On the card, the photo runs edge to edge across the top and fades into the card below it. Tapping it opens it full screen.
 
-Photos are stored in the SQLite database and are only served to signed-in members of the same circle. Only the host can add or remove them. They are deleted once the social ends, or after the plan's day, the same way the meetup pin is.
+The photo is stored in the SQLite database and only served to signed-in members of the same circle. Only the host can add, replace, or remove it. It is deleted once the social ends, or after the plan's day, the same way the meetup pin is.
 
 ## Limitations
 

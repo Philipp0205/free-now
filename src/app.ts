@@ -87,7 +87,7 @@ export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "☕
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** The app shrinks a gallery photo to a ~1600 px JPEG first, so this is a generous ceiling. */
 const PHOTO_MAX_BYTES = 3 * 1024 * 1024;
-const PHOTOS_PER_EVENT = 6;
+const PHOTOS_PER_EVENT = 1;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -154,7 +154,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const event = requireOwnEvent(deps, me, photoUpload[1], photoUpload[2]);
     const data = await readImage(req);
     if (listPhotos(deps.db, event.ref).length >= PHOTOS_PER_EVENT) {
-      throw new HttpError(409, `${PHOTOS_PER_EVENT} photos is the limit`);
+      throw new HttpError(409, "a social or plan has one photo");
     }
     insertPhoto(deps.db, {
       id: crypto.randomUUID(),
