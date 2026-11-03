@@ -166,6 +166,13 @@ export function haversineMeters(a: { lat: number; lng: number }, b: { lat: numbe
   return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+function sameLocality(a: PlaceCandidate, b: PlaceCandidate): boolean {
+  const parts = (address: string) => address.split(",").map((part) => foldName(part.trim())).filter((part) => part.length >= 4);
+  const left = parts(a.address);
+  const right = parts(b.address);
+  return left.some((part) => right.includes(part));
+}
+
 function foldName(name: string): string {
   return name
     .replace(/ß/g, "ss")
@@ -188,7 +195,9 @@ export function rankPlaces(candidates: PlaceCandidate[], bias: SearchBias, query
   const kept: PlaceCandidate[] = [];
   for (const hit of pool) {
     const folded = foldName(hit.name);
-    const idx = kept.findIndex((prev) => foldName(prev.name) === folded && haversineMeters(prev, hit) <= MERGE_M);
+    const idx = kept.findIndex((prev) => foldName(prev.name) === folded && (
+      haversineMeters(prev, hit) <= MERGE_M || (!bias && sameLocality(prev, hit))
+    ));
     if (idx === -1) kept.push(hit);
     else kept[idx] = preferCandidate(kept[idx], hit, bias);
   }
@@ -265,19 +274,63 @@ export async function searchPlaces(query: string, bias: SearchBias = null, fetch
   return results;
 }
 
+const VENUE_KEYS = new Set(["amenity", "shop", "leisure", "tourism", "craft", "office"]);
+
+export function labelNear(lat: number, lng: number, payload: unknown): string {
+  const record = payload && typeof payload === "object" ? payload as { features?: unknown; geometry?: unknown; properties?: unknown } : null;
+  const feature = Array.isArray(record?.features) ? record.features[0] : record?.geometry ? payload : null;
+  const row = feature && typeof feature === "object" ? feature as {
+    geometry?: { coordinates?: unknown };
+    properties?: Record<string, unknown>;
+  } : null;
+  const coords = row?.geometry?.coordinates;
+  const props = row?.properties ?? {};
+  if (!Array.isArray(coords) || coords.length < 2) return "";
+  const hitLng = Number(coords[0]);
+  const hitLat = Number(coords[1]);
+  if (!Number.isFinite(hitLat) || !Number.isFinite(hitLng)) return "";
+  const osmKey = text(props.osm_key);
+  const osmValue = text(props.osm_value);
+  const coarse = osmKey === "boundary"
+    || (osmKey === "place" && ["city", "town", "state", "country", "county", "region", "municipality"].includes(osmValue));
+  if (coarse) return "";
+  const name = text(props.name);
+  const distance = haversineMeters({ lat, lng }, { lat: hitLat, lng: hitLng });
+  if (name && distance <= 30 && VENUE_KEYS.has(osmKey)) return name.slice(0, 80);
+  const street = [text(props.street), text(props.housenumber)].filter(Boolean).join(" ");
+  const area = text(props.district) || text(props.city) || text(props.locality);
+  if (street) return (area ? `Near ${street}, ${area}` : `Near ${street}`).slice(0, 80);
+  return "";
+}
+
+export function describeNearby(lat: number, lng: number, photonPayload: unknown, nominatimBody: unknown): string {
+  return labelNear(lat, lng, photonPayload) || labelFromNominatim(nominatimBody);
+}
+
+function labelFromNominatim(body: unknown): string {
+  const row = body && typeof body === "object" ? body as { address?: Record<string, unknown>; name?: unknown } : null;
+  const address = row?.address ?? {};
+  const street = [text(address.road), text(address.house_number)].filter(Boolean).join(" ");
+  const area = text(address.suburb) || text(address.city_district) || text(address.city) || text(address.town);
+  if (street) return (area ? `Near ${street}, ${area}` : `Near ${street}`).slice(0, 80);
+  const name = text(row?.name);
+  if (name && area && foldName(name) !== foldName(area)) return `Near ${name}, ${area}`.slice(0, 80);
+  return name ? `Near ${name}`.slice(0, 80) : "";
+}
+
 export async function reversePlace(lat: number, lng: number): Promise<string> {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return "";
   const key = `rev:${lat.toFixed(5)},${lng.toFixed(5)}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.results[0]?.name ?? "";
   await pace();
-  const photon = parsePhoton(await getJson(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(String(lng))}&lat=${encodeURIComponent(String(lat))}`).catch(() => null));
-  let name = photon[0]?.name ?? "";
-  if (!name) {
-    const body = await getJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`).catch(() => null);
-    const display = body && typeof body === "object" ? (body as { display_name?: unknown }).display_name : "";
-    name = String(display ?? "").split(",").slice(0, 2).join(",").trim().slice(0, 80);
+  const photon = await getJson(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(String(lng))}&lat=${encodeURIComponent(String(lat))}`).catch(() => null);
+  let nominatim: unknown = null;
+  if (!labelNear(lat, lng, photon)) {
+    await pace();
+    nominatim = await getJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`).catch(() => null);
   }
+  const name = describeNearby(lat, lng, photon, nominatim);
   cache.set(key, { at: Date.now(), results: name ? [{ name, address: "", lat, lng, distanceM: null }] : [] });
   return name;
 }

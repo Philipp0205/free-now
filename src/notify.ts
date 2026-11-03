@@ -17,26 +17,54 @@ export function socialTitle(note: string): string {
   return note ? `"${note}"` : "Free now";
 }
 
+export function eventTitle(kind: "now" | "later" | "reply" | "time" | "start"): string {
+  if (kind === "later") return "Free later";
+  if (kind === "reply") return "Reply";
+  if (kind === "time") return "New time";
+  return "Free now";
+}
+
+/** A fallback of "near you" is the host's own sheet. Everyone else reads "nearby". */
+export function audiencePlace(place: string): string {
+  const spot = place.trim();
+  return /^near you$/i.test(spot) ? "nearby" : spot;
+}
+
 export function freePushBody(name: string, place: string, fromTime = "", shifted = false): string {
   const spot = place.trim();
   const when = fromTime.trim();
-  if (when) {
-    const base = shifted ? `${name} is now free from ${when}` : `${name} is free from ${when}`;
-    return spot ? `${base} – meet at ${spot}` : base;
+  const base = when
+    ? (shifted ? `${name} is now free from ${when}` : `${name} is free from ${when}`)
+    : "";
+  if (spot === "near you") return base ? `${base}, nearby` : `${name} is free nearby`;
+  if (/^near /i.test(spot)) {
+    const phrase = `near ${spot.slice(5)}`;
+    return base ? `${base}, ${phrase}` : `${name} is free ${phrase}`;
   }
+  if (base) return spot ? `${base} – meet at ${spot}` : base;
   if (!spot) return `${name} is free now`;
   return `${name} is free – meet at ${spot}`;
 }
 
 export function startingNowBody(name: string, place: string): string {
-  const spot = place.trim();
-  return spot ? `Starting now: ${name} at ${spot}` : `Starting now: ${name}`;
+  const raw = place.trim();
+  if (!raw) return `Starting now: ${name}`;
+  if (/^near you$/i.test(raw)) return `Starting now: ${name}, nearby`;
+  return `Starting now: ${name} at ${raw}`;
+}
+
+export function planReplyBody(name: string, note: string, reply: string): string {
+  const label = note.trim() || "the plan";
+  if (reply === "declined") return `${name} can't make it to ${label}`;
+  return `${name} is in for ${label}`;
 }
 
 export function replyPushBody(name: string, reply: string, etaMin: number | null): string {
   if (reply === "declined") return `${name} can't make it`;
-  if (reply === "coming") return etaMin ? `${name} is on the way – ${etaMin} min` : `${name} is on the way`;
-  return `${name} joined your social!`;
+  if (reply === "coming" || reply === "join" || reply === "in") {
+    return etaMin ? `${name} is there in ${etaMin} min` : `${name} is in`;
+  }
+  return `${name} is in`;
 }
 
 export async function notifyUsers(
