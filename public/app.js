@@ -5,6 +5,7 @@ const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
+const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 const COLORS = [
   "#9d174d", "#9a3412", "#166534", "#155e75", "#5b21b6", "#9f1239", "#3f3f46", "#1e3a8a",
@@ -67,6 +68,11 @@ const state = {
   whenMode: "now",
   startChoice: "",
   etaFor: "",
+  commentsOpen: {},
+  commentDrafts: {},
+  editingComment: "",
+  editDraft: "",
+  reactFor: "",
 };
 
 const deepLinkParams = new URLSearchParams(location.search);
@@ -824,6 +830,7 @@ function socialCard(social) {
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : replyActions(social),
+      commentsBlock("social", social),
     ]),
   ]);
 }
@@ -843,8 +850,167 @@ function planCard(plan) {
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : planReplyButtons(plan),
+      commentsBlock("plan", plan),
     ]),
   ]);
+}
+
+function commentsBlock(kind, item) {
+  const key = `${kind}:${item.id}`;
+  const comments = item.comments ?? [];
+  const open = Boolean(state.commentsOpen[key]);
+  const toggle = el("button", {
+    class: "text-btn comments-toggle",
+    type: "button",
+    "aria-expanded": open ? "true" : "false",
+    text: comments.length ? `${comments.length} ${comments.length === 1 ? "comment" : "comments"}` : "Comment",
+    onclick: () => {
+      state.commentsOpen[key] = !open;
+      render();
+      if (!open) document.getElementById(`comment-${key}`)?.focus({ preventScroll: true });
+    },
+  });
+  if (!open) return el("div", { class: "comments", "data-comments": key }, [toggle]);
+  return el("div", { class: "comments", "data-comments": key }, [
+    toggle,
+    el("ul", { class: "comment-list" }, comments.map((comment) => commentItem(comment))),
+    el("form", { class: "comment-form", onsubmit: (event) => onPostComment(event, kind, item) }, [
+      el("textarea", {
+        id: `comment-${key}`,
+        class: "comment-input",
+        rows: "1",
+        maxlength: "500",
+        placeholder: "Write a comment",
+        "aria-label": "Write a comment",
+        oninput: (event) => {
+          state.commentDrafts[key] = event.target.value;
+        },
+      }, [state.commentDrafts[key] ?? ""]),
+      el("button", { class: "chip", type: "submit", text: "Send" }),
+    ]),
+  ]);
+}
+
+function commentItem(comment) {
+  const mine = comment.author.id === state.me.user.id;
+  const editing = mine && state.editingComment === comment.id;
+  const meta = `${comment.author.name} · ${ago(comment.createdAt)}${comment.editedAt ? " · edited" : ""}`;
+  return el("li", { class: "comment" }, [
+    el("p", { class: "comment-meta", text: meta }),
+    editing
+      ? el("form", { class: "comment-form", onsubmit: (event) => onSaveComment(event, comment) }, [
+          el("textarea", {
+            id: `comment-edit-${comment.id}`,
+            class: "comment-input",
+            rows: "2",
+            maxlength: "500",
+            "aria-label": "Edit comment",
+            oninput: (event) => {
+              state.editDraft = event.target.value;
+            },
+          }, [state.editDraft]),
+          el("div", { class: "comment-tools" }, [
+            el("button", { class: "chip on", type: "submit", text: "Save" }),
+            el("button", {
+              class: "chip",
+              type: "button",
+              text: "Cancel",
+              onclick: () => {
+                state.editingComment = "";
+                render();
+              },
+            }),
+          ]),
+        ])
+      : el("p", { class: "comment-body", text: comment.body }),
+    editing ? null : el("div", { class: "reaction-row" }, [
+      ...comment.reactions.map((reaction) => {
+        const reacted = reaction.userIds.includes(state.me.user.id);
+        return el("button", {
+          class: reacted ? "reaction on" : "reaction",
+          type: "button",
+          "aria-pressed": reacted ? "true" : "false",
+          "aria-label": `${reaction.emoji} ${reaction.userIds.length}`,
+          text: `${reaction.emoji} ${reaction.userIds.length}`,
+          onclick: () => reactTo(comment, reaction.emoji),
+        });
+      }),
+      el("button", {
+        class: "reaction add",
+        type: "button",
+        "aria-label": "Add reaction",
+        "aria-expanded": state.reactFor === comment.id ? "true" : "false",
+        text: "+",
+        onclick: () => {
+          state.reactFor = state.reactFor === comment.id ? "" : comment.id;
+          render();
+        },
+      }),
+      mine
+        ? el("button", {
+            class: "text-btn",
+            type: "button",
+            text: "Edit",
+            onclick: () => {
+              state.editingComment = comment.id;
+              state.editDraft = comment.body;
+              state.reactFor = "";
+              render();
+              const input = document.getElementById(`comment-edit-${comment.id}`);
+              input?.focus({ preventScroll: true });
+              input?.setSelectionRange(input.value.length, input.value.length);
+            },
+          })
+        : null,
+      mine
+        ? el("button", { class: "text-btn danger", type: "button", text: "Delete", onclick: () => removeComment(comment) })
+        : null,
+    ]),
+    state.reactFor === comment.id && !editing
+      ? el("div", { class: "reaction-picker", role: "group", "aria-label": "Pick a reaction" }, REACTIONS.map((emoji) =>
+          el("button", { class: "reaction", type: "button", text: emoji, onclick: () => reactTo(comment, emoji) }),
+        ))
+      : null,
+  ]);
+}
+
+async function onPostComment(event, kind, item) {
+  event.preventDefault();
+  const key = `${kind}:${item.id}`;
+  const text = (state.commentDrafts[key] ?? "").trim();
+  if (!text) return;
+  await run(async () => {
+    await api(`/api/${kind === "plan" ? "plans" : "socials"}/${item.id}/comments`, { method: "POST", body: { body: text } });
+    state.commentDrafts[key] = "";
+    document.activeElement?.blur();
+    await refresh({ initial: true });
+  });
+}
+
+async function onSaveComment(event, comment) {
+  event.preventDefault();
+  await run(async () => {
+    await api(`/api/comments/${comment.id}`, { method: "PATCH", body: { body: state.editDraft } });
+    state.editingComment = "";
+    document.activeElement?.blur();
+    await refresh({ initial: true });
+  });
+}
+
+async function reactTo(comment, emoji) {
+  state.reactFor = "";
+  await run(async () => {
+    await api(`/api/comments/${comment.id}/reactions`, { method: "POST", body: { emoji } });
+    await refresh({ initial: true });
+  });
+}
+
+async function removeComment(comment) {
+  if (!window.confirm("Delete this comment?")) return;
+  await run(async () => {
+    await api(`/api/comments/${comment.id}`, { method: "DELETE" });
+    await refresh({ initial: true });
+  });
 }
 
 function circleScreen() {
@@ -2065,6 +2231,15 @@ function openNotification(note) {
   const plan = !social && note.refId ? state.plans.find((item) => item.id === note.refId) : null;
   const kind = social ? "social" : plan ? "plan" : "";
   const item = social || plan;
+  if (item && note.kind === "comment") {
+    const key = `${kind}:${item.id}`;
+    state.tab = "home";
+    state.sheet = null;
+    state.commentsOpen[key] = true;
+    render();
+    document.querySelector(`[data-comments="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" });
+    return;
+  }
   if (item?.location) {
     showOnMap(kind, item.id);
     return;

@@ -9,12 +9,14 @@ import {
   addMember,
   addSocialJoin,
   countUpcomingPlans,
+  deleteComment,
   deletePlan,
   deletePushSubForUser,
   deleteSocial,
   getActiveSocialByCreator,
   getCircleByCode,
   getCircleForUser,
+  getComment,
   getPlan,
   getPlanReply,
   getSocial,
@@ -23,14 +25,18 @@ import {
   getUserByTokenHash,
   hasSocialJoin,
   insertCircle,
+  insertComment,
   insertPlan,
   insertSocial,
   insertUser,
   listActiveSocials,
+  listCommenterIds,
+  listComments,
   listMembers,
   listNotifications,
   listPlanJoins,
   listPushSubs,
+  listReactions,
   listSocialJoins,
   listVisiblePlans,
   markNotificationsRead,
@@ -43,10 +49,13 @@ import {
   rotateInvite,
   deleteSessionByHash,
   insertSession,
+  toggleReaction,
+  updateComment,
   updateSocial,
   updateUserName,
   upsertPushSub,
   type CircleRow,
+  type CommentRow,
   type PlanRow,
   type SocialRow,
   type UserRow,
@@ -67,6 +76,8 @@ export type AppDeps = {
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/** A small fixed set keeps reactions readable on a card and stops arbitrary strings from being stored. */
+export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const MIME: Record<string, string> = {
@@ -333,6 +344,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  const socialComments = matchPath(pathname, /^\/api\/socials\/([^/]+)\/comments$/);
+  if (socialComments && method === "POST") {
+    sendJson(res, 201, { social: await commentOnSocial(deps, me, socialComments[1], body) });
+    return;
+  }
+
   const socialId = matchPath(pathname, /^\/api\/socials\/([^/]+)$/);
   if (socialId && method === "DELETE") {
     const id = parseId(socialId[1]);
@@ -379,11 +396,36 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  const planComments = matchPath(pathname, /^\/api\/plans\/([^/]+)\/comments$/);
+  if (planComments && method === "POST") {
+    sendJson(res, 201, { plan: await commentOnPlan(deps, me, planComments[1], body) });
+    return;
+  }
+
   const planId = matchPath(pathname, /^\/api\/plans\/([^/]+)$/);
   if (planId && method === "DELETE") {
     const id = parseId(planId[1]);
     const changes = deletePlan(deps.db, id, me.id);
     if (!changes) throw new HttpError(404, "plan not found");
+    sendEmpty(res, 204);
+    return;
+  }
+
+  const commentReactions = matchPath(pathname, /^\/api\/comments\/([^/]+)\/reactions$/);
+  if (commentReactions && method === "POST") {
+    sendJson(res, 200, { comment: reactToComment(deps, me, commentReactions[1], body) });
+    return;
+  }
+
+  const commentId = matchPath(pathname, /^\/api\/comments\/([^/]+)$/);
+  if (commentId && method === "PATCH") {
+    sendJson(res, 200, { comment: editComment(deps, me, commentId[1], body) });
+    return;
+  }
+  if (commentId && method === "DELETE") {
+    const comment = openComment(deps, me, commentId[1]);
+    if (comment.author_id !== me.id) throw new HttpError(403, "only the author can delete a comment");
+    deleteComment(deps.db, comment.id, me.id);
     sendEmpty(res, 204);
     return;
   }
@@ -798,6 +840,109 @@ function leavePlan(deps: AppDeps, user: UserRow, rawId: string) {
   return planPayload(deps.db, plan, today, addDays(today, 1));
 }
 
+async function commentOnSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const social = getSocial(deps.db, id);
+  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  const now = deps.now();
+  if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
+  const text = cleanComment(body.body);
+  insertComment(deps.db, { id: crypto.randomUUID(), socialId: social.id, planId: null, authorId: user.id, body: text, createdAt: now });
+  await notifyComment(deps, user, now, text, {
+    creatorId: social.creator_id,
+    commenterIds: listCommenterIds(deps.db, { socialId: social.id }),
+    title: socialTitle(social.note),
+    refId: social.id,
+    url: `/?social=${social.id}`,
+  });
+  return socialPayload(deps.db, social);
+}
+
+async function commentOnPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  const text = cleanComment(body.body);
+  insertComment(deps.db, { id: crypto.randomUUID(), socialId: null, planId: plan.id, authorId: user.id, body: text, createdAt: now });
+  await notifyComment(deps, user, now, text, {
+    creatorId: plan.creator_id,
+    commenterIds: listCommenterIds(deps.db, { planId: plan.id }),
+    title: `"${plan.note}"`,
+    refId: plan.id,
+    url: `/?plan=${plan.id}`,
+  });
+  return planPayload(deps.db, plan, today, addDays(today, 1));
+}
+
+/** The host and everyone who already commented hear about a new comment. Reactions stay quiet. */
+async function notifyComment(
+  deps: AppDeps,
+  author: UserRow,
+  now: number,
+  text: string,
+  event: { creatorId: string; commenterIds: string[]; title: string; refId: string; url: string },
+): Promise<void> {
+  const recipients = new Set([event.creatorId, ...event.commenterIds]);
+  recipients.delete(author.id);
+  const snippet = text.length > 80 ? `${text.slice(0, 79)}…` : text;
+  await notifyUsers(
+    deps.db,
+    deps.push,
+    now,
+    [...recipients].map((userId) => ({
+      userId,
+      title: event.title,
+      body: `${author.name}: ${snippet.replace(/\s+/g, " ")}`,
+      kind: "comment",
+      refId: event.refId,
+      tag: `comment:${event.refId}`,
+      url: event.url,
+    })),
+  );
+}
+
+/** A comment is reachable while its social or plan is still on in the viewer's circle. */
+function openComment(deps: AppDeps, user: UserRow, rawId: string): CommentRow {
+  const comment = getComment(deps.db, parseId(rawId));
+  if (!comment) throw new HttpError(404, "comment not found");
+  const circle = requireCircle(deps, user.id);
+  const now = deps.now();
+  if (comment.social_id) {
+    const social = getSocial(deps.db, comment.social_id);
+    if (!social || social.circle_id !== circle.id) throw new HttpError(404, "comment not found");
+    if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
+  } else {
+    const plan = comment.plan_id ? getPlan(deps.db, comment.plan_id) : undefined;
+    if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "comment not found");
+    if (plan.for_date < isoDate(now, deps.config.tz)) throw new HttpError(410, "that plan has ended");
+  }
+  return comment;
+}
+
+function editComment(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const comment = openComment(deps, user, rawId);
+  if (comment.author_id !== user.id) throw new HttpError(403, "only the author can edit a comment");
+  const text = cleanComment(body.body);
+  if (text !== comment.body) updateComment(deps.db, comment.id, user.id, text, deps.now());
+  const fresh = getComment(deps.db, comment.id);
+  if (!fresh) throw new HttpError(500, "comment missing");
+  return commentPayload(deps.db, fresh);
+}
+
+function reactToComment(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const comment = openComment(deps, user, rawId);
+  if (typeof body.emoji !== "string" || !REACTIONS.includes(body.emoji)) {
+    throw new HttpError(400, `emoji must be one of ${REACTIONS.join(" ")}`);
+  }
+  toggleReaction(deps.db, comment.id, user.id, body.emoji, deps.now());
+  return commentPayload(deps.db, comment);
+}
+
 function createCircle(deps: AppDeps, userId: string, name: string, now: number): CircleRow {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const circle: CircleRow = {
@@ -854,6 +999,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
       etaMin: join.eta_min ?? null,
       arriveAt: join.arrive_at ?? null,
     })),
+    comments: listComments(db, { socialId: social.id }).map((comment) => commentPayload(db, comment)),
   };
 }
 
@@ -874,6 +1020,23 @@ function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: s
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,
     })),
+    comments: listComments(db, { planId: plan.id }).map((comment) => commentPayload(db, comment)),
+  };
+}
+
+/** Reactions carry the user ids so each viewer can tell which ones are theirs. */
+function commentPayload(db: DatabaseSync, comment: CommentRow) {
+  const reactions = new Map<string, string[]>();
+  for (const row of listReactions(db, comment.id)) {
+    reactions.set(row.emoji, [...(reactions.get(row.emoji) ?? []), row.user_id]);
+  }
+  return {
+    id: comment.id,
+    author: { id: comment.author_id, name: comment.author_name },
+    body: comment.body,
+    createdAt: comment.created_at,
+    editedAt: comment.edited_at,
+    reactions: REACTIONS.filter((emoji) => reactions.has(emoji)).map((emoji) => ({ emoji, userIds: reactions.get(emoji) ?? [] })),
   };
 }
 
@@ -1068,6 +1231,19 @@ function cleanNote(value: unknown, required: boolean): string {
   if (note.length > 80) throw new HttpError(400, "note is too long (80)");
   if (required && note.length === 0) throw new HttpError(400, "note is required");
   return note;
+}
+
+/** Line breaks survive so a longer thought can breathe. Runs of blank lines do not. */
+function cleanComment(value: unknown): string {
+  if (typeof value !== "string") throw new HttpError(400, "comment is required");
+  const text = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0009\u000b-\u001f]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (text.length < 1) throw new HttpError(400, "comment is required");
+  if (text.length > 500) throw new HttpError(400, "comment is too long (500)");
+  return text;
 }
 
 function cleanCode(value: unknown): string {

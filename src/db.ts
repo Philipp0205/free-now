@@ -77,6 +77,23 @@ export type NotificationRow = {
   read_at: number | null;
 };
 
+export type CommentRow = {
+  id: string;
+  social_id: string | null;
+  plan_id: string | null;
+  author_id: string;
+  author_name: string;
+  body: string;
+  created_at: number;
+  edited_at: number | null;
+};
+
+export type ReactionRow = {
+  comment_id: string;
+  user_id: string;
+  emoji: string;
+};
+
 export type MemberRow = {
   id: string;
   name: string;
@@ -186,6 +203,26 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS event_comments (
+  id TEXT PRIMARY KEY,
+  social_id TEXT REFERENCES socials(id) ON DELETE CASCADE,
+  plan_id TEXT REFERENCES plans(id) ON DELETE CASCADE,
+  author_id TEXT NOT NULL REFERENCES users(id),
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  edited_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_comments_social ON event_comments(social_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_comments_plan ON event_comments(plan_id, created_at);
+
+CREATE TABLE IF NOT EXISTS comment_reactions (
+  comment_id TEXT NOT NULL REFERENCES event_comments(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  emoji TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (comment_id, user_id, emoji)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -721,6 +758,73 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: 
   db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(readAt, userId);
 }
 
+export function insertComment(
+  db: DatabaseSync,
+  comment: { id: string; socialId: string | null; planId: string | null; authorId: string; body: string; createdAt: number },
+): void {
+  db.prepare(
+    "INSERT INTO event_comments (id, social_id, plan_id, author_id, body, created_at, edited_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+  ).run(comment.id, comment.socialId, comment.planId, comment.authorId, comment.body, comment.createdAt);
+}
+
+export function listComments(db: DatabaseSync, event: { socialId?: string; planId?: string }): CommentRow[] {
+  const column = event.socialId ? "social_id" : "plan_id";
+  return all<CommentRow>(
+    db,
+    `${COMMENT_SELECT} WHERE c.${column} = ? ORDER BY c.created_at ASC, c.rowid ASC`,
+    event.socialId ?? event.planId ?? "",
+  );
+}
+
+export function getComment(db: DatabaseSync, id: string): CommentRow | undefined {
+  return one<CommentRow>(db, `${COMMENT_SELECT} WHERE c.id = ?`, id);
+}
+
+/** Only the author can change a comment, so the author id is part of the match. */
+export function updateComment(db: DatabaseSync, id: string, authorId: string, body: string, editedAt: number): number {
+  const result = db
+    .prepare("UPDATE event_comments SET body = ?, edited_at = ? WHERE id = ? AND author_id = ?")
+    .run(body, editedAt, id, authorId);
+  return Number(result.changes);
+}
+
+export function deleteComment(db: DatabaseSync, id: string, authorId: string): number {
+  const result = db.prepare("DELETE FROM event_comments WHERE id = ? AND author_id = ?").run(id, authorId);
+  return Number(result.changes);
+}
+
+export function listCommenterIds(db: DatabaseSync, event: { socialId?: string; planId?: string }): string[] {
+  const column = event.socialId ? "social_id" : "plan_id";
+  return all<{ author_id: string }>(
+    db,
+    `SELECT DISTINCT author_id FROM event_comments WHERE ${column} = ?`,
+    event.socialId ?? event.planId ?? "",
+  ).map((row) => row.author_id);
+}
+
+export function listReactions(db: DatabaseSync, commentId: string): ReactionRow[] {
+  return all<ReactionRow>(
+    db,
+    "SELECT comment_id, user_id, emoji FROM comment_reactions WHERE comment_id = ? ORDER BY created_at ASC, rowid ASC",
+    commentId,
+  );
+}
+
+/** Returns true when the reaction is now on, false when it was taken back. */
+export function toggleReaction(db: DatabaseSync, commentId: string, userId: string, emoji: string, now: number): boolean {
+  const removed = db
+    .prepare("DELETE FROM comment_reactions WHERE comment_id = ? AND user_id = ? AND emoji = ?")
+    .run(commentId, userId, emoji);
+  if (Number(removed.changes)) return false;
+  db.prepare("INSERT INTO comment_reactions (comment_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)").run(
+    commentId,
+    userId,
+    emoji,
+    now,
+  );
+  return true;
+}
+
 function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
   db.prepare(
     `UPDATE socials
@@ -762,6 +866,12 @@ const PLAN_SELECT = `
          p.lat, p.lng, p.place
   FROM plans p
   JOIN users u ON u.id = p.creator_id
+`;
+
+const COMMENT_SELECT = `
+  SELECT c.id, c.social_id, c.plan_id, c.author_id, u.name AS author_name, c.body, c.created_at, c.edited_at
+  FROM event_comments c
+  JOIN users u ON u.id = c.author_id
 `;
 
 function one<T>(db: DatabaseSync, sql: string, ...params: Array<string | number>): T | undefined {
