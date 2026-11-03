@@ -65,6 +65,9 @@ const state = {
   whereMap: false,
   focusSocial: "",
   deepLink: null,
+  statusMessage: "",
+  whereArea: "",
+  whereFallback: "",
   invitePreview: null,
   inviteError: "",
   whenMode: "now",
@@ -77,6 +80,12 @@ const planFocus = deepLinkParams.get("plan");
 const socialFocus = deepLinkParams.get("social");
 if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
 else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
+if (state.deepLink) {
+  const url = new URL(location.href);
+  url.searchParams.delete("social");
+  url.searchParams.delete("plan");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}` || "/");
+}
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
 if (joinPath) state.pendingCode = joinPath[1].toUpperCase();
 state.codeDraft = state.pendingCode;
@@ -216,9 +225,11 @@ function isNetworkFailure(error) {
 
 function noteConnectionProblem(error) {
   state.offline = isNetworkFailure(error);
-  state.error = state.offline ? "You're offline. Retrying…" : error.status >= 500
-    ? "Something went wrong. Retrying…"
-    : friendlyMessage(error.message, error.status);
+  state.statusMessage = state.offline
+    ? "You're offline. Retrying…"
+    : error.status >= 500
+      ? "Something went wrong. Retrying…"
+      : state.statusMessage;
 }
 
 function scheduleOfflineRetry(delay) {
@@ -228,7 +239,7 @@ function scheduleOfflineRetry(delay) {
       if (!state.meta) state.meta = await api("/api/meta", { token: null });
       if (state.token) state.me = await api("/api/me");
       state.offline = false;
-      if (state.error === "You're offline. Retrying…" || state.error === "Something went wrong. Retrying…") state.error = "";
+      state.statusMessage = "";
       render();
       refresh({ initial: true }).catch(() => {});
       void considerReminders();
@@ -261,12 +272,26 @@ function friendlyMessage(raw, status) {
 
 async function refresh({ initial = false } = {}) {
   if (!state.token || !state.me?.circle) return;
-  const [socials, plans, notifications, me] = await Promise.all([
-    api("/api/socials"),
-    api("/api/plans"),
-    api("/api/notifications"),
-    api("/api/me"),
-  ]);
+  let socials;
+  let plans;
+  let notifications;
+  let me;
+  try {
+    [socials, plans, notifications, me] = await Promise.all([
+      api("/api/socials"),
+      api("/api/plans"),
+      api("/api/notifications"),
+      api("/api/me"),
+    ]);
+  } catch (error) {
+    if (error.status === 401) return;
+    if (isNetworkFailure(error) || error.status >= 500) {
+      noteConnectionProblem(error);
+      render();
+      scheduleOfflineRetry(1000);
+    }
+    return;
+  }
   state.socials = socials.socials;
   state.plans = plans.plans;
   state.notifications = notifications.notifications;
@@ -293,8 +318,11 @@ async function refresh({ initial = false } = {}) {
     banner: state.banner?.id ?? null,
   });
   persistCachedState();
+  const hadStatus = Boolean(state.statusMessage);
+  state.offline = false;
+  state.statusMessage = "";
   if (consumeDeepLink()) return;
-  if (signature === state.signature) return;
+  if (signature === state.signature && !hadStatus) return;
   state.signature = signature;
   if (state.sheet || state.installOpen || isTyping()) return;
   const y = document.scrollingElement?.scrollTop ?? 0;
@@ -729,7 +757,7 @@ function setup() {
 
 function shell() {
   const phone = el("div", { class: "phone" });
-  if (RETRY_NOTE.has(state.error)) phone.append(el("p", { class: "status-banner", role: "status", text: state.error }));
+  if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
   if (state.tab === "home") phone.append(home());
   if (state.tab === "map") phone.append(mapScreen());
   if (state.tab === "circle") phone.append(circleScreen());
@@ -931,7 +959,6 @@ function alertsScreen() {
 
 function youScreen() {
   const code = state.me.user.buzzToken;
-  const denied = "Notification" in window && Notification.permission === "denied";
   return el("div", {}, [
     screenHeader("You"),
     el("div", { class: "profile-hero" }, [
@@ -943,27 +970,16 @@ function youScreen() {
       el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
     ]),
     el("div", { class: "panel" }, [
-      el("h3", { text: "Notifications" }),
-      notificationStatus(),
-      el("p", {
-        text: state.meta?.devMode
-          ? "Add VAPID keys to deliver real phone notifications. Until then, alerts stay in this app — enough for two browser profiles."
-          : "Install Hangry on your phone, then allow notifications, so a join reaches your pocket.",
-      }),
-      denied ? el("ol", { class: "guide-reenable" }, reenableSteps().map((line) => el("li", { text: line }))) : null,
       el("button", {
-        class: "btn",
+        class: "row notif-row",
         type: "button",
-        text: denied
-          ? "Notifications are blocked"
-          : state.pushOn
-            ? "Notifications are on"
-            : state.pushBusy
-              ? "Waiting…"
-              : "Turn on notifications",
-        disabled: denied || state.pushOn || state.pushBusy,
-        onclick: () => { void onEnablePush(); },
-      }),
+        onclick: openNotifications,
+      }, [
+        el("div", { class: "grow" }, [
+          el("h3", { text: "Notifications" }),
+          el("p", { text: notificationStatusLabel() }),
+        ]),
+      ]),
       state.meta?.vapidPublicKey
         ? el("button", {
             class: "btn ghost",
@@ -1036,7 +1052,50 @@ function tabbar() {
   }));
 }
 
+function notificationStatusLabel() {
+  if ("Notification" in window && Notification.permission === "denied") return "Blocked";
+  if (state.pushOn) return "On";
+  return "Off";
+}
+
+function openNotifications() {
+  if ("Notification" in window && Notification.permission === "denied") {
+    openInstallGuide();
+    return;
+  }
+  state.sheet = "notifications";
+  render();
+}
+
+function notificationsSheet() {
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-label": "Notifications" }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Notifications" }),
+        el("p", {
+          class: "help",
+          text: state.pushOn
+            ? "Notifications are on."
+            : "Allow notifications so a friend can reach this phone.",
+        }),
+      ]),
+      state.pushOn
+        ? null
+        : el("button", {
+            class: "btn",
+            type: "button",
+            text: state.pushBusy ? "Waiting…" : "Turn on notifications",
+            disabled: state.pushBusy,
+            onclick: () => { void onEnablePush(); },
+          }),
+    ]),
+  ]);
+}
+
 function sheet() {
+  if (state.sheet === "notifications") return notificationsSheet();
   if (state.sheet === "action") {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
@@ -1646,15 +1705,27 @@ async function rotateInvite() {
   });
 }
 
+function pinnedSpot(lat, lng) {
+  const digits = (value) => (Math.round(value * 10000) / 10000).toFixed(4);
+  return `Pinned spot (${digits(lat)}, ${digits(lng)})`;
+}
+
+function droppedPinName(area, lat, lng) {
+  const district = String(area || "").replace(/\s+/g, " ").trim();
+  if (district) return `Dropped pin near ${district}`.slice(0, 80);
+  return pinnedSpot(lat, lng);
+}
+
 function wherePayload() {
   const where = state.where;
   const typed = namedPlace(state.whereQuery || where.place || "");
+  const named = typed || (where.lat != null && where.lng != null ? droppedPinName(state.whereArea, where.lat, where.lng) : "");
   if (where.mode === "here" && where.lat != null && where.lng != null) {
     return { place: namedPlace(where.place) || "near you", lat: where.lat, lng: where.lng, precise: false };
   }
-  if ((where.mode === "place" || typed) && (typed || where.lat != null)) {
+  if ((where.mode === "place" || named) && (named || where.lat != null)) {
     return {
-      place: typed,
+      place: named,
       lat: where.lat,
       lng: where.lng,
       precise: Boolean(where.precise && where.lat != null && where.lng != null),
@@ -1741,7 +1812,7 @@ function wherePicker() {
         render();
       },
     }),
-    state.whereMap ? el("div", { id: "where-map", class: "where-map" }) : null,
+    state.whereMap ? el("div", { id: "where-map", class: "where-map", "data-no-sheet-drag": "1" }) : null,
   ]);
 }
 
@@ -1975,30 +2046,54 @@ async function useCurrentWhere() {
   }
 }
 
+function paintChosenPlace(name) {
+  state.where.place = name;
+  state.whereQuery = name;
+  state.where.mode = "place";
+  state.whereAutofill = false;
+  const label = document.querySelector(".where-v");
+  const query = document.getElementById("where-query");
+  if (label) {
+    label.textContent = name;
+    label.classList.remove("is-placeholder");
+  }
+  if (query && document.activeElement !== query) query.value = name;
+  paintSummary();
+  if (!label && !query) rerenderWhere();
+}
+
 function scheduleReverse(lat, lng, replace = false) {
   clearTimeout(reverseTimer);
-  reverseTimer = setTimeout(() => {
-    api(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`).then((data) => {
-      if (state.where.lat !== lat || state.where.lng !== lng) return;
-      if (!data?.place) return;
-      const pending = state.where.place === FINDING_PLACE || state.whereQuery === FINDING_PLACE;
-      if (!replace && state.whereQuery.trim() && !pending) return;
-      if (replace && !pending) return;
-      state.where.place = data.place;
-      state.whereQuery = data.place;
-      state.where.mode = "place";
-      state.whereAutofill = false;
-      const label = document.querySelector(".where-v");
-      const query = document.getElementById("where-query");
-      if (label) {
-        label.textContent = data.place;
-        label.classList.remove("is-placeholder");
-      }
-      if (query && document.activeElement !== query) query.value = data.place;
-      paintSummary();
-      if (!label && !query) rerenderWhere();
-    }).catch((error) => console.error("reverse geocode failed", error));
-  }, 400);
+  const stamp = {};
+  reverseTimer = stamp;
+  let finished = false;
+  const still = () => reverseTimer === stamp && state.where.lat === lat && state.where.lng === lng;
+  const accept = (name, area) => {
+    if (!still()) return;
+    const current = state.where.place;
+    const open = !current || current === FINDING_PLACE || current === state.whereFallback;
+    if (!open) return;
+    if (!replace && state.whereQuery.trim() && state.whereQuery !== FINDING_PLACE && current !== state.whereFallback) return;
+    if (area) state.whereArea = area;
+    state.whereFallback = name.startsWith("Pinned spot (") || name.startsWith("Dropped pin near ") ? name : "";
+    paintChosenPlace(name);
+  };
+  const giveUp = () => accept(droppedPinName(state.whereArea, lat, lng), state.whereArea);
+  setTimeout(() => {
+    if (!finished) giveUp();
+  }, 4000);
+  api(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`).then((data) => {
+    if (!still()) return;
+    finished = true;
+    const place = String(data?.place || "").trim();
+    const area = String(data?.area || "").trim();
+    if (place) accept(place, area);
+    else accept(droppedPinName(area, lat, lng), area);
+  }).catch((error) => {
+    console.error("reverse geocode failed", error);
+    finished = true;
+    giveUp();
+  });
 }
 
 function openNotification(note) {
@@ -2018,12 +2113,22 @@ function openNotification(note) {
   render();
 }
 
+function clearDeepLinkQuery() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has("social") && !url.searchParams.has("plan")) return;
+  url.searchParams.delete("social");
+  url.searchParams.delete("plan");
+  const next = `${url.pathname}${url.search}${url.hash}` || "/";
+  history.replaceState(history.state, "", next);
+}
+
 function consumeDeepLink() {
   if (!state.deepLink) return false;
   const { kind, id } = state.deepLink;
   const list = kind === "plan" ? state.plans : state.socials;
   const item = list.find((entry) => entry.id === id);
   state.deepLink = null;
+  clearDeepLinkQuery();
   if (!item) return false;
   if (item.location) {
     showOnMap(kind, item.id);
@@ -2201,10 +2306,17 @@ function placeLine(location, placeName, target) {
 }
 
 function showOnMap(kind, id) {
+  const url = new URL(location.href);
+  url.searchParams.delete("social");
+  url.searchParams.delete("plan");
+  const clean = `${url.pathname}${url.search}${url.hash}` || "/";
+  if (`${location.pathname}${location.search}${location.hash}` !== clean) {
+    history.replaceState(history.state, "", clean);
+  }
   if (state.tab !== "map") {
     state.mapReturnTab = state.tab;
     if (!state.mapHistory) {
-      history.pushState({ hangryMap: 1 }, "");
+      history.pushState({ hangryMap: 1 }, "", clean);
       state.mapHistory = true;
     }
   }
@@ -2364,6 +2476,30 @@ function syncSheetHistory() {
   }
 }
 
+function scrollableAncestor(node) {
+  let current = node instanceof Element ? node : null;
+  while (current && current !== document.body) {
+    const style = getComputedStyle(current);
+    const overflow = style.overflowY;
+    if ((overflow === "auto" || overflow === "scroll" || overflow === "overlay") && current.scrollHeight > current.clientHeight + 1) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function horizontalScroller(node) {
+  let current = node instanceof Element ? node : null;
+  while (current && current !== document.body) {
+    const style = getComputedStyle(current);
+    const overflow = style.overflowX;
+    if ((overflow === "auto" || overflow === "scroll") && current.scrollWidth > current.clientWidth + 1) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
 function bindSheetSwipe() {
   document.querySelectorAll(".sheet, .guide").forEach((panel) => {
     let tracking = false;
@@ -2371,12 +2507,13 @@ function bindSheetSwipe() {
     let startY = 0;
     let drag = 0;
     let pointerId = -1;
+    let startedAtTop = false;
     const headerHit = (event) => Boolean(event.target.closest(".sheet-head, .grabber"));
-    const blocked = (event) => Boolean(event.target.closest("input, textarea, button, a, select"));
-    const scroller = () => panel.querySelector(".sheet-scroll") || (panel.classList.contains("guide") ? null : panel);
-    const atTop = () => {
-      const node = scroller();
-      return !node || node.scrollTop <= 0;
+    const handsOff = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return true;
+      if (target.closest("input, textarea, select, button, a, .leaflet-container, .leaflet-marker-icon, .leaflet-marker-pane, .pin, [data-no-sheet-drag]")) return true;
+      return Boolean(horizontalScroller(target));
     };
     const place = () => {
       const shift = `translateY(${drag}px)`;
@@ -2384,9 +2521,11 @@ function bindSheetSwipe() {
     };
     panel.addEventListener("pointerdown", (event) => {
       if (event.button != null && event.button !== 0) return;
-      if (blocked(event)) return;
+      if (handsOff(event)) return;
       const header = headerHit(event);
-      if (!header && !atTop()) return;
+      const scroller = scrollableAncestor(event.target);
+      startedAtTop = !scroller || scroller.scrollTop <= 0;
+      if (!header && !startedAtTop) return;
       tracking = true;
       dragging = header;
       startY = event.clientY;
@@ -2401,7 +2540,7 @@ function bindSheetSwipe() {
       if (!tracking || event.pointerId !== pointerId) return;
       const dy = event.clientY - startY;
       if (!dragging) {
-        if (dy < -4 || !atTop()) {
+        if (!startedAtTop || dy < -4) {
           tracking = false;
           return;
         }
@@ -2425,7 +2564,8 @@ function bindSheetSwipe() {
     panel.addEventListener("pointercancel", finish);
     panel.addEventListener("touchmove", (event) => {
       if (!tracking || !event.touches.length) return;
-      if (event.touches[0].clientY - startY > 0 && (headerHit(event) || atTop())) event.preventDefault();
+      const dy = event.touches[0].clientY - startY;
+      if (dy > 0 && (headerHit(event) || startedAtTop)) event.preventDefault();
     }, { passive: false });
   });
 }
@@ -3015,7 +3155,13 @@ async function run(fn, keepError = "") {
   try {
     await fn();
   } catch (error) {
-    state.error = error.message || "Something went wrong";
+    if (isNetworkFailure(error) || error.status >= 500) {
+      noteConnectionProblem(error);
+      scheduleOfflineRetry(1000);
+      state.error = isNetworkFailure(error) ? "You're offline. Try again." : "Something went wrong. Try again.";
+    } else {
+      state.error = error.message || "Something went wrong. Try again.";
+    }
   }
   render();
   scheduleErrorClear();

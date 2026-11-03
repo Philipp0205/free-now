@@ -330,10 +330,10 @@ test("denied notifications explain how to allow them again", { timeout: 90_000 }
     await page.screenshot({ path: shot("polish-notifications-denied.png") });
     await page.locator(".sheet button.btn.ghost", { hasText: "Not now" }).click();
     await page.getByRole("button", { name: "You", exact: true }).click();
-    const blocked = page.getByRole("button", { name: "Notifications are blocked" });
-    await blocked.waitFor();
-    assert.equal(await blocked.isDisabled(), true);
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await page.locator(".guide").waitFor();
     await page.getByText("Settings → Site settings → Notifications").waitFor();
+    assert.equal(await page.locator(".guide").getByRole("button", { name: "Turn on notifications" }).count(), 0);
   } finally {
     await page.context().close();
   }
@@ -420,6 +420,155 @@ test("a plan link opens the map on that plan", { timeout: 90_000 }, async () => 
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.locator(".map-card").getByText("Bouldering").waitFor({ timeout: 8000 });
     assert.equal(await page.locator(".screen-title").innerText(), "Map");
+    assert.equal(new URL(page.url()).search, "");
+    await page.evaluate(() => history.back());
+    await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
+    assert.equal(new URL(page.url()).search, "");
+    await page.reload();
+    const laterAgain = page.locator(".sheet button", { hasText: "Not now" });
+    if (await laterAgain.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await laterAgain.click();
+    await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
+    assert.equal(await page.locator(".map-card").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("panning the place map does not close the sheet", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await page.setViewportSize({ width: 412, height: 915 });
+    await openFreeSheet(page, "Philipp");
+    await page.locator("button.where-row").click();
+    await page.getByRole("button", { name: "Pick on map" }).click();
+    await page.locator("#where-map .leaflet-marker-icon").waitFor({ timeout: 8000 });
+    await page.locator(".sheet-scroll").evaluate((node) => { node.scrollTop = 0; });
+    await dragDown(page, page.locator("#where-map"));
+    assert.equal(await page.locator("form.sheet").count(), 1);
+    await dragDown(page, page.locator("#where-map .leaflet-marker-icon"));
+    assert.equal(await page.locator("form.sheet").count(), 1);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a scrolled install guide drags closed only from the top", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false, DENIED_NOTIFICATIONS);
+  try {
+    await signIn(page, "Philipp");
+    const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "You", exact: true }).click();
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await page.locator(".guide").waitFor();
+    await page.locator(".guide-scrim").evaluate((node) => {
+      const filler = document.createElement("div");
+      filler.style.height = "900px";
+      node.querySelector(".guide")?.append(filler);
+      node.scrollTop = 240;
+    });
+    const spot = await page.evaluate(() => {
+      const scrim = document.querySelector(".guide-scrim");
+      if (!scrim) return null;
+      const rect = scrim.getBoundingClientRect();
+      for (let y = rect.top + 24; y < rect.bottom - 24; y += 16) {
+        const hit = document.elementFromPoint(rect.left + 36, y);
+        if (!hit || !scrim.contains(hit) || hit.closest("button, a, input")) continue;
+        return { x: rect.left + 36, y };
+      }
+      return null;
+    });
+    assert.ok(spot, "no guide text to drag");
+    await page.mouse.move(spot.x, spot.y);
+    await page.mouse.down();
+    await page.mouse.move(spot.x, spot.y + 180, { steps: 12 });
+    await page.mouse.up();
+    assert.equal(await page.locator(".guide").count(), 1);
+    const scrolled = await page.locator(".guide-scrim").evaluate((node) => node.scrollTop);
+    assert.ok(scrolled > 0, `expected the guide to stay scrolled, top=${scrolled}`);
+    await page.locator(".guide-scrim").evaluate((node) => { node.scrollTop = 0; });
+    await dragDown(page, page.locator(".guide .lede"));
+    await page.locator(".guide").waitFor({ state: "detached" });
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a failed address lookup still names the pin", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  await page.route("**/api/geocode?**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("q")) return route.fulfill({ json: { results: [] } });
+    if (url.searchParams.get("lat") === "1") {
+      return route.fulfill({ json: { place: "", area: "Mitte" } });
+    }
+    return new Promise(() => {});
+  });
+  try {
+    await openFreeSheet(page, "Philipp");
+    await page.locator("button.where-row").click();
+    await page.getByRole("button", { name: "Pick on map" }).click();
+    await page.locator("#where-map .leaflet-marker-icon").waitFor({ timeout: 8000 });
+    await page.locator("#where-map").click({ position: { x: 40, y: 40 } });
+    await page.waitForFunction(() => {
+      const text = document.querySelector(".where-v")?.textContent || "";
+      return text.startsWith("Pinned spot (") || text.startsWith("Dropped pin near ");
+    }, null, { timeout: 8000 });
+    const named = await page.locator(".where-v").innerText();
+    assert.notEqual(named, "Finding address…");
+    await page.getByRole("button", { name: "I'm free" }).click();
+    await page.getByRole("button", { name: "End" }).waitFor({ timeout: 8000 });
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const listed = await fetch(`${baseUrl}/api/socials`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    assert.ok(listed.socials[0].place.length > 0, JSON.stringify(listed.socials[0]));
+    assert.notEqual(listed.socials[0].place, "Finding address…");
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a 5xx while the app is open shows the retry banner and a toast", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const friend = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${friend.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.keyboard.press("Escape");
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Can't" }).waitFor();
+    await page.route("**/api/**", (route) => route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "internal error" }),
+    }));
+    await page.getByText("Something went wrong. Retrying…").waitFor({ timeout: 8000 });
+    await page.getByRole("button", { name: "Can't" }).click();
+    await page.getByText("Something went wrong. Try again.").waitFor();
+    const stacked = await page.evaluate(() => {
+      const banner = document.querySelector(".status-banner")?.getBoundingClientRect();
+      const title = document.querySelector(".screen-title")?.getBoundingClientRect();
+      const toast = document.querySelector(".toast")?.getBoundingClientRect();
+      return {
+        banner: banner?.bottom ?? null,
+        title: title?.top ?? null,
+        toast: toast?.top ?? null,
+        tab: document.querySelector(".tabbar")?.getBoundingClientRect().top ?? null,
+      };
+    });
+    assert.ok(stacked.banner != null && stacked.title != null && stacked.banner <= stacked.title + 1, JSON.stringify(stacked));
+    assert.ok(stacked.toast != null && stacked.tab != null && stacked.toast >= stacked.title, JSON.stringify(stacked));
   } finally {
     await page.context().close();
   }
