@@ -282,7 +282,7 @@ test("host and admin can change every event, and a member cannot", async () => {
     });
     await denied("DELETE", `/api/socials/${later.social.id}/people/${nia.user.id}`);
     await api(port, "DELETE", `/api/socials/${later.social.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
-    assert.equal(sent.at(-1)?.body, "Bea removed you from Dusk walk");
+    assert.equal(sent.at(-1)?.body, "Alex removed you from Dusk walk");
 
     await denied("DELETE", `/api/plans/${plan.plan.id}/people/${nia.user.id}`);
     await api(port, "DELETE", `/api/plans/${plan.plan.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
@@ -319,7 +319,7 @@ test("host and admin can change every event, and a member cannot", async () => {
     });
     await denied("DELETE", `/api/plans/${dinner.plan.id}/people/${nia.user.id}`);
     await api(port, "DELETE", `/api/plans/${dinner.plan.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
-    assert.equal(sent.at(-1)?.body, "Bea removed you from Supper");
+    assert.equal(sent.at(-1)?.body, "Alex removed you from Supper");
 
     await denied("DELETE", `/api/socials/${social.social.id}`);
     await api(port, "DELETE", `/api/socials/${social.social.id}`, { token: alex.token, status: 204 });
@@ -336,6 +336,61 @@ test("host and admin can change every event, and a member cannot", async () => {
     const plans = await api(port, "GET", "/api/plans", { token: alex.token });
     assert.equal(socials.socials.length, 0);
     assert.equal(plans.plans.length, 0);
+  });
+});
+
+test("removal blocks the old invite, ends posts, and names who removed you", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const code = created.circle.inviteCode;
+    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code }, status: 201 });
+    await api(port, "POST", `/api/circles/members/${bea.user.id}`, { token: alex.token, body: { admin: true }, status: 200 });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: sam.token,
+      body: { endpoint: "https://push.example/sam", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const coffee = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Coffee" }, status: 201 });
+    await api(port, "POST", `/api/socials/${coffee.social.id}/reply`, { token: sam.token, body: { reply: "in" }, status: 200 });
+    const tea = await api(port, "POST", "/api/socials", { token: sam.token, body: { note: "Tea" }, status: 201 });
+    await api(port, "DELETE", `/api/circles/members/${sam.user.id}`, { token: bea.token, status: 204 });
+    const afterKick = await api(port, "GET", "/api/socials", { token: alex.token });
+    assert.equal(afterKick.socials.some((social: { id: string }) => social.id === tea.social.id), false);
+    const coffeeLeft = afterKick.socials.find((social: { id: string }) => social.id === coffee.social.id);
+    assert.equal(coffeeLeft.joined.some((person: { id: string }) => person.id === sam.user.id), false);
+    const blocked = await api(port, "POST", "/api/circles/join", { token: sam.token, body: { code }, status: 403 });
+    assert.equal(blocked.error, "An admin removed you from this circle.");
+    await api(port, "DELETE", `/api/circles/removals/${sam.user.id}`, { token: bea.token, status: 204 });
+    await api(port, "POST", "/api/circles/join", { token: sam.token, body: { code }, status: 200 });
+    await api(port, "DELETE", `/api/circles/members/${sam.user.id}`, { token: alex.token, status: 204 });
+    const rotated = await api(port, "POST", "/api/circles/invite", { token: alex.token, status: 200 });
+    await api(port, "POST", "/api/circles/join", { token: sam.token, body: { code: rotated.circle.inviteCode }, status: 200 });
+
+    const late = await api(port, "POST", "/api/socials", { token: sam.token, body: { note: "Late" }, status: 201 });
+    await api(port, "POST", `/api/socials/${late.social.id}/reply`, { token: alex.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", "/api/circles/leave", { token: sam.token, status: 200 });
+    const afterLeave = await api(port, "GET", "/api/socials", { token: alex.token });
+    assert.equal(afterLeave.socials.some((social: { note: string }) => social.note === "Late"), false);
+
+    await api(port, "DELETE", `/api/socials/${coffee.social.id}`, { token: alex.token, status: 204 });
+    const again = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Again" }, status: 201 });
+    await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: rotated.circle.inviteCode }, status: 201 }).then(async (nia) => {
+      await api(port, "POST", "/api/push/subscribe", {
+        token: nia.token,
+        body: { endpoint: "https://push.example/nia", keys: { p256dh: "p", auth: "a" } },
+        status: 204,
+      });
+      await api(port, "POST", `/api/socials/${again.social.id}/reply`, { token: nia.token, body: { reply: "in" }, status: 200 });
+      await api(port, "DELETE", `/api/socials/${again.social.id}/people/${nia.user.id}`, { token: bea.token, status: 204 });
+      assert.equal(sent.at(-1)?.body, "Bea removed you from Again");
+      const denied = await api(port, "POST", `/api/socials/${again.social.id}/reply`, { token: nia.token, body: { reply: "in" }, status: 403 });
+      assert.equal(denied.error, "Bea removed you from this.");
+      const seen = await api(port, "GET", "/api/socials", { token: nia.token });
+      const row = seen.socials.find((social: { id: string }) => social.id === again.social.id);
+      assert.equal(row.joined.some((person: { id: string }) => person.id === nia.user.id), false);
+    });
   });
 });
 

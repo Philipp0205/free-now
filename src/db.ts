@@ -195,6 +195,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS circle_removals (
+  circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  invite_code TEXT NOT NULL,
+  PRIMARY KEY (circle_id, user_id)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -235,6 +242,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plan_joins", "arrive_at", "arrive_at INTEGER");
   ensureColumn(db, "social_joins", "blocked", "blocked INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "plan_joins", "blocked", "blocked INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "social_joins", "removed_by", "removed_by TEXT");
+  ensureColumn(db, "plan_joins", "removed_by", "removed_by TEXT");
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   backfillCircleAdmins(db);
@@ -440,6 +449,7 @@ export function removeMember(db: DatabaseSync, circleId: string, userId: string)
         db.prepare("UPDATE memberships SET is_admin = 1 WHERE circle_id = ? AND user_id = ?").run(circleId, next.user_id);
       }
     }
+    endMemberEvents(db, circleId, userId);
     db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
     const row = one<{ n: number | bigint }>(
       db,
@@ -462,11 +472,44 @@ export function kickMember(db: DatabaseSync, circleId: string, userId: string): 
   if (!member) return "missing";
   if (member.is_admin && countCircleAdmins(db, circleId) <= 1) return "last";
   withTx(db, () => {
-    db.prepare("DELETE FROM socials WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
-    db.prepare("DELETE FROM plans WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+    endMemberEvents(db, circleId, userId);
+    const circle = one<{ invite_code: string }>(db, "SELECT invite_code FROM circles WHERE id = ?", circleId);
+    db.prepare(
+      `INSERT INTO circle_removals (circle_id, user_id, invite_code) VALUES (?, ?, ?)
+       ON CONFLICT(circle_id, user_id) DO UPDATE SET invite_code = excluded.invite_code`,
+    ).run(circleId, userId, circle?.invite_code ?? "");
     db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
   });
   return "ok";
+}
+
+function endMemberEvents(db: DatabaseSync, circleId: string, userId: string): void {
+  db.prepare("DELETE FROM socials WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+  db.prepare("DELETE FROM plans WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+  db.prepare(
+    "DELETE FROM social_joins WHERE user_id = ? AND social_id IN (SELECT id FROM socials WHERE circle_id = ?)",
+  ).run(userId, circleId);
+  db.prepare(
+    "DELETE FROM plan_joins WHERE user_id = ? AND plan_id IN (SELECT id FROM plans WHERE circle_id = ?)",
+  ).run(userId, circleId);
+}
+
+export function removalBlocksJoin(db: DatabaseSync, circleId: string, userId: string, inviteCode: string): boolean {
+  const row = one<{ invite_code: string }>(
+    db,
+    "SELECT invite_code FROM circle_removals WHERE circle_id = ? AND user_id = ?",
+    circleId,
+    userId,
+  );
+  return Boolean(row && row.invite_code === inviteCode);
+}
+
+export function clearRemoval(db: DatabaseSync, circleId: string, userId: string): void {
+  db.prepare("DELETE FROM circle_removals WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
+}
+
+export function clearCircleRemovals(db: DatabaseSync, circleId: string): void {
+  db.prepare("DELETE FROM circle_removals WHERE circle_id = ?").run(circleId);
 }
 
 export function insertSocial(
@@ -602,16 +645,16 @@ export function getSocialReply(
   db: DatabaseSync,
   socialId: string,
   userId: string,
-): { reply: string; eta_min: number | null; arrive_at: number | null; blocked: number } | undefined {
-  return one(db, "SELECT reply, eta_min, arrive_at, blocked FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
+): { reply: string; eta_min: number | null; arrive_at: number | null; blocked: number; removed_by: string | null } | undefined {
+  return one(db, "SELECT reply, eta_min, arrive_at, blocked, removed_by FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
 }
 
-export function blockSocialGuest(db: DatabaseSync, socialId: string, userId: string, now: number): void {
+export function blockSocialGuest(db: DatabaseSync, socialId: string, userId: string, now: number, actorName: string): void {
   db.prepare(
-    `INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min, arrive_at, blocked)
-     VALUES (?, ?, ?, 'removed', NULL, NULL, 1)
-     ON CONFLICT(social_id, user_id) DO UPDATE SET reply = 'removed', eta_min = NULL, arrive_at = NULL, blocked = 1`,
-  ).run(socialId, userId, now);
+    `INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min, arrive_at, blocked, removed_by)
+     VALUES (?, ?, ?, 'removed', NULL, NULL, 1, ?)
+     ON CONFLICT(social_id, user_id) DO UPDATE SET reply = 'removed', eta_min = NULL, arrive_at = NULL, blocked = 1, removed_by = excluded.removed_by`,
+  ).run(socialId, userId, now, actorName);
 }
 
 export function setSocialReply(
@@ -656,6 +699,7 @@ export function markSocialReminded(db: DatabaseSync, socialId: string, remindedA
 
 export function rotateInvite(db: DatabaseSync, circleId: string, code: string, expiresAt: number): void {
   db.prepare("UPDATE circles SET invite_code = ?, invite_expires_at = ? WHERE id = ?").run(code, expiresAt, circleId);
+  clearCircleRemovals(db, circleId);
 }
 
 export function removeSocialJoin(db: DatabaseSync, socialId: string, userId: string): void {
@@ -759,16 +803,16 @@ export function hasPlanJoin(db: DatabaseSync, planId: string, userId: string): b
   return Boolean(one(db, "SELECT 1 AS ok FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId));
 }
 
-export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string; arrive_at: number | null; blocked: number } | undefined {
-  return one(db, "SELECT reply, arrive_at, blocked FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
+export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string; arrive_at: number | null; blocked: number; removed_by: string | null } | undefined {
+  return one(db, "SELECT reply, arrive_at, blocked, removed_by FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
 }
 
-export function blockPlanGuest(db: DatabaseSync, planId: string, userId: string, now: number): void {
+export function blockPlanGuest(db: DatabaseSync, planId: string, userId: string, now: number, actorName: string): void {
   db.prepare(
-    `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply, arrive_at, blocked)
-     VALUES (?, ?, ?, 'removed', NULL, 1)
-     ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = 'removed', arrive_at = NULL, blocked = 1`,
-  ).run(planId, userId, now);
+    `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply, arrive_at, blocked, removed_by)
+     VALUES (?, ?, ?, 'removed', NULL, 1, ?)
+     ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = 'removed', arrive_at = NULL, blocked = 1, removed_by = excluded.removed_by`,
+  ).run(planId, userId, now, actorName);
 }
 
 export function setPlanReply(

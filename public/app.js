@@ -266,7 +266,12 @@ function friendlyMessage(raw, status) {
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
-  if (lower.includes("removed you")) return "The host removed you from this.";
+  if (lower.includes("removed you from this circle")) return "An admin removed you from this circle.";
+  if (lower.includes("removed you")) {
+    const named = text.match(/^(.+) removed you from this\.?$/i);
+    if (named && named[1].toLowerCase() !== "the host") return text.endsWith(".") ? text : `${text}.`;
+    return "The host removed you from this.";
+  }
   if (lower.includes("only the host")) return "Only the host can do that.";
   if (status === 403 || lower.includes("only an admin")) return "Only an admin can do that.";
   if (lower.includes("needs an admin")) return "A circle needs an admin.";
