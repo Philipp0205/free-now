@@ -21,11 +21,12 @@ export type Config = {
 };
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
-// CARTO Dark Matter's public raster CDN now returns an API-key watermark.
-// Esri World Dark Gray is a no-key dark street map. Override both env vars
-// to switch to CARTO, Stadia, or OpenFreeMap later.
-const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
-const DEFAULT_MAP_TILE_ATTRIBUTION = "© Esri, HERE, Garmin, OpenStreetMap contributors";
+// CARTO Voyager and dark_all on the public raster CDN both return an
+// "API KEY REQUIRED" tile. Esri World Street Map is the no-key basemap that
+// still names the city and the streets at zooms 12–16. It has data through
+// zoom 19 here; 20+ is the "Map data not yet available" placeholder.
+const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+const DEFAULT_MAP_TILE_ATTRIBUTION = "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Config {
   const port = readPort(env.PORT);
