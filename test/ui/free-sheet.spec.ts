@@ -267,31 +267,39 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await viewer.getByRole("button", { name: "I'm in" }).click();
     await viewer.getByText("You're in", { exact: true }).waitFor();
-    assert.equal(await viewer.getByRole("button", { name: "5 min" }).count(), 1);
-    assert.equal(await viewer.getByRole("button", { name: "Pick time" }).count(), 1);
+    assert.equal(await viewer.getByRole("button", { name: "5 min" }).count(), 0);
+    assert.equal(await viewer.getByText("Arriving at").count(), 0);
+    await viewer.getByText("Pick time", { exact: true }).waitFor();
     await viewer.screenshot({ path: shot("fix-arrive-before.png") });
-    await viewer.getByRole("button", { name: "Pick time" }).click();
-    await viewer.getByText(/You're in, arriving /).waitFor();
-    const field = viewer.locator(".arrive-field input");
+    const field = viewer.locator(".time-chip input");
     await field.waitFor();
     const placed = await field.evaluate((input) => {
-      const box = input.getBoundingClientRect();
+      const chip = input.closest(".time-chip") as HTMLElement;
+      const box = chip.getBoundingClientRect();
       const tab = document.querySelector(".tabbar")?.getBoundingClientRect().top ?? window.innerHeight;
-      const style = getComputedStyle(input);
+      const [hour, minute] = (input as HTMLInputElement).value.split(":").map(Number);
+      const nextMinute = minute === 59 ? 58 : minute + 1;
+      const value = `${String(hour).padStart(2, "0")}:${String(nextMinute).padStart(2, "0")}`;
+      (input as HTMLInputElement).value = value;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
       return {
         bottom: box.bottom,
         tab,
-        background: style.backgroundColor,
+        background: getComputedStyle(chip).backgroundColor,
         min: (input as HTMLInputElement).min,
         max: (input as HTMLInputElement).max,
-        value: (input as HTMLInputElement).value,
+        step: (input as HTMLInputElement).step,
+        height: Math.round(box.height),
+        value,
       };
     });
     assert.ok(placed.bottom <= placed.tab - 8, JSON.stringify(placed));
     assert.equal(placed.background, "rgb(44, 44, 46)");
-    assert.match(placed.min, /^\d{2}:\d{2}$/);
-    assert.match(placed.max, /^\d{2}:\d{2}$/);
-    assert.ok(placed.value >= placed.min && placed.value <= placed.max, JSON.stringify(placed));
+    assert.equal(placed.min, "");
+    assert.equal(placed.max, "");
+    assert.equal(placed.step, "60");
+    assert.ok(placed.height >= 44, JSON.stringify(placed));
+    await viewer.getByText(`You're in, arriving ${placed.value}`).waitFor();
     await viewer.screenshot({ path: shot("fix-arrive-time.png") });
     await viewerContext.close();
     await page.reload();
@@ -299,6 +307,93 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     if (await hostLater.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await hostLater.click();
     await page.getByText(/Fritz is in, arriving /).waitFor();
     await page.screenshot({ path: shot("fix-arrive-host.png") });
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("later and tomorrow replies keep I'm in and Can't on one row", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const friend = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const now = new Date();
+    const ahead = new Date(now.getTime() + 90 * 60 * 1000);
+    const laterClock = ahead.getUTCDate() === now.getUTCDate()
+      ? `${String(ahead.getUTCHours()).padStart(2, "0")}:${String(ahead.getUTCMinutes()).padStart(2, "0")}`
+      : null;
+    if (laterClock) {
+      await fetch(`${baseUrl}/api/socials`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ note: "Dinner", startsAt: laterClock }),
+      });
+    }
+    await fetch(`${baseUrl}/api/plans`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Walk" }),
+    });
+    const viewerContext = await browser.newContext({
+      viewport: { width: 360, height: 640 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent: CHROME_UA,
+    });
+    await viewerContext.addInitScript(vvMock);
+    await viewerContext.addInitScript((value) => localStorage.setItem("fn_token", value), friend.token);
+    const viewer = await viewerContext.newPage();
+    await viewer.goto(baseUrl);
+    const sheet = viewer.locator(".sheet button", { hasText: "Not now" });
+    if (await sheet.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await sheet.click();
+    const labels = [...(laterClock ? ["Dinner"] : []), "Walk"];
+    for (const width of [360, 412]) {
+      await viewer.setViewportSize({ width, height: 700 });
+      for (const label of labels) {
+        const card = viewer.locator("article", { has: viewer.getByRole("heading", { name: label, exact: true }) });
+        await card.scrollIntoViewIfNeeded();
+        const buttons = card.locator(".reply-row .chip");
+        await buttons.first().waitFor();
+        const layout = await card.evaluate((node) => {
+          const row = node.querySelector(".reply-row");
+          const chips = [...(row?.querySelectorAll(":scope > .chip") ?? [])].map((chip) => chip.getBoundingClientRect());
+          const time = node.querySelector(".time-chip")?.getBoundingClientRect();
+          const input = node.querySelector(".time-chip input") as HTMLInputElement | null;
+          return {
+            chips: chips.map((box) => ({ top: Math.round(box.top), width: Math.round(box.width), height: Math.round(box.height) })),
+            time: time ? { height: Math.round(time.height), top: Math.round(time.top) } : null,
+            labels: node.querySelectorAll(".sheet-label").length,
+            arrivingAt: [...node.querySelectorAll("*")].filter((el) => el.childNodes.length === 1 && el.textContent === "Arriving at").length,
+            min: input?.min ?? null,
+            max: input?.max ?? null,
+            value: input?.value ?? null,
+          };
+        });
+        assert.equal(layout.chips.length, 2, JSON.stringify(layout));
+        assert.equal(layout.chips[0].top, layout.chips[1].top, JSON.stringify(layout));
+        assert.ok(Math.abs(layout.chips[0].width - layout.chips[1].width) <= 1, JSON.stringify(layout));
+        assert.ok(layout.chips.every((chip) => chip.height >= 44), JSON.stringify(layout));
+        assert.ok(layout.time && layout.time.height >= 44, JSON.stringify(layout));
+        assert.ok(layout.time && layout.time.top >= layout.chips[0].top, JSON.stringify(layout));
+        assert.equal(layout.labels, 0, JSON.stringify(layout));
+        assert.equal(layout.arrivingAt, 0, JSON.stringify(layout));
+        assert.equal(layout.min, "");
+        assert.equal(layout.max, "");
+        if (label === "Dinner" && laterClock) assert.equal(layout.value, laterClock);
+      }
+    }
+    await viewer.locator("article", { has: viewer.getByRole("heading", { name: labels[0], exact: true }) }).scrollIntoViewIfNeeded();
+    await viewer.screenshot({ path: shot("reply-row.png") });
+    await viewer.getByRole("button", { name: "You", exact: true }).click();
+    assert.equal(await viewer.getByRole("button", { name: "Save name" }).count(), 0);
+    await viewer.getByText("An admin can change it.").waitFor();
+    await viewerContext.close();
   } finally {
     await page.context().close();
   }
