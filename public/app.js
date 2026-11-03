@@ -1,4 +1,5 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
+import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 
 const TOKEN_KEY = "fn_token";
 const INSTALLED_KEY = "fn_installed";
@@ -143,6 +144,150 @@ function isTyping() {
   return tag === "INPUT" || tag === "TEXTAREA";
 }
 
+let restingHeight = 0;
+let restingWidth = 0;
+let revealTimer = 0;
+
+function isTextField(node) {
+  return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement;
+}
+
+function prefersTouchUi() {
+  if (window.matchMedia?.("(pointer: coarse)")?.matches) return true;
+  return navigator.maxTouchPoints > 0 && !!window.matchMedia?.("(hover: none)")?.matches;
+}
+
+function readVirtualKeyboard() {
+  const empty = { height: 0, top: null, bottom: null };
+  if (!prefersTouchUi()) return empty;
+  const rect = navigator.virtualKeyboard?.boundingRect;
+  if (!rect || !Number.isFinite(rect.height) || rect.height <= 0) return empty;
+  return { height: rect.height, top: rect.top, bottom: rect.bottom };
+}
+
+function syncKeyboardInset() {
+  const vv = window.visualViewport;
+  const layoutHeight = window.innerHeight;
+  if (!vv) {
+    document.documentElement.style.setProperty("--kb-offset", "0px");
+    document.documentElement.style.setProperty("--vv-height", `${layoutHeight}px`);
+    document.documentElement.classList.remove("kb-open");
+    return;
+  }
+  const viewportHeight = vv.height;
+  const offset = keyboardOffset(layoutHeight, viewportHeight, vv.offsetTop);
+  const focused = isTyping();
+  const width = window.innerWidth;
+  if (!restingHeight) {
+    restingHeight = viewportHeight;
+    restingWidth = width;
+  } else if (Math.abs(width - restingWidth) > 80) {
+    restingHeight = viewportHeight;
+    restingWidth = width;
+  } else if (!focused && offset < KEYBOARD_OFFSET_MIN && viewportHeight >= restingHeight - 40) {
+    restingHeight = viewportHeight;
+    restingWidth = width;
+  }
+  const touchUi = prefersTouchUi();
+  const vk = readVirtualKeyboard();
+  const open = keyboardIsOpen({
+    offset,
+    focused,
+    restingHeight,
+    viewportHeight,
+    virtualKeyboardHeight: vk.height,
+    touchUi,
+  });
+  document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+  document.documentElement.style.setProperty("--vv-height", `${Math.max(0, Math.round(viewportHeight))}px`);
+  const bar = document.querySelector(".tabbar");
+  const rect = bar?.getBoundingClientRect();
+  const overlaps = rect
+    ? tabbarOverlapsKeyboard({
+        barTop: rect.top,
+        barBottom: rect.bottom,
+        layoutHeight,
+        offset,
+        shrunk: restingHeight - viewportHeight,
+        virtualKeyboardTop: vk.top,
+        virtualKeyboardBottom: vk.bottom,
+      })
+    : false;
+  document.documentElement.classList.toggle("kb-open", open && overlaps);
+}
+
+function scheduleReveal(node) {
+  window.clearTimeout(revealTimer);
+  revealTimer = window.setTimeout(() => revealField(node), FIELD_REVEAL_MS);
+}
+
+function revealField(node) {
+  if (!node.isConnected || document.activeElement !== node) return;
+  if (node.closest(".sheet")) {
+    node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return;
+  }
+  const form = node.closest("form");
+  if (form) {
+    scrollBottomIntoView(form);
+    return;
+  }
+  node.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/** Minimum scroll so the form's bottom edge, including its submit button, clears the keyboard. */
+function scrollBottomIntoView(element) {
+  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+  const overflow = element.getBoundingClientRect().bottom - (viewHeight - 12);
+  if (overflow <= 1) return;
+  scrollParent(element).scrollBy({ top: overflow, left: 0 });
+}
+
+function scrollParent(element) {
+  let node = element.parentElement;
+  while (node) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) return node;
+    node = node.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
+function onViewportResize() {
+  syncKeyboardInset();
+  const active = document.activeElement;
+  if (isTextField(active)) scheduleReveal(active);
+}
+
+function onViewportScroll() {
+  syncKeyboardInset();
+}
+
+function bindKeyboard() {
+  document.addEventListener("focusin", (event) => {
+    if (isTextField(event.target)) scheduleReveal(event.target);
+  });
+  document.addEventListener("focusout", () => {
+    window.setTimeout(syncKeyboardInset, 60);
+  });
+  const vv = window.visualViewport;
+  if (vv) {
+    vv.addEventListener("resize", onViewportResize);
+    vv.addEventListener("scroll", onViewportScroll, { passive: true });
+  }
+  window.addEventListener("resize", onViewportResize);
+  window.addEventListener("orientationchange", () => {
+    restingHeight = 0;
+    syncKeyboardInset();
+  });
+  // Optional. overlaysContent stays off so interactive-widget=resizes-content can still shrink the layout.
+  const vk = navigator.virtualKeyboard;
+  if (vk?.addEventListener) vk.addEventListener("geometrychange", onViewportResize);
+  syncKeyboardInset();
+}
+
+bindKeyboard();
+
 async function api(path, options = {}) {
   const token = options.token === undefined ? state.token : options.token;
   const response = await fetch(path, {
@@ -187,11 +332,11 @@ function render() {
   document.getElementById("app").replaceChildren(view());
   if (state.focusSheet) {
     state.focusSheet = false;
-    document.getElementById("sheet-note")?.focus();
+    document.getElementById("sheet-note")?.focus({ preventScroll: true });
   } else if (activeId) {
     const node = document.getElementById(activeId);
     if (node) {
-      node.focus();
+      node.focus({ preventScroll: true });
       if (caret != null && node.setSelectionRange) {
         try {
           node.setSelectionRange(caret, caret);
@@ -1073,9 +1218,16 @@ function installDue() {
 }
 
 async function considerReminders() {
-  if (!state.token || !state.me) return;
+  if (!state.token || !state.me || !state.me.circle) {
+    const showing = state.installSheet || state.pushReminder;
+    state.installSheet = false;
+    state.pushReminder = null;
+    if (showing) render();
+    return;
+  }
   const signals = currentSignals();
-  if (!isInstalled() && state.me.circle && installDue()) {
+  const prompt = installPrompt(signals, { canPrompt: Boolean(state.installEvent) });
+  if (!isInstalled() && installDue() && !prompt.quiet) {
     state.installSheet = true;
     state.pushReminder = null;
     render();
@@ -1172,7 +1324,8 @@ async function onInstall() {
 }
 
 function showInstallPill() {
-  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden;
+  const prompt = installPrompt(currentSignals(), { canPrompt: false });
+  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden && !prompt.quiet;
 }
 
 function installPill() {
@@ -1237,12 +1390,19 @@ function installSheetView() {
 }
 
 async function onRotateBuzz() {
-  if (!window.confirm("The old buzzer and recovery code will stop working.")) return;
-  await run(async () => {
-    const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
-    state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
-    state.error = "New secret ready";
-  });
+  state.confirm = {
+    title: "New secret?",
+    body: "The old buzzer and recovery code will stop working.",
+    confirmLabel: "Regenerate",
+    action: async () => {
+      await run(async () => {
+        const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
+        state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
+        state.error = "New secret ready";
+      });
+    },
+  };
+  render();
 }
 
 async function onLeave() {

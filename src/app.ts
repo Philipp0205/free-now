@@ -320,7 +320,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       createdAt: deps.now(),
     });
     console.log(`push subscribe user=${me.id} status=ok`);
-    sendJson(res, 204, {});
+    sendEmpty(res, 204);
     return;
   }
 
