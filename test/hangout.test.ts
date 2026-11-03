@@ -99,7 +99,8 @@ test("on my way and can't make it notify the host and can be changed", async () 
     });
     assert.equal(coming.social.joined[0].reply, "coming");
     assert.equal(coming.social.joined[0].etaMin, 10);
-    assert.equal(sent.at(-1)?.body, "Veit is on the way – 10 min");
+    assert.equal(sent.at(-1)?.title, "Reply");
+    assert.equal(sent.at(-1)?.body, "Veit is there in 10 min");
 
     const declined = await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
       token: veit.token,
@@ -230,7 +231,7 @@ test("a start-time change notifies immediately, and a quick ETA does not send a 
       status: 200,
     });
     assert.equal(sent.length, quiet + 1);
-    assert.equal(sent.at(-1)?.body, "Dana is on the way – 10 min");
+    assert.equal(sent.at(-1)?.body, "Dana is in");
 
     await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
       token: dana.token,

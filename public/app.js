@@ -38,6 +38,9 @@ const state = {
   pushSnooze: false,
   installSheet: false,
   installPillHidden: false,
+  onboarding: false,
+  pushOn: false,
+  advanced: false,
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
   viewerLocation: null,
@@ -92,7 +95,7 @@ if ("serviceWorker" in navigator) {
 
 boot();
 setInterval(() => {
-  if (!document.hidden) refresh().catch(() => {});
+  if (!document.hidden && state.token) refresh().catch(() => {});
 }, 3000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh().catch(() => {});
@@ -366,6 +369,16 @@ async function api(path, options = {}) {
     }
   }
   if (!response.ok) {
+    if (response.status === 401 && token && token === state.token) {
+      clearSession();
+      state.tab = "home";
+      state.sheet = null;
+      state.confirm = null;
+      state.onboarding = false;
+      state.installSheet = false;
+      state.pushReminder = null;
+      if (!state.booting) render();
+    }
     const error = new Error(data?.error || `Request failed (${response.status})`);
     error.status = response.status;
     throw error;
@@ -430,10 +443,8 @@ function view() {
     root.append(shell());
   }
   if (state.installOpen) root.append(installGuideView());
-  if (state.installSheet && !state.sheet && !state.confirm && !state.installOpen) {
-    root.append(installSheetView());
-  } else if (state.pushReminder && !state.pushSnooze && !state.sheet && !state.confirm && !state.installOpen) {
-    root.append(pushReminderSheet());
+  if (state.onboarding && !state.sheet && !state.confirm && !state.installOpen) {
+    root.append(onboardingSheet());
   }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
@@ -536,30 +547,28 @@ function shell() {
   return phone;
 }
 
+function screenHeader(title) {
+  const unread = state.notifications.filter((note) => !note.readAt).length;
+  return el("header", { class: "screen-head" }, [
+    el("h1", { class: "screen-title", text: title }),
+    el("button", {
+      class: "icon-btn",
+      type: "button",
+      "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
+      onclick: () => {
+        state.tab = "alerts";
+        render();
+      },
+    }, [
+      icon("bell"),
+      unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+    ]),
+  ]);
+}
+
 function home() {
   const mine = mySocial();
-  const parts = [
-    el("header", { class: "screen-head" }, [
-      el("h1", { class: "screen-title", text: "Now" }),
-      el("div", { class: "head-actions" }, [
-        el("button", {
-          class: "icon-btn",
-          type: "button",
-          "aria-label": "Create",
-          onclick: () => openSheet("action"),
-        }, [icon("add")]),
-        el("button", {
-          class: "avatar-btn",
-          type: "button",
-          "aria-label": "You",
-          onclick: () => {
-            state.tab = "you";
-            render();
-          },
-        }, [avatar(state.me.user, 34, "header")]),
-      ]),
-    ]),
-  ];
+  const parts = [screenHeader("Now")];
   if (showInstallPill()) parts.push(installPill());
   parts.push(
     el("div", { class: "now-row" }, [
@@ -602,7 +611,10 @@ function home() {
     ]));
   }
   const tomorrow = el("section", { class: "section" }, [
-    el("h2", { text: "Tomorrow" }),
+    el("div", { class: "section-row" }, [
+      el("h2", { text: "Tomorrow" }),
+      el("button", { class: "text-btn", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
+    ]),
     el("div", { class: "cards" }, state.plans.length
       ? state.plans.map(planCard)
       : [
@@ -668,7 +680,7 @@ function planCard(plan) {
 function circleScreen() {
   const circle = state.me.circle;
   return el("div", {}, [
-    el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Circle" })]),
+    screenHeader("Circle"),
     el("div", { class: "panel" }, [
       el("h3", { text: circle.name }),
       el("div", { class: "code-block", text: circle.inviteCode }),
@@ -728,7 +740,7 @@ function alertsScreen() {
       })
     : null;
   return el("div", {}, [
-    el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Alerts" })]),
+    screenHeader("Alerts"),
     dev,
     el("div", { class: "list" }, items),
   ]);
@@ -736,9 +748,10 @@ function alertsScreen() {
 
 function youScreen() {
   const origin = state.meta?.publicBaseUrl || location.origin;
-  const curl = `curl -X POST ${origin}/api/buzz/${state.me.user.buzzToken} \\\n  -H 'content-type: application/json' \\\n  -d '{"note":"Rooftop coffee??"}'`;
+  const code = state.me.user.buzzToken;
+  const curl = `curl -X POST ${origin}/api/buzz/${code} \\\n  -H 'content-type: application/json' \\\n  -d '{"note":"Rooftop coffee??"}'`;
   return el("div", {}, [
-    el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "You" })]),
+    screenHeader("You"),
     el("div", { class: "profile-hero" }, [
       avatar(state.me.user, 72, "lg"),
       el("strong", { text: state.me.user.name }),
@@ -787,25 +800,43 @@ function youScreen() {
         : null,
     ]),
     el("div", { class: "panel" }, [
-      el("h3", { text: "Buzzer and recovery" }),
-      el("p", {
-        text: "This secret starts a social from a button, and signs you back in if you clear this browser. Treat it like a password.",
-      }),
-      el("pre", { class: "curl", text: curl }),
+      el("h3", { text: "Recovery code" }),
+      el("p", { class: "code-block", text: code }),
+      el("p", { class: "help", text: "Save this. It is how you sign back in on another phone." }),
       el("div", { class: "stack" }, [
         el("button", {
           class: "btn secondary",
           type: "button",
-          text: "Copy curl",
-          onclick: () => copyText(curl, "curl copied"),
+          text: "Copy",
+          onclick: () => copyText(code, "Recovery code copied"),
         }),
         el("button", {
           class: "btn ghost",
           type: "button",
-          text: "Regenerate secret",
+          text: "New code",
           onclick: onRotateBuzz,
         }),
       ]),
+      el("button", {
+        class: "text-btn",
+        type: "button",
+        text: state.advanced ? "Hide advanced" : "Advanced (ESP32 buzzer)",
+        onclick: () => {
+          state.advanced = !state.advanced;
+          render();
+        },
+      }),
+      state.advanced
+        ? el("div", {}, [
+            el("pre", { class: "curl", text: curl }),
+            el("button", {
+              class: "btn ghost",
+              type: "button",
+              text: "Copy curl",
+              onclick: () => copyText(curl, "curl copied"),
+            }),
+          ])
+        : null,
     ]),
     el("div", { class: "panel stack" }, [
       el("button", { class: "btn danger", type: "button", text: "Leave circle", onclick: onLeave }),
@@ -815,17 +846,14 @@ function youScreen() {
 }
 
 function tabbar() {
-  const unread = state.notifications.filter((note) => !note.readAt).length;
   const tabs = [
     ["home", "Now", "home"],
     ["map", "Map", "map"],
     ["circle", "Circle", "compass"],
-    ["create", "Create", "plus"],
-    ["alerts", "Alerts", "bell"],
     ["you", "You", "person"],
   ];
   return el("nav", { class: "tabbar" }, tabs.map(([id, label, glyph]) => {
-    const current = id !== "create" && state.tab === id;
+    const current = state.tab === id;
     return el("button", {
       class: "tab",
       type: "button",
@@ -834,7 +862,7 @@ function tabbar() {
       onclick: () => onTab(id),
     }, [
       icon(glyph),
-      id === "alerts" && unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+      el("span", { class: "tab-label", text: label }),
     ]);
   }));
 }
@@ -859,6 +887,7 @@ function sheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("form", { class: "sheet", role: "dialog", onsubmit: planning ? onCreatePlan : onFree }, [
+      el("div", { class: "sheet-scroll" }, [
       el("div", { class: "grabber" }),
       el("h2", { text: planning ? "Tomorrow" : later ? "Free later today" : "Free now" }),
       el("p", {
@@ -882,7 +911,8 @@ function sheet() {
           }, { placeholder: "Optional", maxlength: "80" })
         : whereBlock(),
       planning ? shareToggle("Use my location") : null,
-      el("div", { class: "stack", style: "margin-top:14px" }, [
+      ]),
+      el("div", { class: "sheet-dock stack" }, [
         el("button", {
           class: "btn",
           type: "submit",
@@ -1016,7 +1046,7 @@ function mapScreen() {
     destroyLiveMap();
     mapWrap = null;
     return el("div", { class: "map-screen" }, [
-      el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Map" })]),
+      screenHeader("Map"),
       el("div", { class: "map-empty" }, [
         el("h2", { text: "No places yet" }),
         el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
@@ -1030,7 +1060,7 @@ function mapScreen() {
     ]);
   }
   return el("div", { class: "map-screen" }, [
-    el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Map" })]),
+    screenHeader("Map"),
     mapWrap,
   ]);
 }
@@ -1104,8 +1134,8 @@ function whereFromSocial(social) {
 }
 
 function whereLabel() {
-  if (state.where.mode === "here") return "Current location";
   if (state.where.place) return state.where.place;
+  if (state.where.mode === "here") return "near you";
   if (state.where.lat != null) return "Dropped pin";
   return "Nowhere";
 }
@@ -1187,35 +1217,50 @@ function startPayload() {
   return { later: true };
 }
 
+function inReply(person) {
+  return person.reply === "coming" || person.reply === "join" || person.reply === "in";
+}
+
+function replyLine(person, social) {
+  const upcoming = social.startsAt && social.startsAt > Date.now();
+  const eta = !upcoming && person.etaMin ? person.etaMin : null;
+  const mine = person.id === state.me.user.id;
+  if (person.reply === "declined") return mine ? "You can't" : `${person.name} can't`;
+  if (mine) return eta ? `You're in · ${eta} min` : "You're in";
+  return eta ? `${person.name} · there in ${eta} min` : `${person.name} is in`;
+}
+
 function replySummary(social) {
-  const coming = social.joined.filter((person) => person.reply === "coming");
-  const declined = social.joined.filter((person) => person.reply === "declined");
-  const joined = social.joined.filter((person) => !person.reply || person.reply === "join");
-  const lines = [];
-  if (coming.length) {
-    lines.push(coming.map((person) => person.etaMin ? `${person.name} · ${person.etaMin} min` : `${person.name} is on the way`).join(", "));
-  }
-  if (joined.length) lines.push(`${joined.map((person) => person.name).join(", ")} joined`);
-  if (declined.length) lines.push(`${declined.map((person) => person.name).join(", ")} can't make it`);
-  if (!lines.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, lines.map((line) => el("p", { class: "reply-line", text: line })));
+  const people = social.joined.filter((person) => inReply(person) || person.reply === "declined");
+  if (!people.length) return el("p", { text: "Waiting for friends" });
+  return el("div", {}, people.map((person) => el("p", { class: "reply-line", text: replyLine(person, social) })));
 }
 
 function replyActions(social) {
   const mine = social.joined.find((person) => person.id === state.me.user.id);
-  const showEta = mine?.reply === "coming";
+  const upcoming = social.startsAt && social.startsAt > Date.now();
+  const inNow = mine && inReply(mine) && mine.reply !== "declined";
   return el("div", {}, [
     el("div", { class: "reply-row" }, [
-      el("button", { class: mine?.reply === "join" ? "chip on" : "chip", type: "button", text: "Join", onclick: () => replyTo(social, "join") }),
-      el("button", { class: mine?.reply === "coming" ? "chip on" : "chip", type: "button", text: "On my way", onclick: () => replyTo(social, "coming", mine?.etaMin ?? null) }),
-      el("button", { class: mine?.reply === "declined" ? "chip on" : "chip", type: "button", text: "Can't make it", onclick: () => replyTo(social, "declined") }),
+      el("button", {
+        class: inNow ? "chip on" : "chip",
+        type: "button",
+        text: "I'm in",
+        onclick: () => replyTo(social, "in", upcoming ? null : mine?.etaMin ?? null),
+      }),
+      el("button", {
+        class: mine?.reply === "declined" ? "chip on" : "chip",
+        type: "button",
+        text: "Can't",
+        onclick: () => replyTo(social, "declined"),
+      }),
     ]),
-    showEta
+    inNow && !upcoming
       ? el("div", { class: "eta-row" }, [5, 10, 20].map((minutes) => el("button", {
           class: mine?.etaMin === minutes ? "chip on" : "chip",
           type: "button",
           text: `${minutes} min`,
-          onclick: () => replyTo(social, "coming", minutes),
+          onclick: () => replyTo(social, "in", minutes),
         })))
       : null,
   ]);
@@ -1255,7 +1300,7 @@ function wherePayload() {
   const where = state.where;
   const typed = (state.whereQuery || where.place || "").trim();
   if (where.mode === "here" && where.lat != null && where.lng != null) {
-    return { place: "", lat: where.lat, lng: where.lng, precise: false };
+    return { place: where.place || "near you", lat: where.lat, lng: where.lng, precise: false };
   }
   if ((where.mode === "place" || typed) && (typed || where.lat != null)) {
     return {
@@ -1352,7 +1397,6 @@ function wherePicker() {
           },
         })
       : null,
-    el("p", { class: "where-hint", text: "Leave this blank, or type a name without picking a pin." }),
   ]);
 }
 
@@ -1430,6 +1474,17 @@ function scheduleWhereSearch() {
   }, 400);
 }
 
+async function defaultCurrentWhere() {
+  if (!navigator.geolocation || !navigator.permissions?.query) return;
+  try {
+    const status = await navigator.permissions.query({ name: "geolocation" });
+    if (status.state !== "granted") return;
+  } catch {
+    return;
+  }
+  if (state.sheet === "free" && state.where.mode === "none") await useCurrentWhere();
+}
+
 async function useCurrentWhere() {
   if (!navigator.geolocation) {
     state.error = "This browser can't share location. The rest still works.";
@@ -1446,11 +1501,18 @@ async function useCurrentWhere() {
       });
     });
     state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    state.where = { mode: "here", place: "", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
-    state.whereQuery = "";
+    state.where = { mode: "here", place: "near you", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
+    state.whereQuery = "near you";
     state.whereResults = [];
     state.error = "";
     render();
+    const named = await api(`/api/geocode?lat=${encodeURIComponent(pos.coords.latitude)}&lng=${encodeURIComponent(pos.coords.longitude)}`).catch(() => null);
+    if (state.where.mode === "here" && state.where.lat === pos.coords.latitude) {
+      const place = named?.place || "near you";
+      state.where.place = place;
+      state.whereQuery = place;
+      render();
+    }
   } catch {
     state.error = "Location stayed off. Everything else still works.";
     render();
@@ -1867,8 +1929,9 @@ function openSheet(name) {
     state.noteDraft = "";
     state.placeDraft = "";
   }
-  state.focusSheet = name === "free" || name === "plan";
+  state.focusSheet = false;
   render();
+  if (name === "free" && state.where.mode === "none") void defaultCurrentWhere();
 }
 
 function closeSheet() {
@@ -1882,8 +1945,9 @@ function closeSheet() {
 }
 
 async function onTab(id) {
-  if (id === "create") {
-    openSheet("action");
+  if (id === "alerts") {
+    state.tab = "alerts";
+    render();
     return;
   }
   state.tab = id;
@@ -2041,7 +2105,16 @@ function confirmSheet() {
       el("div", { class: "grabber" }),
       el("h2", { text: pending.title }),
       el("p", { class: "help", text: pending.body }),
+      pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
       el("div", { class: "stack" }, [
+        pending.copy
+          ? el("button", {
+              class: "btn secondary",
+              type: "button",
+              text: "Copy",
+              onclick: () => copyText(pending.copy, "Recovery code copied"),
+            })
+          : null,
         el("button", {
           class: "btn danger",
           type: "button",
@@ -2122,7 +2195,7 @@ async function onEnablePush() {
     render();
     scheduleErrorClear();
   }
-  void considerPushReminder();
+  void considerReminders();
 }
 
 async function onTestPush() {
@@ -2144,51 +2217,80 @@ function installDue() {
   return installReminderDue(localStorage.getItem(INSTALL_LATER_KEY), Date.now());
 }
 
-async function considerReminders() {
-  if (!state.token || !state.me || !state.me.circle) {
-    const showing = state.installSheet || state.pushReminder;
-    state.installSheet = false;
-    state.pushReminder = null;
-    if (showing) render();
-    return;
+async function devicePushOn() {
+  if (!state.meta?.vapidPublicKey) return false;
+  if (!("Notification" in window) || Notification.permission !== "granted") return false;
+  const endpoint = await localSubscriptionEndpoint();
+  if (!endpoint) return false;
+  try {
+    const status = await api("/api/push/status", { method: "POST", body: { endpoint } });
+    return Boolean(status?.known);
+  } catch {
+    return false;
   }
-  const signals = currentSignals();
-  const prompt = installPrompt(signals, { canPrompt: Boolean(state.installEvent) });
-  if (!isInstalled() && installDue() && !prompt.quiet) {
-    state.installSheet = true;
-    state.pushReminder = null;
-    render();
-    return;
-  }
-  if (state.installSheet) return;
-  if (!isInstalled() && needsInstallForPush(signals)) {
-    state.pushReminder = null;
-    render();
-    return;
-  }
-  await considerPushReminder();
 }
 
-async function considerPushReminder() {
-  if (!state.token || !state.me || state.pushSnooze || state.installSheet) return;
-  const signals = currentSignals();
-  if (signals.permission !== "granted") {
-    state.pushReminder = pushReminder(signals, { hasSubscription: false, serverKnows: false });
+async function considerReminders() {
+  if (!state.token || !state.me || !state.me.circle) {
+    state.onboarding = false;
+    state.pushOn = false;
+    state.installSheet = false;
+    state.pushReminder = null;
     render();
     return;
   }
-  const endpoint = await localSubscriptionEndpoint();
-  let serverKnows = false;
-  if (endpoint) {
-    try {
-      const status = await api("/api/push/status", { method: "POST", body: { endpoint } });
-      serverKnows = Boolean(status?.known);
-    } catch {
-      serverKnows = false;
-    }
-  }
-  state.pushReminder = pushReminder(signals, { hasSubscription: Boolean(endpoint), serverKnows });
+  state.pushOn = await devicePushOn();
+  const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
+  const wantInstall = !isInstalled() && installDue() && !prompt.quiet;
+  const wantPush = !state.pushOn && !state.pushSnooze;
+  state.onboarding = wantInstall || wantPush;
+  state.installSheet = false;
+  state.pushReminder = null;
   render();
+}
+
+function dismissOnboarding() {
+  state.pushSnooze = true;
+  if (!isInstalled()) localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
+  state.onboarding = false;
+  render();
+}
+
+function onboardingSheet() {
+  const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
+  const showInstall = !isInstalled() && !prompt.quiet;
+  const showPush = !state.pushOn;
+  const actions = [];
+  if (showPush) {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: state.pushBusy ? "Waiting…" : "Turn on notifications",
+      disabled: state.pushBusy,
+      onclick: () => { void onEnablePush(); },
+    }));
+  }
+  if (showInstall && prompt.offerInstall) {
+    actions.push(el("button", { class: "btn secondary", type: "button", text: "Add to home screen", onclick: () => { void onInstall(); } }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: dismissOnboarding }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissOnboarding }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Get started" }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: showPush ? "Turn on notifications" : "Add to home screen" }),
+      el("p", {
+        class: "help",
+        text: showPush
+          ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
+          : "Add Hangry to your home screen so it stays one tap away.",
+      }),
+      showInstall && prompt.steps.length
+        ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 function localSubscriptionEndpoint() {
@@ -2252,7 +2354,7 @@ async function onInstall() {
 
 function showInstallPill() {
   const prompt = installPrompt(currentSignals(), { canPrompt: false });
-  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden && !prompt.quiet;
+  return Boolean(state.me?.circle) && !state.pushOn && !isInstalled() && !state.installPillHidden && !prompt.quiet;
 }
 
 function installPill() {
@@ -2260,10 +2362,9 @@ function installPill() {
     el("button", {
       class: "text",
       type: "button",
-      text: "Install Hangry to get notifications",
+      text: "Add to home screen",
       onclick: () => {
-        state.installSheet = true;
-        state.pushReminder = null;
+        state.onboarding = true;
         render();
       },
     }),
@@ -2342,15 +2443,26 @@ async function onLeave() {
   });
 }
 
-async function onLogout() {
-  try {
-    await api("/api/auth/logout", { method: "POST", body: {} });
-  } catch {
-    /* still drop the local session */
-  }
-  clearSession();
-  state.tab = "home";
-  state.sheet = null;
+function onLogout() {
+  const code = state.me?.user?.buzzToken || "";
+  state.confirm = {
+    title: "Sign out?",
+    body: "You'll need this recovery code to get back in.",
+    confirmLabel: "Sign out",
+    copy: code,
+    action: async () => {
+      try {
+        await api("/api/auth/logout", { method: "POST", body: {} });
+      } catch {
+        /* still drop the local session */
+      }
+      clearSession();
+      state.tab = "home";
+      state.sheet = null;
+      state.onboarding = false;
+      render();
+    },
+  };
   render();
 }
 
