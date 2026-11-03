@@ -1097,12 +1097,19 @@ async function onInstall() {
 }
 
 async function onRotateBuzz() {
-  if (!window.confirm("The old buzzer and recovery code will stop working.")) return;
-  await run(async () => {
-    const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
-    state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
-    state.error = "New secret ready";
-  });
+  state.confirm = {
+    title: "New secret?",
+    body: "The old buzzer and recovery code will stop working.",
+    confirmLabel: "Regenerate",
+    action: async () => {
+      await run(async () => {
+        const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
+        state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
+        state.error = "New secret ready";
+      });
+    },
+  };
+  render();
 }
 
 async function onLeave() {

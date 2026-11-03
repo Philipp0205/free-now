@@ -319,7 +319,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       auth: sub.auth,
       createdAt: deps.now(),
     });
-    sendJson(res, 204, {});
+    sendEmpty(res, 204);
     return;
   }
 
