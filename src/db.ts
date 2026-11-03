@@ -63,6 +63,7 @@ export type PlanRow = {
   lat: number | null;
   lng: number | null;
   place: string;
+  at_time: string | null;
 };
 
 export type PushSubRow = {
@@ -232,6 +233,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "social_joins", "eta_min", "eta_min INTEGER");
   ensureColumn(db, "social_joins", "arrive_at", "arrive_at INTEGER");
   ensureColumn(db, "plan_joins", "arrive_at", "arrive_at INTEGER");
+  ensureColumn(db, "social_joins", "blocked", "blocked INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "plan_joins", "blocked", "blocked INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   backfillCircleAdmins(db);
@@ -241,6 +244,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "lat", "lat REAL");
   ensureColumn(db, "plans", "lng", "lng REAL");
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "plans", "at_time", "at_time TEXT");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -576,7 +580,7 @@ export function listSocialJoins(db: DatabaseSync, socialId: string): JoinRow[] {
     `SELECT u.id, u.name, j.joined_at, j.reply, j.eta_min, j.arrive_at
      FROM social_joins j
      JOIN users u ON u.id = j.user_id
-     WHERE j.social_id = ?
+     WHERE j.social_id = ? AND j.blocked = 0
      ORDER BY j.joined_at ASC`,
     socialId,
   );
@@ -598,8 +602,16 @@ export function getSocialReply(
   db: DatabaseSync,
   socialId: string,
   userId: string,
-): { reply: string; eta_min: number | null; arrive_at: number | null } | undefined {
-  return one(db, "SELECT reply, eta_min, arrive_at FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
+): { reply: string; eta_min: number | null; arrive_at: number | null; blocked: number } | undefined {
+  return one(db, "SELECT reply, eta_min, arrive_at, blocked FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
+}
+
+export function blockSocialGuest(db: DatabaseSync, socialId: string, userId: string, now: number): void {
+  db.prepare(
+    `INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min, arrive_at, blocked)
+     VALUES (?, ?, ?, 'removed', NULL, NULL, 1)
+     ON CONFLICT(social_id, user_id) DO UPDATE SET reply = 'removed', eta_min = NULL, arrive_at = NULL, blocked = 1`,
+  ).run(socialId, userId, now);
 }
 
 export function setSocialReply(
@@ -667,8 +679,13 @@ export function patchSocialDetails(
   place: string,
   lat: number | null,
   lng: number | null,
+  startsAt: number | null,
+  remindedAt: number | null,
+  expiresAt: number,
 ): void {
-  db.prepare("UPDATE socials SET note = ?, place = ?, lat = ?, lng = ? WHERE id = ?").run(note, place, lat, lng, id);
+  db.prepare(
+    "UPDATE socials SET note = ?, place = ?, lat = ?, lng = ?, starts_at = ?, reminded_at = ?, expires_at = ? WHERE id = ?",
+  ).run(note, place, lat, lng, startsAt, remindedAt, expiresAt, id);
 }
 
 export function insertPlan(
@@ -732,7 +749,7 @@ export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
     `SELECT u.id, u.name, j.joined_at, j.reply, NULL AS eta_min, j.arrive_at
      FROM plan_joins j
      JOIN users u ON u.id = j.user_id
-     WHERE j.plan_id = ?
+     WHERE j.plan_id = ? AND j.blocked = 0
      ORDER BY j.joined_at ASC`,
     planId,
   );
@@ -742,8 +759,16 @@ export function hasPlanJoin(db: DatabaseSync, planId: string, userId: string): b
   return Boolean(one(db, "SELECT 1 AS ok FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId));
 }
 
-export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string; arrive_at: number | null } | undefined {
-  return one(db, "SELECT reply, arrive_at FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
+export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string; arrive_at: number | null; blocked: number } | undefined {
+  return one(db, "SELECT reply, arrive_at, blocked FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
+}
+
+export function blockPlanGuest(db: DatabaseSync, planId: string, userId: string, now: number): void {
+  db.prepare(
+    `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply, arrive_at, blocked)
+     VALUES (?, ?, ?, 'removed', NULL, 1)
+     ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = 'removed', arrive_at = NULL, blocked = 1`,
+  ).run(planId, userId, now);
 }
 
 export function setPlanReply(
@@ -781,8 +806,16 @@ export function patchPlanDetails(
   place: string,
   lat: number | null,
   lng: number | null,
+  atTime: string | null,
 ): void {
-  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ? WHERE id = ?").run(note, place, lat, lng, id);
+  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ? WHERE id = ?").run(
+    note,
+    place,
+    lat,
+    lng,
+    atTime,
+    id,
+  );
 }
 
 function backfillCircleAdmins(db: DatabaseSync): void {
@@ -902,7 +935,7 @@ const SOCIAL_SELECT = `
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place
+         p.lat, p.lng, p.place, p.at_time
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;

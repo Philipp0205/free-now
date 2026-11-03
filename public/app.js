@@ -266,6 +266,8 @@ function friendlyMessage(raw, status) {
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
+  if (lower.includes("removed you")) return "The host removed you from this.";
+  if (lower.includes("only the host")) return "Only the host can do that.";
   if (status === 403 || lower.includes("only an admin")) return "Only an admin can do that.";
   if (lower.includes("needs an admin")) return "A circle needs an admin.";
   if (status === 401) return "Please sign in again.";
@@ -877,9 +879,7 @@ function socialCard(social) {
     "data-social": social.id,
   }, [
     el("div", { class: "card-bg" }),
-    mine
-      ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
-      : null,
+    eventTools("social", social),
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
@@ -887,7 +887,6 @@ function socialCard(social) {
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : replyActions(social),
-      hostTools("social", social),
     ]),
   ]);
 }
@@ -897,17 +896,14 @@ function planCard(plan) {
   const people = [plan.creator, ...plan.joined];
   return el("article", { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
-    mine
-      ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
-      : null,
+    eventTools("plan", plan),
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
-      el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
+      el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : planReplyButtons(plan),
-      hostTools("plan", plan),
     ]),
   ]);
 }
@@ -1195,16 +1191,22 @@ function confirmRemoveMember(member) {
   render();
 }
 
-function hostTools(kind, item) {
-  if (!youAreAdmin() || !item?.creator || item.creator.id === state.me.user.id) return null;
-  return el("div", { class: "reply-row" }, [
-    el("button", { class: "chip", type: "button", text: "Edit", "aria-label": `Edit ${item.creator.name}`, onclick: () => openAdminEdit(kind, item) }),
-    el("button", { class: "chip", type: "button", text: "End", "aria-label": `End ${item.creator.name}`, onclick: () => endAsAdmin(kind, item) }),
+function canManageEvent(item) {
+  return Boolean(item?.creator) && (item.creator.id === state.me.user.id || youAreAdmin());
+}
+
+function eventTools(kind, item) {
+  if (!canManageEvent(item)) return null;
+  const label = item.note || (kind === "plan" ? "plan" : "free post");
+  return el("div", { class: "card-tools" }, [
+    el("button", { class: "text-btn event-tool", type: "button", text: "Edit", "aria-label": `Edit ${label}`, onclick: () => openAdminEdit(kind, item) }),
+    el("button", { class: "text-btn event-tool", type: "button", text: "End", "aria-label": `End ${label}`, onclick: () => endManaged(kind, item) }),
   ]);
 }
 
 function openAdminEdit(kind, item) {
-  state.adminEdit = { kind, id: item.id, note: item.note || "", place: item.place || "" };
+  const time = kind === "social" ? (item.startsAt ? clock(item.startsAt) : "") : (item.time || "");
+  state.adminEdit = { kind, id: item.id, note: item.note || "", place: item.place || "", time };
   state.sheet = "admin-edit";
   render();
 }
@@ -1222,6 +1224,15 @@ function adminEditSheet() {
       ]),
       el("div", { class: "sheet-scroll" }, [
         sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
+        el("label", { class: "sheet-group" }, [
+          el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
+          el("input", {
+            id: "admin-time",
+            class: "sheet-control",
+            type: "time",
+            value: edit.time,
+          }),
+        ]),
         sheetField("Place", "admin-place", edit.place, (value) => { edit.place = value; }, { maxlength: "80" }),
       ]),
       el("div", { class: "sheet-dock" }, [
@@ -1237,18 +1248,21 @@ async function saveAdminEdit(event) {
   if (!edit) return;
   const note = document.getElementById("admin-note")?.value ?? edit.note;
   const place = document.getElementById("admin-place")?.value ?? edit.place;
+  const time = document.getElementById("admin-time")?.value || null;
   await run(async () => {
-    await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body: { note, place } });
+    const body = edit.kind === "social" ? { note, place, startsAt: time } : { note, place, time };
+    await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
     await refresh({ initial: true });
   });
 }
 
-function endAsAdmin(kind, item) {
+function endManaged(kind, item) {
+  const own = item.creator?.id === state.me.user.id;
   const who = item.creator?.name || "They";
   state.confirm = {
     title: "End this?",
-    body: kind === "plan" ? `${who} will be told this plan ended.` : `${who} will be told this ended.`,
+    body: own ? "Friends will no longer see it." : `${who} will be told this ended.`,
     confirmLabel: "End",
     action: async () => {
       await run(async () => {
@@ -1706,7 +1720,7 @@ function replyLine(person, social) {
 function replySummary(social) {
   const people = social.joined.filter((person) => inReply(person) || person.reply === "declined");
   if (!people.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, people.map((person) => el("p", { class: "reply-line", text: replyLine(person, social) })));
+  return el("div", {}, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
 }
 
 function replyActions(social) {
@@ -2321,9 +2335,9 @@ function mapCard(pin) {
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
     social && !pin.own ? replySummary(social) : null,
     social && !pin.own ? replyActions(social) : null,
-    social?.creator ? hostTools("social", social) : null,
+    social?.creator ? eventTools("social", social) : null,
     plan && !pin.own ? planPinActions(plan) : null,
-    plan?.creator ? hostTools("plan", plan) : null,
+    plan?.creator ? eventTools("plan", plan) : null,
     el("div", { class: "map-card-actions" }, [
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
     ]),
@@ -2341,7 +2355,42 @@ function planReplyLine(person) {
 function planReplySummary(plan) {
   const people = plan.joined.filter((person) => person.reply === "declined" || inReply(person));
   if (!people.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, people.map((person) => el("p", { class: "reply-line", text: planReplyLine(person) })));
+  return el("div", {}, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
+}
+
+function canRemoveGuest(event) {
+  return Boolean(event?.creator) && (event.creator.id === state.me.user.id || youAreAdmin());
+}
+
+function guestLine(text, person, kind, event) {
+  const line = el("p", { class: "reply-line", text });
+  if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) return line;
+  return el("div", { class: "guest-row" }, [
+    line,
+    el("button", {
+      class: "text-btn",
+      type: "button",
+      text: "Remove",
+      "aria-label": `Remove ${person.name}`,
+      onclick: () => confirmRemoveGuest(kind, event, person),
+    }),
+  ]);
+}
+
+function confirmRemoveGuest(kind, event, person) {
+  const label = (event.note || "").trim() || (kind === "plan" ? "the plan" : "Free now");
+  state.confirm = {
+    title: `Remove ${person.name}?`,
+    body: `They can't join ${label} again.`,
+    confirmLabel: "Remove",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/${kind}s/${event.id}/people/${person.id}`, { method: "DELETE" });
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
 }
 
 function planReplyButtons(plan) {

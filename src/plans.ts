@@ -70,6 +70,7 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
   const tomorrow = addDays(today, 1);
   if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
+  if (getPlanReply(deps.db, plan.id, user.id)?.blocked) throw new HttpError(403, "The host removed you from this.");
   await setPlanComing(deps, user, plan, now);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
@@ -98,6 +99,9 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const reply = normalizeReply(body.reply);
+  if (reply === "coming" && getPlanReply(deps.db, plan.id, user.id)?.blocked) {
+    throw new HttpError(403, "The host removed you from this.");
+  }
   if (reply === "coming") {
     const previous = getPlanReply(deps.db, plan.id, user.id);
     let arriveAt: number | null = previous?.reply === "coming" ? (previous.arrive_at ?? null) : null;
