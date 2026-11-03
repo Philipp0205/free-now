@@ -749,6 +749,96 @@ test("picking on the map drops a pin and names the place", { timeout: 90_000 }, 
   }
 });
 
+test("alert times sit on the right of the card", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: /Alerts/ }).click();
+    await page.locator(".alert-card .time").waitFor();
+    const aligned = await page.evaluate(() => {
+      const card = document.querySelector(".alert-card") as HTMLElement;
+      const time = card.querySelector(".time") as HTMLElement;
+      const style = getComputedStyle(card);
+      const cardBox = card.getBoundingClientRect();
+      const timeBox = time.getBoundingClientRect();
+      const pad = parseFloat(style.paddingRight);
+      return { timeRight: timeBox.right, edge: cardBox.right - pad, textAlign: getComputedStyle(time).textAlign };
+    });
+    assert.equal(aligned.textAlign, "right");
+    assert.ok(Math.abs(aligned.timeRight - aligned.edge) <= 2, JSON.stringify(aligned));
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a sheet error toast paints above the sheet", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Alex");
+    await page.route("**/api/socials", (route) => {
+      if (route.request().method() === "POST") {
+        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal error" }) });
+      }
+      return route.continue();
+    });
+    await page.getByRole("button", { name: "I'm free" }).click();
+    await page.getByText("Something went wrong. Try again.").waitFor();
+    const layers = await page.evaluate(() => {
+      const toast = document.querySelector(".toast") as HTMLElement;
+      const sheet = document.querySelector("form.sheet") as HTMLElement;
+      const box = toast.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + 8);
+      return {
+        toastZ: Number(getComputedStyle(toast).zIndex),
+        sheetZ: Number(getComputedStyle(sheet).zIndex),
+        hitToast: Boolean(hit && (hit === toast || toast.contains(hit))),
+      };
+    });
+    assert.ok(layers.toastZ > layers.sheetZ, JSON.stringify(layers));
+    assert.equal(layers.hitToast, true);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a confirm sheet closes when its content is dragged at 412", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await page.setViewportSize({ width: 412, height: 700 });
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.locator(".sheet-confirm .sheet-body").waitFor();
+    await dragDown(page, page.locator(".sheet-confirm .sheet-body"));
+    await page.locator(".sheet-confirm").waitFor({ state: "detached" });
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("a swipe on the header or the top of the sheet closes it", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {

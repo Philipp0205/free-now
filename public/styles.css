@@ -112,6 +112,7 @@ button:disabled { cursor: default; opacity: 0.55; }
   column-gap: 8px;
   width: 100%;
 }
+.alert-card .grow { flex: 1; min-width: 0; }
 .alert-top h3 { margin: 0; min-width: 0; }
 .alert-card .time { color: var(--muted); font-size: 13px; text-align: right; }
 .status-banner {
@@ -714,7 +715,8 @@ input[type="time"].sheet-control { color-scheme: dark; }
   line-height: 1.35;
   text-align: center;
 }
-.sheet-head, .guide-head { touch-action: none; }
+.sheet-head, .guide-head, .sheet-confirm .sheet-body { touch-action: none; }
+.sheet-confirm { overflow: hidden; }
 .sheet.dragging, .guide.dragging { transition: none; }
 .sheet:has(.where-results) .sheet-dock { display: none; }
 .time-error { margin: 0; color: var(--danger); font-size: 13px; }
@@ -771,7 +773,7 @@ input[type="time"].sheet-control { color-scheme: dark; }
   color: #fff;
   border-radius: 14px;
   padding: 12px 14px;
-  z-index: 28;
+  z-index: 60;
   font-size: 14px;
 }
 
