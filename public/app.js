@@ -423,7 +423,10 @@ function render() {
   const activeId = state.focusSheet ? null : document.activeElement?.id || null;
   const caret = document.activeElement?.selectionStart ?? null;
   const y = document.scrollingElement?.scrollTop ?? 0;
+  const sheetY = document.querySelector(".sheet-scroll")?.scrollTop ?? 0;
   document.getElementById("app").replaceChildren(view());
+  const sheetScroll = document.querySelector(".sheet-scroll");
+  if (sheetScroll) sheetScroll.scrollTop = sheetY;
   if (state.focusSheet) {
     state.focusSheet = false;
     document.getElementById("sheet-note")?.focus({ preventScroll: true });
@@ -443,7 +446,12 @@ function render() {
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
   if (state.whereMap && state.sheet === "free") {
-    queueMicrotask(() => { mountWhereMap().catch((error) => console.error("where map failed", error)); });
+    queueMicrotask(() => {
+      mountWhereMap().then(() => {
+        const node = document.querySelector(".sheet-scroll");
+        if (node) node.scrollTop = sheetY;
+      }).catch((error) => console.error("where map failed", error));
+    });
   }
   if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
   bindSheetSwipe();
@@ -891,7 +899,7 @@ function sheet() {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
       el("div", { class: "sheet", role: "dialog", "aria-label": "Create" }, [
-        el("div", { class: "grabber" }),
+        el("div", { class: "sheet-head" }, [el("div", { class: "grabber" })]),
         el("div", { class: "actions" }, [
           el("button", { class: "action", type: "button", text: "I'm free now", onclick: () => openSheet("free") }),
           el("button", { class: "action", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
@@ -907,20 +915,22 @@ function sheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("form", { class: "sheet", role: "dialog", onsubmit: planning ? onCreatePlan : onFree }, [
-      el("div", { class: "sheet-scroll" }, [
+      el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
+        el("div", { class: "sheet-intro" }, [
+          el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
+          el("p", {
+            class: "help",
+            text: planning
+              ? "Friends can join. It stays up through tomorrow."
+              : later
+                ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
+                : `Friends in your circle get a push. This lasts ${ttl}.`,
+          }),
+        ]),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
         el("div", { class: "sheet-form" }, [
-          el("div", { class: "sheet-intro" }, [
-            el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
-            el("p", {
-              class: "help",
-              text: planning
-                ? "Friends can join. It stays up through tomorrow."
-                : later
-                  ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
-                  : `Friends in your circle get a push. This lasts ${ttl}.`,
-            }),
-          ]),
           planning ? null : whenBlock(),
           planning ? null : timeBlock(),
           sheetField(planning ? "Plan" : "Note (optional)", "sheet-note", state.noteDraft, (value) => {
@@ -1028,7 +1038,8 @@ function installGuideView() {
   actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallGuide }));
   return el("div", { class: "guide-scrim" }, [
     el("section", { class: "guide", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-title" }, [
-      el("div", { class: "guide-head" }, [
+      el("div", { class: "guide-head sheet-head" }, [
+        el("div", { class: "grabber" }),
         el("h2", {
           id: "install-title",
           text: guide.status === "on" || guide.status === "denied" ? "Notifications" : guide.headline,
@@ -1161,11 +1172,18 @@ function whereFromSocial(social) {
   };
 }
 
+const FINDING_PLACE = "Finding address…";
+
+function namedPlace(value) {
+  const text = String(value || "").trim();
+  return !text || text === FINDING_PLACE ? "" : text;
+}
+
 function whereLabel() {
   if (state.where.mode === "here" && /^near you$/i.test(state.where.place || "")) return "Current location";
   if (state.where.place) return state.where.place;
   if (state.where.mode === "here") return "Current location";
-  if (state.where.lat != null) return "Dropped pin";
+  if (state.where.lat != null) return FINDING_PLACE;
   return "Pick a place";
 }
 
@@ -1436,9 +1454,9 @@ async function rotateInvite() {
 
 function wherePayload() {
   const where = state.where;
-  const typed = (state.whereQuery || where.place || "").trim();
+  const typed = namedPlace(state.whereQuery || where.place || "");
   if (where.mode === "here" && where.lat != null && where.lng != null) {
-    return { place: where.place || "near you", lat: where.lat, lng: where.lng, precise: false };
+    return { place: namedPlace(where.place) || "near you", lat: where.lat, lng: where.lng, precise: false };
   }
   if ((where.mode === "place" || typed) && (typed || where.lat != null)) {
     return {
@@ -1785,12 +1803,22 @@ function scheduleReverse(lat, lng, replace = false) {
     api(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`).then((data) => {
       if (state.where.lat !== lat || state.where.lng !== lng) return;
       if (!data?.place) return;
-      if (!replace && state.whereQuery.trim() && state.whereQuery !== "Dropped pin") return;
+      const pending = state.where.place === FINDING_PLACE || state.whereQuery === FINDING_PLACE;
+      if (!replace && state.whereQuery.trim() && !pending) return;
+      if (replace && !pending) return;
       state.where.place = data.place;
       state.whereQuery = data.place;
       state.where.mode = "place";
       state.whereAutofill = false;
-      rerenderWhere();
+      const label = document.querySelector(".where-v");
+      const query = document.getElementById("where-query");
+      if (label) {
+        label.textContent = data.place;
+        label.classList.remove("is-placeholder");
+      }
+      if (query && document.activeElement !== query) query.value = data.place;
+      paintSummary();
+      if (!label && !query) rerenderWhere();
     }).catch((error) => console.error("reverse geocode failed", error));
   }, 400);
 }
@@ -1911,13 +1939,16 @@ async function mountWhereMap() {
     state.where.lat = ll.lat;
     state.where.lng = ll.lng;
     state.where.precise = true;
-    state.where.place = "Dropped pin";
-    state.whereQuery = "Dropped pin";
+    state.where.place = FINDING_PLACE;
+    state.whereQuery = FINDING_PLACE;
     const label = document.querySelector(".where-v");
     if (label) {
-      label.textContent = "Dropped pin";
+      label.textContent = FINDING_PLACE;
       label.classList.remove("is-placeholder");
     }
+    document.querySelector(".where-field")?.classList.add("has-value");
+    const query = document.getElementById("where-query");
+    if (query) query.value = FINDING_PLACE;
     paintSummary();
     scheduleReverse(ll.lat, ll.lng, true);
   };
@@ -2340,35 +2371,68 @@ function syncSheetHistory() {
 }
 
 function bindSheetSwipe() {
-  document.querySelectorAll(".sheet").forEach((sheet) => {
+  document.querySelectorAll(".sheet, .guide").forEach((panel) => {
     let tracking = false;
+    let dragging = false;
     let startY = 0;
     let drag = 0;
-    sheet.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("input, textarea, button, a, select")) return;
-      const rect = sheet.getBoundingClientRect();
-      const onHandle = event.target.closest(".grabber");
-      if (!onHandle && event.clientY > rect.top + 64) return;
+    let pointerId = -1;
+    const headerHit = (event) => Boolean(event.target.closest(".sheet-head, .grabber"));
+    const blocked = (event) => Boolean(event.target.closest("input, textarea, button, a, select"));
+    const scroller = () => panel.querySelector(".sheet-scroll") || (panel.classList.contains("guide") ? null : panel);
+    const atTop = () => {
+      const node = scroller();
+      return !node || node.scrollTop <= 0;
+    };
+    const place = () => {
+      const shift = `translateY(${drag}px)`;
+      panel.style.transform = panel.classList.contains("guide") ? shift : `translateX(-50%) ${shift}`;
+    };
+    panel.addEventListener("pointerdown", (event) => {
+      if (event.button != null && event.button !== 0) return;
+      if (blocked(event)) return;
+      const header = headerHit(event);
+      if (!header && !atTop()) return;
       tracking = true;
+      dragging = header;
       startY = event.clientY;
       drag = 0;
-      sheet.classList.add("dragging");
-      sheet.setPointerCapture?.(event.pointerId);
+      pointerId = event.pointerId;
+      if (header) {
+        panel.classList.add("dragging");
+        panel.setPointerCapture?.(event.pointerId);
+      }
     });
-    sheet.addEventListener("pointermove", (event) => {
-      if (!tracking) return;
-      drag = Math.max(0, event.clientY - startY);
-      sheet.style.transform = `translateX(-50%) translateY(${drag}px)`;
+    panel.addEventListener("pointermove", (event) => {
+      if (!tracking || event.pointerId !== pointerId) return;
+      const dy = event.clientY - startY;
+      if (!dragging) {
+        if (dy < -4 || !atTop()) {
+          tracking = false;
+          return;
+        }
+        if (dy < 8) return;
+        dragging = true;
+        panel.classList.add("dragging");
+        panel.setPointerCapture?.(event.pointerId);
+      }
+      drag = Math.max(0, dy);
+      place();
     });
-    const finish = () => {
-      if (!tracking) return;
+    const finish = (event) => {
+      if (!tracking || (event.pointerId != null && event.pointerId !== pointerId)) return;
       tracking = false;
-      sheet.classList.remove("dragging");
-      sheet.style.transform = "";
+      dragging = false;
+      panel.classList.remove("dragging");
+      panel.style.transform = "";
       if (drag > 72) dismissTopSheet();
     };
-    sheet.addEventListener("pointerup", finish);
-    sheet.addEventListener("pointercancel", finish);
+    panel.addEventListener("pointerup", finish);
+    panel.addEventListener("pointercancel", finish);
+    panel.addEventListener("touchmove", (event) => {
+      if (!tracking || !event.touches.length) return;
+      if (event.touches[0].clientY - startY > 0 && (headerHit(event) || atTop())) event.preventDefault();
+    }, { passive: false });
   });
 }
 
@@ -2550,9 +2614,11 @@ function confirmSheet() {
       },
     }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": pending.title }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: pending.title }),
-      el("p", { class: "help", text: pending.body }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: pending.title }),
+        el("p", { class: "help", text: pending.body }),
+      ]),
       pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
       el("div", { class: "stack" }, [
         pending.copy
@@ -2718,14 +2784,16 @@ function onboardingSheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissOnboarding }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Get started" }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: showPush ? "Turn on notifications" : "Add to home screen" }),
-      el("p", {
-        class: "help",
-        text: showPush
-          ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
-          : "Add Hangry to your home screen so it stays one tap away.",
-      }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: showPush ? "Turn on notifications" : "Add to home screen" }),
+        el("p", {
+          class: "help",
+          text: showPush
+            ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
+            : "Add Hangry to your home screen so it stays one tap away.",
+        }),
+      ]),
       showInstall && prompt.steps.length
         ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
         : null,
@@ -2769,9 +2837,11 @@ function pushReminderSheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: snooze }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": reminder.title }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: reminder.title }),
-      el("p", { class: "help", text: reminder.lede }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: reminder.title }),
+        el("p", { class: "help", text: reminder.lede }),
+      ]),
       reminder.steps?.length
         ? el("ol", { class: "guide-reenable" }, reminder.steps.map((line) => el("li", { text: line })))
         : null,
@@ -2847,9 +2917,11 @@ function installSheetView() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissInstallSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": prompt.title }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: prompt.title }),
-      el("p", { class: "help", text: prompt.lede }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: prompt.title }),
+        el("p", { class: "help", text: prompt.lede }),
+      ]),
       prompt.steps.length
         ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
         : null,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
@@ -222,9 +222,12 @@ test("picking on the map drops a pin and names the place", { timeout: 90_000 }, 
   const page = await phonePage(CHROME_UA, false);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
-  await page.context().route("**/api/geocode?**", (route) => {
+  let releaseGeocode = () => {};
+  const geocode = new Promise<void>((resolve) => { releaseGeocode = resolve; });
+  await page.context().route("**/api/geocode?**", async (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.has("q")) return route.fulfill({ json: { results: [] } });
+    await geocode;
     return route.fulfill({ json: { place: PLACE } });
   });
   try {
@@ -232,9 +235,60 @@ test("picking on the map drops a pin and names the place", { timeout: 90_000 }, 
     await page.locator("button.where-row").click();
     await page.getByRole("button", { name: "Pick on map" }).click();
     await page.locator("#where-map .leaflet-marker-icon").waitFor({ timeout: 8000 });
+    const scroller = page.locator(".sheet-scroll");
+    await scroller.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    const before = await scroller.evaluate((node) => node.scrollTop);
+    assert.ok(before > 20, `sheet did not scroll, top=${before}`);
     await page.locator("#where-map").click({ position: { x: 30, y: 40 } });
-    await page.locator(".where-v", { hasText: PLACE }).waitFor({ timeout: 8000 });
+    await page.waitForFunction(() => document.querySelector(".where-v")?.textContent === "Finding address…");
+    assert.equal(await page.getByText("Dropped pin").count(), 0);
+    const during = await scroller.evaluate((node) => ({ top: node.scrollTop, map: Boolean(document.getElementById("where-map")) }));
+    assert.ok(during.map);
+    assert.ok(during.top > 20, JSON.stringify({ before, during }));
+    releaseGeocode();
+    await page.waitForFunction((place) => document.querySelector(".where-v")?.textContent === place, PLACE, { timeout: 8000 });
+    const after = await scroller.evaluate((node) => node.scrollTop);
+    assert.ok(after > 20, JSON.stringify({ before, after }));
+    assert.equal(await page.locator("#where-map").count(), 1);
     assert.deepEqual(errors, []);
+  } finally {
+    releaseGeocode();
+    await page.context().close();
+  }
+});
+
+test("a swipe on the header or the top of the sheet closes it", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Philipp");
+    const touch = await page.locator(".sheet-head").evaluate((node) => getComputedStyle(node).touchAction);
+    assert.equal(touch, "none");
+    await dragDown(page, page.locator("form.sheet h2"));
+    await page.locator("form.sheet").waitFor({ state: "detached" });
+
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator("form.sheet").waitFor();
+    const scroller = page.locator(".sheet-scroll");
+    await scroller.evaluate((node) => {
+      const filler = document.createElement("div");
+      filler.style.height = "480px";
+      node.append(filler);
+      node.scrollTop = 200;
+    });
+    await dragSheetContent(page);
+    assert.equal(await page.locator("form.sheet").count(), 1);
+
+    await scroller.evaluate((node) => { node.scrollTop = 0; });
+    await dragSheetContent(page);
+    await page.locator("form.sheet").waitFor({ state: "detached" });
+
+    await page.getByRole("button", { name: "You", exact: true }).click();
+    await page.getByRole("button", { name: "How to turn on notifications" }).click();
+    await page.locator(".guide .grabber").waitFor();
+    const guideTouch = await page.locator(".guide-head").evaluate((node) => getComputedStyle(node).touchAction);
+    assert.equal(guideTouch, "none");
+    await dragDown(page, page.locator(".guide h2"));
+    await page.locator(".guide").waitFor({ state: "detached" });
   } finally {
     await page.context().close();
   }
@@ -270,6 +324,37 @@ async function openFreeSheet(page: Page, name: string) {
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
   await page.getByRole("button", { name: "Let friends know you're free now" }).click();
   await page.locator("#sheet-note").waitFor();
+}
+
+async function dragSheetContent(page: Page) {
+  const point = await page.evaluate(() => {
+    const scroll = document.querySelector(".sheet-scroll");
+    if (!scroll) return null;
+    const rect = scroll.getBoundingClientRect();
+    for (let y = rect.top + 18; y < rect.bottom - 8; y += 14) {
+      const hit = document.elementFromPoint(rect.left + 28, y);
+      if (!hit || !scroll.contains(hit)) continue;
+      if (hit.closest("input, textarea, button, a, select")) continue;
+      return { x: rect.left + 28, y };
+    }
+    return null;
+  });
+  assert.ok(point, "no empty spot in the sheet to drag");
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.move(point.x, point.y + 180, { steps: 12 });
+  await page.mouse.up();
+}
+
+async function dragDown(page: Page, target: Locator) {
+  const box = await target.boundingBox();
+  assert.ok(box);
+  const x = box.x + Math.min(20, box.width / 2);
+  const y = box.y + Math.min(10, box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 180, { steps: 12 });
+  await page.mouse.up();
 }
 
 async function deleteBackward(page: Page, ua: string) {
