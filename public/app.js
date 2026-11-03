@@ -5,7 +5,7 @@ const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
-const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "☕", "🍷"];
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 const COLORS = [
   "#9d174d", "#9a3412", "#166534", "#155e75", "#5b21b6", "#9f1239", "#3f3f46", "#1e3a8a",
