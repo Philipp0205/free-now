@@ -672,24 +672,19 @@ function socialCard(social) {
 
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
-  const joined = plan.joined.some((person) => person.id === state.me.user.id && person.reply !== "declined");
-  const people = [plan.creator, ...plan.joined.filter((person) => person.reply !== "declined")];
-  return el("article", { class: "card card-photo", style: `--photo:url("${bgFor(plan.id)}")` }, [
+  const people = [plan.creator, ...plan.joined];
+  return el("article", { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
-      : el("button", {
-          class: "pill",
-          type: "button",
-          text: joined ? "Joined" : "Join",
-          disabled: joined,
-          onclick: () => joinPlan(plan),
-        }),
+      : null,
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place),
+      planReplySummary(plan),
+      mine ? null : planReplyButtons(plan),
     ]),
   ]);
 }
@@ -1784,27 +1779,45 @@ function mapCard(pin) {
   ]);
 }
 
-function planPinActions(plan) {
+function planReplyLine(person) {
+  const mine = person.id === state.me.user.id;
+  if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
+  return mine ? "You're in" : `${person.name} is in`;
+}
+
+function planReplySummary(plan) {
+  const people = plan.joined.filter((person) => person.reply === "declined" || inReply(person));
+  if (!people.length) return el("p", { text: "Waiting for friends" });
+  return el("div", {}, people.map((person) => el("p", { class: "reply-line", text: planReplyLine(person) })));
+}
+
+function planReplyButtons(plan) {
   const mine = plan.joined.find((person) => person.id === state.me.user.id);
   const inNow = Boolean(mine) && mine.reply !== "declined";
   const declined = mine?.reply === "declined";
+  return el("div", { class: "reply-row" }, [
+    el("button", {
+      class: inNow ? "chip on" : "chip",
+      type: "button",
+      text: "I'm in",
+      onclick: () => replyToPlan(plan, "in"),
+    }),
+    el("button", {
+      class: declined ? "chip on" : "chip",
+      type: "button",
+      text: "Can't",
+      onclick: () => replyToPlan(plan, "declined"),
+    }),
+  ]);
+}
+
+function planPinActions(plan) {
+  const mine = plan.joined.find((person) => person.id === state.me.user.id);
   return el("div", {}, [
-    inNow ? el("p", { class: "reply-line", text: "You're in" }) : null,
-    declined ? el("p", { class: "reply-line", text: "You can't make it" }) : null,
-    el("div", { class: "reply-row" }, [
-      el("button", {
-        class: inNow ? "chip on" : "chip",
-        type: "button",
-        text: "I'm in",
-        onclick: () => replyToPlan(plan, "in"),
-      }),
-      el("button", {
-        class: declined ? "chip on" : "chip",
-        type: "button",
-        text: "Can't",
-        onclick: () => replyToPlan(plan, "declined"),
-      }),
-    ]),
+    mine && (mine.reply === "declined" || inReply(mine))
+      ? el("p", { class: "reply-line", text: planReplyLine(mine) })
+      : null,
+    planReplyButtons(plan),
   ]);
 }
 
@@ -2212,13 +2225,6 @@ function confirmSheet() {
       ]),
     ]),
   ]);
-}
-
-async function joinPlan(plan) {
-  await run(async () => {
-    await api(`/api/plans/${plan.id}/join`, { method: "POST", body: {} });
-    await refresh({ initial: true });
-  });
 }
 
 async function deletePlan(plan) {

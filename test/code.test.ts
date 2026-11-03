@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { extractBuzzSecret, humanCode } from "../src/code.js";
 import { describeNearby, labelNear, rankPlaces } from "../src/geocode.js";
-import { audiencePlace, freePushBody, startingNowBody } from "../src/notify.js";
+import { audiencePlace, freePushBody, planReplyBody, startingNowBody } from "../src/notify.js";
 
 test("recovery codes are short and a pasted curl or URL still yields the secret", () => {
   const code = humanCode();
@@ -70,6 +70,11 @@ test("a fallback place is nearby in a friend's push, not near you", () => {
   assert.equal(freePushBody("Bea", "Near Schlossplatz, Stuttgart-Mitte"), "Bea is free near Schlossplatz, Stuttgart-Mitte");
   assert.equal(startingNowBody("Bea", "near you"), "Starting now: Bea, nearby");
   assert.equal(startingNowBody("Bea", ""), "Starting now: Bea");
+});
+
+test("plan replies share the Reply title and name the plan", () => {
+  assert.equal(planReplyBody("Fritz", "Bouldering", "coming"), "Fritz is in for Bouldering");
+  assert.equal(planReplyBody("Fritz", "Bouldering", "declined"), "Fritz can't make it to Bouldering");
 });
 
 test("without a location, the same name in one locality collapses", () => {

@@ -287,8 +287,8 @@ test("tomorrow plans can be joined and disappear after that day", async () => {
       status: 200,
     });
     assert.equal(join.json.plan.joined[0].name, "Veit");
-    assert.equal(ctx.sent[1].payload.title, '"Walk and dinner with Alvin?"');
-    assert.equal(ctx.sent[1].payload.body, "Veit joined your plan");
+    assert.equal(ctx.sent[1].payload.title, "Reply");
+    assert.equal(ctx.sent[1].payload.body, "Veit is in for Walk and dinner with Alvin?");
 
     const declined = await api(ctx, "POST", `/api/plans/${plan.json.plan.id}/reply`, {
       token: veit.token,
@@ -296,14 +296,16 @@ test("tomorrow plans can be joined and disappear after that day", async () => {
       status: 200,
     });
     assert.equal(declined.json.plan.joined[0].reply, "declined");
-    assert.equal(ctx.sent.at(-1)?.payload.body, "Veit can't make it");
+    assert.equal(ctx.sent.at(-1)?.payload.title, "Reply");
+    assert.equal(ctx.sent.at(-1)?.payload.body, "Veit can't make it to Walk and dinner with Alvin?");
     const back = await api(ctx, "POST", `/api/plans/${plan.json.plan.id}/reply`, {
       token: veit.token,
       body: { reply: "in" },
       status: 200,
     });
     assert.equal(back.json.plan.joined[0].reply, "coming");
-    assert.equal(ctx.sent.at(-1)?.payload.body, "Veit joined your plan");
+    assert.equal(ctx.sent.at(-1)?.payload.title, "Reply");
+    assert.equal(ctx.sent.at(-1)?.payload.body, "Veit is in for Walk and dinner with Alvin?");
 
     ctx.at(Date.parse("2026-06-02T18:00:00.000Z"));
     const today = await api(ctx, "GET", "/api/plans", { token: veit.token });

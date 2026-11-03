@@ -53,6 +53,12 @@ export function startingNowBody(name: string, place: string): string {
   return `Starting now: ${name} at ${raw}`;
 }
 
+export function planReplyBody(name: string, note: string, reply: string): string {
+  const label = note.trim() || "the plan";
+  if (reply === "declined") return `${name} can't make it to ${label}`;
+  return `${name} is in for ${label}`;
+}
+
 export function replyPushBody(name: string, reply: string, etaMin: number | null): string {
   if (reply === "declined") return `${name} can't make it`;
   if (reply === "coming" || reply === "join" || reply === "in") {
