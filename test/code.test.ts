@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { extractBuzzSecret, humanCode } from "../src/code.js";
 import { describeNearby, labelNear, rankPlaces } from "../src/geocode.js";
-import { freePushBody } from "../src/notify.js";
+import { audiencePlace, freePushBody, startingNowBody } from "../src/notify.js";
 
 test("recovery codes are short and a pasted curl or URL still yields the secret", () => {
   const code = humanCode();
@@ -62,9 +62,14 @@ test("reverse geocoding names a nearby venue, otherwise a street", () => {
 });
 
 test("a fallback place is nearby in a friend's push, not near you", () => {
+  assert.equal(audiencePlace("near you"), "nearby");
+  assert.equal(audiencePlace("Near you"), "nearby");
+  assert.equal(audiencePlace("Near Schlossplatz, Stuttgart-Mitte"), "Near Schlossplatz, Stuttgart-Mitte");
   assert.equal(freePushBody("Bea", "near you"), "Bea is free nearby");
   assert.equal(freePushBody("Bea", ""), "Bea is free now");
   assert.equal(freePushBody("Bea", "Near Schlossplatz, Stuttgart-Mitte"), "Bea is free near Schlossplatz, Stuttgart-Mitte");
+  assert.equal(startingNowBody("Bea", "near you"), "Starting now: Bea, nearby");
+  assert.equal(startingNowBody("Bea", ""), "Starting now: Bea");
 });
 
 test("without a location, the same name in one locality collapses", () => {

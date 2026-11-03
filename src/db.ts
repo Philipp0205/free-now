@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS plan_joins (
   plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
   joined_at INTEGER NOT NULL,
+  reply TEXT NOT NULL DEFAULT 'coming',
   PRIMARY KEY (plan_id, user_id)
 );
 
@@ -225,6 +226,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "lat", "lat REAL");
   ensureColumn(db, "plans", "lng", "lng REAL");
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -616,7 +618,7 @@ export function getPlan(db: DatabaseSync, id: string): PlanRow | undefined {
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, j.joined_at
+    `SELECT u.id, u.name, j.joined_at, j.reply, NULL AS eta_min
      FROM plan_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.plan_id = ?
@@ -629,8 +631,15 @@ export function hasPlanJoin(db: DatabaseSync, planId: string, userId: string): b
   return Boolean(one(db, "SELECT 1 AS ok FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId));
 }
 
-export function addPlanJoin(db: DatabaseSync, planId: string, userId: string, joinedAt: number): void {
-  db.prepare("INSERT INTO plan_joins (plan_id, user_id, joined_at) VALUES (?, ?, ?)").run(planId, userId, joinedAt);
+export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string } | undefined {
+  return one(db, "SELECT reply FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
+}
+
+export function setPlanReply(db: DatabaseSync, planId: string, userId: string, joinedAt: number, reply: string): void {
+  db.prepare(
+    `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply) VALUES (?, ?, ?, ?)
+     ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = excluded.reply`,
+  ).run(planId, userId, joinedAt, reply);
 }
 
 export function removePlanJoin(db: DatabaseSync, planId: string, userId: string): void {

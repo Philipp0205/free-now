@@ -7,7 +7,6 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Config } from "./config.js";
 import {
   addMember,
-  addPlanJoin,
   addSocialJoin,
   countUpcomingPlans,
   deletePlan,
@@ -17,11 +16,11 @@ import {
   getCircleByCode,
   getCircleForUser,
   getPlan,
+  getPlanReply,
   getSocial,
   getSocialReply,
   getUserByBuzzToken,
   getUserByTokenHash,
-  hasPlanJoin,
   hasSocialJoin,
   insertCircle,
   insertPlan,
@@ -38,6 +37,7 @@ import {
   removeMember,
   removePlanJoin,
   removeSocialJoin,
+  setPlanReply,
   setSocialReply,
   rotateBuzzToken,
   rotateInvite,
@@ -53,7 +53,7 @@ import {
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
-import { eventTitle, freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
+import { audiencePlace, eventTitle, freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import type { PushSender } from "./push.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
@@ -352,6 +352,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const note = cleanNote(body.note, true);
     const place = cleanPlace(body.place);
     sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body)) });
+    return;
+  }
+
+  const planReply = matchPath(pathname, /^\/api\/plans\/([^/]+)\/reply$/);
+  if (planReply && method === "POST") {
+    sendJson(res, 200, { plan: await replyPlan(deps, me, planReply[1], body) });
     return;
   }
 
@@ -663,7 +669,7 @@ async function publishPlan(
     recipients.map((member) => ({
       userId: member.id,
       title: "Tomorrow",
-      body: place ? `${user.name}: ${note} · ${place}` : `${user.name}: ${note}`,
+      body: place ? `${user.name}: ${note} · ${audiencePlace(place)}` : `${user.name}: ${note}`,
       kind: "plan",
       refId: id,
       tag: `plan:${id}`,
@@ -684,22 +690,64 @@ async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
   const tomorrow = addDays(today, 1);
   if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
-  if (!hasPlanJoin(deps.db, plan.id, user.id)) {
-    addPlanJoin(deps.db, plan.id, user.id, now);
-    await notifyUsers(deps.db, deps.push, now, [
-      {
-        userId: plan.creator_id,
-        title: socialTitle(plan.note),
-        body: `${user.name} joined your plan`,
-        kind: "plan-join",
-        refId: plan.id,
-        tag: `plan-join:${plan.id}:${user.id}`,
-      },
-    ]);
-  }
+  await setPlanComing(deps, user, plan, now);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, fresh, today, tomorrow);
+}
+
+async function setPlanComing(
+  deps: AppDeps,
+  user: UserRow,
+  plan: PlanRow,
+  now: number,
+): Promise<void> {
+  const previous = getPlanReply(deps.db, plan.id, user.id);
+  if (previous?.reply === "coming") return;
+  setPlanReply(deps.db, plan.id, user.id, now, "coming");
+  await notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: plan.creator_id,
+      title: socialTitle(plan.note),
+      body: `${user.name} joined your plan`,
+      kind: "plan-join",
+      refId: plan.id,
+      tag: `plan-join:${plan.id}:${user.id}`,
+    },
+  ]);
+}
+
+async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
+  const reply = normalizeReply(body.reply);
+  if (reply === "coming") {
+    await setPlanComing(deps, user, plan, now);
+  } else {
+    const previous = getPlanReply(deps.db, plan.id, user.id);
+    if (previous?.reply !== "declined") {
+      setPlanReply(deps.db, plan.id, user.id, now, "declined");
+      await notifyUsers(deps.db, deps.push, now, [
+        {
+          userId: plan.creator_id,
+          title: eventTitle("reply"),
+          body: `${user.name} can't make it`,
+          kind: "plan-reply",
+          refId: plan.id,
+          tag: `plan-reply:${plan.id}:${user.id}`,
+        },
+      ]);
+    }
+  }
+  const fresh = getPlan(deps.db, plan.id);
+  if (!fresh) throw new HttpError(500, "plan missing");
+  return planPayload(deps.db, fresh, today, addDays(today, 1));
 }
 
 function leavePlan(deps: AppDeps, user: UserRow, rawId: string) {
@@ -785,6 +833,7 @@ function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: s
       id: join.id,
       name: join.name,
       joinedAt: join.joined_at,
+      reply: join.reply ?? "coming",
     })),
   };
 }

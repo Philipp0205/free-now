@@ -24,6 +24,12 @@ export function eventTitle(kind: "now" | "later" | "reply" | "time" | "start"): 
   return "Free now";
 }
 
+/** A fallback of "near you" is the host's own sheet. Everyone else reads "nearby". */
+export function audiencePlace(place: string): string {
+  const spot = place.trim();
+  return /^near you$/i.test(spot) ? "nearby" : spot;
+}
+
 export function freePushBody(name: string, place: string, fromTime = "", shifted = false): string {
   const spot = place.trim();
   const when = fromTime.trim();
@@ -41,8 +47,10 @@ export function freePushBody(name: string, place: string, fromTime = "", shifted
 }
 
 export function startingNowBody(name: string, place: string): string {
-  const spot = place.trim();
-  return spot ? `Starting now: ${name} at ${spot}` : `Starting now: ${name}`;
+  const raw = place.trim();
+  if (!raw) return `Starting now: ${name}`;
+  if (/^near you$/i.test(raw)) return `Starting now: ${name}, nearby`;
+  return `Starting now: ${name} at ${raw}`;
 }
 
 export function replyPushBody(name: string, reply: string, etaMin: number | null): string {
