@@ -584,6 +584,44 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
 }
 .chip.on { background: #fff; color: #000; }
 .reply-line { margin: 4px 0 0; color: #d1d1d6; font-size: 14px; }
+.comments { margin-top: 8px; border-top: 1px solid var(--hairline); }
+.comments-toggle { color: #d1d1d6; }
+.comment-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.comment-list:empty { display: none; }
+.card-copy .comment-meta { color: var(--muted); font-size: 13px; }
+.card-copy .comment-body { margin-top: 2px; color: #fff; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reaction-row, .reaction-picker, .comment-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.reaction-row .text-btn { min-height: 36px; padding: 0 6px; font-size: 14px; }
+.reaction {
+  border: 0;
+  background: rgba(44, 44, 46, 0.85);
+  color: #fff;
+  border-radius: 999px;
+  min-height: 36px;
+  min-width: 44px;
+  padding: 0 10px;
+  font-size: 15px;
+}
+.reaction.on { background: rgba(255, 77, 141, 0.3); box-shadow: inset 0 0 0 1px #ff4d8d; }
+.reaction.add { color: var(--muted); font-size: 18px; }
+.reaction-picker { padding: 6px; border-radius: 18px; background: rgba(28, 28, 30, 0.92); width: fit-content; }
+.comment-form { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+.comment-form .comment-tools { margin-top: 0; }
+.comment .comment-form { flex-direction: column; align-items: stretch; }
+.comment-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  resize: vertical;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(44, 44, 46, 0.92);
+  color: #fff;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 16px;
+}
+.comment-input:focus { outline: none; box-shadow: inset 0 0 0 2px #ff4d8d; }
 .where { margin-top: 0; }
 .where-field {
   position: relative;
