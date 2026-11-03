@@ -9,6 +9,16 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 
+const DENIED_NOTIFICATIONS = `(() => {
+  function HangryNotification() {}
+  HangryNotification.permission = "denied";
+  HangryNotification.requestPermission = () => Promise.resolve("denied");
+  Object.defineProperty(window, "Notification", {
+    configurable: true,
+    get: () => HangryNotification,
+  });
+})();`;
+
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const FIREFOX_UA = "Mozilla/5.0 (Android 14; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0";
 const PLACE = "Near Schlossplatz, Stuttgart-Mitte";
@@ -218,6 +228,133 @@ test("later today defaults to the next half hour", { timeout: 90_000 }, async ()
   }
 });
 
+test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const friend = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
+    });
+    const viewerContext = await browser.newContext({
+      viewport: { width: 360, height: 640 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent: CHROME_UA,
+    });
+    await viewerContext.addInitScript(vvMock);
+    await viewerContext.addInitScript((value) => localStorage.setItem("fn_token", value), friend.token);
+    const viewer = await viewerContext.newPage();
+    await viewer.goto(baseUrl);
+    const later = viewer.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await viewer.getByRole("button", { name: "I'm in" }).click();
+    await viewer.getByText("You're in", { exact: true }).waitFor();
+    assert.equal(await viewer.getByRole("button", { name: "5 min" }).count(), 1);
+    assert.equal(await viewer.getByRole("button", { name: "Pick time" }).count(), 1);
+    await viewer.screenshot({ path: "/opt/cursor/artifacts/fix-arrive-before.png" });
+    await viewer.getByRole("button", { name: "Pick time" }).click();
+    await viewer.getByText(/You're in, arriving /).waitFor();
+    const field = viewer.locator(".arrive-field input");
+    await field.waitFor();
+    const placed = await field.evaluate((input) => {
+      const box = input.getBoundingClientRect();
+      const tab = document.querySelector(".tabbar")?.getBoundingClientRect().top ?? window.innerHeight;
+      const style = getComputedStyle(input);
+      return {
+        bottom: box.bottom,
+        tab,
+        background: style.backgroundColor,
+        min: (input as HTMLInputElement).min,
+        max: (input as HTMLInputElement).max,
+        value: (input as HTMLInputElement).value,
+      };
+    });
+    assert.ok(placed.bottom <= placed.tab - 8, JSON.stringify(placed));
+    assert.equal(placed.background, "rgb(44, 44, 46)");
+    assert.match(placed.min, /^\d{2}:\d{2}$/);
+    assert.match(placed.max, /^\d{2}:\d{2}$/);
+    assert.ok(placed.value >= placed.min && placed.value <= placed.max, JSON.stringify(placed));
+    await viewer.screenshot({ path: "/opt/cursor/artifacts/fix-arrive-time.png" });
+    await viewerContext.close();
+    await page.reload();
+    const hostLater = page.locator(".sheet button", { hasText: "Not now" });
+    if (await hostLater.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await hostLater.click();
+    await page.getByText(/Fritz is in, arriving /).waitFor();
+    await page.screenshot({ path: "/opt/cursor/artifacts/fix-arrive-host.png" });
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a saved session stays in the app when the network drops", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Philipp");
+    await page.waitForFunction(() => (localStorage.getItem("fn_state") || "").includes("circle"));
+    await page.route("**/api/**", (route) => route.abort("internetdisconnected"));
+    await page.reload();
+    await page.getByText("You're offline. Retrying…").waitFor();
+    assert.equal(await page.locator("#name").count(), 0);
+    await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
+    await page.screenshot({ path: "/opt/cursor/artifacts/polish-offline.png" });
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("denied notifications explain how to allow them again", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false, DENIED_NOTIFICATIONS);
+  try {
+    await signIn(page, "Philipp");
+    await page.getByRole("heading", { name: "Notifications are blocked" }).waitFor();
+    await page.getByText("Settings → Site settings → Notifications").waitFor();
+    assert.equal(await page.getByRole("button", { name: "Turn on notifications" }).count(), 0);
+    await page.screenshot({ path: "/opt/cursor/artifacts/polish-notifications-denied.png" });
+    await page.locator(".sheet button.btn.ghost", { hasText: "Not now" }).click();
+    await page.getByRole("button", { name: "You", exact: true }).click();
+    const blocked = page.getByRole("button", { name: "Notifications are blocked" });
+    await blocked.waitFor();
+    assert.equal(await blocked.isDisabled(), true);
+    await page.getByText("Settings → Site settings → Notifications").waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a place line opens that pin and Back returns", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Show Schlossplatz on the map" }).click();
+    await page.locator(".map-card").waitFor({ timeout: 8000 });
+    await page.getByText("Coffee").waitFor();
+    await page.screenshot({ path: "/opt/cursor/artifacts/polish-map-pin.png" });
+    await page.evaluate(() => history.back());
+    await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
+    assert.equal(await page.locator(".map-card").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("picking on the map drops a pin and names the place", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   const errors: string[] = [];
@@ -294,7 +431,7 @@ test("a swipe on the header or the top of the sheet closes it", { timeout: 90_00
   }
 });
 
-async function phonePage(userAgent: string, locate: boolean) {
+async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },
     isMobile: true,
@@ -303,6 +440,7 @@ async function phonePage(userAgent: string, locate: boolean) {
     ...(locate ? { geolocation: { latitude: 48.7784, longitude: 9.18 }, permissions: ["geolocation"] } : {}),
   });
   await context.addInitScript(vvMock);
+  if (extraScript) await context.addInitScript(extraScript);
   if (locate) {
     await context.route("**/api/geocode?**", (route) => {
       const url = new URL(route.request().url());
@@ -313,7 +451,7 @@ async function phonePage(userAgent: string, locate: boolean) {
   return context.newPage();
 }
 
-async function openFreeSheet(page: Page, name: string) {
+async function signIn(page: Page, name: string) {
   await page.goto(baseUrl);
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
@@ -321,6 +459,12 @@ async function openFreeSheet(page: Page, name: string) {
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
   await page.locator("#circle-name").fill("friends");
   await page.getByRole("button", { name: "Create circle" }).click();
+  await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
+}
+
+async function openFreeSheet(page: Page, name: string) {
+  await signIn(page, name);
+  const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
   await page.getByRole("button", { name: "Let friends know you're free now" }).click();
   await page.locator("#sheet-note").waitFor();

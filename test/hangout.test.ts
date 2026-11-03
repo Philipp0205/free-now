@@ -70,7 +70,7 @@ test("an invite link names the circle, joins in one step, and can be revoked", a
     const again = await api(port, "GET", `/api/invites/${renewed.circle.inviteCode}`);
     assert.equal(again.name, "the roof");
     db.prepare("UPDATE circles SET invite_expires_at = ?").run(START - 1);
-    await api(port, "GET", `/api/invites/${renewed.circle.inviteCode}`, { status: 404 });
+    await api(port, "GET", `/api/invites/${renewed.circle.inviteCode}`, { status: 410 });
   });
 });
 
@@ -279,5 +279,134 @@ test("opening an older database backfills invite expiry from created_at", () => 
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a picked arrival time is stored and each change pushes once", async () => {
+  await withApp(async ({ port, sent, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const veit = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Fritz", code: created.circle.inviteCode },
+      status: 201,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: alex.token,
+      body: { endpoint: "https://push.example/alex", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const social = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Coffee?" },
+      status: 201,
+    });
+    const tapped = await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in" },
+      status: 200,
+    });
+    assert.equal(tapped.social.joined[0].arriveAt, null);
+    const picked = await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "16:00" },
+      status: 200,
+    });
+    assert.equal(picked.social.joined[0].etaMin, null);
+    assert.equal(sent.at(-1)?.body, "Fritz is in, arriving 16:00");
+    const before = sent.length;
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "16:20" },
+      status: 200,
+    });
+    assert.equal(sent.length, before + 1);
+    assert.equal(sent.at(-1)?.body, "Fritz is in, arriving 16:20");
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "14:00" },
+      status: 400,
+    });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "18:00" },
+      status: 400,
+    });
+
+    const later = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Dinner", startsAt: "18:00" },
+      status: 200,
+    });
+    await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "17:30" },
+      status: 400,
+    });
+    const dinner = await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "19:40" },
+      status: 200,
+    });
+    assert.equal(dinner.social.joined[0].arriveAt, Date.parse("2026-06-01T19:40:00.000Z"));
+    assert.equal(sent.at(-1)?.body, "Fritz is in, arriving 19:40");
+
+    const plan = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Bouldering" },
+      status: 201,
+    });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "18:00" },
+      status: 200,
+    });
+    assert.equal(sent.at(-1)?.body, "Fritz is in, arriving 18:00");
+    at(Date.parse("2026-06-02T19:00:00.000Z"));
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "18:00" },
+      status: 400,
+    });
+    const shifted = await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "19:40" },
+      status: 200,
+    });
+    assert.equal(shifted.plan.joined[0].arriveAt, Date.parse("2026-06-02T19:40:00.000Z"));
+    assert.equal(sent.at(-1)?.body, "Fritz is in, arriving 19:40");
+  });
+});
+
+test("the old Railway host redirects to the configured public origin", async () => {
+  const db = openDb(":memory:");
+  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", PUBLIC_BASE_URL: "https://hangry.example" });
+  const server = http.createServer(createApp({
+    db,
+    push: { async send() { /* unused */ } },
+    config: { ...config, dbPath: ":memory:" },
+    now: () => Date.now(),
+  }));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const redirected = await new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
+      const request = http.request({
+        hostname: "127.0.0.1",
+        port,
+        path: "/join/ABC?x=1",
+        headers: { host: "hangry-production-64c4.up.railway.app" },
+      }, (response) => {
+        response.resume();
+        resolve({ status: response.statusCode ?? 0, location: response.headers.location });
+      });
+      request.on("error", reject);
+      request.end();
+    });
+    assert.equal(redirected.status, 301);
+    assert.equal(redirected.location, "https://hangry.example/join/ABC?x=1");
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
   }
 });
