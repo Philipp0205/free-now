@@ -277,16 +277,29 @@ async function mobilePage(emulatePhone: boolean) {
   return context.newPage();
 }
 
+async function dismissReminders(page: Page) {
+  const sheet = page.locator(".sheet");
+  for (let i = 0; i < 4; i += 1) {
+    const visible = await sheet.waitFor({ state: "visible", timeout: 1500 }).then(() => true).catch(() => false);
+    if (!visible) return;
+    const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
+    if (!(await later.count())) return;
+    await later.first().click();
+  }
+}
+
 async function signUp(page: Page, name: string) {
   await page.locator("#name").waitFor({ timeout: 15_000 });
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
+  await dismissReminders(page);
   await page.locator("#invite-code").waitFor();
 }
 
 async function createCircle(page: Page) {
   await page.locator("#circle-name").fill("friends");
   await page.getByRole("button", { name: "Create circle" }).click();
+  await dismissReminders(page);
   await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
 }
 
