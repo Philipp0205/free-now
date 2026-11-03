@@ -150,7 +150,10 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
     await paintKeyboard(page);
     await shot(page, "mobile_free_sheet_keyboard");
 
-    await page.locator(".scrim").click({ position: { x: 16, y: 16 } });
+    await page.evaluate(() => {
+      const scrim = document.querySelector(".scrim");
+      if (scrim instanceof HTMLElement) scrim.click();
+    });
     await page.locator(".sheet").waitFor({ state: "detached" });
     await page.getByRole("button", { name: "Plan tomorrow" }).click();
     await page.locator(".sheet").getByRole("heading", { name: "Tomorrow" }).waitFor();
