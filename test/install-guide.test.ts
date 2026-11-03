@@ -193,6 +193,12 @@ test("install reminders depend on the browser and how long ago Not now was", () 
   assert.equal(firefox.copyLink, true);
   assert.match(firefox.lede, /open Hangry in Chrome and tap Install app/);
   assert.equal(needsInstallForPush(readInstallSignals({ userAgent: ANDROID_FIREFOX })), true);
+  const desktop = installPrompt(readInstallSignals({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    notificationPermission: "default",
+  }));
+  assert.equal(desktop.kind, "desktop");
+  assert.equal(desktop.quiet, true);
 
   const now = Date.parse("2026-11-03T00:00:00Z");
   assert.equal(installReminderDue(null, now), true);

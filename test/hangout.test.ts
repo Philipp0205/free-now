@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
@@ -96,7 +99,7 @@ test("on my way and can't make it notify the host and can be changed", async () 
     });
     assert.equal(coming.social.joined[0].reply, "coming");
     assert.equal(coming.social.joined[0].etaMin, 10);
-    assert.equal(sent.at(-1)?.body, "Veit is on my way – 10 min");
+    assert.equal(sent.at(-1)?.body, "Veit is on the way – 10 min");
 
     const declined = await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
       token: veit.token,
@@ -159,7 +162,7 @@ test("later today pushes once, then reminds only people who are coming", async (
     at(social.social.startsAt);
     assert.equal(await sendStartReminders(db, { async send(_s, payload) { sent.push(payload); } }, social.social.startsAt), 1);
     const reminder = sent.at(-1);
-    assert.equal(reminder?.body, "Philipp is free – meet at Café X");
+    assert.equal(reminder?.body, "Starting now: Philipp at Café X");
     assert.equal(reminder?.url, `/?social=${social.social.id}`);
     assert.equal(sent.filter((payload) => payload.body === reminder?.body).length, 1);
 
@@ -168,5 +171,112 @@ test("later today pushes once, then reminds only people who are coming", async (
       body: { note: "Too late", startsAt: "10:00" },
       status: 400,
     });
+    await api(port, "POST", "/api/socials", {
+      token: philipp.token,
+      body: { later: true },
+      status: 400,
+    });
+    await api(port, "POST", "/api/socials", {
+      token: philipp.token,
+      body: { later: true, startsAt: null },
+      status: 400,
+    });
   }, "UTC");
+});
+
+test("a start-time change notifies immediately, and a quick ETA does not send a second push", async () => {
+  await withApp(async ({ port, sent }) => {
+    const dana = await api(port, "POST", "/api/auth/start", { body: { name: "Dana" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: dana.token, body: { name: "friends" }, status: 201 });
+    const philipp = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Philipp", code: created.circle.inviteCode },
+      status: 201,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: philipp.token,
+      body: { endpoint: "https://push.example/philipp", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: dana.token,
+      body: { endpoint: "https://push.example/dana", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const social = await api(port, "POST", "/api/socials", {
+      token: philipp.token,
+      body: { note: "Coffee" },
+      status: 201,
+    });
+    const before = sent.length;
+    const shifted = await api(port, "POST", "/api/socials", {
+      token: philipp.token,
+      body: { startsAt: "23:30" },
+      status: 200,
+    });
+    assert.ok(shifted.social.startsAt > START);
+    assert.equal(sent.length, before + 1);
+    assert.equal(sent.at(-1)?.body, "Philipp is now free from 23:30");
+
+    const quiet = sent.length;
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: dana.token,
+      body: { reply: "coming" },
+      status: 200,
+    });
+    assert.equal(sent.length, quiet);
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: dana.token,
+      body: { reply: "coming", eta: 10 },
+      status: 200,
+    });
+    assert.equal(sent.length, quiet + 1);
+    assert.equal(sent.at(-1)?.body, "Dana is on the way – 10 min");
+
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: dana.token,
+      body: { reply: "coming", eta: 20 },
+      status: 200,
+    });
+    assert.equal(sent.length, quiet + 1);
+  }, "UTC");
+});
+
+test("a circle with no invite expiry needs a new link", async () => {
+  await withApp(async ({ port, db }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "old" }, status: 201 });
+    db.prepare("UPDATE circles SET invite_expires_at = NULL").run();
+    await api(port, "GET", `/api/invites/${created.circle.inviteCode}`, { status: 404 });
+  });
+});
+
+test("opening an older database backfills invite expiry from created_at", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hangry-"));
+  const file = path.join(dir, "old.sqlite");
+  const raw = new DatabaseSync(file);
+  raw.exec(`
+    CREATE TABLE circles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      invite_code TEXT NOT NULL UNIQUE,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  raw.prepare("INSERT INTO circles (id, name, invite_code, created_by, created_at) VALUES (?, ?, ?, ?, ?)").run(
+    "c1",
+    "old",
+    "OLDCODE",
+    "u1",
+    1_000,
+  );
+  raw.close();
+  const db = openDb(file);
+  try {
+    const row = db.prepare("SELECT invite_expires_at FROM circles WHERE id = ?").get("c1") as { invite_expires_at: number };
+    assert.equal(row.invite_expires_at, 1_000 + 14 * 24 * 60 * 60 * 1000);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
