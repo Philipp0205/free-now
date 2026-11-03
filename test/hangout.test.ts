@@ -390,6 +390,57 @@ test("a picked arrival time is stored and each change pushes once", async () => 
   });
 });
 
+test("the host can edit any of their plans, and only people coming hear about it", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Fritz", code: created.circle.inviteCode },
+      status: 201,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: fritz.token,
+      body: { endpoint: "https://push.example/fritz", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const first = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Bouldering", lat: 48.1, lng: 11.5 },
+      status: 201,
+    });
+    const second = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Dinner" },
+      status: 201,
+    });
+    await api(port, "POST", `/api/plans/${first.plan.id}/reply`, { token: fritz.token, body: { reply: "in" }, status: 200 });
+
+    const before = sent.length;
+    const edited = await api(port, "PATCH", `/api/plans/${first.plan.id}`, {
+      token: alex.token,
+      body: { note: "Bouldering at 7", place: "Boulderwelt" },
+      status: 200,
+    });
+    assert.equal(edited.plan.note, "Bouldering at 7");
+    assert.equal(edited.plan.place, "Boulderwelt");
+    assert.deepEqual(edited.plan.location, first.plan.location);
+    assert.equal(edited.plan.joined.length, 1);
+    assert.equal(sent.length, before + 1);
+    assert.equal(sent.at(-1)?.title, "Plan changed");
+    assert.equal(sent.at(-1)?.body, "Alex: Bouldering at 7 · Boulderwelt");
+
+    await api(port, "PATCH", `/api/plans/${second.plan.id}`, {
+      token: alex.token,
+      body: { note: "Late dinner" },
+      status: 200,
+    });
+    assert.equal(sent.length, before + 1);
+
+    await api(port, "PATCH", `/api/plans/${first.plan.id}`, { token: fritz.token, body: { note: "Mine now" }, status: 403 });
+    await api(port, "PATCH", `/api/plans/${first.plan.id}`, { token: alex.token, body: { note: "" }, status: 400 });
+  });
+});
+
 test("the old Railway host redirects to the configured public origin", async () => {
   const db = openDb(":memory:");
   const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", PUBLIC_BASE_URL: "https://hangry.example" });
