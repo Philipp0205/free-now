@@ -687,6 +687,7 @@ async function publishPlan(
       kind: "plan",
       refId: id,
       tag: `plan:${id}`,
+      url: `/?plan=${id}`,
     })),
   );
   const plan = getPlan(deps.db, id);
@@ -750,6 +751,7 @@ async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Reco
           kind: "plan-reply",
           refId: plan.id,
           tag: `plan-reply:${plan.id}:${user.id}`,
+          url: `/?plan=${plan.id}`,
         },
       ]);
     }
@@ -780,6 +782,7 @@ async function notifyPlanReply(
       kind: "plan-reply",
       refId: plan.id,
       tag: `plan-reply:${plan.id}:${user.id}`,
+      url: `/?plan=${plan.id}`,
     },
   ]);
 }
@@ -975,7 +978,7 @@ function requireLiveInvite(db: DatabaseSync, code: string, now: number): CircleR
 /** Undefined keeps a scheduled start. Null means free right now. A clock time is later today in APP_TZ. */
 function readStart(body: Record<string, unknown>, now: number, tz: string): number | null | undefined {
   if (body.later === true && body.startsAt == null && body.startsInMin == null) {
-    throw new HttpError(400, "pick a time later today");
+    throw new HttpError(400, "Pick a time later today.");
   }
   if (!Object.prototype.hasOwnProperty.call(body, "startsAt") && !Object.prototype.hasOwnProperty.call(body, "startsInMin")) {
     return undefined;
@@ -983,47 +986,55 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
   if (body.startsInMin != null) {
     const minutes = Number(body.startsInMin);
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 18 * 60) {
-      throw new HttpError(400, "Pick a time later today");
+      throw new HttpError(400, "Pick a time later today.");
     }
     return assertLaterToday(now + minutes * 60 * 1000, now, tz);
   }
   if (body.startsAt == null) return null;
   if (typeof body.startsAt === "string") {
-    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "Pick a time later today");
+    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "Pick a time later today.");
     try {
       return assertLaterToday(zonedDateTime(isoDate(now, tz), body.startsAt, tz), now, tz);
     } catch {
-      throw new HttpError(400, "Pick a time later today");
+      throw new HttpError(400, "Pick a time later today.");
     }
   }
   const instant = Number(body.startsAt);
-  if (!Number.isFinite(instant)) throw new HttpError(400, "Pick a time later today");
+  if (!Number.isFinite(instant)) throw new HttpError(400, "Pick a time later today.");
   return assertLaterToday(instant, now, tz);
 }
 
 function readArriveAt(value: unknown, now: number, tz: string, start: number, end: number): number {
   if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) {
-    throw new HttpError(400, "Pick a time you can arrive");
+    throw new HttpError(400, "Pick a time you can arrive.");
   }
+  const hour = Number(value.slice(0, 2));
+  const minute = Number(value.slice(3, 5));
+  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a time you can arrive.");
   const day = isoDate(Math.max(start, now), tz);
-  let at = zonedDateTime(day, value, tz);
-  if (at < start) {
-    const next = zonedDateTime(addDays(day, 1), value, tz);
-    if (next <= end) at = next;
+  let at: number;
+  try {
+    at = zonedDateTime(day, value, tz);
+    if (at < start) {
+      const next = zonedDateTime(addDays(day, 1), value, tz);
+      if (next <= end) at = next;
+    }
+  } catch {
+    throw new HttpError(400, "Pick a time you can arrive.");
   }
-  if (at <= now || at < start || at > end) throw new HttpError(400, "Pick a time you can arrive");
+  if (at <= now || at < start || at > end) throw new HttpError(400, "Pick a time you can arrive.");
   return at;
 }
 
 function readPlanArrive(value: unknown, day: string, now: number, tz: string): number {
-  const start = zonedDateTime(day, "00:00", tz);
-  const end = zonedDateTime(addDays(day, 1), "00:00", tz) - 1;
+  const start = zonedDateTime(day, "06:00", tz);
+  const end = zonedDateTime(day, "23:59", tz);
   return readArriveAt(value, now, tz, start, end);
 }
 
 function assertLaterToday(instant: number, now: number, tz: string): number {
-  if (instant <= now) throw new HttpError(400, "Pick a time later today");
-  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "Pick a time later today");
+  if (instant <= now) throw new HttpError(400, "Pick a time later today.");
+  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "Pick a time later today.");
   return instant;
 }
 

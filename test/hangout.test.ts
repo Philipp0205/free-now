@@ -361,6 +361,19 @@ test("a picked arrival time is stored and each change pushes once", async () => 
       status: 200,
     });
     assert.equal(sent.at(-1)?.body, "Fritz is in, arriving 18:00");
+    assert.equal(sent.at(-1)?.url, `/?plan=${plan.plan.id}`);
+    const impossible = await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "25:00" },
+      status: 400,
+    });
+    assert.equal(impossible.error, "Pick a time you can arrive.");
+    const earlyMorning = await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: veit.token,
+      body: { reply: "in", arriveAt: "05:00" },
+      status: 400,
+    });
+    assert.equal(earlyMorning.error, "Pick a time you can arrive.");
     at(Date.parse("2026-06-02T19:00:00.000Z"));
     await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
       token: veit.token,

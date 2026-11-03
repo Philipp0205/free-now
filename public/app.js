@@ -6,7 +6,10 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
-const COLORS = ["#9d174d", "#9a3412", "#166534", "#155e75", "#5b21b6", "#9f1239", "#3f3f46", "#1e3a8a"];
+const COLORS = [
+  "#9d174d", "#9a3412", "#166534", "#155e75", "#5b21b6", "#9f1239", "#3f3f46", "#1e3a8a",
+  "#7f1d1d", "#7c2d12", "#14532d", "#164e63", "#4c1d95", "#831843", "#134e4a", "#312e81",
+];
 
 let sheetHistoryPushed = false;
 let ignoreSheetPop = false;
@@ -58,6 +61,7 @@ const state = {
   whereSearching: false,
   whereMap: false,
   focusSocial: "",
+  deepLink: null,
   invitePreview: null,
   inviteError: "",
   whenMode: "now",
@@ -65,8 +69,11 @@ const state = {
   etaFor: "",
 };
 
-const socialFocus = new URLSearchParams(location.search).get("social");
-if (socialFocus) state.focusSocial = socialFocus;
+const deepLinkParams = new URLSearchParams(location.search);
+const planFocus = deepLinkParams.get("plan");
+const socialFocus = deepLinkParams.get("social");
+if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
+else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
 if (joinPath) state.pendingCode = joinPath[1].toUpperCase();
 state.codeDraft = state.pendingCode;
@@ -139,9 +146,8 @@ async function boot() {
     }
   } catch (error) {
     if (state.token && error.status !== 401) {
-      state.offline = true;
       restoreCachedState();
-      state.error = "You're offline. Retrying…";
+      noteConnectionProblem(error);
       scheduleOfflineRetry(1000);
     } else {
       state.error = friendlyMessage(error.message, error.status);
@@ -189,6 +195,18 @@ function restoreCachedState() {
   }
 }
 
+function isNetworkFailure(error) {
+  const status = error?.status;
+  return status == null || status === 0;
+}
+
+function noteConnectionProblem(error) {
+  state.offline = isNetworkFailure(error);
+  state.error = state.offline ? "You're offline. Retrying…" : error.status >= 500
+    ? "Something went wrong. Retrying…"
+    : friendlyMessage(error.message, error.status);
+}
+
 function scheduleOfflineRetry(delay) {
   clearTimeout(state.offlineTimer);
   state.offlineTimer = setTimeout(async () => {
@@ -196,30 +214,32 @@ function scheduleOfflineRetry(delay) {
       if (!state.meta) state.meta = await api("/api/meta", { token: null });
       if (state.token) state.me = await api("/api/me");
       state.offline = false;
-      if (state.error === "You're offline. Retrying…") state.error = "";
+      if (state.error === "You're offline. Retrying…" || state.error === "Something went wrong. Retrying…") state.error = "";
       render();
       refresh({ initial: true }).catch(() => {});
       void considerReminders();
     } catch (error) {
       if (error.status === 401) return;
-      state.offline = true;
-      state.error = "You're offline. Retrying…";
+      noteConnectionProblem(error);
       render();
       scheduleOfflineRetry(Math.min(delay * 2, 30000));
     }
   }, delay);
 }
 
+const RETRY_NOTE = new Set(["You're offline. Retrying…", "Something went wrong. Retrying…"]);
+
 function friendlyMessage(raw, status) {
   const text = String(raw || "");
   const lower = text.toLowerCase();
+  if (status >= 500) return "Something went wrong. Retrying…";
   if (!text || lower.includes("failed to fetch") || status === 0) return "You're offline. Retrying…";
   if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
   if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
   if (status === 410 || lower.includes("expired")) return "This invite has expired. Ask for a new link.";
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
-  if (lower.includes("pick a time")) return "Pick a time later today";
+  if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
   if (status === 401) return "Please sign in again.";
   return "Something went wrong. Try again.";
@@ -259,6 +279,7 @@ async function refresh({ initial = false } = {}) {
     banner: state.banner?.id ?? null,
   });
   persistCachedState();
+  if (consumeDeepLink()) return;
   if (signature === state.signature) return;
   state.signature = signature;
   if (state.sheet || state.installOpen || isTyping()) return;
@@ -582,7 +603,9 @@ function view() {
   }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
-  if (state.error && state.error !== TIME_LATER_ERROR) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+  if (state.error && state.error !== TIME_LATER_ERROR && !RETRY_NOTE.has(state.error)) {
+    root.append(el("div", { class: "toast", role: "status", text: state.error }));
+  }
   return root;
 }
 
@@ -640,6 +663,7 @@ function welcome() {
                   state.inviteError = "";
                   state.invitePreview = null;
                   state.pendingCode = "";
+                  state.codeDraft = "";
                   history.replaceState(null, "", "/");
                   render();
                 },
@@ -658,6 +682,13 @@ function welcome() {
           }),
         ]),
   ]);
+}
+
+function useNamedCircleDefault() {
+  const name = state.me?.user?.name?.trim();
+  if (name && (state.circleDraft === "friends" || !state.circleDraft.trim())) {
+    state.circleDraft = `${name}'s circle`;
+  }
 }
 
 function setup() {
@@ -684,6 +715,7 @@ function setup() {
 
 function shell() {
   const phone = el("div", { class: "phone" });
+  if (RETRY_NOTE.has(state.error)) phone.append(el("p", { class: "status-banner", role: "status", text: state.error }));
   if (state.tab === "home") phone.append(home());
   if (state.tab === "map") phone.append(mapScreen());
   if (state.tab === "circle") phone.append(circleScreen());
@@ -859,8 +891,13 @@ function alertsScreen() {
           onclick: () => openNotification(note),
         }, [
           note.readAt ? null : el("span", { class: "unread", "aria-label": "Unread" }),
-          el("div", { class: "grow" }, [el("h3", { text: note.title }), el("p", { text: note.body })]),
-          el("span", { class: "time", text: ago(note.createdAt) }),
+          el("div", { class: "grow" }, [
+            el("div", { class: "alert-top" }, [
+              el("h3", { text: note.title }),
+              el("span", { class: "time", text: ago(note.createdAt) }),
+            ]),
+            el("p", { text: note.body }),
+          ]),
         ]),
       )
     : [el("p", { class: "help", style: "padding: 8px 20px", text: "When a friend is free, it shows up here." })];
@@ -1324,7 +1361,7 @@ function whenChoice(mode, text) {
   });
 }
 
-const TIME_LATER_ERROR = "Pick a time later today";
+const TIME_LATER_ERROR = "Pick a time later today.";
 
 function zonedParts(ms) {
   const tz = state.meta?.tz || "Europe/Berlin";
@@ -1589,9 +1626,18 @@ function socialArriveLimits(social) {
 
 function planArriveLimits(plan) {
   if (!plan?.forDate) return { min: null, max: null };
-  const start = zonedMidnight(plan.forDate);
-  const end = zonedMidnight(nextIsoDay(plan.forDate)) - 1;
+  const midnight = zonedMidnight(plan.forDate);
+  const start = midnight + 6 * 60 * 60 * 1000;
+  const end = midnight + (23 * 60 + 59) * 60 * 1000;
   return arriveLimits(start, end);
+}
+
+function defaultPlanClock(plan) {
+  const limits = planArriveLimits(plan);
+  let value = "18:00";
+  if (limits.min && value < limits.min) value = limits.min;
+  if (limits.max && value > limits.max) value = limits.max;
+  return value;
 }
 
 function zonedMidnight(day) {
@@ -2016,21 +2062,35 @@ function scheduleReverse(lat, lng, replace = false) {
 
 function openNotification(note) {
   const social = note.refId ? state.socials.find((item) => item.id === note.refId) : null;
-  const plan = note.refId ? state.plans.find((item) => item.id === note.refId) : null;
-  if (social?.location) {
-    showOnMap("social", social.id);
+  const plan = !social && note.refId ? state.plans.find((item) => item.id === note.refId) : null;
+  const kind = social ? "social" : plan ? "plan" : "";
+  const item = social || plan;
+  if (item?.location) {
+    showOnMap(kind, item.id);
     return;
   }
-  if (plan?.location) {
-    showOnMap("plan", plan.id);
-    return;
-  }
-  if (note.kind === "social" && note.refId) {
-    state.focusSocial = note.refId;
-    state.tab = "home";
+  if (item || note.kind === "social" || note.kind === "plan" || note.kind === "plan-reply" || note.kind === "reply" || note.kind === "join") {
+    state.tab = "map";
     state.sheet = null;
+    state.focusSocial = "";
   }
   render();
+}
+
+function consumeDeepLink() {
+  if (!state.deepLink) return false;
+  const { kind, id } = state.deepLink;
+  const list = kind === "plan" ? state.plans : state.socials;
+  const item = list.find((entry) => entry.id === id);
+  state.deepLink = null;
+  if (!item) return false;
+  if (item.location) {
+    showOnMap(kind, item.id);
+    return true;
+  }
+  state.tab = "map";
+  state.sheet = null;
+  return false;
 }
 
 function addMapTiles(L, map) {
@@ -2194,8 +2254,10 @@ async function mountMap() {
   }
   if (liveMap && liveMap.getContainer() === host) {
     syncMapMarkers(L, pins);
-    refreshOpenCard(pins);
     liveMap.invalidateSize();
+    const focus = takeFocusPin(pins);
+    if (focus) focusMapPin(liveMap, focus);
+    else refreshOpenCard(pins);
     reserveAttribution();
     return;
   }
@@ -2206,14 +2268,9 @@ async function mountMap() {
   liveMap = map;
   watchAttribution(map);
   syncMapMarkers(L, pins);
-  const focus = state.focusPin ? pins.find((pin) => pinKey(pin) === state.focusPin) : null;
-  if (focus) {
-    map.setView([focus.lat, focus.lng], 16);
-    showMapCard(focus);
-    state.focusPin = "";
-  } else {
-    map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
-  }
+  const focus = takeFocusPin(pins);
+  if (focus) focusMapPin(map, focus);
+  else map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
   rememberMapCenter(map);
   map.on("dragend", () => rememberMapCenter(map));
   setTimeout(() => map.invalidateSize(), 60);
@@ -2239,6 +2296,22 @@ function reserveAttribution() {
   const gap = Math.ceil(mapEl.getBoundingClientRect().bottom - attr.getBoundingClientRect().top) + 8;
   if (gap < 16) return;
   wrap.style.setProperty("--attr-h", `${gap}px`);
+}
+
+function takeFocusPin(pins) {
+  if (!state.focusPin) return null;
+  const focus = pins.find((pin) => pinKey(pin) === state.focusPin);
+  if (focus) state.focusPin = "";
+  return focus || null;
+}
+
+function focusMapPin(map, pin) {
+  map.invalidateSize();
+  map.setView([pin.lat, pin.lng], 16, { animate: false });
+  showMapCard(pin);
+  const card = document.querySelector(".map-card");
+  const lift = Math.round((card?.getBoundingClientRect().height ?? 180) / 2 + 16);
+  map.panBy([0, lift], { animate: false });
 }
 
 function showMapCard(pin) {
@@ -2309,7 +2382,7 @@ function planReplyButtons(plan) {
           class: mine?.arriveAt ? "chip on" : "chip",
           type: "button",
           text: "Arriving at",
-          onclick: () => replyToPlan(plan, "in", "18:00"),
+          onclick: () => replyToPlan(plan, "in", defaultPlanClock(plan)),
         })
       : null,
     inNow && mine?.arriveAt
@@ -2748,6 +2821,7 @@ async function onStart(event) {
       }
     }
     state.pushSnooze = false;
+    if (!state.me.circle) useNamedCircleDefault();
     render();
     refresh({ initial: true }).catch(() => {});
     void considerReminders();
