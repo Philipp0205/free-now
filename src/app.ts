@@ -53,7 +53,7 @@ import {
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
-import { audiencePlace, eventTitle, freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
+import { audiencePlace, eventTitle, freePushBody, notifyUsers, planReplyBody, replyPushBody, socialTitle } from "./notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import type { PushSender } from "./push.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
@@ -705,16 +705,7 @@ async function setPlanComing(
   const previous = getPlanReply(deps.db, plan.id, user.id);
   if (previous?.reply === "coming") return;
   setPlanReply(deps.db, plan.id, user.id, now, "coming");
-  await notifyUsers(deps.db, deps.push, now, [
-    {
-      userId: plan.creator_id,
-      title: socialTitle(plan.note),
-      body: `${user.name} joined your plan`,
-      kind: "plan-join",
-      refId: plan.id,
-      tag: `plan-join:${plan.id}:${user.id}`,
-    },
-  ]);
+  await notifyPlanReply(deps, user, plan, now, "coming");
 }
 
 async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
@@ -733,21 +724,31 @@ async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Reco
     const previous = getPlanReply(deps.db, plan.id, user.id);
     if (previous?.reply !== "declined") {
       setPlanReply(deps.db, plan.id, user.id, now, "declined");
-      await notifyUsers(deps.db, deps.push, now, [
-        {
-          userId: plan.creator_id,
-          title: eventTitle("reply"),
-          body: `${user.name} can't make it`,
-          kind: "plan-reply",
-          refId: plan.id,
-          tag: `plan-reply:${plan.id}:${user.id}`,
-        },
-      ]);
+      await notifyPlanReply(deps, user, plan, now, "declined");
     }
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, fresh, today, addDays(today, 1));
+}
+
+async function notifyPlanReply(
+  deps: AppDeps,
+  user: UserRow,
+  plan: PlanRow,
+  now: number,
+  reply: "coming" | "declined",
+): Promise<void> {
+  await notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: plan.creator_id,
+      title: eventTitle("reply"),
+      body: planReplyBody(user.name, plan.note, reply),
+      kind: "plan-reply",
+      refId: plan.id,
+      tag: `plan-reply:${plan.id}:${user.id}`,
+    },
+  ]);
 }
 
 function leavePlan(deps: AppDeps, user: UserRow, rawId: string) {
