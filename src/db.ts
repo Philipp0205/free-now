@@ -16,6 +16,7 @@ export type CircleRow = {
   invite_code: string;
   created_by: string;
   created_at: number;
+  invite_expires_at: number | null;
 };
 
 export type SocialRow = {
@@ -30,12 +31,16 @@ export type SocialRow = {
   lat: number | null;
   lng: number | null;
   place: string;
+  starts_at: number | null;
+  reminded_at: number | null;
 };
 
 export type JoinRow = {
   id: string;
   name: string;
   joined_at: number;
+  reply: string;
+  eta_min: number | null;
 };
 
 export type PlanRow = {
@@ -90,7 +95,8 @@ CREATE TABLE IF NOT EXISTS circles (
   name TEXT NOT NULL,
   invite_code TEXT NOT NULL UNIQUE,
   created_by TEXT NOT NULL REFERENCES users(id),
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  invite_expires_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS memberships (
@@ -109,13 +115,17 @@ CREATE TABLE IF NOT EXISTS socials (
   last_notified_at INTEGER NOT NULL,
   lat REAL,
   lng REAL,
-  place TEXT NOT NULL DEFAULT ''
+  place TEXT NOT NULL DEFAULT '',
+  starts_at INTEGER,
+  reminded_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS social_joins (
   social_id TEXT NOT NULL REFERENCES socials(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
   joined_at INTEGER NOT NULL,
+  reply TEXT NOT NULL DEFAULT 'join',
+  eta_min INTEGER,
   PRIMARY KEY (social_id, user_id)
 );
 
@@ -195,6 +205,14 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "socials", "lat", "lat REAL");
   ensureColumn(db, "socials", "lng", "lng REAL");
   ensureColumn(db, "socials", "place", "place TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "socials", "starts_at", "starts_at INTEGER");
+  ensureColumn(db, "socials", "reminded_at", "reminded_at INTEGER");
+  ensureColumn(db, "social_joins", "reply", "reply TEXT NOT NULL DEFAULT 'join'");
+  ensureColumn(db, "social_joins", "eta_min", "eta_min INTEGER");
+  ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
+  db.prepare(
+    "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
+  ).run(14 * 24 * 60 * 60 * 1000);
   ensureColumn(db, "plans", "lat", "lat REAL");
   ensureColumn(db, "plans", "lng", "lng REAL");
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
@@ -252,11 +270,23 @@ export function rotateBuzzToken(db: DatabaseSync, id: string, buzzToken: string)
   db.prepare("UPDATE users SET buzz_token = ? WHERE id = ?").run(buzzToken, id);
 }
 
-export function insertCircle(db: DatabaseSync, circle: CircleRow, userId: string, joinedAt: number): void {
+export function insertCircle(
+  db: DatabaseSync,
+  circle: Omit<CircleRow, "invite_expires_at"> & { invite_expires_at?: number | null },
+  userId: string,
+  joinedAt: number,
+): void {
   withTx(db, () => {
     db.prepare(
-      "INSERT INTO circles (id, name, invite_code, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(circle.id, circle.name, circle.invite_code, circle.created_by, circle.created_at);
+      "INSERT INTO circles (id, name, invite_code, created_by, created_at, invite_expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      circle.id,
+      circle.name,
+      circle.invite_code,
+      circle.created_by,
+      circle.created_at,
+      circle.invite_expires_at ?? circle.created_at + 14 * 24 * 60 * 60 * 1000,
+    );
     db.prepare("INSERT INTO memberships (user_id, circle_id, joined_at) VALUES (?, ?, ?)").run(
       userId,
       circle.id,
@@ -325,11 +355,12 @@ export function insertSocial(
     lat: number | null;
     lng: number | null;
     place?: string;
+    startsAt?: number | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng, place)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng, place, starts_at, reminded_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
   ).run(
     social.id,
     social.circleId,
@@ -341,6 +372,7 @@ export function insertSocial(
     social.lat,
     social.lng,
     social.place ?? "",
+    social.startsAt ?? null,
   );
 }
 
@@ -364,8 +396,9 @@ export function updateSocial(
   expiresAt: number,
   lastNotifiedAt: number,
   where?: { point: { lat: number; lng: number } | null; place: string },
+  schedule?: { startsAt: number | null; remindedAt: number | null },
 ): void {
-  if (!where) {
+  if (!where && !schedule) {
     db.prepare("UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ? WHERE id = ?").run(
       note,
       expiresAt,
@@ -374,8 +407,20 @@ export function updateSocial(
     );
     return;
   }
+  if (!where) {
+    db.prepare(
+      "UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, starts_at = ?, reminded_at = ? WHERE id = ?",
+    ).run(note, expiresAt, lastNotifiedAt, schedule?.startsAt ?? null, schedule?.remindedAt ?? null, id);
+    return;
+  }
+  if (!schedule) {
+    db.prepare(
+      "UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, lat = ?, lng = ?, place = ? WHERE id = ?",
+    ).run(note, expiresAt, lastNotifiedAt, where.point?.lat ?? null, where.point?.lng ?? null, where.place, id);
+    return;
+  }
   db.prepare(
-    "UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, lat = ?, lng = ?, place = ? WHERE id = ?",
+    `UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, lat = ?, lng = ?, place = ?, starts_at = ?, reminded_at = ? WHERE id = ?`,
   ).run(
     note,
     expiresAt,
@@ -383,6 +428,8 @@ export function updateSocial(
     where.point?.lat ?? null,
     where.point?.lng ?? null,
     where.place,
+    schedule.startsAt,
+    schedule.remindedAt,
     id,
   );
 }
@@ -404,7 +451,7 @@ export function getSocial(db: DatabaseSync, id: string): SocialRow | undefined {
 export function listSocialJoins(db: DatabaseSync, socialId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, j.joined_at
+    `SELECT u.id, u.name, j.joined_at, j.reply, j.eta_min
      FROM social_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.social_id = ?
@@ -418,11 +465,46 @@ export function hasSocialJoin(db: DatabaseSync, socialId: string, userId: string
 }
 
 export function addSocialJoin(db: DatabaseSync, socialId: string, userId: string, joinedAt: number): void {
-  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at) VALUES (?, ?, ?)").run(
+  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min) VALUES (?, ?, ?, 'join', NULL)").run(
     socialId,
     userId,
     joinedAt,
   );
+}
+
+export function getSocialReply(
+  db: DatabaseSync,
+  socialId: string,
+  userId: string,
+): { reply: string; eta_min: number | null } | undefined {
+  return one(db, "SELECT reply, eta_min FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
+}
+
+export function setSocialReply(
+  db: DatabaseSync,
+  socialId: string,
+  userId: string,
+  joinedAt: number,
+  reply: string,
+  etaMin: number | null,
+): void {
+  db.prepare(
+    `INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(social_id, user_id) DO UPDATE SET reply = excluded.reply, eta_min = excluded.eta_min`,
+  ).run(socialId, userId, joinedAt, reply, etaMin);
+}
+
+export function listComingUserIds(db: DatabaseSync, socialId: string): string[] {
+  return all<{ user_id: string }>(
+    db,
+    "SELECT user_id FROM social_joins WHERE social_id = ? AND reply IN ('join', 'coming')",
+    socialId,
+  ).map((row) => row.user_id);
+}
+
+export function rotateInvite(db: DatabaseSync, circleId: string, code: string, expiresAt: number): void {
+  db.prepare("UPDATE circles SET invite_code = ?, invite_expires_at = ? WHERE id = ?").run(code, expiresAt, circleId);
 }
 
 export function removeSocialJoin(db: DatabaseSync, socialId: string, userId: string): void {
@@ -606,7 +688,7 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 
 const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, s.note,
-         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place
+         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
