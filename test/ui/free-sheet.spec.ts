@@ -1414,6 +1414,51 @@ test("you can edit your name, and an admin can edit the circle name", { timeout:
   }
 });
 
+test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => {
+  for (const agent of [CHROME_UA, FIREFOX_UA]) {
+    const page = await phonePage(agent, false);
+    try {
+      await signIn(page, "Alex");
+      const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+      await fetch(`${baseUrl}/api/socials`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ note: "Coffee" }),
+      });
+      await page.reload();
+      const later = page.locator(".sheet button", { hasText: "Not now" });
+      if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+      const chat = page.getByRole("button", { name: "Chat", exact: true }).first();
+      await chat.waitFor();
+      const height = await chat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+      assert.ok(height >= 44, `chat is ${height}px`);
+      await chat.click();
+      await page.getByRole("heading", { name: "Coffee" }).waitFor();
+      await page.locator("#chat-input").fill("See you there");
+      await page.getByRole("button", { name: "Send" }).click();
+      await page.getByText("See you there").waitFor();
+      if (agent === CHROME_UA) await page.screenshot({ path: shot("chat-thread.png") });
+      await page.evaluate(() => {
+        window.__setVisualViewport({ height: 360, offsetTop: 0 });
+      });
+      await page.locator("#chat-input").focus();
+      await page.waitForTimeout(500);
+      const box = await page.locator(".chat-compose").boundingBox();
+      assert.ok(box);
+      assert.ok(box.y + box.height <= 364, JSON.stringify(box));
+      assert.ok(box.height >= 44, JSON.stringify(box));
+      await page.getByRole("button", { name: "Back" }).click();
+      await page.getByRole("button", { name: "Circle", exact: true }).click();
+      const circleChat = page.getByRole("button", { name: "Circle chat" });
+      await circleChat.waitFor();
+      const circleHeight = await circleChat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+      assert.ok(circleHeight >= 44, `circle chat is ${circleHeight}px`);
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },
