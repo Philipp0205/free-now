@@ -10,29 +10,39 @@
   --phone: 480px;
   --tab: calc(64px + env(safe-area-inset-bottom));
   --kb-offset: 0px;
+  --vv-height: 100dvh;
+  --sheet-margin: 12px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 html { touch-action: manipulation; }
-body { min-height: 100dvh; }
+body {
+  min-height: 100svh;
+  min-height: 100dvh;
+}
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.55; }
 :focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; }
 ::placeholder { color: var(--faint); }
 
-#app { min-height: 100dvh; }
+#app {
+  min-height: 100svh;
+  min-height: 100dvh;
+}
 
 .phone {
   width: min(var(--phone), 100%);
   margin: 0 auto;
+  min-height: 100svh;
   min-height: 100dvh;
   padding: calc(8px + env(safe-area-inset-top)) 0 var(--tab);
 }
 
 .boot, .gate {
+  min-height: 100svh;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -149,7 +159,20 @@ button:disabled { cursor: default; opacity: 0.55; }
   overflow: hidden;
   isolation: isolate;
 }
-.card-now { height: 176px; }
+.card-now {
+  height: auto;
+  min-height: 176px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.card-now .card-copy {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  padding: 16px;
+}
 .card-bg, .card-shade { position: absolute; inset: 0; }
 .card-now .card-bg {
   background:
@@ -413,6 +436,10 @@ input[type="text"], input[type="url"], input[type="time"] {
   border-top: 0.5px solid rgba(255, 255, 255, 0.08);
   z-index: 20;
 }
+html.kb-open .tabbar {
+  visibility: hidden;
+  pointer-events: none;
+}
 .tab {
   appearance: none;
   border: 0;
@@ -456,13 +483,19 @@ input[type="text"], input[type="url"], input[type="time"] {
   bottom: var(--kb-offset);
   transform: translateX(-50%);
   width: min(var(--phone), 100%);
-  max-height: calc(100dvh - var(--kb-offset) - env(safe-area-inset-top) - 8px);
+  max-height: calc(100svh - var(--sheet-margin));
+  max-height: calc(var(--vv-height, 100dvh) - var(--sheet-margin) - env(safe-area-inset-top, 0px));
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--sheet);
   border-radius: 22px 22px 0 0;
   padding: 8px 20px calc(20px + env(safe-area-inset-bottom));
   z-index: 31;
+}
+.sheet input,
+.sheet textarea {
+  scroll-margin: 12px;
 }
 .when, .reply-row, .eta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .chip {
@@ -495,7 +528,7 @@ input[type="text"], input[type="url"], input[type="time"] {
 .where-k { color: var(--muted); font-size: 15px; flex: none; }
 .where-v { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .where-picker { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.where-results { display: flex; flex-direction: column; gap: 6px; }
+.where-results { display: flex; flex-direction: column; gap: 6px; scroll-margin: 12px; }
 .where-hit, .where-action {
   width: 100%;
   text-align: left;
@@ -546,7 +579,7 @@ input[type="text"], input[type="url"], input[type="time"] {
   text-align: left;
   border: 0;
   color: #fff;
-  background: rgba(28, 28, 30, 0.96);
+  background: #1c1c1e;
   border-radius: 16px;
   padding: 8px 10px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
@@ -694,6 +727,7 @@ input[type="text"], input[type="url"], input[type="time"] {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0;
+  transform: translateY(0.5px);
 }
 .pin-social {
   background: radial-gradient(circle at 32% 28%, #ffb0e4, #ff2d78 46%, #ff4d3a 78%, #ff7a2a);

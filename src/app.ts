@@ -52,6 +52,7 @@ import {
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
 import { freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
+import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import type { PushSender } from "./push.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 
@@ -376,7 +377,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       createdAt: deps.now(),
     });
     console.log(`push subscribe user=${me.id} status=ok`);
-    sendJson(res, 204, {});
+    sendEmpty(res, 204);
     return;
   }
 
@@ -452,6 +453,7 @@ async function publishSocial(
   let created = false;
   let socialId: string;
   let shouldNotify = true;
+  let shifted = false;
   // A missing note on a live social keeps the current text. The original
   // createdAt stays put; expiry moves to now + TTL so the window is a full
   // TTL from this buzz and the two timestamps still describe one social.
@@ -492,7 +494,8 @@ async function publishSocial(
     const noteChanged = existing.note !== nextNote;
     const whereChanged = !keepWhere && (existing.place !== nextPlace || existing.lat !== (nextPoint?.lat ?? null) || existing.lng !== (nextPoint?.lng ?? null));
     const startChanged = (existing.starts_at ?? null) !== nextStart;
-    shouldNotify = noteChanged || whereChanged || startChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs;
+    shifted = startChanged;
+    shouldNotify = startChanged || (noteChanged || whereChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs);
     updateSocial(
       deps.db,
       existing.id,
@@ -513,7 +516,7 @@ async function publishSocial(
       recipients.map((member) => ({
         userId: member.id,
         title,
-        body: freePushBody(user.name, nextPlace, fromTime),
+        body: freePushBody(user.name, nextPlace, fromTime, shifted),
         url: `/?social=${socialId}`,
         kind: "social",
         refId: socialId,
@@ -572,19 +575,30 @@ async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Re
   }
   const previous = getSocialReply(deps.db, social.id, user.id);
   const changed = !previous || previous.reply !== reply || (previous.eta_min ?? null) !== eta;
-  setSocialReply(deps.db, social.id, user.id, previous ? now : now, reply, eta);
-  if (changed) {
-    await notifyUsers(deps.db, deps.push, now, [
-      {
-        userId: social.creator_id,
-        title: socialTitle(social.note),
-        body: replyPushBody(user.name, reply, eta),
-        kind: "reply",
-        refId: social.id,
-        tag: `reply:${social.id}:${user.id}`,
-        url: `/?social=${social.id}`,
-      },
-    ]);
+  setSocialReply(deps.db, social.id, user.id, now, reply, eta);
+  const key = `${social.id}:${user.id}`;
+  const becameComing = reply === "coming" && previous?.reply !== "coming";
+  const etaOnly = previous?.reply === "coming" && reply === "coming";
+  const held = cancelReplyPush(key);
+  const notice = () => notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: social.creator_id,
+      title: socialTitle(social.note),
+      body: replyPushBody(user.name, reply, eta),
+      kind: "reply",
+      refId: social.id,
+      tag: `reply:${social.id}:${user.id}`,
+      url: `/?social=${social.id}`,
+    },
+  ]);
+  if (held || (becameComing && eta != null)) {
+    await notice();
+  } else if (becameComing) {
+    scheduleReplyPush(key, notice);
+  } else if (etaOnly) {
+    /* The host already got the coming push. An ETA a moment later stays on the card. */
+  } else if (changed) {
+    await notice();
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
@@ -847,12 +861,15 @@ const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 function liveInvite(db: DatabaseSync, code: string, now: number): CircleRow | undefined {
   const circle = getCircleByCode(db, code);
   if (!circle) return undefined;
-  if (circle.invite_expires_at != null && circle.invite_expires_at <= now) return undefined;
+  if (circle.invite_expires_at == null || circle.invite_expires_at <= now) return undefined;
   return circle;
 }
 
 /** Undefined keeps a scheduled start. Null means free right now. A clock time is later today in APP_TZ. */
 function readStart(body: Record<string, unknown>, now: number, tz: string): number | null | undefined {
+  if (body.later === true && body.startsAt == null && body.startsInMin == null) {
+    throw new HttpError(400, "pick a time later today");
+  }
   if (!Object.prototype.hasOwnProperty.call(body, "startsAt") && !Object.prototype.hasOwnProperty.call(body, "startsInMin")) {
     return undefined;
   }
