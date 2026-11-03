@@ -29,6 +29,7 @@ export type SocialRow = {
   last_notified_at: number;
   lat: number | null;
   lng: number | null;
+  place: string;
 };
 
 export type JoinRow = {
@@ -107,7 +108,8 @@ CREATE TABLE IF NOT EXISTS socials (
   expires_at INTEGER NOT NULL,
   last_notified_at INTEGER NOT NULL,
   lat REAL,
-  lng REAL
+  lng REAL,
+  place TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS social_joins (
@@ -192,6 +194,7 @@ export function openDb(dbPath: string): DatabaseSync {
   db.exec(SCHEMA);
   ensureColumn(db, "socials", "lat", "lat REAL");
   ensureColumn(db, "socials", "lng", "lng REAL");
+  ensureColumn(db, "socials", "place", "place TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "plans", "lat", "lat REAL");
   ensureColumn(db, "plans", "lng", "lng REAL");
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
@@ -321,11 +324,12 @@ export function insertSocial(
     expiresAt: number;
     lat: number | null;
     lng: number | null;
+    place?: string;
   },
 ): void {
   db.prepare(
-    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng, place)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     social.id,
     social.circleId,
@@ -336,6 +340,7 @@ export function insertSocial(
     social.createdAt,
     social.lat,
     social.lng,
+    social.place ?? "",
   );
 }
 
@@ -358,9 +363,9 @@ export function updateSocial(
   note: string,
   expiresAt: number,
   lastNotifiedAt: number,
-  point?: { lat: number; lng: number } | null,
+  where?: { point: { lat: number; lng: number } | null; place: string },
 ): void {
-  if (point === undefined) {
+  if (!where) {
     db.prepare("UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ? WHERE id = ?").run(
       note,
       expiresAt,
@@ -370,8 +375,16 @@ export function updateSocial(
     return;
   }
   db.prepare(
-    "UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, lat = ?, lng = ? WHERE id = ?",
-  ).run(note, expiresAt, lastNotifiedAt, point?.lat ?? null, point?.lng ?? null, id);
+    "UPDATE socials SET note = ?, expires_at = ?, last_notified_at = ?, lat = ?, lng = ?, place = ? WHERE id = ?",
+  ).run(
+    note,
+    expiresAt,
+    lastNotifiedAt,
+    where.point?.lat ?? null,
+    where.point?.lng ?? null,
+    where.place,
+    id,
+  );
 }
 
 export function listActiveSocials(db: DatabaseSync, circleId: string, now: number): SocialRow[] {
@@ -564,7 +577,9 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: 
 
 function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
   db.prepare(
-    "UPDATE socials SET lat = NULL, lng = NULL WHERE expires_at <= ? AND (lat IS NOT NULL OR lng IS NOT NULL)",
+    `UPDATE socials
+     SET lat = NULL, lng = NULL, place = ''
+     WHERE expires_at <= ? AND (lat IS NOT NULL OR lng IS NOT NULL OR place != '')`,
   ).run(now);
 }
 
@@ -591,7 +606,7 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 
 const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, s.note,
-         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng
+         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;

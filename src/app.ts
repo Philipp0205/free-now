@@ -47,7 +47,8 @@ import {
   type SocialRow,
   type UserRow,
 } from "./db.js";
-import { notifyUsers, socialTitle } from "./notify.js";
+import { reversePlace, searchPlaces } from "./geocode.js";
+import { freePushBody, notifyUsers, socialTitle } from "./notify.js";
 import type { PushSender } from "./push.js";
 import { addDays, isoDate, whenLabel } from "./time.js";
 
@@ -176,12 +177,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!buzzer) throw new HttpError(404, "unknown token");
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
-    const result = await publishSocial(deps, buzzer, note, readPoint(body));
+    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
 
   const me = requireUser(user);
+
+  if (method === "GET" && pathname === "/api/geocode") {
+    const q = url.searchParams.get("q")?.trim() ?? "";
+    const lat = Number(url.searchParams.get("lat"));
+    const lng = Number(url.searchParams.get("lng"));
+    if (q) {
+      if (q.length > 80) throw new HttpError(400, "query is too long");
+      sendJson(res, 200, { results: await searchPlaces(q) });
+      return;
+    }
+    if (url.searchParams.has("lat") || url.searchParams.has("lng")) {
+      sendJson(res, 200, { place: await reversePlace(lat, lng) });
+      return;
+    }
+    throw new HttpError(400, "query is required");
+  }
 
   if (method === "POST" && pathname === "/api/auth/logout") {
     rotateSession(deps.db, me.id, sha256(randomToken()));
@@ -246,7 +263,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, me, note, readPoint(body));
+    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
@@ -390,6 +407,7 @@ async function publishSocial(
   user: UserRow,
   note: string | undefined,
   point?: { lat: number; lng: number } | null,
+  place?: string,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id);
   const now = deps.now();
@@ -400,7 +418,13 @@ async function publishSocial(
   // A missing note on a live social keeps the current text. The original
   // createdAt stays put; expiry moves to now + TTL so the window is a full
   // TTL from this buzz and the two timestamps still describe one social.
+  // A missing place and missing coordinates keep the saved meetup.
   const nextNote = note === undefined ? (existing?.note ?? "") : note;
+  const keepWhere = place === undefined && point === undefined;
+  const nextPlace = place === undefined ? (existing?.place ?? "") : place;
+  const nextPoint = point === undefined
+    ? (existing?.lat == null || existing?.lng == null ? null : { lat: existing.lat, lng: existing.lng })
+    : point;
   if (!existing) {
     created = true;
     socialId = crypto.randomUUID();
@@ -411,21 +435,23 @@ async function publishSocial(
       note: nextNote,
       createdAt: now,
       expiresAt: now + deps.config.socialTtlMs,
-      lat: point?.lat ?? null,
-      lng: point?.lng ?? null,
+      lat: nextPoint?.lat ?? null,
+      lng: nextPoint?.lng ?? null,
+      place: nextPlace,
     });
   } else {
     socialId = existing.id;
     const gap = now - existing.last_notified_at;
     const noteChanged = existing.note !== nextNote;
-    shouldNotify = noteChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs;
+    const whereChanged = !keepWhere && (existing.place !== nextPlace || existing.lat !== (nextPoint?.lat ?? null) || existing.lng !== (nextPoint?.lng ?? null));
+    shouldNotify = noteChanged || whereChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs;
     updateSocial(
       deps.db,
       existing.id,
       nextNote,
       now + deps.config.socialTtlMs,
       shouldNotify ? now : existing.last_notified_at,
-      point,
+      keepWhere ? undefined : { point: nextPoint, place: nextPlace },
     );
   }
   if (shouldNotify) {
@@ -438,7 +464,8 @@ async function publishSocial(
       recipients.map((member) => ({
         userId: member.id,
         title,
-        body: `${user.name} is free now`,
+        body: freePushBody(user.name, nextPlace),
+        url: `/?social=${socialId}`,
         kind: "social",
         refId: socialId,
         tag: `social:${socialId}`,
@@ -613,6 +640,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
     note: social.note,
     createdAt: social.created_at,
     expiresAt: social.expires_at,
+    place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
     creator: { id: social.creator_id, name: social.creator_name },
     joined: listSocialJoins(db, social.id).map((join) => ({
@@ -706,7 +734,7 @@ function pointPayload(lat: number | null, lng: number | null): { lat: number; ln
   return { lat, lng };
 }
 
-/** ~100 m. Undefined means the client did not mention location, so a refresh keeps the saved pin. */
+/** ~100 m for a GPS reading. An explicitly chosen place keeps finer coordinates. Undefined means the client did not mention location. */
 function readPoint(body: Record<string, unknown>): { lat: number; lng: number } | null | undefined {
   const hasLat = Object.prototype.hasOwnProperty.call(body, "lat");
   const hasLng = Object.prototype.hasOwnProperty.call(body, "lng");
@@ -715,16 +743,23 @@ function readPoint(body: Record<string, unknown>): { lat: number; lng: number } 
   if (!hasLat || !hasLng || body.lat == null || body.lng == null) {
     throw new HttpError(400, "lat and lng are both required");
   }
-  const lat = roundCoord(body.lat, "lat");
-  const lng = roundCoord(body.lng, "lng");
+  const precise = body.precise === true;
+  const lat = roundCoord(body.lat, "lat", precise ? 6 : 3);
+  const lng = roundCoord(body.lng, "lng", precise ? 6 : 3);
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) throw new HttpError(400, "location is out of range");
   return { lat, lng };
 }
 
-function roundCoord(value: unknown, label: string): number {
+function readPlace(body: Record<string, unknown>): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(body, "place")) return undefined;
+  return cleanPlace(body.place);
+}
+
+function roundCoord(value: unknown, label: string, digits: number): number {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) throw new HttpError(400, `${label} is not a number`);
-  return Math.round(number * 1000) / 1000;
+  const scale = 10 ** digits;
+  return Math.round(number * scale) / scale;
 }
 
 function cleanPlace(value: unknown): string {

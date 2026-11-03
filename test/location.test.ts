@@ -114,6 +114,38 @@ test("a plan can name a place and share a pin without putting coordinates in the
   });
 });
 
+test("a meetup place is stored, pushed, and can be a name without a pin", async () => {
+  await withApp(async (port, sent) => {
+    const { alex } = await circle(port);
+    const social = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Coffee?", place: "Café Einstein", lat: 52.520008, lng: 13.404954, precise: true },
+      status: 201,
+    });
+    assert.equal(social.social.place, "Café Einstein");
+    assert.deepEqual(social.social.location, { lat: 52.520008, lng: 13.404954 });
+    assert.equal(sent[0].body, "Alex is free – meet at Café Einstein");
+    assert.equal(sent[0].url, `/?social=${social.social.id}`);
+    assert.equal(JSON.stringify(sent[0]).includes("52.52"), false);
+
+    const named = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Coffee?", place: "the roof", lat: null, lng: null },
+      status: 200,
+    });
+    assert.equal(named.social.place, "the roof");
+    assert.equal(named.social.location, null);
+
+    const kept = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Coffee?" },
+      status: 200,
+    });
+    assert.equal(kept.social.place, "the roof");
+    assert.equal(kept.social.location, null);
+  });
+});
+
 test("map tiles default to a dark basemap and can be overridden", async () => {
   const defaults = loadConfig({});
   assert.equal(
@@ -155,6 +187,7 @@ test("an expired social row has NULL coordinates while the row remains", () => {
     expiresAt: now - 1,
     lat: 52.52,
     lng: 13.405,
+    place: "Café X",
   });
   insertSocial(db, {
     id: "live",
@@ -167,14 +200,16 @@ test("an expired social row has NULL coordinates while the row remains", () => {
     lng: 13.405,
   });
   sweep(db, now, "2026-05-01", "2026-06-02");
-  const row = db.prepare("SELECT lat, lng, note FROM socials WHERE id = ?").get("s") as {
+  const row = db.prepare("SELECT lat, lng, note, place FROM socials WHERE id = ?").get("s") as {
     lat: number | null;
     lng: number | null;
     note: string;
+    place: string;
   };
   assert.equal(row.lat, null);
   assert.equal(row.lng, null);
   assert.equal(row.note, "hi");
+  assert.equal(row.place, "");
   const live = db.prepare("SELECT lat, lng FROM socials WHERE id = ?").get("live") as { lat: number; lng: number };
   assert.equal(live.lat, 52.52);
   assert.equal(live.lng, 13.405);
@@ -190,14 +225,17 @@ test("an expired social row has NULL coordinates while the row remains", () => {
     expiresAt: now,
     lat: 48.137,
     lng: 11.575,
+    place: "Marienplatz",
   });
   assert.equal(listActiveSocials(db, "c", now).some((social) => social.id === "read"), false);
-  const stripped = db.prepare("SELECT lat, lng FROM socials WHERE id = ?").get("read") as {
+  const stripped = db.prepare("SELECT lat, lng, place FROM socials WHERE id = ?").get("read") as {
     lat: number | null;
     lng: number | null;
+    place: string;
   };
   assert.equal(stripped.lat, null);
   assert.equal(stripped.lng, null);
+  assert.equal(stripped.place, "");
   db.close();
 });
 
@@ -259,7 +297,7 @@ test("an older database gains location columns", () => {
   const db = openDb(file);
   const socialCols = db.prepare("PRAGMA table_info(socials)").all().map((row) => (row as { name: string }).name);
   const planCols = db.prepare("PRAGMA table_info(plans)").all().map((row) => (row as { name: string }).name);
-  assert.ok(socialCols.includes("lat") && socialCols.includes("lng"));
+  assert.ok(socialCols.includes("lat") && socialCols.includes("lng") && socialCols.includes("place"));
   assert.ok(planCols.includes("lat") && planCols.includes("lng") && planCols.includes("place"));
   db.close();
   fs.unlinkSync(file);

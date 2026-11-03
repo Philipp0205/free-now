@@ -195,9 +195,9 @@ railway.json    Dockerfile builder and health check
 
 ## Location
 
-Sharing a place is off until someone turns on **Share where I am** when going free, or **Use my location** on a tomorrow plan. The device remembers that choice. While it is on, Hangry takes one reading at the moment you publish. It does not watch your location in the background. The coordinates are rounded to about 100 metres. They are cleared as soon as the social expires, and as soon as a plan's day is over. A place name someone typed is not taken from the pin, so that name stays. If location is denied, the social or plan is still created.
+Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Hangry does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A tomorrow plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
 
-A tomorrow plan can also name a place in words. A push may include that name. It never includes coordinates.
+The push says who is free and, when there is a meetup, where: `Alex is free – meet at Café Einstein`. It never includes coordinates. Tapping it opens that social.
 
 A card with a place does not embed a map. It shows a short line — the place name, or "nearby" — plus the distance when this phone has already allowed location, and an Open in Maps action.
 
@@ -215,4 +215,4 @@ The Map tab (not a switch on Now) shows the same places on a Leaflet map. The de
 - Clearing site data without saving that secret signs you out for good.
 - Invite codes are unguessable enough for a circle of friends and are not rate-limited.
 - "Tomorrow" follows `APP_TZ` (Europe/Berlin unless you set it), not each phone's timezone.
-- Location is optional and rounded to about 100 metres. Coordinates are cleared as soon as a social expires and as soon as a plan's day is over. There is no background tracking.
+- A meetup is optional. Current location is rounded to about 100 metres; a chosen place can keep its coordinates. The social's place and pin are cleared as soon as it expires. There is no background tracking.
