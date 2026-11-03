@@ -1,7 +1,8 @@
-import { installGuide, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
+import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 
 const TOKEN_KEY = "fn_token";
-const IOS_HINT_KEY = "fn_ios_hint_off";
+const INSTALLED_KEY = "fn_installed";
+const INSTALL_LATER_KEY = "fn_install_later";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 const COLORS = ["#ff375f", "#ff9f0a", "#30d158", "#64d2ff", "#bf5af2", "#ff6482", "#ac8e68", "#5e5ce6"];
 
@@ -33,6 +34,8 @@ const state = {
   pushBusy: false,
   pushReminder: null,
   pushSnooze: false,
+  installSheet: false,
+  installPillHidden: false,
 };
 
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
@@ -52,6 +55,13 @@ window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   state.installEvent = event;
   render();
+});
+
+window.addEventListener("appinstalled", () => {
+  localStorage.setItem(INSTALLED_KEY, "1");
+  state.installEvent = null;
+  state.installSheet = false;
+  void considerReminders();
 });
 
 if ("serviceWorker" in navigator) {
@@ -83,7 +93,7 @@ async function boot() {
     state.booting = false;
     render();
     refresh({ initial: true }).catch(() => {});
-    void considerPushReminder();
+    void considerReminders();
   }
 }
 
@@ -208,7 +218,9 @@ function view() {
     root.append(shell());
   }
   if (state.installOpen) root.append(installGuideView());
-  if (state.pushReminder && !state.pushSnooze && !state.sheet && !state.confirm && !state.installOpen) {
+  if (state.installSheet && !state.sheet && !state.confirm && !state.installOpen) {
+    root.append(installSheetView());
+  } else if (state.pushReminder && !state.pushSnooze && !state.sheet && !state.confirm && !state.installOpen) {
     root.append(pushReminderSheet());
   }
   if (state.banner) root.append(banner(state.banner));
@@ -325,8 +337,7 @@ function home() {
       ]),
     ]),
   ];
-  if (showIosHint()) parts.push(iosHint());
-  if (showChromeHint()) parts.push(chromeHint());
+  if (showInstallPill()) parts.push(installPill());
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
@@ -747,55 +758,6 @@ function canEnableNotifications(signals, guide) {
   return false;
 }
 
-function iosHint() {
-  return el("div", { class: "ios-hint" }, [
-    el("div", { class: "ios-hint-body" }, [
-      el("button", {
-        type: "button",
-        text: "Add to Home Screen for notifications",
-        onclick: openInstallGuide,
-      }),
-    ]),
-    el("button", {
-      class: "ios-dismiss",
-      type: "button",
-      "aria-label": "Dismiss",
-      text: "×",
-      onclick: () => {
-        localStorage.setItem(IOS_HINT_KEY, "1");
-        state.iosHintOpen = false;
-        render();
-      },
-    }),
-  ]);
-}
-
-function showChromeHint() {
-  const signals = currentSignals();
-  return signals.platform === "android" && signals.canInstall === false;
-}
-
-function chromeHint() {
-  return el("div", { class: "ios-hint" }, [
-    el("div", { class: "ios-hint-body" }, [
-      el("p", { text: "For notifications, open Hangry in Chrome and tap Install app." }),
-      el("button", {
-        type: "button",
-        text: "Copy link",
-        onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
-      }),
-    ]),
-  ]);
-}
-
-function showIosHint() {
-  if (localStorage.getItem(IOS_HINT_KEY) === "1") return false;
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
-    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-  return ios && !standalone;
-}
-
 function field(label, id, value, onValue, attrs = {}) {
   return el("label", { class: "field" }, [
     el("span", { text: label }),
@@ -903,7 +865,7 @@ async function onStart(event) {
     state.pushSnooze = false;
     render();
     refresh({ initial: true }).catch(() => {});
-    void considerPushReminder();
+    void considerReminders();
   } catch (error) {
     state.error = error.message;
     render();
@@ -922,7 +884,7 @@ async function onRecover(event) {
     state.pushSnooze = false;
     render();
     refresh({ initial: true }).catch(() => {});
-    void considerPushReminder();
+    void considerReminders();
   } catch (error) {
     state.error = error.message;
     render();
@@ -935,6 +897,7 @@ async function onCreateCircle(event) {
     await api("/api/circles", { method: "POST", body: { name: state.circleDraft || "friends" } });
     state.me = await api("/api/me");
   });
+  void considerReminders();
 }
 
 async function onJoinCircle(event) {
@@ -944,6 +907,7 @@ async function onJoinCircle(event) {
     state.me = await api("/api/me");
     if (state.pendingCode) history.replaceState(null, "", "/");
   });
+  void considerReminders();
 }
 
 async function onFree(event) {
@@ -1097,8 +1061,37 @@ async function onTestPush() {
   });
 }
 
+function isInstalled() {
+  if (localStorage.getItem(INSTALLED_KEY) === "1") return true;
+  return window.matchMedia("(display-mode: standalone)").matches
+    || window.matchMedia("(display-mode: fullscreen)").matches
+    || window.navigator.standalone === true;
+}
+
+function installDue() {
+  return installReminderDue(localStorage.getItem(INSTALL_LATER_KEY), Date.now());
+}
+
+async function considerReminders() {
+  if (!state.token || !state.me) return;
+  const signals = currentSignals();
+  if (!isInstalled() && state.me.circle && installDue()) {
+    state.installSheet = true;
+    state.pushReminder = null;
+    render();
+    return;
+  }
+  if (state.installSheet) return;
+  if (!isInstalled() && needsInstallForPush(signals)) {
+    state.pushReminder = null;
+    render();
+    return;
+  }
+  await considerPushReminder();
+}
+
 async function considerPushReminder() {
-  if (!state.token || !state.me || state.pushSnooze) return;
+  if (!state.token || !state.me || state.pushSnooze || state.installSheet) return;
   const signals = currentSignals();
   if (signals.permission !== "granted") {
     state.pushReminder = pushReminder(signals, { hasSubscription: false, serverKnows: false });
@@ -1168,9 +1161,79 @@ function pushReminderSheet() {
 async function onInstall() {
   if (!state.installEvent) return;
   state.installEvent.prompt();
-  await state.installEvent.userChoice;
+  const choice = await state.installEvent.userChoice;
   state.installEvent = null;
+  if (choice?.outcome === "accepted") {
+    localStorage.setItem(INSTALLED_KEY, "1");
+    state.installSheet = false;
+  }
   render();
+  void considerReminders();
+}
+
+function showInstallPill() {
+  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden;
+}
+
+function installPill() {
+  return el("div", { class: "install-pill" }, [
+    el("button", {
+      class: "text",
+      type: "button",
+      text: "Install Hangry to get notifications",
+      onclick: () => {
+        state.installSheet = true;
+        state.pushReminder = null;
+        render();
+      },
+    }),
+    el("button", {
+      class: "ios-dismiss",
+      type: "button",
+      "aria-label": "Hide install reminder",
+      text: "×",
+      onclick: () => {
+        state.installPillHidden = true;
+        render();
+      },
+    }),
+  ]);
+}
+
+function dismissInstallSheet() {
+  localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
+  state.installSheet = false;
+  render();
+  void considerReminders();
+}
+
+function installSheetView() {
+  const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
+  const actions = [];
+  if (prompt.offerInstall) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: () => onInstall() }));
+  }
+  if (prompt.copyLink) {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: dismissInstallSheet }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissInstallSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": prompt.title }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: prompt.title }),
+      el("p", { class: "help", text: prompt.lede }),
+      prompt.steps.length
+        ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 async function onRotateBuzz() {
