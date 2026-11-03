@@ -702,7 +702,7 @@ html.kb-open .tabbar {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0;
-  transform: translateY(1px);
+  transform: translateY(0.5px);
 }
 .pin-social {
   background: radial-gradient(circle at 32% 28%, #ffb0e4, #ff2d78 46%, #ff4d3a 78%, #ff7a2a);
