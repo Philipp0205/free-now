@@ -214,6 +214,12 @@ The Map tab (not a switch on Now) shows the same places on a Leaflet map. The de
 
 Place search goes through the server to Photon, then Nominatim, with a Hangry user-agent and about one request a second. When this phone has a location, or the map has been moved, results prefer places within about 30 km and put bars, cafés, and other meeting spots ahead of streets and regions. Each hit shows the distance and a short address.
 
+## Photos
+
+Whoever starts a social or a tomorrow plan can add up to six photos from their phone's gallery in the same sheet. The app shrinks each one to a JPEG of about 1600 px before it uploads. On the card, the photos sit in the middle as a swipeable frame, with the people who are in floating beside it. The expand button opens them full screen.
+
+Photos are stored in the SQLite database and are only served to signed-in members of the same circle. Only the host can add or remove them. They are deleted once the social ends, or after the plan's day, the same way the meetup pin is.
+
 ## Limitations
 
 - One circle per person. Joining another means leaving the first. The last person to leave deletes the circle.

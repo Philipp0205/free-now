@@ -67,7 +67,16 @@ const state = {
   whenMode: "now",
   startChoice: "",
   etaFor: "",
+  photoDrafts: [],
+  photoRemovals: [],
+  photoBusy: false,
+  lightbox: null,
 };
+
+const PHOTO_EDGE = 1600;
+const PHOTOS_PER_EVENT = 6;
+const photoUrls = new Map();
+const photoIndex = new Map();
 
 const deepLinkParams = new URLSearchParams(location.search);
 const planFocus = deepLinkParams.get("plan");
@@ -86,6 +95,9 @@ const ICONS = {
   person: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 19.2c.8-2.8 3.2-4.2 6.4-4.2s5.6 1.4 6.4 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
+  expand: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5h5v5M10 19H5v-5M19 5l-6 6M5 19l6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  photo: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3.5" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="m4.5 17 4.6-4.4 3.4 3.1 2.6-2.3 4.4 3.9" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
@@ -282,7 +294,7 @@ async function refresh({ initial = false } = {}) {
   if (consumeDeepLink()) return;
   if (signature === state.signature) return;
   state.signature = signature;
-  if (state.sheet || state.installOpen || isTyping()) return;
+  if (state.sheet || state.installOpen || state.lightbox || isTyping()) return;
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
@@ -484,9 +496,10 @@ async function api(path, options = {}) {
     method: options.method ?? "GET",
     headers: {
       ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(options.raw ? { "content-type": options.raw.type } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.raw ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
   });
   } catch {
     const error = new Error("You're offline. Retrying…");
@@ -566,6 +579,7 @@ function render() {
     });
   }
   if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
+  restorePhotoScroll();
   bindSheetSwipe();
   syncSheetHistory();
   if (state.focusSocial) {
@@ -603,6 +617,7 @@ function view() {
   }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
+  if (state.lightbox) root.append(lightboxView());
   if (state.error && state.error !== TIME_LATER_ERROR && !RETRY_NOTE.has(state.error)) {
     root.append(el("div", { class: "toast", role: "status", text: state.error }));
   }
@@ -809,8 +824,10 @@ function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
   const people = [social.creator, ...social.joined.filter((person) => person.reply !== "declined")];
   const upcoming = social.startsAt && social.startsAt > Date.now();
+  const photos = social.photos?.length > 0;
+  const base = upcoming ? "card card-now later" : "card card-now";
   return el("article", {
-    class: state.focusSocial === social.id ? "card card-now focused" : upcoming ? "card card-now later" : "card card-now",
+    class: `${state.focusSocial === social.id ? "card card-now focused" : base}${photos ? " has-photos" : ""}`,
     "data-social": social.id,
   }, [
     el("div", { class: "card-bg" }),
@@ -818,7 +835,7 @@ function socialCard(social) {
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
       : null,
     el("div", { class: "card-copy" }, [
-      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+      photos ? photoStage(social, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
       el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
@@ -831,13 +848,16 @@ function socialCard(social) {
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const people = [plan.creator, ...plan.joined];
-  return el("article", { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
+  const photos = plan.photos?.length > 0;
+  return el("article", photos
+    ? { class: "card card-now card-plan has-photos" }
+    : { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
       : null,
     el("div", { class: "card-copy" }, [
-      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+      photos ? photoStage(plan, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
@@ -845,6 +865,226 @@ function planCard(plan) {
       mine ? null : planReplyButtons(plan),
     ]),
   ]);
+}
+
+/** The host's gallery photos, centred on the card, with the people who are in floating beside them. */
+function photoStage(item, people) {
+  return el("div", { class: "photo-stage" }, [
+    avatarCloud(people),
+    photoFrame(item),
+  ]);
+}
+
+function avatarCloud(people) {
+  const shown = people.slice(0, 3);
+  const extra = people.length - shown.length;
+  return el("div", { class: "avatar-cloud", "aria-label": people.map((person) => person.name).join(", ") }, [
+    ...shown.map((person, index) => avatar(person, [40, 30, 36][index], `cloud-${index}`)),
+    extra > 0 ? el("span", { class: "avatar cloud-more", text: `+${extra}` }) : null,
+  ]);
+}
+
+function photoFrame(item) {
+  const photos = item.photos;
+  const strip = el("div", {
+    class: "photo-strip-view",
+    "data-photos": item.id,
+    onscroll: (event) => {
+      const node = event.currentTarget;
+      const index = Math.round(node.scrollLeft / Math.max(1, node.clientWidth));
+      photoIndex.set(item.id, index);
+      node.parentElement?.querySelectorAll(".photo-dot").forEach((dot, at) => dot.classList.toggle("on", at === index));
+    },
+  }, photos.map((photo, index) =>
+    el("button", {
+      class: "photo-slide",
+      type: "button",
+      "aria-label": `Open photo ${index + 1} of ${photos.length}`,
+      onclick: () => openLightbox(photos, index),
+    }, [photoImg(photo.id)]),
+  ));
+  const current = Math.min(photoIndex.get(item.id) ?? 0, photos.length - 1);
+  return el("div", { class: "photo-frame" }, [
+    strip,
+    el("button", {
+      class: "photo-expand",
+      type: "button",
+      "aria-label": "Show photos full screen",
+      onclick: () => openLightbox(photos, photoIndex.get(item.id) ?? 0),
+    }, [icon("expand")]),
+    photos.length > 1
+      ? el("div", { class: "photo-dots", "aria-hidden": "true" }, photos.map((_, index) =>
+          el("span", { class: index === current ? "photo-dot on" : "photo-dot" })))
+      : null,
+  ]);
+}
+
+function restorePhotoScroll() {
+  document.querySelectorAll("[data-photos]").forEach((node) => {
+    const index = photoIndex.get(node.getAttribute("data-photos")) ?? 0;
+    if (index) node.scrollLeft = index * node.clientWidth;
+  });
+  const box = document.querySelector(".lightbox-strip");
+  if (box && state.lightbox) box.scrollLeft = state.lightbox.index * box.clientWidth;
+}
+
+/** Photos need the session header, so they are fetched once and shown from an object URL. */
+function photoImg(id, extra = {}) {
+  const img = el("img", { alt: "", decoding: "async", draggable: "false", "data-photo": id, ...extra });
+  const url = photoUrls.get(id);
+  if (url) img.src = url;
+  else void loadPhoto(id);
+  return img;
+}
+
+async function loadPhoto(id) {
+  if (photoUrls.has(id)) return;
+  photoUrls.set(id, "");
+  try {
+    const response = await fetch(`/api/photos/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${state.token}` },
+    });
+    if (!response.ok) throw new Error(String(response.status));
+    const url = URL.createObjectURL(await response.blob());
+    photoUrls.set(id, url);
+    document.querySelectorAll(`img[data-photo="${CSS.escape(id)}"]`).forEach((img) => { img.src = url; });
+  } catch {
+    photoUrls.delete(id);
+  }
+}
+
+function openLightbox(photos, index) {
+  state.lightbox = { photos, index };
+  render();
+}
+
+function closeLightbox() {
+  state.lightbox = null;
+  render();
+}
+
+function lightboxView() {
+  const { photos, index } = state.lightbox;
+  return el("div", { class: "lightbox", role: "dialog", "aria-modal": "true", "aria-label": "Photos" }, [
+    el("div", {
+      class: "lightbox-strip",
+      onscroll: (event) => {
+        const node = event.currentTarget;
+        const at = Math.round(node.scrollLeft / Math.max(1, node.clientWidth));
+        if (!state.lightbox || at === state.lightbox.index) return;
+        state.lightbox.index = at;
+        const count = document.querySelector(".lightbox-count");
+        if (count) count.textContent = `${at + 1} / ${photos.length}`;
+      },
+    }, photos.map((photo) => el("div", { class: "lightbox-slide" }, [photoImg(photo.id)]))),
+    el("button", { class: "lightbox-close", type: "button", "aria-label": "Close", onclick: closeLightbox }, [icon("close")]),
+    photos.length > 1 ? el("span", { class: "lightbox-count", text: `${index + 1} / ${photos.length}` }) : null,
+  ]);
+}
+
+/** Existing photos on the social being edited. A new plan has none yet. */
+function sheetPhotos() {
+  if (state.sheet !== "free") return [];
+  return (mySocial()?.photos ?? []).filter((photo) => !state.photoRemovals.includes(photo.id));
+}
+
+function photoBlock() {
+  const kept = sheetPhotos();
+  const room = PHOTOS_PER_EVENT - kept.length - state.photoDrafts.length;
+  const thumb = (img, label, onRemove) => el("div", { class: "photo-thumb" }, [
+    img,
+    el("button", { class: "photo-remove", type: "button", "aria-label": label, onclick: onRemove }, [icon("close")]),
+  ]);
+  return el("div", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", text: "Photos (optional)" }),
+    el("div", { class: "photo-picker" }, [
+      ...kept.map((photo) => thumb(photoImg(photo.id), "Remove photo", () => {
+        state.photoRemovals = [...state.photoRemovals, photo.id];
+        render();
+      })),
+      ...state.photoDrafts.map((draft) => thumb(el("img", { src: draft.url, alt: "" }), "Remove photo", () => {
+        URL.revokeObjectURL(draft.url);
+        state.photoDrafts = state.photoDrafts.filter((item) => item !== draft);
+        render();
+      })),
+      room > 0
+        ? el("label", { class: "photo-add" }, [
+            icon("photo"),
+            el("span", { text: kept.length || state.photoDrafts.length ? "More" : "Add" }),
+            el("input", { class: "photo-input", type: "file", accept: "image/*", multiple: "", onchange: onPickPhotos }),
+          ])
+        : null,
+    ]),
+  ]);
+}
+
+async function onPickPhotos(event) {
+  const input = event.currentTarget;
+  const files = [...(input.files ?? [])];
+  input.value = "";
+  const room = PHOTOS_PER_EVENT - sheetPhotos().length - state.photoDrafts.length;
+  if (files.length > room) state.error = `Up to ${PHOTOS_PER_EVENT} photos.`;
+  for (const file of files.slice(0, Math.max(0, room))) {
+    try {
+      const blob = await shrinkPhoto(file);
+      state.photoDrafts = [...state.photoDrafts, { blob, url: URL.createObjectURL(blob) }];
+    } catch {
+      state.error = "That photo could not be read.";
+    }
+    render();
+  }
+  if (state.error) {
+    render();
+    scheduleErrorClear();
+  }
+}
+
+/** A gallery photo is often 5–12 MB. A 1600 px JPEG looks the same on a phone and uploads quickly. */
+function shrinkPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, PHOTO_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("encode failed"))), "image/jpeg", 0.82);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("decode failed"));
+    };
+    img.src = url;
+  });
+}
+
+function clearPhotoDrafts() {
+  for (const draft of state.photoDrafts) URL.revokeObjectURL(draft.url);
+  state.photoDrafts = [];
+  state.photoRemovals = [];
+}
+
+async function syncPhotos(kind, id) {
+  if (!state.photoDrafts.length && !state.photoRemovals.length) return;
+  state.photoBusy = true;
+  render();
+  try {
+    for (const photoId of state.photoRemovals) {
+      await api(`/api/${kind}/${id}/photos/${photoId}`, { method: "DELETE" });
+    }
+    state.photoRemovals = [];
+    while (state.photoDrafts.length) {
+      const [draft] = state.photoDrafts;
+      await api(`/api/${kind}/${id}/photos`, { method: "POST", raw: draft.blob });
+      URL.revokeObjectURL(draft.url);
+      state.photoDrafts = state.photoDrafts.slice(1);
+    }
+  } finally {
+    state.photoBusy = false;
+  }
 }
 
 function circleScreen() {
@@ -1074,6 +1314,7 @@ function sheet() {
               }, { placeholder: "A park, a cafe, a street", maxlength: "80" })
             : whereBlock(),
           planning ? shareToggle("Use my location") : null,
+          photoBlock(),
         ]),
       ]),
       el("div", { class: "sheet-dock stack" }, [
@@ -1081,8 +1322,8 @@ function sheet() {
         el("button", {
           class: "btn",
           type: "submit",
-          text: planning ? "Add plan" : editing ? "Update" : later ? "I'm free later" : "I'm free",
-          disabled: later && !laterTimeChosen(),
+          text: state.photoBusy ? "Adding photos…" : planning ? "Add plan" : editing ? "Update" : later ? "I'm free later" : "I'm free",
+          disabled: (later && !laterTimeChosen()) || state.photoBusy,
         }),
         !planning && mySocial()
           ? el("button", { class: "btn ghost", type: "button", text: "End", onclick: () => endSocial(mySocial()) })
@@ -2610,6 +2851,7 @@ function el(tag, attrs = {}, children = []) {
 function openSheet(name) {
   state.sheet = name;
   state.error = "";
+  clearPhotoDrafts();
   if (name === "free") {
     state.noteDraft = mySocial()?.note ?? "";
     state.where = whereFromSocial(mySocial());
@@ -2635,6 +2877,7 @@ function openSheet(name) {
 
 function closeSheet() {
   state.sheet = null;
+  clearPhotoDrafts();
   state.whereMap = false;
   if (whereLeaflet) {
     whereLeaflet.remove();
@@ -2644,10 +2887,14 @@ function closeSheet() {
 }
 
 function sheetIsOpen() {
-  return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen);
+  return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen || state.lightbox);
 }
 
 function dismissTopSheet() {
+  if (state.lightbox) {
+    closeLightbox();
+    return;
+  }
   if (state.confirm) {
     state.confirm = null;
     render();
@@ -2877,7 +3124,8 @@ async function onFree(event) {
     return;
   }
   await run(async () => {
-    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload() } });
+    const { social } = await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload() } });
+    await syncPhotos("socials", social.id);
     state.sheet = null;
     state.whereMap = false;
     await refresh({ initial: true });
@@ -2890,10 +3138,13 @@ async function onCreatePlan(event) {
   const locationNote = state.error;
   if (locationNote) render();
   await run(async () => {
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place: state.placeDraft, ...where } });
+    const { plan } = await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place: state.placeDraft, ...where } });
+    // The plan exists now. A failed photo must not leave the sheet open, or a second tap adds it twice.
+    const photoNote = await syncPhotos("plans", plan.id).then(() => "", () => "Plan added. A photo did not upload.");
+    clearPhotoDrafts();
     state.sheet = null;
     state.placeDraft = "";
-    state.error = locationNote;
+    state.error = photoNote || locationNote;
     await refresh({ initial: true });
   }, locationNote);
 }
