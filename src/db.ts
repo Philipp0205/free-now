@@ -94,6 +94,14 @@ export type ReactionRow = {
   emoji: string;
 };
 
+export type PhotoRow = {
+  id: string;
+  social_id: string | null;
+  plan_id: string | null;
+  mime: string;
+  created_at: number;
+};
+
 export type MemberRow = {
   id: string;
   name: string;
@@ -223,6 +231,17 @@ CREATE TABLE IF NOT EXISTS comment_reactions (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (comment_id, user_id, emoji)
 );
+
+CREATE TABLE IF NOT EXISTS event_photos (
+  id TEXT PRIMARY KEY,
+  social_id TEXT REFERENCES socials(id) ON DELETE CASCADE,
+  plan_id TEXT REFERENCES plans(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL,
+  data BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_photos_social ON event_photos(social_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_photos_plan ON event_photos(plan_id, created_at);
 `;
 
 let sqliteWarningPatched = false;
@@ -696,6 +715,27 @@ export function removePlanJoin(db: DatabaseSync, planId: string, userId: string)
   db.prepare("DELETE FROM plan_joins WHERE plan_id = ? AND user_id = ?").run(planId, userId);
 }
 
+/** A missing point keeps the saved coordinates. */
+export function updatePlan(
+  db: DatabaseSync,
+  id: string,
+  note: string,
+  place: string,
+  point?: { lat: number; lng: number } | null,
+): void {
+  if (point === undefined) {
+    db.prepare("UPDATE plans SET note = ?, place = ? WHERE id = ?").run(note, place, id);
+    return;
+  }
+  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ? WHERE id = ?").run(
+    note,
+    place,
+    point?.lat ?? null,
+    point?.lng ?? null,
+    id,
+  );
+}
+
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
   const result = db.prepare("DELETE FROM plans WHERE id = ? AND creator_id = ?").run(id, creatorId);
   return Number(result.changes);
@@ -825,6 +865,44 @@ export function toggleReaction(db: DatabaseSync, commentId: string, userId: stri
   return true;
 }
 
+export function insertPhoto(
+  db: DatabaseSync,
+  photo: { id: string; socialId: string | null; planId: string | null; mime: string; data: Uint8Array; createdAt: number },
+): void {
+  db.prepare(
+    "INSERT INTO event_photos (id, social_id, plan_id, mime, data, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(photo.id, photo.socialId, photo.planId, photo.mime, photo.data, photo.createdAt);
+}
+
+export function listPhotos(db: DatabaseSync, event: { socialId?: string; planId?: string }): PhotoRow[] {
+  if (event.socialId) {
+    return all<PhotoRow>(
+      db,
+      `${PHOTO_SELECT} WHERE social_id = ? ORDER BY created_at ASC, rowid ASC`,
+      event.socialId,
+    );
+  }
+  return all<PhotoRow>(db, `${PHOTO_SELECT} WHERE plan_id = ? ORDER BY created_at ASC, rowid ASC`, event.planId ?? "");
+}
+
+export function getPhoto(db: DatabaseSync, id: string): PhotoRow | undefined {
+  return one<PhotoRow>(db, `${PHOTO_SELECT} WHERE id = ?`, id);
+}
+
+export function getPhotoData(db: DatabaseSync, id: string): Uint8Array | undefined {
+  return one<{ data: Uint8Array }>(db, "SELECT data FROM event_photos WHERE id = ?", id)?.data;
+}
+
+export function deletePhoto(db: DatabaseSync, id: string): void {
+  db.prepare("DELETE FROM event_photos WHERE id = ?").run(id);
+}
+
+/** Photos belong to the moment. They go once a social has ended or a plan's day has passed. */
+export function clearExpiredPhotos(db: DatabaseSync, now: number, today: string): void {
+  db.prepare("DELETE FROM event_photos WHERE social_id IN (SELECT id FROM socials WHERE expires_at <= ?)").run(now);
+  db.prepare("DELETE FROM event_photos WHERE plan_id IN (SELECT id FROM plans WHERE for_date < ?)").run(today);
+}
+
 function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
   db.prepare(
     `UPDATE socials
@@ -843,6 +921,7 @@ function clearExpiredPlanPoints(db: DatabaseSync, today: string): void {
 export function clearExpiredLocations(db: DatabaseSync, now: number, today: string): void {
   clearExpiredSocialPoints(db, now);
   clearExpiredPlanPoints(db, today);
+  clearExpiredPhotos(db, now, today);
 }
 
 export function sweep(db: DatabaseSync, now: number, planCutoff: string, today = ""): void {
@@ -860,6 +939,8 @@ const SOCIAL_SELECT = `
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
+
+const PHOTO_SELECT = "SELECT id, social_id, plan_id, mime, created_at FROM event_photos";
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at,

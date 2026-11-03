@@ -10,6 +10,7 @@ import {
   addSocialJoin,
   countUpcomingPlans,
   deleteComment,
+  deletePhoto,
   deletePlan,
   deletePushSubForUser,
   deleteSocial,
@@ -17,6 +18,8 @@ import {
   getCircleByCode,
   getCircleForUser,
   getComment,
+  getPhoto,
+  getPhotoData,
   getPlan,
   getPlanReply,
   getSocial,
@@ -26,6 +29,7 @@ import {
   hasSocialJoin,
   insertCircle,
   insertComment,
+  insertPhoto,
   insertPlan,
   insertSocial,
   insertUser,
@@ -34,6 +38,7 @@ import {
   listComments,
   listMembers,
   listNotifications,
+  listPhotos,
   listPlanJoins,
   listPushSubs,
   listReactions,
@@ -51,6 +56,7 @@ import {
   insertSession,
   toggleReaction,
   updateComment,
+  updatePlan,
   updateSocial,
   updateUserName,
   upsertPushSub,
@@ -79,6 +85,9 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /** A small fixed set keeps reactions readable on a card and stops arbitrary strings from being stored. */
 export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The app shrinks a gallery photo to a ~1600 px JPEG first, so this is a generous ceiling. */
+const PHOTO_MAX_BYTES = 3 * 1024 * 1024;
+const PHOTOS_PER_EVENT = 6;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -137,6 +146,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const user = userFromRequest(req, deps.db);
+
+  // Photos arrive as raw image bytes, not JSON, so they are matched before the body is parsed.
+  const photoUpload = matchPath(pathname, /^\/api\/(socials|plans)\/([^/]+)\/photos$/);
+  if (photoUpload && method === "POST") {
+    const me = requireUser(user);
+    const event = requireOwnEvent(deps, me, photoUpload[1], photoUpload[2]);
+    const data = await readImage(req);
+    if (listPhotos(deps.db, event.ref).length >= PHOTOS_PER_EVENT) {
+      throw new HttpError(409, `${PHOTOS_PER_EVENT} photos is the limit`);
+    }
+    insertPhoto(deps.db, {
+      id: crypto.randomUUID(),
+      socialId: event.ref.socialId ?? null,
+      planId: event.ref.planId ?? null,
+      mime: data.mime,
+      data: data.bytes,
+      createdAt: deps.now(),
+    });
+    sendJson(res, 201, { photos: photosPayload(deps.db, event.ref) });
+    return;
+  }
+
   const body =
     method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE"
       ? await readJson(req)
@@ -403,6 +434,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const planId = matchPath(pathname, /^\/api\/plans\/([^/]+)$/);
+  if (planId && method === "PATCH") {
+    const note = cleanNote(body.note, true);
+    const place = cleanPlace(body.place);
+    sendJson(res, 200, { plan: await editPlan(deps, me, planId[1], note, place, readPoint(body)) });
+    return;
+  }
+
   if (planId && method === "DELETE") {
     const id = parseId(planId[1]);
     const changes = deletePlan(deps.db, id, me.id);
@@ -477,6 +515,37 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       subscriptions: subs.length,
       webPush: Boolean(deps.config.vapid),
     });
+    return;
+  }
+
+  const photoDelete = matchPath(pathname, /^\/api\/(socials|plans)\/([^/]+)\/photos\/([^/]+)$/);
+  if (photoDelete && method === "DELETE") {
+    const event = requireOwnEvent(deps, me, photoDelete[1], photoDelete[2]);
+    const photo = getPhoto(deps.db, parseId(photoDelete[3]));
+    const owned = photo && (photo.social_id ?? photo.plan_id) === (event.ref.socialId ?? event.ref.planId);
+    if (!photo || !owned) throw new HttpError(404, "photo not found");
+    deletePhoto(deps.db, photo.id);
+    sendJson(res, 200, { photos: photosPayload(deps.db, event.ref) });
+    return;
+  }
+
+  const photoFile = matchPath(pathname, /^\/api\/photos\/([^/]+)$/);
+  if (photoFile && method === "GET") {
+    const circle = requireCircle(deps, me.id);
+    const photo = getPhoto(deps.db, parseId(photoFile[1]));
+    const owner = photo?.social_id ? getSocial(deps.db, photo.social_id) : photo?.plan_id ? getPlan(deps.db, photo.plan_id) : undefined;
+    const data = photo && owner?.circle_id === circle.id ? getPhotoData(deps.db, photo.id) : undefined;
+    if (!photo || !data) throw new HttpError(404, "photo not found");
+    // A photo id never points at different bytes, so the browser may keep it.
+    res.writeHead(200, {
+      "content-type": photo.mime,
+      "content-length": data.byteLength,
+      "cache-control": "private, max-age=86400, immutable",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+      "x-frame-options": "DENY",
+    });
+    res.end(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
     return;
   }
 
@@ -737,6 +806,47 @@ async function publishPlan(
   return planPayload(deps.db, plan, today, tomorrow);
 }
 
+/** Only the host edits a plan. Friends who said they're coming hear about a change. */
+async function editPlan(
+  deps: AppDeps,
+  user: UserRow,
+  rawId: string,
+  note: string,
+  place: string,
+  point?: { lat: number; lng: number } | null,
+) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (plan.creator_id !== user.id) throw new HttpError(403, "only the host can edit this plan");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  const tomorrow = addDays(today, 1);
+  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  updatePlan(deps.db, plan.id, note, place, point);
+  if (plan.note !== note || plan.place !== place) {
+    const coming = listPlanJoins(deps.db, plan.id).filter((join) => join.reply === "coming");
+    await notifyUsers(
+      deps.db,
+      deps.push,
+      now,
+      coming.map((join) => ({
+        userId: join.id,
+        title: "Plan changed",
+        body: place ? `${user.name}: ${note} · ${audiencePlace(place)}` : `${user.name}: ${note}`,
+        kind: "plan",
+        refId: plan.id,
+        tag: `plan:${plan.id}`,
+        url: `/?plan=${plan.id}`,
+      })),
+    );
+  }
+  const fresh = getPlan(deps.db, plan.id);
+  if (!fresh) throw new HttpError(500, "plan missing");
+  return planPayload(deps.db, fresh, today, tomorrow);
+}
+
 async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
@@ -990,6 +1100,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
+    photos: photosPayload(db, { socialId: social.id }),
     creator: { id: social.creator_id, name: social.creator_name },
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
@@ -1012,6 +1123,7 @@ function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: s
     whenLabel: whenLabel(plan.for_date, today, tomorrow),
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
+    photos: photosPayload(db, { planId: plan.id }),
     creator: { id: plan.creator_id, name: plan.creator_name },
     joined: listPlanJoins(db, plan.id).map((join) => ({
       id: join.id,
@@ -1038,6 +1150,33 @@ function commentPayload(db: DatabaseSync, comment: CommentRow) {
     editedAt: comment.edited_at,
     reactions: REACTIONS.filter((emoji) => reactions.has(emoji)).map((emoji) => ({ emoji, userIds: reactions.get(emoji) ?? [] })),
   };
+}
+
+function photosPayload(db: DatabaseSync, ref: { socialId?: string; planId?: string }) {
+  return listPhotos(db, ref).map((photo) => ({ id: photo.id }));
+}
+
+/** Only the person who made a social or plan can add or remove its photos, and only while it is still on. */
+function requireOwnEvent(
+  deps: AppDeps,
+  user: UserRow,
+  kind: string,
+  rawId: string,
+): { ref: { socialId?: string; planId?: string } } {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  if (kind === "socials") {
+    const social = getSocial(deps.db, id);
+    if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+    if (social.creator_id !== user.id) throw new HttpError(403, "only the host can change photos");
+    if (social.expires_at <= deps.now()) throw new HttpError(410, "that social has ended");
+    return { ref: { socialId: social.id } };
+  }
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (plan.creator_id !== user.id) throw new HttpError(403, "only the host can change photos");
+  if (plan.for_date < isoDate(deps.now(), deps.config.tz)) throw new HttpError(410, "that plan has ended");
+  return { ref: { planId: plan.id } };
 }
 
 function requireUser(user: UserRow | undefined): UserRow {
@@ -1295,6 +1434,42 @@ async function readJson(req: http.IncomingMessage): Promise<Record<string, unkno
     throw new HttpError(400, "expected a JSON object");
   }
   return parsed as Record<string, unknown>;
+}
+
+async function readImage(req: http.IncomingMessage): Promise<{ mime: string; bytes: Uint8Array }> {
+  const declared = String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+  if (!declared.startsWith("image/")) throw new HttpError(415, "send the photo as an image");
+  const bytes = await readRaw(req, PHOTO_MAX_BYTES, "photo is too large");
+  // Trust the bytes, not the header, so nothing but a picture is ever served back.
+  const mime = sniffImage(bytes);
+  if (!mime) throw new HttpError(415, "that file is not a JPEG, PNG, or WebP photo");
+  return { mime, bytes };
+}
+
+function sniffImage(bytes: Uint8Array): string | null {
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (bytes.length > 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
+function readRaw(req: http.IncomingMessage, limit: number, tooLarge: string): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new HttpError(413, tooLarge));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(new Uint8Array(Buffer.concat(chunks))));
+    req.on("error", reject);
+  });
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
