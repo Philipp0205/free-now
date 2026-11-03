@@ -239,6 +239,47 @@ test("join form clears a 280px keyboard on a 360x640 phone", { timeout: 90_000 }
   }
 });
 
+test("where search stays above the pinned I'm free bar", { timeout: 90_000 }, async () => {
+  const page = await mobilePage(true);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.goto(baseUrl);
+    await signUp(page, "Bea");
+    await createCircle(page);
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator("#sheet-note").waitFor();
+    await page.locator("button.where-row").click();
+    const query = page.locator("#where-query");
+    await query.waitFor();
+    await query.focus();
+    await setViewport(page, { height: 330, offsetTop: 0 });
+    await page.waitForTimeout(FIELD_REVEAL_MS + 300);
+    const placed = await page.evaluate(() => {
+      const field = document.getElementById("where-query")?.getBoundingClientRect();
+      const dock = document.querySelector(".sheet-dock")?.getBoundingClientRect();
+      const view = window.visualViewport;
+      return {
+        fieldTop: field?.top ?? null,
+        fieldBottom: field?.bottom ?? null,
+        dockTop: dock?.top ?? null,
+        viewHeight: view?.height ?? null,
+        focused: document.activeElement?.id ?? "",
+      };
+    });
+    assert.equal(placed.focused, "where-query", JSON.stringify(placed));
+    assert.equal(placed.viewHeight, 330);
+    assert.ok(placed.fieldTop != null && placed.fieldBottom != null && placed.dockTop != null, JSON.stringify(placed));
+    assert.ok(placed.fieldTop >= -1, JSON.stringify(placed));
+    assert.ok(placed.fieldBottom <= placed.dockTop - 8, JSON.stringify(placed));
+    await paintKeyboard(page);
+    await shot(page, "mobile_where_above_dock");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("desktop sheet stays on the bottom edge", { timeout: 90_000 }, async () => {
   const page = await mobilePage(false);
   const errors: string[] = [];
