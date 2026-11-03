@@ -42,6 +42,7 @@ export type JoinRow = {
   joined_at: number;
   reply: string;
   eta_min: number | null;
+  arrive_at: number | null;
 };
 
 export type PlanRow = {
@@ -127,6 +128,7 @@ CREATE TABLE IF NOT EXISTS social_joins (
   joined_at INTEGER NOT NULL,
   reply TEXT NOT NULL DEFAULT 'join',
   eta_min INTEGER,
+  arrive_at INTEGER,
   PRIMARY KEY (social_id, user_id)
 );
 
@@ -147,6 +149,7 @@ CREATE TABLE IF NOT EXISTS plan_joins (
   user_id TEXT NOT NULL REFERENCES users(id),
   joined_at INTEGER NOT NULL,
   reply TEXT NOT NULL DEFAULT 'coming',
+  arrive_at INTEGER,
   PRIMARY KEY (plan_id, user_id)
 );
 
@@ -219,6 +222,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "socials", "reminded_at", "reminded_at INTEGER");
   ensureColumn(db, "social_joins", "reply", "reply TEXT NOT NULL DEFAULT 'join'");
   ensureColumn(db, "social_joins", "eta_min", "eta_min INTEGER");
+  ensureColumn(db, "social_joins", "arrive_at", "arrive_at INTEGER");
+  ensureColumn(db, "plan_joins", "arrive_at", "arrive_at INTEGER");
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   db.prepare(
     "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
@@ -495,7 +500,7 @@ export function getSocial(db: DatabaseSync, id: string): SocialRow | undefined {
 export function listSocialJoins(db: DatabaseSync, socialId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, j.joined_at, j.reply, j.eta_min
+    `SELECT u.id, u.name, j.joined_at, j.reply, j.eta_min, j.arrive_at
      FROM social_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.social_id = ?
@@ -509,7 +514,7 @@ export function hasSocialJoin(db: DatabaseSync, socialId: string, userId: string
 }
 
 export function addSocialJoin(db: DatabaseSync, socialId: string, userId: string, joinedAt: number): void {
-  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min) VALUES (?, ?, ?, 'coming', NULL)").run(
+  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min, arrive_at) VALUES (?, ?, ?, 'coming', NULL, NULL)").run(
     socialId,
     userId,
     joinedAt,
@@ -520,8 +525,8 @@ export function getSocialReply(
   db: DatabaseSync,
   socialId: string,
   userId: string,
-): { reply: string; eta_min: number | null } | undefined {
-  return one(db, "SELECT reply, eta_min FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
+): { reply: string; eta_min: number | null; arrive_at: number | null } | undefined {
+  return one(db, "SELECT reply, eta_min, arrive_at FROM social_joins WHERE social_id = ? AND user_id = ?", socialId, userId);
 }
 
 export function setSocialReply(
@@ -531,12 +536,13 @@ export function setSocialReply(
   joinedAt: number,
   reply: string,
   etaMin: number | null,
+  arriveAt: number | null,
 ): void {
   db.prepare(
-    `INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(social_id, user_id) DO UPDATE SET reply = excluded.reply, eta_min = excluded.eta_min`,
-  ).run(socialId, userId, joinedAt, reply, etaMin);
+    `INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min, arrive_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(social_id, user_id) DO UPDATE SET reply = excluded.reply, eta_min = excluded.eta_min, arrive_at = excluded.arrive_at`,
+  ).run(socialId, userId, joinedAt, reply, etaMin, arriveAt);
 }
 
 export function listComingUserIds(db: DatabaseSync, socialId: string): string[] {
@@ -618,7 +624,7 @@ export function getPlan(db: DatabaseSync, id: string): PlanRow | undefined {
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, j.joined_at, j.reply, NULL AS eta_min
+    `SELECT u.id, u.name, j.joined_at, j.reply, NULL AS eta_min, j.arrive_at
      FROM plan_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.plan_id = ?
@@ -631,15 +637,22 @@ export function hasPlanJoin(db: DatabaseSync, planId: string, userId: string): b
   return Boolean(one(db, "SELECT 1 AS ok FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId));
 }
 
-export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string } | undefined {
-  return one(db, "SELECT reply FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
+export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string; arrive_at: number | null } | undefined {
+  return one(db, "SELECT reply, arrive_at FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
 }
 
-export function setPlanReply(db: DatabaseSync, planId: string, userId: string, joinedAt: number, reply: string): void {
+export function setPlanReply(
+  db: DatabaseSync,
+  planId: string,
+  userId: string,
+  joinedAt: number,
+  reply: string,
+  arriveAt: number | null,
+): void {
   db.prepare(
-    `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply) VALUES (?, ?, ?, ?)
-     ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = excluded.reply`,
-  ).run(planId, userId, joinedAt, reply);
+    `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply, arrive_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = excluded.reply, arrive_at = excluded.arrive_at`,
+  ).run(planId, userId, joinedAt, reply, arriveAt);
 }
 
 export function removePlanJoin(db: DatabaseSync, planId: string, userId: string): void {

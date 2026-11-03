@@ -67,8 +67,9 @@ export function planReplyBody(name: string, note: string, reply: string): string
   return `${name} is in for ${label}`;
 }
 
-export function replyPushBody(name: string, reply: string, etaMin: number | null): string {
+export function replyPushBody(name: string, reply: string, etaMin: number | null, arriveLabel = ""): string {
   if (reply === "declined") return `${name} can't make it`;
+  if (arriveLabel) return `${name} is in, arriving ${arriveLabel}`;
   if (reply === "coming" || reply === "join" || reply === "in") {
     return etaMin ? `${name} is there in ${etaMin} min` : `${name} is in`;
   }

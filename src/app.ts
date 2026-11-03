@@ -102,7 +102,16 @@ export function createApp(deps: AppDeps): http.RequestListener {
   };
 }
 
+const LEGACY_HOST = "hangry-production-64c4.up.railway.app";
+
 async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps): Promise<void> {
+  const host = String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase();
+  if (host === LEGACY_HOST && deps.config.publicBaseUrl) {
+    const dest = new URL(req.url ?? "/", deps.config.publicBaseUrl);
+    res.writeHead(301, { location: dest.toString() });
+    res.end();
+    return;
+  }
   const method = (req.method ?? "GET").toUpperCase();
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
@@ -144,8 +153,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const name = cleanLabel(body.name, "name", 24);
     const now = deps.now();
     const rawCode = body.code == null || body.code === "" ? "" : cleanCode(body.code);
-    const invited = rawCode ? liveInvite(deps.db, rawCode, now) : undefined;
-    if (rawCode && !invited) throw new HttpError(404, "invite not found");
+    const invited = rawCode ? requireLiveInvite(deps.db, rawCode, now) : undefined;
     const token = randomToken();
     const buzzToken = humanCode();
     const id = crypto.randomUUID();
@@ -168,8 +176,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   const invitePreview = matchPath(pathname, /^\/api\/invites\/([^/]+)$/);
   if (invitePreview && method === "GET") {
-    const circle = liveInvite(deps.db, cleanCode(decodeURIComponent(invitePreview[1])), deps.now());
-    if (!circle) throw new HttpError(404, "invite not found");
+    const circle = requireLiveInvite(deps.db, decodeURIComponent(invitePreview[1]), deps.now());
     sendJson(res, 200, { name: circle.name });
     return;
   }
@@ -268,8 +275,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/circles/join") {
     const code = cleanCode(body.code);
-    const circle = liveInvite(deps.db, code, deps.now());
-    if (!circle) throw new HttpError(404, "invite not found");
+    const circle = requireLiveInvite(deps.db, code, deps.now());
     const current = getCircleForUser(deps.db, me.id);
     if (current && current.id !== circle.id) throw new HttpError(409, "you are already in a circle");
     if (!current) addMember(deps.db, circle.id, me.id, deps.now());
@@ -588,35 +594,43 @@ async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Re
   const reply = normalizeReply(body.reply);
   const live = social.starts_at == null || social.starts_at <= now;
   let eta: number | null = null;
-  if (reply === "coming" && live && body.eta != null) {
+  let arriveAt: number | null = null;
+  if (reply === "coming" && body.arriveAt != null && body.arriveAt !== "") {
+    const windowStart = live ? now : (social.starts_at ?? now);
+    arriveAt = readArriveAt(body.arriveAt, now, deps.config.tz, windowStart, social.expires_at);
+  } else if (reply === "coming" && live && body.eta != null) {
     const minutes = Number(body.eta);
     if (![5, 10, 20].includes(minutes)) throw new HttpError(400, "eta must be 5, 10, or 20");
     eta = minutes;
   }
   const previous = getSocialReply(deps.db, social.id, user.id);
-  const changed = !previous || previous.reply !== reply || (previous.eta_min ?? null) !== eta;
-  setSocialReply(deps.db, social.id, user.id, now, reply, eta);
+  const changed = !previous || previous.reply !== reply || (previous.eta_min ?? null) !== eta || (previous.arrive_at ?? null) !== arriveAt;
+  setSocialReply(deps.db, social.id, user.id, now, reply, eta, arriveAt);
   const key = `${social.id}:${user.id}`;
   const becameComing = reply === "coming" && previous?.reply !== "coming";
-  const etaOnly = previous?.reply === "coming" && reply === "coming";
+  const arriveChanged = reply === "coming" && (previous?.arrive_at ?? null) !== arriveAt && arriveAt != null;
+  const etaOnly = previous?.reply === "coming" && reply === "coming" && !arriveChanged;
   const held = cancelReplyPush(key);
+  const arriveLabel = arriveAt ? clockLabel(arriveAt, deps.config.tz) : "";
   const notice = () => notifyUsers(deps.db, deps.push, now, [
     {
       userId: social.creator_id,
       title: eventTitle("reply"),
-      body: replyPushBody(user.name, reply, eta),
+      body: replyPushBody(user.name, reply, eta, arriveLabel),
       kind: "reply",
       refId: social.id,
       tag: `reply:${social.id}:${user.id}`,
       url: `/?social=${social.id}`,
     },
   ]);
-  if (held || (becameComing && eta != null)) {
+  if (held || (becameComing && (eta != null || arriveAt != null))) {
     await notice();
   } else if (becameComing) {
     scheduleReplyPush(key, notice);
+  } else if (arriveChanged) {
+    await notice();
   } else if (etaOnly) {
-    /* The host already got the coming push. An ETA a moment later stays on the card. */
+    /* The host already got the coming push. A 5/10/20 chip a moment later stays on the card. */
   } else if (changed) {
     await notice();
   }
@@ -673,6 +687,7 @@ async function publishPlan(
       kind: "plan",
       refId: id,
       tag: `plan:${id}`,
+      url: `/?plan=${id}`,
     })),
   );
   const plan = getPlan(deps.db, id);
@@ -704,7 +719,7 @@ async function setPlanComing(
 ): Promise<void> {
   const previous = getPlanReply(deps.db, plan.id, user.id);
   if (previous?.reply === "coming") return;
-  setPlanReply(deps.db, plan.id, user.id, now, "coming");
+  setPlanReply(deps.db, plan.id, user.id, now, "coming", null);
   await notifyPlanReply(deps, user, plan, now, "coming");
 }
 
@@ -719,11 +734,31 @@ async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Reco
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const reply = normalizeReply(body.reply);
   if (reply === "coming") {
-    await setPlanComing(deps, user, plan, now);
+    const previous = getPlanReply(deps.db, plan.id, user.id);
+    let arriveAt: number | null = previous?.reply === "coming" ? (previous.arrive_at ?? null) : null;
+    if (body.arriveAt) arriveAt = readPlanArrive(body.arriveAt, plan.for_date, now, deps.config.tz);
+    const became = previous?.reply !== "coming";
+    const arriveChanged = (previous?.arrive_at ?? null) !== arriveAt && arriveAt != null;
+    setPlanReply(deps.db, plan.id, user.id, now, "coming", arriveAt);
+    if (became || arriveChanged) {
+      await notifyUsers(deps.db, deps.push, now, [
+        {
+          userId: plan.creator_id,
+          title: eventTitle("reply"),
+          body: arriveAt
+            ? replyPushBody(user.name, "coming", null, clockLabel(arriveAt, deps.config.tz))
+            : planReplyBody(user.name, plan.note, "coming"),
+          kind: "plan-reply",
+          refId: plan.id,
+          tag: `plan-reply:${plan.id}:${user.id}`,
+          url: `/?plan=${plan.id}`,
+        },
+      ]);
+    }
   } else {
     const previous = getPlanReply(deps.db, plan.id, user.id);
     if (previous?.reply !== "declined") {
-      setPlanReply(deps.db, plan.id, user.id, now, "declined");
+      setPlanReply(deps.db, plan.id, user.id, now, "declined", null);
       await notifyPlanReply(deps, user, plan, now, "declined");
     }
   }
@@ -747,6 +782,7 @@ async function notifyPlanReply(
       kind: "plan-reply",
       refId: plan.id,
       tag: `plan-reply:${plan.id}:${user.id}`,
+      url: `/?plan=${plan.id}`,
     },
   ]);
 }
@@ -816,6 +852,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
       joinedAt: join.joined_at,
       reply: join.reply ?? "join",
       etaMin: join.eta_min ?? null,
+      arriveAt: join.arrive_at ?? null,
     })),
   };
 }
@@ -835,6 +872,7 @@ function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: s
       name: join.name,
       joinedAt: join.joined_at,
       reply: join.reply ?? "coming",
+      arriveAt: join.arrive_at ?? null,
     })),
   };
 }
@@ -923,16 +961,24 @@ function readPoint(body: Record<string, unknown>): { lat: number; lng: number } 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 function liveInvite(db: DatabaseSync, code: string, now: number): CircleRow | undefined {
-  const circle = getCircleByCode(db, code);
-  if (!circle) return undefined;
-  if (circle.invite_expires_at == null || circle.invite_expires_at <= now) return undefined;
+  try {
+    return requireLiveInvite(db, code, now);
+  } catch {
+    return undefined;
+  }
+}
+
+function requireLiveInvite(db: DatabaseSync, code: string, now: number): CircleRow {
+  const circle = getCircleByCode(db, cleanCode(code));
+  if (!circle || circle.invite_expires_at == null) throw new HttpError(404, "invite not found");
+  if (circle.invite_expires_at <= now) throw new HttpError(410, "invite expired");
   return circle;
 }
 
 /** Undefined keeps a scheduled start. Null means free right now. A clock time is later today in APP_TZ. */
 function readStart(body: Record<string, unknown>, now: number, tz: string): number | null | undefined {
   if (body.later === true && body.startsAt == null && body.startsInMin == null) {
-    throw new HttpError(400, "pick a time later today");
+    throw new HttpError(400, "Pick a time later today.");
   }
   if (!Object.prototype.hasOwnProperty.call(body, "startsAt") && !Object.prototype.hasOwnProperty.call(body, "startsInMin")) {
     return undefined;
@@ -940,27 +986,55 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
   if (body.startsInMin != null) {
     const minutes = Number(body.startsInMin);
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 18 * 60) {
-      throw new HttpError(400, "Pick a time later today");
+      throw new HttpError(400, "Pick a time later today.");
     }
     return assertLaterToday(now + minutes * 60 * 1000, now, tz);
   }
   if (body.startsAt == null) return null;
   if (typeof body.startsAt === "string") {
-    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "Pick a time later today");
+    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "Pick a time later today.");
     try {
       return assertLaterToday(zonedDateTime(isoDate(now, tz), body.startsAt, tz), now, tz);
     } catch {
-      throw new HttpError(400, "Pick a time later today");
+      throw new HttpError(400, "Pick a time later today.");
     }
   }
   const instant = Number(body.startsAt);
-  if (!Number.isFinite(instant)) throw new HttpError(400, "Pick a time later today");
+  if (!Number.isFinite(instant)) throw new HttpError(400, "Pick a time later today.");
   return assertLaterToday(instant, now, tz);
 }
 
+function readArriveAt(value: unknown, now: number, tz: string, start: number, end: number): number {
+  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) {
+    throw new HttpError(400, "Pick a time you can arrive.");
+  }
+  const hour = Number(value.slice(0, 2));
+  const minute = Number(value.slice(3, 5));
+  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a time you can arrive.");
+  const day = isoDate(Math.max(start, now), tz);
+  let at: number;
+  try {
+    at = zonedDateTime(day, value, tz);
+    if (at < start) {
+      const next = zonedDateTime(addDays(day, 1), value, tz);
+      if (next <= end) at = next;
+    }
+  } catch {
+    throw new HttpError(400, "Pick a time you can arrive.");
+  }
+  if (at <= now || at < start || at > end) throw new HttpError(400, "Pick a time you can arrive.");
+  return at;
+}
+
+function readPlanArrive(value: unknown, day: string, now: number, tz: string): number {
+  const start = zonedDateTime(day, "06:00", tz);
+  const end = zonedDateTime(day, "23:59", tz);
+  return readArriveAt(value, now, tz, start, end);
+}
+
 function assertLaterToday(instant: number, now: number, tz: string): number {
-  if (instant <= now) throw new HttpError(400, "Pick a time later today");
-  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "Pick a time later today");
+  if (instant <= now) throw new HttpError(400, "Pick a time later today.");
+  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "Pick a time later today.");
   return instant;
 }
 
