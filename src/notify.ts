@@ -30,7 +30,7 @@ export function freePushBody(name: string, place: string, fromTime = "", shifted
   const base = when
     ? (shifted ? `${name} is now free from ${when}` : `${name} is free from ${when}`)
     : "";
-  if (spot === "near you") return base ? `${base}, near you` : `${name} is free near you`;
+  if (spot === "near you") return base ? `${base}, nearby` : `${name} is free nearby`;
   if (/^near /i.test(spot)) {
     const phrase = `near ${spot.slice(5)}`;
     return base ? `${base}, ${phrase}` : `${name} is free ${phrase}`;

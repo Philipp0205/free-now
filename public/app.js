@@ -267,6 +267,7 @@ function scheduleReveal(node) {
 function revealField(node) {
   if (!node.isConnected || document.activeElement !== node) return;
   if (node.id === "where-query") {
+    scrollFieldAboveDock(node);
     revealWhereResults();
     return;
   }
@@ -280,6 +281,25 @@ function revealField(node) {
     return;
   }
   node.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/** Keep a focused sheet field above the pinned action bar and the keyboard. */
+function scrollFieldAboveDock(node) {
+  const sheet = node.closest(".sheet");
+  const dock = sheet?.querySelector(".sheet-dock");
+  const scroller = sheet?.querySelector(".sheet-scroll") || scrollParent(node);
+  const view = window.visualViewport;
+  const viewTop = view?.offsetTop ?? 0;
+  const viewBottom = viewTop + (view?.height ?? window.innerHeight);
+  const margin = 12;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const dockTop = dock?.getBoundingClientRect().top ?? viewBottom;
+    const limit = Math.min(dockTop, viewBottom);
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > limit - margin) scroller.scrollBy({ top: rect.bottom - (limit - margin), left: 0 });
+    else if (rect.top < viewTop + margin) scroller.scrollBy({ top: rect.top - (viewTop + margin), left: 0 });
+    else break;
+  }
 }
 
 /** Minimum scroll so the form's bottom edge, including its submit button, clears the keyboard. */
@@ -555,10 +575,7 @@ function screenHeader(title) {
       class: "icon-btn",
       type: "button",
       "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
-      onclick: () => {
-        state.tab = "alerts";
-        render();
-      },
+      onclick: () => { void onTab("alerts"); },
     }, [
       icon("bell"),
       unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
@@ -1728,14 +1745,16 @@ function mapCard(pin) {
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
     el("div", { class: "map-card-actions" }, [
-      pin.canJoin
-        ? el("button", {
-            class: "btn",
-            type: "button",
-            text: "Join",
-            onclick: () => (pin.kind === "plan" ? joinPlan({ id: pin.id }) : joinSocial({ id: pin.id })),
-          })
-        : null,
+      pin.kind === "social" && pin.canJoin
+        ? replyActions(state.socials.find((social) => social.id === pin.id) || { id: pin.id, startsAt: null, joined: [] })
+        : pin.canJoin
+          ? el("button", {
+              class: "btn",
+              type: "button",
+              text: "Join",
+              onclick: () => joinPlan({ id: pin.id }),
+            })
+          : null,
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
     ]),
   ]);
@@ -1945,11 +1964,6 @@ function closeSheet() {
 }
 
 async function onTab(id) {
-  if (id === "alerts") {
-    state.tab = "alerts";
-    render();
-    return;
-  }
   state.tab = id;
   state.sheet = null;
   if (id === "alerts") {
