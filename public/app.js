@@ -1364,6 +1364,10 @@ function hitMeta(hit) {
 function searchOrigin() {
   if (state.viewerLocation) return state.viewerLocation;
   if (state.mapCenter) return state.mapCenter;
+  return recentPlace();
+}
+
+function recentPlace() {
   for (const social of state.socials || []) {
     if (social.location) return social.location;
   }
@@ -1373,14 +1377,20 @@ function searchOrigin() {
   return null;
 }
 
-function noteMapCenter(map) {
-  const save = () => {
-    const center = map.getCenter();
-    if (!center) return;
-    state.mapCenter = { lat: center.lat, lng: center.lng };
-  };
-  map.on("moveend", save);
-  save();
+function rememberMapCenter(map) {
+  const center = map.getCenter();
+  if (!center) return;
+  state.mapCenter = { lat: center.lat, lng: center.lng };
+}
+
+function pickerFocus() {
+  if (state.where.lat != null && state.where.lng != null) {
+    return { lat: state.where.lat, lng: state.where.lng, zoom: 15 };
+  }
+  if (state.viewerLocation) return { lat: state.viewerLocation.lat, lng: state.viewerLocation.lng, zoom: 15 };
+  const recent = recentPlace();
+  if (recent) return { lat: recent.lat, lng: recent.lng, zoom: 15 };
+  return { lat: 51.1657, lng: 10.4515, zoom: 6 };
 }
 
 function chooseWhereHit(hit) {
@@ -1475,7 +1485,7 @@ function addMapTiles(L, map) {
   const tileUrl = state.meta?.mapTileUrl
     || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
   const tileAttribution = state.meta?.mapTileAttribution
-    || "© Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
+    || "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
   L.tileLayer(tileUrl, {
     attribution: tileAttribution,
     subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
@@ -1558,13 +1568,11 @@ async function mountWhereMap() {
     whereLeaflet.remove();
     whereLeaflet = null;
   }
-  const lat = state.where.lat ?? state.viewerLocation?.lat ?? 52.52;
-  const lng = state.where.lng ?? state.viewerLocation?.lng ?? 13.405;
-  const zoom = state.where.lat != null || state.viewerLocation ? 15 : 12;
+  const focus = pickerFocus();
   const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
-  map.setView([lat, lng], Math.min(zoom, TILE_MAX_ZOOM));
+  map.setView([focus.lat, focus.lng], Math.min(focus.zoom, TILE_MAX_ZOOM));
   addMapTiles(L, map);
-  noteMapCenter(map);
+  map.on("dragend", () => rememberMapCenter(map));
   const marker = L.marker([lat, lng], {
     draggable: true,
     icon: L.divIcon({
@@ -1639,7 +1647,8 @@ async function mountMap() {
   } else {
     map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [36, 36], maxZoom: 15 });
   }
-  noteMapCenter(map);
+  rememberMapCenter(map);
+  map.on("dragend", () => rememberMapCenter(map));
   setTimeout(() => map.invalidateSize(), 60);
 }
 

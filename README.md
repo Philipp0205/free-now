@@ -75,7 +75,7 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `SOCIAL_TTL_MS` | `7200000` | How long a social stays active (2 hours). |
 | `APP_TZ` | `Europe/Berlin` | Timezone that decides what "tomorrow" means. Override it if the circle lives elsewhere. |
 | `MAP_TILE_URL` | Esri World Street Map | HTTPS tile template with `{z}`, `{x}`, and `{y}`. `{s}` is a subdomain and `{r}` is retina when the template contains them. |
-| `MAP_TILE_ATTRIBUTION` | `© Esri, HERE, Garmin, USGS, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
+| `MAP_TILE_ATTRIBUTION` | `Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 

@@ -39,13 +39,55 @@ test("nearby bars outrank same-name villages", () => {
     { name: "Schlossplatz", address: "the square", lat: 48.7784, lng: 9.1801, osmKey: "place", osmValue: "square", osmId: "square" },
   ];
   const ratto = rankPlaces(candidates.filter((hit) => /ratto/i.test(hit.name)), STUTTGART, "Ratto");
+  assert.equal(ratto.length, 1);
   assert.equal(ratto[0].name, "RATTO Bistrobar");
   assert.ok((ratto[0].distanceM ?? 99999) < 5000);
-  assert.equal(ratto[1].name, "Ratto");
 
   const platz = rankPlaces(candidates.filter((hit) => hit.name === "Schlossplatz"), STUTTGART, "Schlossplatz");
   assert.equal(platz.length, 1);
   assert.equal(platz[0].address, "the square");
+});
+
+test("Schlossplatz keeps the square 20 m away and merges the duplicate spellings", () => {
+  const hits = rankPlaces([
+    { name: "Schloßplatz", address: "Neuhausen auf den Fildern", lat: 48.6831, lng: 9.2776, osmKey: "leisure", osmValue: "park", osmId: "park" },
+    { name: "Schlossplatz", address: "Stuttgart-Mitte", lat: 48.77855, lng: 9.17995, osmKey: "place", osmValue: "square", osmId: "square" },
+    { name: "Schlossplatz", address: "Stuttgart-Mitte", lat: 48.7782, lng: 9.1802, osmKey: "highway", osmValue: "path", osmId: "path" },
+    { name: "Schlossplatz", address: "Stuttgart-Mitte", lat: 48.779, lng: 9.179, osmKey: "railway", osmValue: "stop", osmId: "stop" },
+    { name: "Schloßplatz", address: "Stuttgart-Mitte", lat: 48.7786, lng: 9.18, osmKey: "highway", osmValue: "bus_stop", osmId: "bus" },
+  ], STUTTGART, "Schlossplatz");
+  assert.equal(hits[0].address, "Stuttgart-Mitte");
+  assert.ok((hits[0].distanceM ?? 999) < 100);
+  assert.equal(hits.filter((hit) => hit.address === "Stuttgart-Mitte").length, 1);
+  assert.equal(hits[1]?.address, "Neuhausen auf den Fildern");
+  assert.ok((hits[1]?.distanceM ?? 0) > 10_000);
+  assert.ok(hits.every((hit) => (hit.distanceM ?? 0) <= 50_000));
+});
+
+test("a known location drops places more than 50 km away", () => {
+  const hits = rankPlaces([
+    { name: "RATTO Bistrobar", address: "Cottastraße 4, Stuttgart-Süd", lat: 48.7674, lng: 9.1708, osmKey: "amenity", osmValue: "bar", osmId: "bar" },
+    { name: "Ratto", address: "Borbona, Rieti", lat: 42.5124, lng: 13.1644, osmKey: "waterway", osmValue: "river", osmId: "river" },
+    { name: "Ratto", address: "Khamanon Tahsil, Fatehgarh Sahib", lat: 30.8614, lng: 76.3688, osmKey: "place", osmValue: "village", osmId: "village" },
+  ], STUTTGART, "Ratto");
+  assert.deepEqual(hits.map((hit) => hit.name), ["RATTO Bistrobar"]);
+});
+
+test("without a location the search only applies a Germany bias", async () => {
+  const urls: string[] = [];
+  const hits = await searchPlaces("Ratto", null, async (url) => {
+    urls.push(url);
+    if (url.includes("photon")) {
+      return { features: [{ geometry: { coordinates: [9.17, 48.77] }, properties: { name: "RATTO Bistrobar", city: "Stuttgart", osm_key: "amenity", osm_value: "bar" } }] };
+    }
+    return [{ lat: "48.77", lon: "9.17", name: "RATTO Bistrobar", display_name: "RATTO Bistrobar, Stuttgart", class: "amenity", type: "bar", address: { city: "Stuttgart" } }];
+  });
+  assert.match(urls[0], /bbox=5\.8663,47\.2701,15\.0419,55\.0815/);
+  assert.doesNotMatch(urls[0], /[?&]lat=/);
+  assert.match(urls[1], /countrycodes=de/);
+  assert.doesNotMatch(urls[1], /viewbox=/);
+  assert.equal(hits[0].name, "RATTO Bistrobar");
+  assert.equal(hits[0].distanceM, null);
 });
 
 test("Ratto with a Stuttgart centre comes back as the local bar", async () => {
@@ -103,6 +145,5 @@ test("Ratto with a Stuttgart centre comes back as the local bar", async () => {
   assert.match(hits[0].address, /Stuttgart/);
   assert.ok(hits[0].lat > 48.7 && hits[0].lat < 48.8);
   assert.ok((hits[0].distanceM ?? 0) > 0 && (hits[0].distanceM ?? 99999) < 5000);
-  assert.equal(hits.at(-1)?.name, "Ratto");
-  assert.ok(hits.length <= 6);
+  assert.deepEqual(hits.map((hit) => hit.name), ["RATTO Bistrobar"]);
 });

@@ -23,8 +23,11 @@ const CACHE_MS = 10 * 60 * 1000;
 const PACE_MS = 1100;
 const LOCAL_KM = 30;
 const RESULT_CAP = 6;
-/** Soft centre when nobody has shared a location yet. Europe/Berlin users, not a hard filter. */
-const GERMANY_BIAS = { lat: 51.1657, lng: 10.4515 };
+const NEAR_M = 2_000;
+const MERGE_M = 300;
+const DROP_M = 50_000;
+/** Germany extent for a search with no known point. minLon,minLat,maxLon,maxLat. */
+const GERMANY_BBOX = "5.8663,47.2701,15.0419,55.0815";
 
 const cache = new Map<string, { at: number; results: PlaceHit[] }>();
 let chain: Promise<void> = Promise.resolve();
@@ -163,27 +166,49 @@ export function haversineMeters(a: { lat: number; lng: number }, b: { lat: numbe
   return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+function foldName(name: string): string {
+  return name
+    .replace(/ß/g, "ss")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase();
+}
+
+function preferCandidate(current: PlaceCandidate, next: PlaceCandidate, bias: SearchBias): PlaceCandidate {
+  const poi = poiRank(next.osmKey, next.osmValue) - poiRank(current.osmKey, current.osmValue);
+  if (poi) return poi > 0 ? next : current;
+  if (!bias) return current;
+  return haversineMeters(bias, next) < haversineMeters(bias, current) ? next : current;
+}
+
 export function rankPlaces(candidates: PlaceCandidate[], bias: SearchBias, query: string): PlaceHit[] {
-  const best = new Map<string, PlaceCandidate>();
-  for (const hit of candidates) {
-    const key = `${hit.name.toLocaleLowerCase()}@${hit.lat.toFixed(3)},${hit.lng.toFixed(3)}`;
-    const prev = best.get(key);
-    if (!prev || poiRank(hit.osmKey, hit.osmValue) > poiRank(prev.osmKey, prev.osmValue)) best.set(key, hit);
+  const pool = bias
+    ? candidates.filter((hit) => haversineMeters(bias, hit) <= DROP_M)
+    : candidates;
+  const kept: PlaceCandidate[] = [];
+  for (const hit of pool) {
+    const folded = foldName(hit.name);
+    const idx = kept.findIndex((prev) => foldName(prev.name) === folded && haversineMeters(prev, hit) <= MERGE_M);
+    if (idx === -1) kept.push(hit);
+    else kept[idx] = preferCandidate(kept[idx], hit, bias);
   }
-  const unique = [...best.values()];
-  const ranked = unique
+  const ranked = kept
     .map((hit) => ({ hit, distance: bias ? haversineMeters(bias, hit) : null }))
     .sort((a, b) => {
-      const aLocal = a.distance != null && a.distance <= LOCAL_KM * 1000;
-      const bLocal = b.distance != null && b.distance <= LOCAL_KM * 1000;
-      if (aLocal !== bLocal) return aLocal ? -1 : 1;
+      const aNear = a.distance != null && a.distance <= NEAR_M;
+      const bNear = b.distance != null && b.distance <= NEAR_M;
+      if (aNear !== bNear) return aNear ? -1 : 1;
+      if (aNear && bNear && a.distance != null && b.distance != null) {
+        if (Math.abs(a.distance - b.distance) > 40) return a.distance - b.distance;
+        const poi = poiRank(b.hit.osmKey, b.hit.osmValue) - poiRank(a.hit.osmKey, a.hit.osmValue);
+        if (poi) return poi;
+        return a.distance - b.distance;
+      }
       const poi = poiRank(b.hit.osmKey, b.hit.osmValue) - poiRank(a.hit.osmKey, a.hit.osmValue);
       if (poi) return poi;
       const named = nameScore(b.hit.name, query) - nameScore(a.hit.name, query);
       if (named) return named;
-      if (a.distance != null && b.distance != null && Math.abs(a.distance - b.distance) > 150) {
-        return a.distance - b.distance;
-      }
+      if (a.distance != null && b.distance != null) return a.distance - b.distance;
       return 0;
     });
   return ranked.slice(0, RESULT_CAP).map(({ hit, distance }) => ({
@@ -223,16 +248,17 @@ export async function searchPlaces(query: string, bias: SearchBias = null, fetch
   const key = `${q.toLocaleLowerCase()}|${point ? `${point.lat.toFixed(2)},${point.lng.toFixed(2)}` : "de"}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.results;
-  const focus = point ?? GERMANY_BIAS;
   const local = point != null;
   const paced = fetchJson === getJson;
   if (paced) await pace();
   const photonUrl = local
-    ? `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&lat=${focus.lat}&lon=${focus.lng}&location_bias_scale=0.6&bbox=${bboxAround(focus.lat, focus.lng, LOCAL_KM)}`
-    : `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&lat=${focus.lat}&lon=${focus.lng}&location_bias_scale=0.2`;
+    ? `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&lat=${point.lat}&lon=${point.lng}&location_bias_scale=0.6&bbox=${bboxAround(point.lat, point.lng, LOCAL_KM)}`
+    : `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&bbox=${GERMANY_BBOX}`;
   const photon = parsePhoton(await fetchJson(photonUrl).catch(() => null));
   if (paced) await pace();
-  const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}&viewbox=${nominatimViewbox(focus.lat, focus.lng, local ? LOCAL_KM : 400)}&bounded=0`;
+  const nominatimUrl = local
+    ? `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}&viewbox=${nominatimViewbox(point.lat, point.lng, LOCAL_KM)}&bounded=0`
+    : `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}&countrycodes=de`;
   const nominatim = parseNominatim(await fetchJson(nominatimUrl).catch(() => null));
   const results = rankPlaces([...photon, ...nominatim], point, q);
   cache.set(key, { at: Date.now(), results });
