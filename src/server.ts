@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { clearExpiredLocations, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
 import { createNoopPushSender, createWebPushSender } from "./push.js";
+import { sendStartReminders } from "./remind.js";
 import { addDays, isoDate } from "./time.js";
 
 const config = loadConfig();
@@ -18,6 +19,9 @@ function sweepNow(): void {
 function clearLocationsNow(): void {
   const now = Date.now();
   clearExpiredLocations(db, now, isoDate(now, config.tz));
+  void sendStartReminders(db, push, now).catch((error: unknown) => {
+    console.error("start reminder failed", error instanceof Error ? error.message : error);
+  });
 }
 
 sweepNow();

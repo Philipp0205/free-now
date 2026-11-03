@@ -369,7 +369,7 @@ pre.curl {
   word-break: break-all;
 }
 label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
-input[type="text"], input[type="url"] {
+input[type="text"], input[type="url"], input[type="time"] {
   width: 100%;
   background: #1c1c1e;
   border: 0;
@@ -464,6 +464,18 @@ input[type="text"], input[type="url"] {
   padding: 8px 20px calc(20px + env(safe-area-inset-bottom));
   z-index: 31;
 }
+.when, .reply-row, .eta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip {
+  border: 0;
+  background: #2c2c2e;
+  color: #fff;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.chip.on { background: #fff; color: #000; }
+.reply-line { margin: 4px 0 0; color: #d1d1d6; font-size: 14px; }
 .where { margin-top: 12px; }
 .where-row {
   width: 100%;

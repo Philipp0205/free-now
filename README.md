@@ -21,12 +21,13 @@ No VAPID keys are required for this. Notifications show up inside the app (a ban
 Use two browser profiles, or a normal window and a private window. They do not share site data, so each one is a different friend.
 
 1. Profile A: open <http://localhost:3000>. Enter a name (Alex) and create a circle. The invite code is on the home screen until someone joins, and on the compass tab after that.
-2. Profile B: open <http://localhost:3000>. Enter a name (Veit) and join with that code. An invite link (`/join/CODE`) skips the code box after they choose a name.
-3. Profile A: tap the glowing circle, type `Rooftop coffee??`, and press **I'm free**.
-4. Profile B: a banner appears — `"Rooftop coffee??"` / `Alex is free now`. The social is on the Now screen. Tap **Join**.
-5. Profile A: the banner says `"Rooftop coffee??"` / `Veit joined your social!`
+2. Profile A: tap **Share invite**. The link looks like `/join/CODE`. **New invite link** retires the old one. A link also expires 14 days after it was created or last renewed.
+3. Profile B: open that link. The page names the circle. One button creates their account and joins, then the install sheet and the notification reminder follow in that order.
+4. Profile A: tap the glowing circle. Leave it on **Now**, or choose **Later today** (in 1 hour, 18:00, or a time today). Add a place if you want. Press **I'm free**.
+5. Profile B: the banner is `Alex is free now`, or `Alex is free from 18:00 – meet at Café X` when there is a time and a place. Tap **Join**, **On my way** (5, 10, or 20 minutes), or **Can't make it**.
+6. Profile A: the card lists who is coming, with ETAs, and who declined. A later social reminds only the people who joined or are on the way, when it starts, and then runs for about two hours.
 
-Tomorrow plans use the **+** button. Friends join those the same way. A social ends on its own after about two hours (change `SOCIAL_TTL_MS`), or the creator can end it early.
+Tomorrow plans use the **+** button. Friends join those the same way. A social that is free now ends on its own after about two hours (change `SOCIAL_TTL_MS`), or the creator can end it early. A social posted for later today lasts about two hours from that start time.
 
 Real phone push is a separate step. Generate VAPID keys, set them in the environment, restart, then follow [Install on your phone](#install-on-your-phone). The same guide is in the app, on the welcome screen and under You → notifications.
 
