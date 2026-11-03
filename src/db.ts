@@ -88,6 +88,7 @@ export type MemberRow = {
   id: string;
   name: string;
   joined_at: number;
+  is_admin: number;
 };
 
 const SCHEMA = `
@@ -232,6 +233,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "social_joins", "arrive_at", "arrive_at INTEGER");
   ensureColumn(db, "plan_joins", "arrive_at", "arrive_at INTEGER");
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
+  ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
+  backfillCircleAdmins(db);
   db.prepare(
     "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
   ).run(14 * 24 * 60 * 60 * 1000);
@@ -339,7 +342,7 @@ export function insertCircle(
       circle.created_at,
       circle.invite_expires_at ?? circle.created_at + 14 * 24 * 60 * 60 * 1000,
     );
-    db.prepare("INSERT INTO memberships (user_id, circle_id, joined_at) VALUES (?, ?, ?)").run(
+    db.prepare("INSERT INTO memberships (user_id, circle_id, joined_at, is_admin) VALUES (?, ?, ?, 1)").run(
       userId,
       circle.id,
       joinedAt,
@@ -364,13 +367,45 @@ export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | 
 export function listMembers(db: DatabaseSync, circleId: string): MemberRow[] {
   return all<MemberRow>(
     db,
-    `SELECT u.id, u.name, m.joined_at
+    `SELECT u.id, u.name, m.joined_at, m.is_admin
      FROM memberships m
      JOIN users u ON u.id = m.user_id
      WHERE m.circle_id = ?
-     ORDER BY m.joined_at ASC`,
+     ORDER BY m.joined_at ASC, u.name ASC`,
     circleId,
   );
+}
+
+export function isCircleAdmin(db: DatabaseSync, circleId: string, userId: string): boolean {
+  const row = one<{ is_admin: number }>(
+    db,
+    "SELECT is_admin FROM memberships WHERE circle_id = ? AND user_id = ?",
+    circleId,
+    userId,
+  );
+  return Boolean(row?.is_admin);
+}
+
+export function countCircleAdmins(db: DatabaseSync, circleId: string): number {
+  const row = one<{ n: number | bigint }>(
+    db,
+    "SELECT COUNT(*) AS n FROM memberships WHERE circle_id = ? AND is_admin = 1",
+    circleId,
+  );
+  return Number(row?.n ?? 0);
+}
+
+export function setCircleAdmin(db: DatabaseSync, circleId: string, userId: string, admin: boolean): "ok" | "missing" | "last" {
+  const member = one<{ is_admin: number }>(
+    db,
+    "SELECT is_admin FROM memberships WHERE circle_id = ? AND user_id = ?",
+    circleId,
+    userId,
+  );
+  if (!member) return "missing";
+  if (!admin && member.is_admin && countCircleAdmins(db, circleId) <= 1) return "last";
+  db.prepare("UPDATE memberships SET is_admin = ? WHERE circle_id = ? AND user_id = ?").run(admin ? 1 : 0, circleId, userId);
+  return "ok";
 }
 
 export function addMember(db: DatabaseSync, circleId: string, userId: string, joinedAt: number): void {
@@ -383,6 +418,24 @@ export function addMember(db: DatabaseSync, circleId: string, userId: string, jo
 
 export function removeMember(db: DatabaseSync, circleId: string, userId: string): void {
   withTx(db, () => {
+    const admins = countCircleAdmins(db, circleId);
+    const leaving = one<{ is_admin: number }>(
+      db,
+      "SELECT is_admin FROM memberships WHERE circle_id = ? AND user_id = ?",
+      circleId,
+      userId,
+    );
+    if (leaving?.is_admin && admins <= 1) {
+      const next = one<{ user_id: string }>(
+        db,
+        "SELECT user_id FROM memberships WHERE circle_id = ? AND user_id != ? ORDER BY joined_at ASC, user_id ASC LIMIT 1",
+        circleId,
+        userId,
+      );
+      if (next) {
+        db.prepare("UPDATE memberships SET is_admin = 1 WHERE circle_id = ? AND user_id = ?").run(circleId, next.user_id);
+      }
+    }
     db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
     const row = one<{ n: number | bigint }>(
       db,
@@ -393,6 +446,23 @@ export function removeMember(db: DatabaseSync, circleId: string, userId: string)
       db.prepare("DELETE FROM circles WHERE id = ?").run(circleId);
     }
   });
+}
+
+export function kickMember(db: DatabaseSync, circleId: string, userId: string): "ok" | "missing" | "last" {
+  const member = one<{ is_admin: number }>(
+    db,
+    "SELECT is_admin FROM memberships WHERE circle_id = ? AND user_id = ?",
+    circleId,
+    userId,
+  );
+  if (!member) return "missing";
+  if (member.is_admin && countCircleAdmins(db, circleId) <= 1) return "last";
+  withTx(db, () => {
+    db.prepare("DELETE FROM socials WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+    db.prepare("DELETE FROM plans WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+    db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
+  });
+  return "ok";
 }
 
 export function insertSocial(
@@ -585,6 +655,22 @@ export function deleteSocial(db: DatabaseSync, id: string, creatorId: string): n
   return Number(result.changes);
 }
 
+export function deleteSocialById(db: DatabaseSync, id: string): number {
+  const result = db.prepare("DELETE FROM socials WHERE id = ?").run(id);
+  return Number(result.changes);
+}
+
+export function patchSocialDetails(
+  db: DatabaseSync,
+  id: string,
+  note: string,
+  place: string,
+  lat: number | null,
+  lng: number | null,
+): void {
+  db.prepare("UPDATE socials SET note = ?, place = ?, lat = ?, lng = ? WHERE id = ?").run(note, place, lat, lng, id);
+}
+
 export function insertPlan(
   db: DatabaseSync,
   plan: {
@@ -681,6 +767,44 @@ export function removePlanJoin(db: DatabaseSync, planId: string, userId: string)
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
   const result = db.prepare("DELETE FROM plans WHERE id = ? AND creator_id = ?").run(id, creatorId);
   return Number(result.changes);
+}
+
+export function deletePlanById(db: DatabaseSync, id: string): number {
+  const result = db.prepare("DELETE FROM plans WHERE id = ?").run(id);
+  return Number(result.changes);
+}
+
+export function patchPlanDetails(
+  db: DatabaseSync,
+  id: string,
+  note: string,
+  place: string,
+  lat: number | null,
+  lng: number | null,
+): void {
+  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ? WHERE id = ?").run(note, place, lat, lng, id);
+}
+
+function backfillCircleAdmins(db: DatabaseSync): void {
+  const circles = all<{ id: string; created_by: string }>(
+    db,
+    `SELECT c.id, c.created_by FROM circles c
+     WHERE NOT EXISTS (SELECT 1 FROM memberships m WHERE m.circle_id = c.id AND m.is_admin = 1)`,
+  );
+  const creatorIsMember = db.prepare("SELECT 1 AS ok FROM memberships WHERE circle_id = ? AND user_id = ?");
+  const earliest = db.prepare(
+    "SELECT user_id FROM memberships WHERE circle_id = ? ORDER BY joined_at ASC, user_id ASC LIMIT 1",
+  );
+  const promote = db.prepare("UPDATE memberships SET is_admin = 1 WHERE circle_id = ? AND user_id = ?");
+  for (const circle of circles) {
+    const stillThere = creatorIsMember.get(circle.id, circle.created_by) as { ok: number } | undefined;
+    if (stillThere) {
+      promote.run(circle.id, circle.created_by);
+      continue;
+    }
+    const next = earliest.get(circle.id) as { user_id: string } | undefined;
+    if (next) promote.run(circle.id, next.user_id);
+  }
 }
 
 export function upsertPushSub(

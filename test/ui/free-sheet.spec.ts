@@ -1046,6 +1046,41 @@ test("a swipe on the header or the top of the sheet closes it", { timeout: 90_00
   }
 });
 
+test("an admin manages members from the circle list", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("heading", { name: "Members" }).waitFor();
+    await page.locator(".admin-badge", { hasText: "Admin" }).waitFor();
+    const manage = page.getByRole("button", { name: "Manage Fritz" });
+    await manage.waitFor();
+    const height = await manage.evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(height >= 44, `manage button is ${height}px`);
+    await manage.click();
+    await page.getByRole("button", { name: "Make admin" }).waitFor();
+    const remove = page.getByRole("button", { name: "Remove from circle" });
+    await remove.waitFor();
+    const removeHeight = await remove.evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(removeHeight >= 44, `remove button is ${removeHeight}px`);
+    await remove.click();
+    await page.getByRole("button", { name: "Remove", exact: true }).waitFor();
+    await page.getByText("They lose access right away.").waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },

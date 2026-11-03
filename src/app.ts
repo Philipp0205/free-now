@@ -8,20 +8,25 @@ import type { Config } from "./config.js";
 import {
   addMember,
   addSocialJoin,
-  deletePlan,
+  deletePlanById,
   deletePushSubForUser,
-  deleteSocial,
+  deleteSocialById,
   getCircleByCode,
   getCircleForUser,
+  isCircleAdmin,
+  kickMember,
   getPlan,
   getSocial,
   getUserByBuzzToken,
   getUserByTokenHash,
   hasSocialJoin,
   insertCircle,
+  patchPlanDetails,
+  patchSocialDetails,
   insertUser,
   listActiveSocials,
   listMembers,
+  setCircleAdmin,
   listNotifications,
   listPlanJoins,
   listPushSubs,
@@ -161,7 +166,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       token,
       buzzToken,
       user: { id, name },
-      circle: invited ? circlePayload(deps, req, invited) : null,
+      circle: invited ? circlePayload(deps, req, invited, id) : null,
     });
     return;
   }
@@ -261,7 +266,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const name = body.name == null || body.name === "" ? "friends" : cleanLabel(body.name, "circle name", 32);
     const now = deps.now();
     const circle = createCircle(deps, me.id, name, now);
-    sendJson(res, 201, { circle: circlePayload(deps, req, circle) });
+    sendJson(res, 201, { circle: circlePayload(deps, req, circle, me.id) });
     return;
   }
 
@@ -271,7 +276,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const current = getCircleForUser(deps.db, me.id);
     if (current && current.id !== circle.id) throw new HttpError(409, "you are already in a circle");
     if (!current) addMember(deps.db, circle.id, me.id, deps.now());
-    sendJson(res, 200, { circle: circlePayload(deps, req, circle) });
+    sendJson(res, 200, { circle: circlePayload(deps, req, circle, me.id) });
     return;
   }
 
@@ -281,7 +286,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     rotateInvite(deps.db, circle.id, inviteCode(), now + INVITE_TTL_MS);
     const fresh = getCircleForUser(deps.db, me.id);
     if (!fresh) throw new HttpError(500, "circle missing");
-    sendJson(res, 200, { circle: circlePayload(deps, req, fresh) });
+    sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
   }
 
@@ -290,6 +295,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!circle) throw new HttpError(409, "join a circle first");
     removeMember(deps.db, circle.id, me.id);
     sendJson(res, 200, mePayload(deps, req, me));
+    return;
+  }
+
+  const circleMember = matchPath(pathname, /^\/api\/circles\/members\/([^/]+)$/);
+  if (circleMember && (method === "POST" || method === "DELETE")) {
+    const circle = requireCircle(deps, me.id);
+    requireAdmin(deps, circle.id, me.id);
+    const memberId = parseId(circleMember[1]);
+    if (method === "DELETE") {
+      const result = kickMember(deps.db, circle.id, memberId);
+      if (result === "missing") throw new HttpError(404, "member not found");
+      if (result === "last") throw new HttpError(409, "A circle needs an admin.");
+      sendEmpty(res, 204);
+      return;
+    }
+    if (typeof body.admin !== "boolean") throw new HttpError(400, "admin must be true or false");
+    const result = setCircleAdmin(deps.db, circle.id, memberId, body.admin);
+    if (result === "missing") throw new HttpError(404, "member not found");
+    if (result === "last") throw new HttpError(409, "A circle needs an admin.");
+    const fresh = getCircleForUser(deps.db, me.id);
+    if (!fresh) throw new HttpError(500, "circle missing");
+    sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
   }
 
@@ -326,10 +353,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const socialId = matchPath(pathname, /^\/api\/socials\/([^/]+)$/);
+  if (socialId && method === "PATCH") {
+    sendJson(res, 200, { social: editSocial(deps, me, socialId[1], body) });
+    return;
+  }
   if (socialId && method === "DELETE") {
-    const id = parseId(socialId[1]);
-    const changes = deleteSocial(deps.db, id, me.id);
-    if (!changes) throw new HttpError(404, "social not found");
+    await endSocial(deps, me, socialId[1]);
     sendEmpty(res, 204);
     return;
   }
@@ -372,10 +401,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const planId = matchPath(pathname, /^\/api\/plans\/([^/]+)$/);
+  if (planId && method === "PATCH") {
+    sendJson(res, 200, { plan: editPlan(deps, me, planId[1], body) });
+    return;
+  }
   if (planId && method === "DELETE") {
-    const id = parseId(planId[1]);
-    const changes = deletePlan(deps.db, id, me.id);
-    if (!changes) throw new HttpError(404, "plan not found");
+    await endPlan(deps, me, planId[1]);
     sendEmpty(res, 204);
     return;
   }
@@ -524,17 +555,117 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow) {
   const circle = getCircleForUser(deps.db, user.id);
   return {
     user: { id: user.id, name: user.name, buzzToken: user.buzz_token },
-    circle: circle ? circlePayload(deps, req, circle) : null,
+    circle: circle ? circlePayload(deps, req, circle, user.id) : null,
   };
 }
 
-function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow) {
+function requireAdmin(deps: AppDeps, circleId: string, userId: string): void {
+  if (!isCircleAdmin(deps.db, circleId, userId)) throw new HttpError(403, "Only an admin can do that.");
+}
+
+async function endSocial(deps: AppDeps, user: UserRow, rawId: string): Promise<void> {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const social = getSocial(deps.db, id);
+  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  const admin = isCircleAdmin(deps.db, circle.id, user.id);
+  if (social.creator_id !== user.id && !admin) throw new HttpError(403, "Only an admin can do that.");
+  if (!deleteSocialById(deps.db, social.id)) throw new HttpError(404, "social not found");
+  if (social.creator_id !== user.id) {
+    const label = social.note.trim() || "your free post";
+    await notifyUsers(deps.db, deps.push, deps.now(), [
+      {
+        userId: social.creator_id,
+        title: "Ended",
+        body: `${user.name} ended ${label}`,
+        kind: "ended",
+        refId: social.id,
+        tag: `ended:social:${social.id}`,
+      },
+    ]);
+  }
+}
+
+function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const social = getSocial(deps.db, id);
+  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (social.creator_id !== user.id && !isCircleAdmin(deps.db, circle.id, user.id)) {
+    throw new HttpError(403, "Only an admin can do that.");
+  }
+  const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
+  const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : social.place;
+  let lat = social.lat;
+  let lng = social.lng;
+  if (Object.prototype.hasOwnProperty.call(body, "lat") || Object.prototype.hasOwnProperty.call(body, "lng")) {
+    const point = readPoint(body);
+    lat = point?.lat ?? null;
+    lng = point?.lng ?? null;
+  }
+  patchSocialDetails(deps.db, social.id, note, place, lat, lng);
+  const fresh = getSocial(deps.db, social.id);
+  if (!fresh) throw new HttpError(500, "social missing");
+  return socialPayload(deps.db, fresh);
+}
+
+async function endPlan(deps: AppDeps, user: UserRow, rawId: string): Promise<void> {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (plan.creator_id !== user.id && !isCircleAdmin(deps.db, circle.id, user.id)) {
+    throw new HttpError(403, "Only an admin can do that.");
+  }
+  if (!deletePlanById(deps.db, plan.id)) throw new HttpError(404, "plan not found");
+  if (plan.creator_id !== user.id) {
+    await notifyUsers(deps.db, deps.push, deps.now(), [
+      {
+        userId: plan.creator_id,
+        title: "Ended",
+        body: `${user.name} ended ${plan.note}`,
+        kind: "ended",
+        refId: plan.id,
+        tag: `ended:plan:${plan.id}`,
+      },
+    ]);
+  }
+}
+
+function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (plan.creator_id !== user.id && !isCircleAdmin(deps.db, circle.id, user.id)) {
+    throw new HttpError(403, "Only an admin can do that.");
+  }
+  const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, true) : plan.note;
+  const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : plan.place;
+  let lat = plan.lat;
+  let lng = plan.lng;
+  if (Object.prototype.hasOwnProperty.call(body, "lat") || Object.prototype.hasOwnProperty.call(body, "lng")) {
+    const point = readPoint(body);
+    lat = point?.lat ?? null;
+    lng = point?.lng ?? null;
+  }
+  patchPlanDetails(deps.db, plan.id, note, place, lat, lng);
+  const fresh = getPlan(deps.db, plan.id);
+  if (!fresh) throw new HttpError(500, "plan missing");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  return planPayload(deps.db, fresh, today, addDays(today, 1));
+}
+
+function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow, viewerId: string | null = null) {
+  const members = listMembers(deps.db, circle.id);
   return {
     id: circle.id,
     name: circle.name,
     inviteCode: circle.invite_code,
     inviteUrl: `${requestOrigin(req, deps.config)}/join/${circle.invite_code}`,
-    members: listMembers(deps.db, circle.id).map((member) => ({ id: member.id, name: member.name })),
+    youAreAdmin: Boolean(viewerId && members.some((member) => member.id === viewerId && member.is_admin)),
+    members: members.map((member) => ({ id: member.id, name: member.name, admin: Boolean(member.is_admin) })),
   };
 }
 

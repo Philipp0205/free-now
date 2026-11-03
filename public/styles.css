@@ -429,6 +429,19 @@ button.row {
 .row .grow { flex: 1; min-width: 0; }
 .row h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .row p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.members-title { margin: 18px 12px 4px; font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.member-row h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #3f3f46;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
 .time { color: var(--faint); font-size: 13px; white-space: nowrap; }
 .unread { width: 8px; height: 8px; border-radius: 50%; background: #ff375f; flex: none; }
 
