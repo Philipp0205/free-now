@@ -128,11 +128,11 @@ test("two friends can invite, start a social, push, join, and expire", async () 
     assert.equal(ctx.sent.length, 1);
     assert.equal(ctx.sent[0].endpoint, "https://push.example/veit");
     assert.equal(ctx.sent[0].payload.title, "Free now");
-    assert.equal(ctx.sent[0].payload.body, "Alex is free now");
+    assert.equal(ctx.sent[0].payload.body, "Alex is free now – Rooftop coffee??");
 
     const veitNotes = await api(ctx, "GET", "/api/notifications", { token: veit.token });
     assert.equal(veitNotes.json.notifications[0].title, "Free now");
-    assert.equal(veitNotes.json.notifications[0].body, "Alex is free now");
+    assert.equal(veitNotes.json.notifications[0].body, "Alex is free now – Rooftop coffee??");
 
     const alexBefore = await api(ctx, "GET", "/api/notifications", { token: alex.token });
     assert.equal(alexBefore.json.notifications.length, 0);
@@ -189,7 +189,7 @@ test("two friends can invite, start a social, push, join, and expire", async () 
       status: 200,
     });
     assert.equal(ctx.sent.length, 3);
-    assert.equal(ctx.sent[2].payload.body, "Alex is free now");
+    assert.equal(ctx.sent[2].payload.body, "Alex is free now – Rooftop coffee??");
 
     ctx.advance(TTL + 1);
     const expired = await api(ctx, "GET", "/api/socials", { token: veit.token });
@@ -221,7 +221,7 @@ test("buzz token starts a social and notifies the circle", async () => {
     assert.equal(ctx.sent.length, 1);
     assert.equal(ctx.sent[0].endpoint, "https://push.example/veit");
     assert.equal(ctx.sent[0].payload.title, "Free now");
-    assert.equal(ctx.sent[0].payload.body, "Alex is free now");
+    assert.equal(ctx.sent[0].payload.body, "Alex is free now – Rooftop coffee??");
 
     const bare = await fetch(`http://127.0.0.1:${ctx.port}/api/buzz/${alex.buzzToken}`, { method: "POST" });
     assert.equal(bare.status, 200);

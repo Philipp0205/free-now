@@ -49,6 +49,7 @@ const state = {
   where: emptyWhere(),
   whereOpen: false,
   whereQuery: "",
+  whereAutofill: false,
   whereResults: [],
   whereSearching: false,
   whereMap: false,
@@ -74,6 +75,7 @@ const ICONS = {
   person: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 19.2c.8-2.8 3.2-4.2 6.4-4.2s5.6 1.4 6.4 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -273,6 +275,7 @@ function revealField(node) {
   }
   if (node.closest(".sheet")) {
     node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    scrollFieldAboveDock(node);
     return;
   }
   const form = node.closest("form");
@@ -420,7 +423,10 @@ function render() {
   const activeId = state.focusSheet ? null : document.activeElement?.id || null;
   const caret = document.activeElement?.selectionStart ?? null;
   const y = document.scrollingElement?.scrollTop ?? 0;
+  const sheetY = document.querySelector(".sheet-scroll")?.scrollTop ?? 0;
   document.getElementById("app").replaceChildren(view());
+  const sheetScroll = document.querySelector(".sheet-scroll");
+  if (sheetScroll) sheetScroll.scrollTop = sheetY;
   if (state.focusSheet) {
     state.focusSheet = false;
     document.getElementById("sheet-note")?.focus({ preventScroll: true });
@@ -439,8 +445,17 @@ function render() {
   }
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
-  if (state.whereMap && state.sheet === "free") queueMicrotask(() => { mountWhereMap().catch(() => {}); });
+  if (state.whereMap && state.sheet === "free") {
+    queueMicrotask(() => {
+      mountWhereMap().then(() => {
+        const node = document.querySelector(".sheet-scroll");
+        if (node) node.scrollTop = sheetY;
+      }).catch((error) => console.error("where map failed", error));
+    });
+  }
   if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
+  bindSheetSwipe();
+  syncSheetHistory();
   if (state.focusSocial) {
     const id = state.focusSocial;
     queueMicrotask(() => {
@@ -468,7 +483,7 @@ function view() {
   }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
-  if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+  if (state.error && state.error !== TIME_LATER_ERROR) root.append(el("div", { class: "toast", role: "status", text: state.error }));
   return root;
 }
 
@@ -884,7 +899,7 @@ function sheet() {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
       el("div", { class: "sheet", role: "dialog", "aria-label": "Create" }, [
-        el("div", { class: "grabber" }),
+        el("div", { class: "sheet-head" }, [el("div", { class: "grabber" })]),
         el("div", { class: "actions" }, [
           el("button", { class: "action", type: "button", text: "I'm free now", onclick: () => openSheet("free") }),
           el("button", { class: "action", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
@@ -894,45 +909,55 @@ function sheet() {
     ]);
   }
   const planning = state.sheet === "plan";
+  const editing = !planning && Boolean(mySocial());
   const later = !planning && state.whenMode === "later";
   const ttl = ttlLabel(state.meta?.socialTtlMs ?? 7200000);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("form", { class: "sheet", role: "dialog", onsubmit: planning ? onCreatePlan : onFree }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("div", { class: "sheet-intro" }, [
+          el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
+          el("p", {
+            class: "help",
+            text: planning
+              ? "Friends can join. It stays up through tomorrow."
+              : later
+                ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
+                : `Friends in your circle get a push. This lasts ${ttl}.`,
+          }),
+        ]),
+      ]),
       el("div", { class: "sheet-scroll" }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: planning ? "Tomorrow" : later ? "Free later today" : "Free now" }),
-      el("p", {
-        class: "help",
-        text: planning
-          ? "Friends can join. It stays up through tomorrow."
-          : later
-            ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
-            : `Friends in your circle get a push. This lasts ${ttl}.`,
-      }),
-      planning ? null : whenBlock(),
-      field(planning ? "Plan" : "Note", "sheet-note", state.noteDraft, (value) => {
-        state.noteDraft = value;
-      }, {
-        placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
-        maxlength: "80",
-      }),
-      planning
-        ? field("Place", "sheet-place", state.placeDraft, (value) => {
-            state.placeDraft = value;
-          }, { placeholder: "Optional", maxlength: "80" })
-        : whereBlock(),
-      planning ? shareToggle("Use my location") : null,
+        el("div", { class: "sheet-form" }, [
+          planning ? null : whenBlock(),
+          planning ? null : timeBlock(),
+          sheetField(planning ? "Plan" : "Note (optional)", "sheet-note", state.noteDraft, (value) => {
+            state.noteDraft = value;
+            paintSummary();
+          }, {
+            placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
+            maxlength: "80",
+          }),
+          planning
+            ? sheetField("Place (optional)", "sheet-place", state.placeDraft, (value) => {
+                state.placeDraft = value;
+              }, { placeholder: "A park, a cafe, a street", maxlength: "80" })
+            : whereBlock(),
+          planning ? shareToggle("Use my location") : null,
+        ]),
       ]),
       el("div", { class: "sheet-dock stack" }, [
+        planning ? null : el("p", { class: "sheet-summary", text: friendsSummary() }),
         el("button", {
           class: "btn",
           type: "submit",
-          text: planning ? "Add plan" : later ? "I'm free later" : "I'm free",
+          text: planning ? "Add plan" : editing ? "Update" : later ? "I'm free later" : "I'm free",
           disabled: later && !laterTimeChosen(),
         }),
         !planning && mySocial()
-          ? el("button", { class: "btn ghost", type: "button", text: "I'm no longer free", onclick: () => endSocial(mySocial()) })
+          ? el("button", { class: "btn ghost", type: "button", text: "End", onclick: () => endSocial(mySocial()) })
           : null,
       ]),
     ]),
@@ -1013,7 +1038,8 @@ function installGuideView() {
   actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallGuide }));
   return el("div", { class: "guide-scrim" }, [
     el("section", { class: "guide", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-title" }, [
-      el("div", { class: "guide-head" }, [
+      el("div", { class: "guide-head sheet-head" }, [
+        el("div", { class: "grabber" }),
         el("h2", {
           id: "install-title",
           text: guide.status === "on" || guide.status === "denied" ? "Notifications" : guide.headline,
@@ -1124,6 +1150,7 @@ let openMapPin = null;
 let whereLeaflet = null;
 const TILE_MAX_ZOOM = 19;
 let whereTimer = 0;
+let skipWhereInput = false;
 let reverseTimer = 0;
 const PIN_PX = 36;
 
@@ -1145,11 +1172,23 @@ function whereFromSocial(social) {
   };
 }
 
+const FINDING_PLACE = "Finding address…";
+
+function namedPlace(value) {
+  const text = String(value || "").trim();
+  return !text || text === FINDING_PLACE ? "" : text;
+}
+
 function whereLabel() {
+  if (state.where.mode === "here" && /^near you$/i.test(state.where.place || "")) return "Current location";
   if (state.where.place) return state.where.place;
-  if (state.where.mode === "here") return "near you";
-  if (state.where.lat != null) return "Dropped pin";
-  return "Nowhere";
+  if (state.where.mode === "here") return "Current location";
+  if (state.where.lat != null) return FINDING_PLACE;
+  return "Pick a place";
+}
+
+function whereIsEmpty() {
+  return whereLabel() === "Pick a place";
 }
 
 function isLiveSocial(social) {
@@ -1166,60 +1205,165 @@ function clock(ms) {
   }).format(new Date(ms));
 }
 
-function hourInZone() {
-  const tz = state.meta?.tz || "Europe/Berlin";
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit" }).formatToParts(new Date());
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
-  return hour === 24 ? 0 : hour;
+function whenBlock() {
+  return el("div", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", id: "when-label", text: "When" }),
+    el("div", { class: "segment", role: "group", "aria-labelledby": "when-label" }, [
+      whenChoice("now", "Now"),
+      whenChoice("later", "Later today"),
+    ]),
+  ]);
 }
 
-function whenBlock() {
-  const hour = hourInZone();
-  return el("div", { class: "when" }, [
-    el("button", {
-      class: state.whenMode === "now" ? "chip on" : "chip",
-      type: "button",
-      text: "Now",
-      onclick: () => { state.whenMode = "now"; state.startChoice = ""; render(); },
+function whenChoice(mode, text) {
+  const on = state.whenMode === mode;
+  return el("button", {
+    type: "button",
+    class: on ? "on" : "",
+    "aria-pressed": on ? "true" : "false",
+    text,
+    onclick: () => {
+      state.whenMode = mode;
+      if (mode === "now") {
+        state.startChoice = "";
+        if (state.error === TIME_LATER_ERROR) state.error = "";
+      } else ensureLaterTime();
+      render();
+    },
+  });
+}
+
+const TIME_LATER_ERROR = "Pick a time later today";
+
+function zonedParts(ms) {
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date(ms));
+  const read = (type) => parts.find((part) => part.type === type)?.value ?? "";
+  let hour = Number(read("hour"));
+  if (hour === 24) hour = 0;
+  return {
+    day: `${read("year")}-${read("month")}-${read("day")}`,
+    hour,
+    minute: Number(read("minute")),
+  };
+}
+
+function clockText(hour, minute) {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function nextLaterSlot(now = Date.now()) {
+  const earliest = now + 15 * 60 * 1000;
+  const today = zonedParts(now).day;
+  const part = zonedParts(earliest);
+  if (part.day !== today) return "";
+  let { hour, minute } = part;
+  if (minute !== 0 && minute !== 30) {
+    if (minute < 30) minute = 30;
+    else { minute = 0; hour += 1; }
+  }
+  if (hour >= 24) return "";
+  return clockText(hour, minute);
+}
+
+function minLaterClock(now = Date.now()) {
+  const part = zonedParts(now + 60 * 1000);
+  if (part.day !== zonedParts(now).day) return "";
+  return clockText(part.hour, part.minute);
+}
+
+function isLaterToday(hhmm, now = Date.now()) {
+  if (!/^\d{2}:\d{2}$/.test(hhmm)) return false;
+  const min = minLaterClock(now);
+  if (!min) return false;
+  return hhmm >= min;
+}
+
+function ensureLaterTime() {
+  if (!isLaterToday(state.startChoice)) state.startChoice = nextLaterSlot();
+  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice)) state.error = "";
+}
+
+function timeBlock() {
+  if (state.whenMode !== "later") return null;
+  const min = minLaterClock();
+  return el("div", { class: "sheet-group" }, [
+    el("label", { class: "sheet-label", for: "later-time", text: "Time" }),
+    el("input", {
+      id: "later-time",
+      class: "sheet-control",
+      type: "time",
+      min: min || null,
+      value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
+      oninput: (event) => {
+        state.startChoice = event.target.value;
+        if (state.startChoice && !isLaterToday(state.startChoice)) state.error = TIME_LATER_ERROR;
+        else if (state.error === TIME_LATER_ERROR) state.error = "";
+        render();
+      },
     }),
-    el("button", {
-      class: state.whenMode === "later" ? "chip on" : "chip",
-      type: "button",
-      text: "Later today",
-      onclick: () => { state.whenMode = "later"; render(); },
+    state.error === TIME_LATER_ERROR ? el("p", { class: "time-error", text: TIME_LATER_ERROR }) : null,
+  ]);
+}
+
+function pushLine(name, place, fromTime, note) {
+  const spot = place.trim();
+  const when = fromTime.trim();
+  const base = when ? `${name} is free from ${when}` : "";
+  const nearYou = /^near you$/i.test(spot);
+  const near = /^near\s+/i.test(spot) ? `near ${spot.replace(/^near\s+/i, "")}` : "";
+  let line;
+  if (!spot) line = base || `${name} is free now`;
+  else if (nearYou) line = base ? `${base}, nearby` : `${name} is free nearby`;
+  else if (near) line = base ? `${base}, ${near}` : `${name} is free ${near}`;
+  else if (base) line = `${base} – meet at ${spot}`;
+  else line = `${name} is free – meet at ${spot}`;
+  return note ? `${line} – ${note}` : line;
+}
+
+function friendsSummary() {
+  const name = state.me?.user?.name?.trim() || "You";
+  const place = (wherePayload().place || "").trim();
+  const note = state.noteDraft.trim();
+  const later = state.whenMode === "later";
+  const time = later && /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "";
+  if (later && !time) {
+    const line = note ? `${name} is free later today – ${note}` : `${name} is free later today`;
+    return `Friends get: ${line}`;
+  }
+  return `Friends get: ${pushLine(name, place, time, note)}`;
+}
+
+function paintSummary() {
+  const node = document.querySelector(".sheet-summary");
+  if (node) node.textContent = friendsSummary();
+}
+
+function sheetField(label, id, value, onValue, attrs = {}) {
+  return el("label", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", text: label }),
+    el("input", {
+      id,
+      class: "sheet-control",
+      type: "text",
+      value,
+      autocomplete: "off",
+      ...attrs,
+      oninput: (event) => onValue(event.target.value),
     }),
-    state.whenMode === "later" && hour < 23
-      ? el("button", {
-          class: state.startChoice === "+60" ? "chip on" : "chip",
-          type: "button",
-          text: "In 1 hour",
-          onclick: () => { state.startChoice = "+60"; render(); },
-        })
-      : null,
-    state.whenMode === "later" && hour < 18
-      ? el("button", {
-          class: state.startChoice === "18:00" ? "chip on" : "chip",
-          type: "button",
-          text: "18:00",
-          onclick: () => { state.startChoice = "18:00"; render(); },
-        })
-      : null,
-    state.whenMode === "later"
-      ? el("input", {
-          id: "later-time",
-          type: "time",
-          value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
-          oninput: (event) => {
-            state.startChoice = event.target.value;
-            render();
-          },
-        })
-      : null,
   ]);
 }
 
 function laterTimeChosen() {
-  return state.startChoice === "+60" || /^\d{2}:\d{2}$/.test(state.startChoice);
+  return isLaterToday(state.startChoice);
 }
 
 function startPayload() {
@@ -1310,9 +1454,9 @@ async function rotateInvite() {
 
 function wherePayload() {
   const where = state.where;
-  const typed = (state.whereQuery || where.place || "").trim();
+  const typed = namedPlace(state.whereQuery || where.place || "");
   if (where.mode === "here" && where.lat != null && where.lng != null) {
-    return { place: where.place || "near you", lat: where.lat, lng: where.lng, precise: false };
+    return { place: namedPlace(where.place) || "near you", lat: where.lat, lng: where.lng, precise: false };
   }
   if ((where.mode === "place" || typed) && (typed || where.lat != null)) {
     return {
@@ -1326,20 +1470,38 @@ function wherePayload() {
 }
 
 function whereBlock() {
-  return el("div", { class: "where" }, [
-    el("button", {
-      class: "where-row",
-      type: "button",
-      "aria-expanded": state.whereOpen ? "true" : "false",
-      onclick: () => {
-        state.whereOpen = !state.whereOpen;
-        if (!state.whereOpen) state.whereMap = false;
-        render();
-        if (state.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
-      },
-    }, [
-      el("span", { class: "where-k", text: "Where?" }),
-      el("span", { class: "where-v", text: whereLabel() }),
+  const value = whereLabel();
+  const empty = whereIsEmpty();
+  return el("div", { class: "where sheet-group" }, [
+    el("span", { class: "sheet-label", id: "where-label", text: "Where" }),
+    el("div", { class: empty ? "where-field" : "where-field has-value" }, [
+      el("button", {
+        class: "where-row",
+        type: "button",
+        "aria-labelledby": "where-label",
+        "aria-expanded": state.whereOpen ? "true" : "false",
+        onclick: () => {
+          state.whereOpen = !state.whereOpen;
+          if (!state.whereOpen) state.whereMap = false;
+          render();
+          if (state.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
+        },
+      }, [
+        el("span", { class: empty ? "where-v is-placeholder" : "where-v", text: value }),
+        icon("chevron"),
+      ]),
+      empty
+        ? null
+        : el("button", {
+            class: "where-clear",
+            type: "button",
+            text: "Clear",
+            onclick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              clearWhereSelection(state.whereOpen);
+            },
+          }),
     ]),
     state.whereOpen ? wherePicker() : null,
   ]);
@@ -1349,24 +1511,15 @@ function wherePicker() {
   return el("div", { class: "where-picker" }, [
     el("input", {
       id: "where-query",
+      class: "sheet-control",
       type: "text",
       value: state.whereQuery,
-      placeholder: "Place name or address",
+      placeholder: "Search for a place",
       maxlength: "80",
       autocomplete: "off",
       enterkeyhint: "search",
-      oninput: (event) => {
-        state.whereQuery = event.target.value;
-        const typed = event.target.value.trim();
-        state.where.mode = typed ? "place" : "none";
-        state.where.place = typed;
-        state.where.lat = null;
-        state.where.lng = null;
-        state.where.precise = false;
-        const label = document.querySelector(".where-v");
-        if (label) label.textContent = typed || "Nowhere";
-        scheduleWhereSearch();
-      },
+      onbeforeinput: onWhereBeforeInput,
+      oninput: onWhereInput,
     }),
     state.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
     state.whereResults.length
@@ -1395,20 +1548,6 @@ function wherePicker() {
       },
     }),
     state.whereMap ? el("div", { id: "where-map", class: "where-map" }) : null,
-    state.where.mode !== "none"
-      ? el("button", {
-          class: "where-action",
-          type: "button",
-          text: "Clear place",
-          onclick: () => {
-            state.where = emptyWhere();
-            state.whereQuery = "";
-            state.whereResults = [];
-            state.whereMap = false;
-            render();
-          },
-        })
-      : null,
   ]);
 }
 
@@ -1450,11 +1589,132 @@ function pickerFocus() {
 }
 
 function chooseWhereHit(hit) {
+  state.whereAutofill = false;
   state.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
   state.whereQuery = hit.name;
   state.whereResults = [];
   state.whereSearching = false;
   render();
+}
+
+function clearWhereSelection(keepOpen) {
+  state.whereAutofill = false;
+  state.where = emptyWhere();
+  state.whereQuery = "";
+  state.whereResults = [];
+  state.whereSearching = false;
+  state.whereMap = false;
+  state.whereOpen = Boolean(keepOpen);
+  clearTimeout(whereTimer);
+  render();
+  paintSummary();
+  if (keepOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
+}
+
+function swallowNextWhereInput() {
+  skipWhereInput = true;
+  queueMicrotask(() => { skipWhereInput = false; });
+}
+
+function onWhereBeforeInput(event) {
+  if (!state.whereAutofill) return;
+  const type = event.inputType || "";
+  if (type.startsWith("delete")) {
+    event.preventDefault();
+    swallowNextWhereInput();
+    clearWhereSelection(true);
+    return;
+  }
+  if (type.startsWith("insert") && typeof event.data === "string") {
+    event.preventDefault();
+    swallowNextWhereInput();
+    commitTypedWhere(event.data);
+  }
+}
+
+function onWhereInput(event) {
+  if (skipWhereInput) {
+    skipWhereInput = false;
+    event.target.value = state.whereQuery;
+    const end = state.whereQuery.length;
+    try { event.target.setSelectionRange(end, end); } catch { /* the caret can stay */ }
+    return;
+  }
+  if (state.whereAutofill) {
+    const next = event.target.value;
+    const previous = state.whereQuery;
+    if (next.length < previous.length) {
+      clearWhereSelection(true);
+      return;
+    }
+    if (next !== previous && next.startsWith(previous)) {
+      commitTypedWhere(next.slice(previous.length));
+      return;
+    }
+    if (next !== previous) {
+      commitTypedWhere(next);
+      return;
+    }
+  }
+  applyWhereQuery(event.target.value);
+}
+
+function commitTypedWhere(text) {
+  state.whereAutofill = false;
+  state.where = {
+    mode: text.trim() ? "place" : "none",
+    place: text,
+    lat: null,
+    lng: null,
+    precise: false,
+  };
+  state.whereQuery = text;
+  const input = document.getElementById("where-query");
+  if (input) {
+    input.value = text;
+    const end = text.length;
+    try { input.setSelectionRange(end, end); } catch { /* keep the caret where the field left it */ }
+  }
+  const label = document.querySelector(".where-v");
+  if (label) {
+    label.textContent = text.trim() || "Pick a place";
+    label.classList.toggle("is-placeholder", !text.trim());
+  }
+  paintSummary();
+  scheduleWhereSearch();
+}
+
+function applyWhereQuery(value) {
+  state.whereAutofill = false;
+  state.whereQuery = value;
+  const typed = value.trim();
+  state.where.mode = typed ? "place" : "none";
+  state.where.place = typed;
+  state.where.lat = null;
+  state.where.lng = null;
+  state.where.precise = false;
+  const label = document.querySelector(".where-v");
+  if (label) {
+    label.textContent = typed || "Pick a place";
+    label.classList.toggle("is-placeholder", !typed);
+  }
+  paintSummary();
+  scheduleWhereSearch();
+}
+
+function rerenderWhere() {
+  const input = document.activeElement?.id === "where-query" ? document.activeElement : null;
+  const caret = input ? input.selectionStart : null;
+  render();
+  if (!input) return;
+  queueMicrotask(() => {
+    const next = document.getElementById("where-query");
+    if (!next) return;
+    next.focus();
+    if (caret != null) {
+      try { next.setSelectionRange(caret, caret); } catch { /* the field keeps its own caret */ }
+    }
+  });
 }
 
 function scheduleWhereSearch() {
@@ -1477,11 +1737,11 @@ function scheduleWhereSearch() {
       if (state.whereQuery.trim() !== query) return;
       state.whereResults = data.results || [];
       state.whereSearching = false;
-      render();
+      rerenderWhere();
     }).catch(() => {
       state.whereSearching = false;
       state.whereResults = [];
-      render();
+      rerenderWhere();
     });
   }, 400);
 }
@@ -1513,17 +1773,22 @@ async function useCurrentWhere() {
       });
     });
     state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    state.whereAutofill = true;
     state.where = { mode: "here", place: "near you", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
-    state.whereQuery = "near you";
+    state.whereQuery = "Current location";
     state.whereResults = [];
     state.error = "";
+    const keepFocus = document.activeElement?.id === "where-query";
     render();
+    if (keepFocus) queueMicrotask(() => document.getElementById("where-query")?.focus());
     const named = await api(`/api/geocode?lat=${encodeURIComponent(pos.coords.latitude)}&lng=${encodeURIComponent(pos.coords.longitude)}`).catch(() => null);
-    if (state.where.mode === "here" && state.where.lat === pos.coords.latitude) {
-      const place = named?.place || "near you";
+    if (state.where.mode === "here" && state.where.lat === pos.coords.latitude && state.whereAutofill) {
+      const place = named?.place && !/^near you$/i.test(named.place) ? named.place : "near you";
       state.where.place = place;
-      state.whereQuery = place;
+      state.whereQuery = place === "near you" ? "Current location" : place;
+      const stillFocused = document.activeElement?.id === "where-query";
       render();
+      if (stillFocused) queueMicrotask(() => document.getElementById("where-query")?.focus());
     }
   } catch {
     state.error = "Location stayed off. Everything else still works.";
@@ -1532,17 +1797,29 @@ async function useCurrentWhere() {
   }
 }
 
-function scheduleReverse(lat, lng) {
+function scheduleReverse(lat, lng, replace = false) {
   clearTimeout(reverseTimer);
   reverseTimer = setTimeout(() => {
     api(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`).then((data) => {
       if (state.where.lat !== lat || state.where.lng !== lng) return;
-      if (state.whereQuery.trim() || !data.place) return;
+      if (!data?.place) return;
+      const pending = state.where.place === FINDING_PLACE || state.whereQuery === FINDING_PLACE;
+      if (!replace && state.whereQuery.trim() && !pending) return;
+      if (replace && !pending) return;
       state.where.place = data.place;
       state.whereQuery = data.place;
       state.where.mode = "place";
-      render();
-    }).catch(() => {});
+      state.whereAutofill = false;
+      const label = document.querySelector(".where-v");
+      const query = document.getElementById("where-query");
+      if (label) {
+        label.textContent = data.place;
+        label.classList.remove("is-placeholder");
+      }
+      if (query && document.activeElement !== query) query.value = data.place;
+      paintSummary();
+      if (!label && !query) rerenderWhere();
+    }).catch((error) => console.error("reverse geocode failed", error));
   }, 400);
 }
 
@@ -1647,7 +1924,7 @@ async function mountWhereMap() {
   map.setView([focus.lat, focus.lng], Math.min(focus.zoom, TILE_MAX_ZOOM));
   addMapTiles(L, map);
   map.on("dragend", () => rememberMapCenter(map));
-  const marker = L.marker([lat, lng], {
+  const marker = L.marker([focus.lat, focus.lng], {
     draggable: true,
     icon: L.divIcon({
       className: "pin pin-social",
@@ -1657,13 +1934,23 @@ async function mountWhereMap() {
     }),
   }).addTo(map);
   const apply = (ll) => {
+    state.whereAutofill = false;
     state.where.mode = "place";
     state.where.lat = ll.lat;
     state.where.lng = ll.lng;
     state.where.precise = true;
+    state.where.place = FINDING_PLACE;
+    state.whereQuery = FINDING_PLACE;
     const label = document.querySelector(".where-v");
-    if (label) label.textContent = state.where.place || "Dropped pin";
-    scheduleReverse(ll.lat, ll.lng);
+    if (label) {
+      label.textContent = FINDING_PLACE;
+      label.classList.remove("is-placeholder");
+    }
+    document.querySelector(".where-field")?.classList.add("has-value");
+    const query = document.getElementById("where-query");
+    if (query) query.value = FINDING_PLACE;
+    paintSummary();
+    scheduleReverse(ll.lat, ll.lng, true);
   };
   marker.on("dragend", () => apply(marker.getLatLng()));
   map.on("click", (event) => {
@@ -2008,6 +2295,7 @@ function openSheet(name) {
     state.noteDraft = mySocial()?.note ?? "";
     state.where = whereFromSocial(mySocial());
     state.whereQuery = state.where.place;
+    state.whereAutofill = false;
     state.whereOpen = false;
     state.whereResults = [];
     state.whereSearching = false;
@@ -2035,6 +2323,139 @@ function closeSheet() {
   }
   render();
 }
+
+let sheetHistoryPushed = false;
+let ignoreSheetPop = false;
+let closingFromPop = false;
+
+function sheetIsOpen() {
+  return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen);
+}
+
+function dismissTopSheet() {
+  if (state.confirm) {
+    state.confirm = null;
+    render();
+    return;
+  }
+  if (state.installOpen) {
+    state.installOpen = false;
+    render();
+    return;
+  }
+  if (state.onboarding) {
+    state.onboarding = false;
+    render();
+    return;
+  }
+  if (state.installSheet) {
+    state.installSheet = false;
+    render();
+    return;
+  }
+  if (state.sheet) closeSheet();
+}
+
+function syncSheetHistory() {
+  const open = sheetIsOpen();
+  if (open && !sheetHistoryPushed) {
+    history.pushState({ hangrySheet: 1 }, "");
+    sheetHistoryPushed = true;
+    return;
+  }
+  if (!open && sheetHistoryPushed && !closingFromPop) {
+    sheetHistoryPushed = false;
+    ignoreSheetPop = true;
+    history.back();
+  }
+}
+
+function bindSheetSwipe() {
+  document.querySelectorAll(".sheet, .guide").forEach((panel) => {
+    let tracking = false;
+    let dragging = false;
+    let startY = 0;
+    let drag = 0;
+    let pointerId = -1;
+    const headerHit = (event) => Boolean(event.target.closest(".sheet-head, .grabber"));
+    const blocked = (event) => Boolean(event.target.closest("input, textarea, button, a, select"));
+    const scroller = () => panel.querySelector(".sheet-scroll") || (panel.classList.contains("guide") ? null : panel);
+    const atTop = () => {
+      const node = scroller();
+      return !node || node.scrollTop <= 0;
+    };
+    const place = () => {
+      const shift = `translateY(${drag}px)`;
+      panel.style.transform = panel.classList.contains("guide") ? shift : `translateX(-50%) ${shift}`;
+    };
+    panel.addEventListener("pointerdown", (event) => {
+      if (event.button != null && event.button !== 0) return;
+      if (blocked(event)) return;
+      const header = headerHit(event);
+      if (!header && !atTop()) return;
+      tracking = true;
+      dragging = header;
+      startY = event.clientY;
+      drag = 0;
+      pointerId = event.pointerId;
+      if (header) {
+        panel.classList.add("dragging");
+        panel.setPointerCapture?.(event.pointerId);
+      }
+    });
+    panel.addEventListener("pointermove", (event) => {
+      if (!tracking || event.pointerId !== pointerId) return;
+      const dy = event.clientY - startY;
+      if (!dragging) {
+        if (dy < -4 || !atTop()) {
+          tracking = false;
+          return;
+        }
+        if (dy < 8) return;
+        dragging = true;
+        panel.classList.add("dragging");
+        panel.setPointerCapture?.(event.pointerId);
+      }
+      drag = Math.max(0, dy);
+      place();
+    });
+    const finish = (event) => {
+      if (!tracking || (event.pointerId != null && event.pointerId !== pointerId)) return;
+      tracking = false;
+      dragging = false;
+      panel.classList.remove("dragging");
+      panel.style.transform = "";
+      if (drag > 72) dismissTopSheet();
+    };
+    panel.addEventListener("pointerup", finish);
+    panel.addEventListener("pointercancel", finish);
+    panel.addEventListener("touchmove", (event) => {
+      if (!tracking || !event.touches.length) return;
+      if (event.touches[0].clientY - startY > 0 && (headerHit(event) || atTop())) event.preventDefault();
+    }, { passive: false });
+  });
+}
+
+window.addEventListener("popstate", () => {
+  if (ignoreSheetPop) {
+    ignoreSheetPop = false;
+    return;
+  }
+  if (!sheetIsOpen()) {
+    sheetHistoryPushed = false;
+    return;
+  }
+  sheetHistoryPushed = false;
+  closingFromPop = true;
+  dismissTopSheet();
+  closingFromPop = false;
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !sheetIsOpen()) return;
+  event.preventDefault();
+  dismissTopSheet();
+});
 
 async function onTab(id) {
   state.tab = id;
@@ -2128,7 +2549,11 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
-  if (state.whenMode === "later" && !laterTimeChosen()) return;
+  if (state.whenMode === "later" && !isLaterToday(state.startChoice)) {
+    state.error = TIME_LATER_ERROR;
+    render();
+    return;
+  }
   await run(async () => {
     await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload() } });
     state.sheet = null;
@@ -2189,9 +2614,11 @@ function confirmSheet() {
       },
     }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": pending.title }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: pending.title }),
-      el("p", { class: "help", text: pending.body }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: pending.title }),
+        el("p", { class: "help", text: pending.body }),
+      ]),
       pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
       el("div", { class: "stack" }, [
         pending.copy
@@ -2357,14 +2784,16 @@ function onboardingSheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissOnboarding }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Get started" }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: showPush ? "Turn on notifications" : "Add to home screen" }),
-      el("p", {
-        class: "help",
-        text: showPush
-          ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
-          : "Add Hangry to your home screen so it stays one tap away.",
-      }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: showPush ? "Turn on notifications" : "Add to home screen" }),
+        el("p", {
+          class: "help",
+          text: showPush
+            ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
+            : "Add Hangry to your home screen so it stays one tap away.",
+        }),
+      ]),
       showInstall && prompt.steps.length
         ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
         : null,
@@ -2408,9 +2837,11 @@ function pushReminderSheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: snooze }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": reminder.title }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: reminder.title }),
-      el("p", { class: "help", text: reminder.lede }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: reminder.title }),
+        el("p", { class: "help", text: reminder.lede }),
+      ]),
       reminder.steps?.length
         ? el("ol", { class: "guide-reenable" }, reminder.steps.map((line) => el("li", { text: line })))
         : null,
@@ -2486,9 +2917,11 @@ function installSheetView() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissInstallSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": prompt.title }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: prompt.title }),
-      el("p", { class: "help", text: prompt.lede }),
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: prompt.title }),
+        el("p", { class: "help", text: prompt.lede }),
+      ]),
       prompt.steps.length
         ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
         : null,
