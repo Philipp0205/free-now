@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installGuide, pushReminder, pushTestMessage, readInstallSignals } from "../public/install-guide.js";
+import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/install-guide.js";
 
 const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const IOS_INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 320.0.0.0";
@@ -171,6 +171,33 @@ test("a signed-in phone is reminded until this device is subscribed", () => {
   assert.equal(pushTestMessage(0), "0 devices subscribed, turn on notifications first");
   assert.equal(pushTestMessage(1), "Test sent to 1 device");
   assert.equal(pushTestMessage(2), "Test sent to 2 devices");
+});
+
+test("install reminders depend on the browser and how long ago Not now was", () => {
+  const ios = readInstallSignals({ userAgent: IOS_SAFARI, notificationPermission: "default" });
+  const iosSheet = installPrompt(ios);
+  assert.equal(iosSheet.kind, "ios");
+  assert.match(iosSheet.steps.join(" "), /Share button/);
+  assert.match(iosSheet.steps.join(" "), /Add to Home Screen/);
+  assert.equal(iosSheet.offerInstall, false);
+  assert.equal(needsInstallForPush(ios), true);
+  assert.equal(needsInstallForPush(readInstallSignals({ userAgent: IOS_SAFARI, standalone: true })), false);
+
+  const chrome = readInstallSignals({ userAgent: ANDROID_CHROME, notificationPermission: "default" });
+  assert.equal(installPrompt(chrome, { canPrompt: true }).offerInstall, true);
+  assert.equal(installPrompt(chrome, { canPrompt: true }).kind, "native");
+  assert.equal(needsInstallForPush(chrome), false);
+
+  const firefox = installPrompt(readInstallSignals({ userAgent: ANDROID_FIREFOX, notificationPermission: "default" }));
+  assert.equal(firefox.kind, "firefox");
+  assert.equal(firefox.copyLink, true);
+  assert.match(firefox.lede, /open Hangry in Chrome and tap Install app/);
+  assert.equal(needsInstallForPush(readInstallSignals({ userAgent: ANDROID_FIREFOX })), true);
+
+  const now = Date.parse("2026-11-03T00:00:00Z");
+  assert.equal(installReminderDue(null, now), true);
+  assert.equal(installReminderDue(String(now - 1000), now), false);
+  assert.equal(installReminderDue(String(now - 3 * 24 * 60 * 60 * 1000), now), true);
 });
 
 test("a desktop browser shows both phone guides", () => {
