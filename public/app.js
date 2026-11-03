@@ -2754,12 +2754,12 @@ function confirmSheet() {
         render();
       },
     }),
-    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": pending.title }, [
+    el("div", { class: "sheet sheet-confirm", role: "dialog", "aria-modal": "true", "aria-label": pending.title }, [
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: pending.title }),
-        el("p", { class: "help", text: pending.body }),
       ]),
+      el("p", { class: "help sheet-body", text: pending.body }),
       pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
       el("div", { class: "stack" }, [
         pending.copy
