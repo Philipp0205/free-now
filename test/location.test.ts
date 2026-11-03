@@ -146,13 +146,13 @@ test("a meetup place is stored, pushed, and can be a name without a pin", async 
   });
 });
 
-test("map tiles default to a dark basemap and can be overridden", async () => {
+test("map tiles default to a labelled street map and can be overridden", async () => {
   const defaults = loadConfig({});
   assert.equal(
     defaults.mapTileUrl,
-    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
   );
-  assert.equal(defaults.mapTileAttribution, "© Esri, HERE, Garmin, OpenStreetMap contributors");
+  assert.equal(defaults.mapTileAttribution, "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors");
   const custom = loadConfig({
     MAP_TILE_URL: "https://tiles.example/{z}/{x}/{y}.png",
     MAP_TILE_ATTRIBUTION: "© Example",

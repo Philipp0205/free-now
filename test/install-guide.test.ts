@@ -85,15 +85,37 @@ test("Android Chrome gets the install prompt and the battery hint", () => {
   assert.match(text, /Battery/);
 });
 
-test("Android Firefox and other non-installable browsers are sent to Chrome", () => {
-  for (const userAgent of [ANDROID_FIREFOX, ANDROID_DUCK]) {
-    const guide = guideFor(userAgent);
-    assert.equal(guide.status, "wrong-browser");
-    assert.equal(guide.offerCopyLink, true);
-    assert.match(flat(guide), /For notifications, open Hangry in Chrome and tap Install app/);
-  }
-  const shortcut = guideFor(ANDROID_FIREFOX, { standalone: true, notificationPermission: "granted" });
-  assert.equal(shortcut.status, "wrong-browser");
+test("Android Firefox gets its own install steps and is not sent to Chrome", () => {
+  const signals = readInstallSignals({ userAgent: ANDROID_FIREFOX, notificationPermission: "default" });
+  assert.equal(signals.browser, "firefox");
+  assert.equal(signals.canInstall, true);
+  const guide = installGuide(signals);
+  const text = flat(guide);
+  assert.equal(guide.status, "install");
+  assert.equal(guide.offerCopyLink, undefined);
+  assert.match(text, /Open the menu ⋮, tap Install/);
+  assert.match(text, /Add to Home screen/);
+  assert.match(text, /confirm/i);
+  assert.doesNotMatch(text, /open Hangry in Chrome/i);
+  assert.doesNotMatch(text, /Copy link/);
+  const fennec = guideFor("Mozilla/5.0 (Android 14; Mobile; rv:68.0) Gecko/68.0 Fennec/68.0");
+  assert.equal(fennec.status, "install");
+  assert.match(flat(fennec), /tap Install/);
+  const installed = guideFor(ANDROID_FIREFOX, { standalone: true, notificationPermission: "granted" });
+  assert.equal(installed.status, "on");
+  const denied = guideFor(ANDROID_FIREFOX, { notificationPermission: "denied" });
+  assert.equal(denied.status, "denied");
+  assert.match(flat(denied), /In Firefox/);
+  assert.doesNotMatch(flat(denied), /In Chrome/);
+});
+
+test("browsers that cannot install are still sent to Chrome", () => {
+  const duck = guideFor(ANDROID_DUCK);
+  assert.equal(duck.status, "wrong-browser");
+  assert.equal(duck.offerCopyLink, true);
+  assert.match(flat(duck), /For notifications, open Hangry in Chrome and tap Install app/);
+  const focus = guideFor("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Focus/126.0 Chrome/126.0.0.0 Mobile Safari/537.36");
+  assert.equal(focus.status, "wrong-browser");
   assert.equal(guideFor(ANDROID_SAMSUNG).status, "install");
 });
 
@@ -165,8 +187,14 @@ test("a signed-in phone is reminded until this device is subscribed", () => {
     userAgent: ANDROID_FIREFOX,
     notificationPermission: "default",
   }));
-  assert.equal(firefox?.kind, "guide");
-  assert.match(firefox?.lede ?? "", /open Hangry in Chrome and tap Install app/);
+  assert.equal(firefox?.kind, "enable");
+  assert.doesNotMatch(firefox?.lede ?? "", /Chrome/);
+  const duckReminder = pushReminder(readInstallSignals({
+    userAgent: ANDROID_DUCK,
+    notificationPermission: "default",
+  }));
+  assert.equal(duckReminder?.kind, "guide");
+  assert.match(duckReminder?.lede ?? "", /open Hangry in Chrome and tap Install app/);
 
   assert.equal(pushTestMessage(0), "0 devices subscribed, turn on notifications first");
   assert.equal(pushTestMessage(1), "Test sent to 1 device");
@@ -190,9 +218,16 @@ test("install reminders depend on the browser and how long ago Not now was", () 
 
   const firefox = installPrompt(readInstallSignals({ userAgent: ANDROID_FIREFOX, notificationPermission: "default" }));
   assert.equal(firefox.kind, "firefox");
-  assert.equal(firefox.copyLink, true);
-  assert.match(firefox.lede, /open Hangry in Chrome and tap Install app/);
-  assert.equal(needsInstallForPush(readInstallSignals({ userAgent: ANDROID_FIREFOX })), true);
+  assert.equal(firefox.copyLink, false);
+  assert.equal(firefox.quiet, undefined);
+  assert.match(firefox.steps.join(" "), /Open the menu ⋮/);
+  assert.match(firefox.steps.join(" "), /Tap Install/);
+  assert.match(firefox.steps.join(" "), /Add to Home screen/);
+  assert.doesNotMatch(firefox.lede, /Chrome/);
+  assert.equal(needsInstallForPush(readInstallSignals({ userAgent: ANDROID_FIREFOX })), false);
+  const duckSheet = installPrompt(readInstallSignals({ userAgent: ANDROID_DUCK }));
+  assert.equal(duckSheet.copyLink, true);
+  assert.match(duckSheet.lede, /open Hangry in Chrome and tap Install app/);
   const desktop = installPrompt(readInstallSignals({
     userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     notificationPermission: "default",

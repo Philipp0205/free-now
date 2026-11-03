@@ -19,21 +19,25 @@ export function readInstallSignals({
   let kind = "other";
   if (ios) kind = "ios";
   else if (android) kind = "android";
+  const browser = android ? androidBrowser(userAgent) : "";
   return {
     platform: kind,
     inApp,
     safari,
-    canInstall: !android || androidCanInstall(userAgent),
+    browser,
+    canInstall: !android || browser !== "other",
     standalone: Boolean(standalone),
     permission: notificationPermission,
   };
 }
 
-function androidCanInstall(userAgent) {
-  if (/Firefox|Fennec|Focus\/|Klar\//i.test(userAgent)) return false;
-  if (/DuckDuckGo|UCBrowser|Opera Mini|MiuiBrowser/i.test(userAgent)) return false;
-  if (/; wv\)/.test(userAgent)) return false;
-  return /Chrome\/|Chromium\/|EdgA\/|Edg\/|SamsungBrowser|OPR\/|Brave|Vivaldi/i.test(userAgent);
+function androidBrowser(userAgent) {
+  if (/; wv\)/.test(userAgent)) return "other";
+  if (/Focus\/|Klar\//i.test(userAgent)) return "other";
+  if (/Firefox|Fennec/i.test(userAgent)) return "firefox";
+  if (/DuckDuckGo|UCBrowser|Opera Mini|MiuiBrowser/i.test(userAgent)) return "other";
+  if (/Chrome\/|Chromium\/|EdgA\/|Edg\/|SamsungBrowser|OPR\/|Brave|Vivaldi/i.test(userAgent)) return "chromium";
+  return "other";
 }
 
 export function installGuide(signals) {
@@ -124,6 +128,7 @@ function iosGuide(signals) {
 function androidGuide(signals) {
   const installed = signals.standalone;
   const allowed = signals.permission === "granted";
+  const firefox = signals.browser === "firefox";
   if (signals.inApp) {
     return chromeInstead(
       "Instagram, WhatsApp, and other in-app browsers can't install Hangry or deliver its notifications. Open this page in Chrome first.",
@@ -156,11 +161,7 @@ function androidGuide(signals) {
         label: null,
         steps: [],
         note: "Also check battery optimisation. Android can silence Hangry even after you tap Allow.",
-        reenable: [
-          "In Chrome, tap the lock icon in the address bar, then Permissions → Notifications → Allow. Or open the menu ⋮ → Settings → Site settings → Notifications.",
-          "In Android Settings, open Apps → Hangry → Notifications and turn them on.",
-          "In Apps → Hangry → Battery, choose Unrestricted.",
-        ],
+        reenable: firefox ? firefoxReenable() : chromeReenable(),
       }],
     };
   }
@@ -168,10 +169,12 @@ function androidGuide(signals) {
     platform: "android",
     status: "install",
     headline: "Get notifications on Android",
-    lede: "Install Hangry from Chrome, open it from the home-screen icon, then allow notifications.",
+    lede: firefox
+      ? "Install Hangry from Firefox, open it from the home-screen icon, then allow notifications."
+      : "Install Hangry from Chrome, open it from the home-screen icon, then allow notifications.",
     groups: [{
       label: null,
-      steps: androidSteps(installed, allowed),
+      steps: firefox ? firefoxSteps(installed, allowed) : androidSteps(installed, allowed),
       note: androidNote(),
       reenable: [],
     }],
@@ -192,6 +195,47 @@ function chromeInstead(lede) {
       reenable: [],
     }],
   };
+}
+
+function firefoxSteps(installed, allowed) {
+  return [
+    step(
+      "Install Hangry",
+      "Open the menu ⋮, tap Install (older versions say Add to Home screen), and confirm.",
+      installed,
+    ),
+    step(
+      "Open the home-screen icon",
+      "Open Hangry from that icon.",
+      installed,
+    ),
+    step(
+      "Tap Enable notifications",
+      "In the app, open You or this guide and tap Enable notifications.",
+      allowed,
+    ),
+    step(
+      "Tap Allow",
+      "Confirm Firefox's permission prompt.",
+      allowed,
+    ),
+  ];
+}
+
+function chromeReenable() {
+  return [
+    "In Chrome, tap the lock icon in the address bar, then Permissions → Notifications → Allow. Or open the menu ⋮ → Settings → Site settings → Notifications.",
+    "In Android Settings, open Apps → Hangry → Notifications and turn them on.",
+    "In Apps → Hangry → Battery, choose Unrestricted.",
+  ];
+}
+
+function firefoxReenable() {
+  return [
+    "In Firefox, open the menu ⋮ → Settings → Site permissions → Notifications, and set Hangry to Allow.",
+    "In Android Settings, open Apps → Hangry → Notifications and turn them on.",
+    "In Apps → Hangry → Battery, choose Unrestricted.",
+  ];
 }
 
 function androidSteps(installed, allowed) {
@@ -229,6 +273,7 @@ function desktopGuide() {
     platform: "android",
     inApp: false,
     safari: false,
+    browser: "chromium",
     canInstall: true,
     standalone: false,
     permission: "default",
@@ -237,7 +282,7 @@ function desktopGuide() {
     platform: "other",
     status: "install",
     headline: "Install on your phone",
-    lede: "Hangry notifies phones. Open this page on an iPhone in Safari, or on Android in Chrome. A computer only shows alerts inside the app.",
+    lede: "Hangry notifies phones. Open this page on an iPhone in Safari, or on Android in Chrome or Firefox. A computer only shows alerts inside the app.",
     groups: [
       { label: "iPhone", steps: ios.groups[0].steps, note: ios.groups[0].note, reenable: [] },
       { label: "Android", steps: android.groups[0].steps, note: android.groups[0].note, reenable: [] },
@@ -341,9 +386,23 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
       copyLink: !safari,
     };
   }
-  if (signals.platform === "android" && (signals.canInstall === false || signals.inApp)) {
+  if (signals.platform === "android" && signals.browser === "firefox") {
     return {
       kind: "firefox",
+      title: "Install Hangry",
+      lede: "Install Hangry to get notifications.",
+      steps: [
+        "Open the menu ⋮.",
+        "Tap Install. Older versions say Add to Home screen.",
+        "Confirm.",
+      ],
+      offerInstall: false,
+      copyLink: false,
+    };
+  }
+  if (signals.platform === "android" && (signals.canInstall === false || signals.inApp)) {
+    return {
+      kind: "unsupported",
       title: "Install Hangry",
       lede: "For notifications, open Hangry in Chrome and tap Install app.",
       steps: [],
