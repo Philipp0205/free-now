@@ -672,8 +672,8 @@ function socialCard(social) {
 
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
-  const joined = plan.joined.some((person) => person.id === state.me.user.id);
-  const people = [plan.creator, ...plan.joined];
+  const joined = plan.joined.some((person) => person.id === state.me.user.id && person.reply !== "declined");
+  const people = [plan.creator, ...plan.joined.filter((person) => person.reply !== "declined")];
   return el("article", { class: "card card-photo", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
     mine
@@ -1087,7 +1087,7 @@ function collectPins() {
   for (const social of state.socials) {
     if (!social.location) continue;
     const mine = social.creator.id === state.me.user.id;
-    const joined = social.joined.some((person) => person.id === state.me.user.id);
+    const place = audiencePlace(social.place);
     pins.push({
       kind: "social",
       id: social.id,
@@ -1095,17 +1095,17 @@ function collectPins() {
       lng: social.location.lng,
       title: social.creator.name,
       initial: initial(social.creator.name),
-      note: social.place
-        ? (social.note ? `${social.note} · ${social.place}` : social.place)
+      note: place
+        ? (social.note ? `${social.note} · ${place}` : place)
         : (social.note || "Free now"),
       time: remaining(social.expiresAt),
-      canJoin: !mine && !joined,
+      own: mine,
     });
   }
   for (const plan of state.plans) {
     if (!plan.location) continue;
     const mine = plan.creator.id === state.me.user.id;
-    const joined = plan.joined.some((person) => person.id === state.me.user.id);
+    const place = audiencePlace(plan.place);
     pins.push({
       kind: "plan",
       id: plan.id,
@@ -1113,9 +1113,9 @@ function collectPins() {
       lng: plan.location.lng,
       title: plan.creator.name,
       initial: initial(plan.creator.name),
-      note: plan.place ? `${plan.note} · ${plan.place}` : plan.note,
+      note: place ? `${plan.note} · ${place}` : plan.note,
       time: plan.whenLabel,
-      canJoin: !mine && !joined,
+      own: mine,
     });
   }
   return pins;
@@ -1242,7 +1242,7 @@ function replyLine(person, social) {
   const upcoming = social.startsAt && social.startsAt > Date.now();
   const eta = !upcoming && person.etaMin ? person.etaMin : null;
   const mine = person.id === state.me.user.id;
-  if (person.reply === "declined") return mine ? "You can't" : `${person.name} can't`;
+  if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
   if (mine) return eta ? `You're in · ${eta} min` : "You're in";
   return eta ? `${person.name} · there in ${eta} min` : `${person.name} is in`;
 }
@@ -1713,6 +1713,7 @@ async function mountMap() {
     syncMapMarkers(L, pins);
     refreshOpenCard(pins);
     liveMap.invalidateSize();
+    reserveAttribution();
     return;
   }
   if (liveMap) destroyLiveMap();
@@ -1720,6 +1721,7 @@ async function mountMap() {
   L.control.zoom({ position: "topright" }).addTo(map);
   addMapTiles(L, map);
   liveMap = map;
+  watchAttribution(map);
   syncMapMarkers(L, pins);
   if (state.viewerLocation) {
     map.setView([state.viewerLocation.lat, state.viewerLocation.lng], 14);
@@ -1731,33 +1733,86 @@ async function mountMap() {
   setTimeout(() => map.invalidateSize(), 60);
 }
 
+function watchAttribution(map) {
+  const attr = map.getContainer()?.querySelector(".leaflet-control-attribution");
+  if (!attr || attr.dataset.watched) {
+    reserveAttribution();
+    return;
+  }
+  attr.dataset.watched = "1";
+  if (window.ResizeObserver) new ResizeObserver(() => reserveAttribution()).observe(attr);
+  reserveAttribution();
+}
+
+/** Keep the pin card above the attribution plate, which wraps on a narrow phone. */
+function reserveAttribution() {
+  const mapEl = document.getElementById("hangry-map");
+  const attr = mapEl?.querySelector(".leaflet-control-attribution");
+  const wrap = document.querySelector(".map-wrap");
+  if (!mapEl || !attr || !wrap) return;
+  const gap = Math.ceil(mapEl.getBoundingClientRect().bottom - attr.getBoundingClientRect().top) + 8;
+  if (gap < 16) return;
+  wrap.style.setProperty("--attr-h", `${gap}px`);
+}
+
 function showMapCard(pin) {
   openMapPin = pinKey(pin);
   const host = document.getElementById("map-card-host");
   if (!host) return;
   host.replaceChildren(mapCard(pin));
+  reserveAttribution();
 }
 
 function mapCard(pin) {
   const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, pin)) : "";
+  const social = pin.kind === "social"
+    ? state.socials.find((item) => item.id === pin.id) || { id: pin.id, startsAt: null, joined: [] }
+    : null;
+  const plan = pin.kind === "plan"
+    ? state.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
+    : null;
   return el("article", { class: "map-card" }, [
     el("strong", { text: pin.title }),
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+    social && !pin.own ? replySummary(social) : null,
+    social && !pin.own ? replyActions(social) : null,
+    plan && !pin.own ? planPinActions(plan) : null,
     el("div", { class: "map-card-actions" }, [
-      pin.kind === "social" && pin.canJoin
-        ? replyActions(state.socials.find((social) => social.id === pin.id) || { id: pin.id, startsAt: null, joined: [] })
-        : pin.canJoin
-          ? el("button", {
-              class: "btn",
-              type: "button",
-              text: "Join",
-              onclick: () => joinPlan({ id: pin.id }),
-            })
-          : null,
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
     ]),
   ]);
+}
+
+function planPinActions(plan) {
+  const mine = plan.joined.find((person) => person.id === state.me.user.id);
+  const inNow = Boolean(mine) && mine.reply !== "declined";
+  const declined = mine?.reply === "declined";
+  return el("div", {}, [
+    inNow ? el("p", { class: "reply-line", text: "You're in" }) : null,
+    declined ? el("p", { class: "reply-line", text: "You can't make it" }) : null,
+    el("div", { class: "reply-row" }, [
+      el("button", {
+        class: inNow ? "chip on" : "chip",
+        type: "button",
+        text: "I'm in",
+        onclick: () => replyToPlan(plan, "in"),
+      }),
+      el("button", {
+        class: declined ? "chip on" : "chip",
+        type: "button",
+        text: "Can't",
+        onclick: () => replyToPlan(plan, "declined"),
+      }),
+    ]),
+  ]);
+}
+
+async function replyToPlan(plan, reply) {
+  await run(async () => {
+    await api(`/api/plans/${plan.id}/reply`, { method: "POST", body: { reply } });
+    await refresh({ initial: true });
+  });
 }
 
 function shareToggle(label) {
@@ -1807,8 +1862,13 @@ function rememberViewerLocation() {
   }).catch(() => {});
 }
 
+function audiencePlace(place) {
+  const spot = typeof place === "string" ? place.trim() : "";
+  return /^near you$/i.test(spot) ? "nearby" : spot;
+}
+
 function placeLine(location, placeName) {
-  const named = typeof placeName === "string" ? placeName.trim() : "";
+  const named = audiencePlace(placeName);
   if (!location && !named) return null;
   const distance = location && state.viewerLocation
     ? formatDistance(haversine(state.viewerLocation, location))

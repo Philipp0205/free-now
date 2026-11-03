@@ -674,7 +674,7 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
   box-shadow: 0 0 0 3px rgba(255, 45, 120, 0.28), 0 0 10px rgba(255, 45, 120, 0.55);
 }
 .map-screen { min-height: calc(100dvh - var(--tab)); display: flex; flex-direction: column; }
-.map-wrap { position: relative; margin: 4px 12px 0; }
+.map-wrap { position: relative; margin: 4px 12px 0; --attr-h: 64px; }
 .hangry-map { height: calc(100dvh - 132px - var(--tab)); border-radius: 24px; overflow: hidden; background: #141416; }
 .map-empty { margin: 28px 22px; }
 .map-empty h2 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.04em; }
@@ -684,11 +684,12 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
   z-index: 500;
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  bottom: var(--attr-h, 64px);
   background: rgba(20, 20, 22, 0.96);
   border-radius: 18px;
   padding: 14px;
 }
+.map-card .reply-line { margin-top: 8px; }
 .map-card strong { display: block; font-size: 16px; }
 .map-card p { margin: 4px 0 0; color: #d1d1d6; }
 .map-card-time { color: var(--muted) !important; font-size: 13px; }
