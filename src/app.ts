@@ -83,7 +83,7 @@ export type AppDeps = {
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /** A small fixed set keeps reactions readable on a card and stops arbitrary strings from being stored. */
-export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "☕", "🍷"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** The app shrinks a gallery photo to a ~1600 px JPEG first, so this is a generous ceiling. */
 const PHOTO_MAX_BYTES = 3 * 1024 * 1024;

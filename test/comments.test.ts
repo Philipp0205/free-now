@@ -107,6 +107,12 @@ test("reactions toggle per person and only from the fixed set", async () => {
       { emoji: "🔥", userIds: [miaId] },
     ]);
 
+    for (const emoji of ["☕", "🍷"]) {
+      const on = await call(ctx, "POST", `/api/comments/${comment.id}/reactions`, veit, { emoji });
+      assert.ok(on.json.comment.reactions.some((reaction: { emoji: string }) => reaction.emoji === emoji));
+      await call(ctx, "POST", `/api/comments/${comment.id}/reactions`, veit, { emoji });
+    }
+
     assert.equal((await call(ctx, "POST", `/api/comments/${comment.id}/reactions`, mia, { emoji: "<script>" })).status, 400);
     const shown = (await call(ctx, "GET", "/api/plans", alex)).json.plans[0].comments[0];
     assert.equal(shown.reactions.length, 2);
