@@ -74,8 +74,8 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `VAPID_SUBJECT` | `mailto:admin@localhost` | Contact URL sent to the push service. `mailto:` or `https:`. |
 | `SOCIAL_TTL_MS` | `7200000` | How long a social stays active (2 hours). |
 | `APP_TZ` | `Europe/Berlin` | Timezone that decides what "tomorrow" means. Override it if the circle lives elsewhere. |
-| `MAP_TILE_URL` | Esri World Dark Gray | HTTPS tile template with `{z}`, `{x}`, and `{y}`. `{s}` is a subdomain and `{r}` is retina when the template contains them. |
-| `MAP_TILE_ATTRIBUTION` | `© Esri, HERE, Garmin, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
+| `MAP_TILE_URL` | Esri World Street Map | HTTPS tile template with `{z}`, `{x}`, and `{y}`. `{s}` is a subdomain and `{r}` is retina when the template contains them. |
+| `MAP_TILE_ATTRIBUTION` | `© Esri, HERE, Garmin, USGS, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 
@@ -107,12 +107,20 @@ Notifications do not work in a Safari tab, or in an in-app browser such as Insta
 
 If you previously tapped Don't Allow: open iPhone Settings → Notifications → Hangry and turn **Allow Notifications** on. If Hangry is not listed, add it to the Home Screen and open it from the icon, then try Enable notifications again.
 
-### Android (Chrome)
+### Android (Chrome or Firefox)
+
+Chrome, Edge, and Samsung Internet:
 
 1. Install Hangry. Tap the install prompt if Chrome shows one. Otherwise open the three-dot menu **⋮** and choose **Install app** or **Add to Home screen**.
 2. Open Hangry from the home-screen icon.
 3. Tap **Enable notifications**.
 4. Tap **Allow**.
+
+Firefox for Android uses the same reminder, with its own install path:
+
+1. Open the menu **⋮**.
+2. Tap **Install**. Older versions say **Add to Home screen**. Confirm.
+3. Open Hangry from the home-screen icon, tap **Enable notifications**, then **Allow**.
 
 If a push never arrives, check both of these:
 
@@ -122,9 +130,9 @@ If a push never arrives, check both of these:
 ### Troubleshooting
 
 - **Opened from Instagram or WhatsApp.** Those in-app browsers cannot install Hangry or receive its pushes. Use the menu and open the link in Safari (iPhone) or Chrome (Android).
-- **Added from Firefox, or another browser that is not Chrome.** A home-screen shortcut from Firefox does not receive Hangry's notifications. Copy the link, open it in Chrome, and tap **Install app**. Then open Android Settings → Apps → Hangry, turn Notifications on, and set Battery to **Unrestricted**.
+- **Opened in a browser that cannot install the app.** In-app browsers, Firefox Focus, DuckDuckGo, and similar shells cannot install Hangry. Copy the link and open it in Chrome or Firefox, then install from there. Firefox itself can install Hangry and receive pushes.
 - **Still looking at a Safari tab.** iOS only delivers Web Push to the Home Screen app, and only on iOS 16.4 or newer.
-- **The install prompt never appears.** On Android, use Chrome's three-dot menu **⋮** → Install app or Add to Home screen. The site has to be HTTPS (localhost is the only exception).
+- **The install prompt never appears.** On Android Chrome, use the three-dot menu **⋮** → Install app or Add to Home screen. In Firefox, the menu says **Install** (older versions say **Add to Home screen**). The site has to be HTTPS (localhost is the only exception).
 - **Don't Allow.** Follow the re-enable steps for that phone above. The Enable button cannot override a blocked permission.
 - **Android goes quiet after a day.** Battery optimisation paused the app. Set Hangry to Unrestricted, and confirm the site permission is still Allow.
 - **No phone push at all, on any device.** The server has no VAPID keys, so alerts stay inside the app. Run `npm run vapid`, set the three variables, and restart.
@@ -202,7 +210,9 @@ The push says who is free and, when there is a meetup, where: `Alex is free – 
 
 A card with a place does not embed a map. It shows a short line — the place name, or "nearby" — plus the distance when this phone has already allowed location, and an Open in Maps action.
 
-The Map tab (not a switch on Now) shows the same places on a Leaflet map. The default basemap is Esri World Dark Gray: a dark street map with no API key. CARTO Dark Matter (`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png`) now answers with an API-key watermark, so it is not the default. Set `MAP_TILE_URL` and `MAP_TILE_ATTRIBUTION` together to switch later, for example to CARTO or Stadia once you have a key. The attribution has to match the tiles. Pink pins are friends who are free. Yellow pins are plans. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
+The Map tab (not a switch on Now) shows the same places on a Leaflet map. The default basemap is Esri World Street Map: labelled streets and districts, no API key, readable at city zoom on a phone. CARTO Voyager and CARTO Dark Matter (`rastertiles/voyager` and `dark_all`) currently answer with an API-key watermark, so they are not the default. Set `MAP_TILE_URL` and `MAP_TILE_ATTRIBUTION` together to switch later. The attribution has to match the tiles. The map stops at zoom 19, which is the last level that still has street tiles here. Pink pins are friends who are free. Yellow pins are plans. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
+
+Place search goes through the server to Photon, then Nominatim, with a Hangry user-agent and about one request a second. When this phone has a location, or the map has been moved, results prefer places within about 30 km and put bars, cafés, and other meeting spots ahead of streets and regions. Each hit shows the distance and a short address.
 
 ## Limitations
 
