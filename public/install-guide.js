@@ -351,6 +351,17 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
       copyLink: true,
     };
   }
+  if (signals.platform !== "android") {
+    return {
+      kind: "desktop",
+      title: "Install Hangry",
+      lede: "Hangry notifies phones. On a computer, alerts stay in this browser.",
+      steps: [],
+      offerInstall: false,
+      copyLink: false,
+      quiet: true,
+    };
+  }
   return {
     kind: "native",
     title: "Install Hangry",
