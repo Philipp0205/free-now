@@ -570,12 +570,12 @@ test("a member cannot rename the circle or the name others see", async () => {
       body: { note: "Dinner", startsAt: "19:06" },
       status: 201,
     });
-    const denied = await api(port, "PATCH", "/api/me", {
+    const renamedSelf = await api(port, "PATCH", "/api/me", {
       token: sam.token,
-      body: { name: "Amanda's +1" },
-      status: 403,
+      body: { name: "Sam" },
+      status: 200,
     });
-    assert.equal(denied.error, "Only an admin can change a name others see.");
+    assert.equal(renamedSelf.user.name, "Sam");
     const circleDenied = await api(port, "PATCH", "/api/circles", {
       token: sam.token,
       body: { name: "Amanda's +1" },
@@ -604,15 +604,15 @@ test("a member cannot rename the circle or the name others see", async () => {
 
     db.prepare("UPDATE memberships SET is_admin = 1 WHERE user_id = ?").run(sam.user.id);
     db.prepare("UPDATE memberships SET is_admin = 0 WHERE user_id = ?").run(alex.user.id);
-    const adminName = await api(port, "PATCH", "/api/me", {
+    const adminCircle = await api(port, "PATCH", "/api/circles", {
       token: sam.token,
-      body: { name: "Sammy" },
+      body: { name: "Yard" },
       status: 200,
     });
-    assert.equal(adminName.user.name, "Sammy");
-    await api(port, "PATCH", "/api/me", {
+    assert.equal(adminCircle.circle.name, "Yard");
+    await api(port, "PATCH", "/api/circles", {
       token: alex.token,
-      body: { name: "Amanda's +1" },
+      body: { name: "Nope" },
       status: 403,
     });
     const cards = await api(port, "GET", "/api/socials", { token: sam.token });

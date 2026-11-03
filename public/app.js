@@ -993,13 +993,11 @@ function youScreen() {
       avatar(state.me.user, 72, "lg"),
       el("strong", { text: state.me.user.name }),
     ]),
-    youAreAdmin()
-      ? el("form", { class: "panel stack", onsubmit: onRename }, [
-          field("Name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
-          el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
-          el("p", { class: "help", text: "Friends see this name on your cards." }),
-        ])
-      : el("p", { class: "help", style: "padding: 0 20px", text: "Friends see this name on your cards. An admin can change it." }),
+    el("form", { class: "panel stack", onsubmit: onRename }, [
+      field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
+      el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
+      el("p", { class: "help", text: "Friends see this name on your cards." }),
+    ]),
     el("div", { class: "panel" }, [
       el("button", {
         class: "row notif-row",
@@ -1729,7 +1727,7 @@ function replyLine(person, social) {
   const arriving = arriveClock(person);
   const mine = person.id === state.me.user.id;
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
-  if (arriving) return mine ? `You're in, arriving ${arriving}` : `${person.name} is in, arriving ${arriving}`;
+  if (arriving) return mine ? "You're in" : `${person.name} is in, arriving ${arriving}`;
   if (mine) return eta ? `You're in · ${eta} min` : "You're in";
   return eta ? `${person.name} · there in ${eta} min` : `${person.name} is in`;
 }
@@ -2340,7 +2338,7 @@ function planReplyLine(person) {
   const mine = person.id === state.me.user.id;
   const arriving = arriveClock(person);
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
-  if (arriving) return mine ? `You're in, arriving ${arriving}` : `${person.name} is in, arriving ${arriving}`;
+  if (arriving) return mine ? "You're in" : `${person.name} is in, arriving ${arriving}`;
   return mine ? "You're in" : `${person.name} is in`;
 }
 

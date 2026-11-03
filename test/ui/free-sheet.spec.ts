@@ -299,7 +299,9 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     assert.equal(placed.max, "");
     assert.equal(placed.step, "60");
     assert.ok(placed.height >= 44, JSON.stringify(placed));
-    await viewer.getByText(`You're in, arriving ${placed.value}`).waitFor();
+    await viewer.getByText("You're in", { exact: true }).waitFor();
+    await viewer.getByText(`Arriving ${placed.value}`, { exact: true }).waitFor();
+    assert.equal(await viewer.getByText(`You're in, arriving ${placed.value}`).count(), 0);
     await viewer.screenshot({ path: shot("fix-arrive-time.png") });
     await viewerContext.close();
     await page.reload();
@@ -391,8 +393,9 @@ test("later and tomorrow replies keep I'm in and Can't on one row", { timeout: 9
     await viewer.locator("article", { has: viewer.getByRole("heading", { name: labels[0], exact: true }) }).scrollIntoViewIfNeeded();
     await viewer.screenshot({ path: shot("reply-row.png") });
     await viewer.getByRole("button", { name: "You", exact: true }).click();
-    assert.equal(await viewer.getByRole("button", { name: "Save name" }).count(), 0);
-    await viewer.getByText("An admin can change it.").waitFor();
+    await viewer.getByText("Your name", { exact: true }).waitFor();
+    await viewer.getByRole("button", { name: "Circle", exact: true }).click();
+    assert.equal(await viewer.getByText("Circle name", { exact: true }).count(), 0);
     await viewerContext.close();
   } finally {
     await page.context().close();
@@ -1387,6 +1390,27 @@ test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
     } finally {
       await page.context().close();
     }
+  }
+});
+
+test("you can edit your name, and an admin can edit the circle name", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "You", exact: true }).click();
+    await page.getByText("Your name", { exact: true }).waitFor();
+    await page.locator("#rename").fill("Alexis");
+    await page.getByRole("button", { name: "Save name" }).click();
+    await page.getByText("Alexis").first().waitFor();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByText("Circle name", { exact: true }).waitFor();
+    const save = page.getByRole("button", { name: "Save circle name" });
+    const height = await save.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+    assert.ok(height >= 44, `save circle is ${height}px`);
+  } finally {
+    await page.context().close();
   }
 });
 
