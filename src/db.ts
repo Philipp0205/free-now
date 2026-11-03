@@ -678,6 +678,27 @@ export function removePlanJoin(db: DatabaseSync, planId: string, userId: string)
   db.prepare("DELETE FROM plan_joins WHERE plan_id = ? AND user_id = ?").run(planId, userId);
 }
 
+/** A missing point keeps the saved coordinates. */
+export function updatePlan(
+  db: DatabaseSync,
+  id: string,
+  note: string,
+  place: string,
+  point?: { lat: number; lng: number } | null,
+): void {
+  if (point === undefined) {
+    db.prepare("UPDATE plans SET note = ?, place = ? WHERE id = ?").run(note, place, id);
+    return;
+  }
+  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ? WHERE id = ?").run(
+    note,
+    place,
+    point?.lat ?? null,
+    point?.lng ?? null,
+    id,
+  );
+}
+
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
   const result = db.prepare("DELETE FROM plans WHERE id = ? AND creator_id = ?").run(id, creatorId);
   return Number(result.changes);

@@ -50,6 +50,7 @@ const state = {
   advanced: false,
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
+  editPlan: null,
   viewerLocation: null,
   mapCenter: null,
   mapCard: null,
@@ -832,7 +833,10 @@ function socialCard(social) {
   }, [
     el("div", { class: "card-bg" }),
     mine
-      ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
+      ? el("div", { class: "card-pills" }, [
+          el("button", { class: "pill quiet", type: "button", text: "Edit", onclick: () => openSheet("free") }),
+          el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) }),
+        ])
       : null,
     el("div", { class: "card-copy" }, [
       photos ? photoStage(social, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
@@ -854,7 +858,10 @@ function planCard(plan) {
     : { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
     mine
-      ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
+      ? el("div", { class: "card-pills" }, [
+          el("button", { class: "pill quiet", type: "button", text: "Edit", onclick: () => openSheet("plan", plan) }),
+          el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) }),
+        ])
       : null,
     el("div", { class: "card-copy" }, [
       photos ? photoStage(plan, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
@@ -984,8 +991,8 @@ function lightboxView() {
 
 /** Existing photos on the social being edited. A new plan has none yet. */
 function sheetPhotos() {
-  if (state.sheet !== "free") return [];
-  return (mySocial()?.photos ?? []).filter((photo) => !state.photoRemovals.includes(photo.id));
+  const event = state.sheet === "free" ? mySocial() : state.sheet === "plan" ? editedPlan() : null;
+  return (event?.photos ?? []).filter((photo) => !state.photoRemovals.includes(photo.id));
 }
 
 function photoBlock() {
@@ -1277,6 +1284,7 @@ function sheet() {
     ]);
   }
   const planning = state.sheet === "plan";
+  const editingPlan = planning && Boolean(state.editPlan);
   const editing = !planning && Boolean(mySocial());
   const later = !planning && state.whenMode === "later";
   const ttl = ttlLabel(state.meta?.socialTtlMs ?? 7200000);
@@ -1286,10 +1294,12 @@ function sheet() {
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("div", { class: "sheet-intro" }, [
-          el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
+          el("h2", { text: editingPlan ? "Edit plan" : planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
           el("p", {
             class: "help",
-            text: planning
+            text: editingPlan
+              ? "Friends who are coming get a push about the change."
+              : planning
               ? "Friends can join. It stays up through tomorrow."
               : later
                 ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
@@ -1313,7 +1323,7 @@ function sheet() {
                 state.placeDraft = value;
               }, { placeholder: "A park, a cafe, a street", maxlength: "80" })
             : whereBlock(),
-          planning ? shareToggle("Use my location") : null,
+          planning && !editingPlan ? shareToggle("Use my location") : null,
           photoBlock(),
         ]),
       ]),
@@ -1322,7 +1332,7 @@ function sheet() {
         el("button", {
           class: "btn",
           type: "submit",
-          text: state.photoBusy ? "Adding photos…" : planning ? "Add plan" : editing ? "Update" : later ? "I'm free later" : "I'm free",
+          text: state.photoBusy ? "Adding photos…" : editingPlan ? "Save" : planning ? "Add plan" : editing ? "Update" : later ? "I'm free later" : "I'm free",
           disabled: (later && !laterTimeChosen()) || state.photoBusy,
         }),
         !planning && mySocial()
@@ -2848,8 +2858,9 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
-function openSheet(name) {
+function openSheet(name, plan = null) {
   state.sheet = name;
+  state.editPlan = plan?.id ?? null;
   state.error = "";
   clearPhotoDrafts();
   if (name === "free") {
@@ -2867,8 +2878,8 @@ function openSheet(name) {
     state.startChoice = upcoming ? clock(mine.startsAt) : "";
   }
   if (name === "plan") {
-    state.noteDraft = "";
-    state.placeDraft = "";
+    state.noteDraft = plan?.note ?? "";
+    state.placeDraft = plan?.place ?? "";
   }
   state.focusSheet = false;
   render();
@@ -2877,6 +2888,7 @@ function openSheet(name) {
 
 function closeSheet() {
   state.sheet = null;
+  state.editPlan = null;
   clearPhotoDrafts();
   state.whereMap = false;
   if (whereLeaflet) {
@@ -3134,6 +3146,20 @@ async function onFree(event) {
 
 async function onCreatePlan(event) {
   event.preventDefault();
+  if (state.editPlan) {
+    const id = state.editPlan;
+    await run(async () => {
+      await api(`/api/plans/${id}`, { method: "PATCH", body: { note: state.noteDraft, place: state.placeDraft } });
+      const photoNote = await syncPhotos("plans", id).then(() => "", () => "Plan saved. A photo did not upload.");
+      clearPhotoDrafts();
+      state.sheet = null;
+      state.editPlan = null;
+      state.placeDraft = "";
+      state.error = photoNote;
+      await refresh({ initial: true });
+    });
+    return;
+  }
   const where = await sharedPoint();
   const locationNote = state.error;
   if (locationNote) render();
@@ -3619,6 +3645,10 @@ async function copyText(value, message) {
       render();
     }
   }, 2200);
+}
+
+function editedPlan() {
+  return state.editPlan ? state.plans.find((plan) => plan.id === state.editPlan) ?? null : null;
 }
 
 function mySocial() {
