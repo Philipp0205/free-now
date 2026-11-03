@@ -17,6 +17,12 @@ export function socialTitle(note: string): string {
   return note ? `"${note}"` : "Free now";
 }
 
+export function freePushBody(name: string, place: string): string {
+  const spot = place.trim();
+  if (!spot) return `${name} is free now`;
+  return `${name} is free – meet at ${spot}`;
+}
+
 export async function notifyUsers(
   db: DatabaseSync,
   push: PushSender,

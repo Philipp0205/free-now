@@ -38,8 +38,17 @@ const state = {
   placeDraft: "",
   viewerLocation: null,
   mapCard: null,
+  where: emptyWhere(),
+  whereOpen: false,
+  whereQuery: "",
+  whereResults: [],
+  whereSearching: false,
+  whereMap: false,
+  focusSocial: "",
 };
 
+const socialFocus = new URLSearchParams(location.search).get("social");
+if (socialFocus) state.focusSocial = socialFocus;
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
 if (joinPath) state.pendingCode = joinPath[1].toUpperCase();
 state.codeDraft = state.pendingCode;
@@ -63,6 +72,13 @@ window.addEventListener("beforeinstallprompt", (event) => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+bindKeyboard();
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !target.closest(".sheet")) return;
+  setTimeout(() => target.scrollIntoView({ block: "center", inline: "nearest" }), 80);
+});
 
 boot();
 setInterval(() => {
@@ -91,6 +107,7 @@ async function boot() {
     refresh({ initial: true }).catch(() => {});
     rememberViewerLocation();
     void considerPushReminder();
+    if (state.focusSocial) history.replaceState(null, "", "/");
   }
 }
 
@@ -200,6 +217,13 @@ function render() {
   }
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
+  if (state.whereMap && state.sheet === "free") queueMicrotask(() => { mountWhereMap().catch(() => {}); });
+  if (state.focusSocial) {
+    const id = state.focusSocial;
+    queueMicrotask(() => {
+      document.querySelector(`[data-social="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
+    });
+  }
 }
 
 function view() {
@@ -394,7 +418,10 @@ function socialCard(social) {
   const joined = social.joined.some((person) => person.id === state.me.user.id);
   const people = [social.creator, ...social.joined];
   const names = social.joined.map((person) => person.name);
-  return el("article", { class: "card card-now" }, [
+  return el("article", {
+    class: state.focusSocial === social.id ? "card card-now focused" : "card card-now",
+    "data-social": social.id,
+  }, [
     el("div", { class: "card-bg" }),
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
@@ -409,7 +436,7 @@ function socialCard(social) {
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || "Free now" }),
       el("p", { text: `${social.creator.name} · ${remaining(social.expiresAt)}` }),
-      placeLine(social.location, ""),
+      placeLine(social.location, social.place),
       el("p", { text: names.length ? `${names.join(", ")} joined` : "Waiting for friends" }),
     ]),
   ]);
@@ -477,7 +504,11 @@ function circleScreen() {
 function alertsScreen() {
   const items = state.notifications.length
     ? state.notifications.map((note) =>
-        el("div", { class: "row" }, [
+        el("button", {
+          class: "row",
+          type: "button",
+          onclick: () => openNotification(note),
+        }, [
           note.readAt ? null : el("span", { class: "unread", "aria-label": "Unread" }),
           el("div", { class: "grow" }, [el("h3", { text: note.title }), el("p", { text: note.body })]),
           el("span", { class: "time", text: ago(note.createdAt) }),
@@ -640,8 +671,8 @@ function sheet() {
         ? field("Place", "sheet-place", state.placeDraft, (value) => {
             state.placeDraft = value;
           }, { placeholder: "Optional", maxlength: "80" })
-        : null,
-      shareToggle(planning ? "Use my location" : "Share where I am"),
+        : whereBlock(),
+      planning ? shareToggle("Use my location") : null,
       el("div", { class: "stack", style: "margin-top:14px" }, [
         el("button", { class: "btn", type: "submit", text: planning ? "Add plan" : "I'm free" }),
         !planning && mySocial()
@@ -843,7 +874,9 @@ function collectPins() {
       lng: social.location.lng,
       title: social.creator.name,
       initial: initial(social.creator.name),
-      note: social.note || "Free now",
+      note: social.place
+        ? (social.note ? `${social.note} · ${social.place}` : social.place)
+        : (social.note || "Free now"),
       time: remaining(social.expiresAt),
       canJoin: !mine && !joined,
     });
@@ -869,7 +902,293 @@ function collectPins() {
 
 let leafletPromise = null;
 let liveMap = null;
+let whereLeaflet = null;
+let whereTimer = 0;
+let reverseTimer = 0;
 const PIN_PX = 36;
+
+function emptyWhere() {
+  return { mode: "none", place: "", lat: null, lng: null, precise: false };
+}
+
+function bindKeyboard() {
+  const apply = () => {
+    const viewport = window.visualViewport;
+    const offset = viewport
+      ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))
+      : 0;
+    document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+  };
+  window.visualViewport?.addEventListener("resize", apply);
+  window.visualViewport?.addEventListener("scroll", apply);
+  window.addEventListener("resize", apply);
+  apply();
+}
+
+function whereFromSocial(social) {
+  if (!social || (!social.place && !social.location)) return emptyWhere();
+  if (social.location && !social.place) {
+    return { mode: "here", place: "", lat: social.location.lat, lng: social.location.lng, precise: false };
+  }
+  return {
+    mode: "place",
+    place: social.place || "",
+    lat: social.location?.lat ?? null,
+    lng: social.location?.lng ?? null,
+    precise: Boolean(social.location),
+  };
+}
+
+function whereLabel() {
+  if (state.where.mode === "here") return "Current location";
+  if (state.where.place) return state.where.place;
+  if (state.where.lat != null) return "Dropped pin";
+  return "Nowhere";
+}
+
+function wherePayload() {
+  const where = state.where;
+  const typed = (state.whereQuery || where.place || "").trim();
+  if (where.mode === "here" && where.lat != null && where.lng != null) {
+    return { place: "", lat: where.lat, lng: where.lng, precise: false };
+  }
+  if ((where.mode === "place" || typed) && (typed || where.lat != null)) {
+    return {
+      place: typed,
+      lat: where.lat,
+      lng: where.lng,
+      precise: Boolean(where.precise && where.lat != null && where.lng != null),
+    };
+  }
+  return { place: "", lat: null, lng: null };
+}
+
+function whereBlock() {
+  return el("div", { class: "where" }, [
+    el("button", {
+      class: "where-row",
+      type: "button",
+      "aria-expanded": state.whereOpen ? "true" : "false",
+      onclick: () => {
+        state.whereOpen = !state.whereOpen;
+        if (!state.whereOpen) state.whereMap = false;
+        render();
+        if (state.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
+      },
+    }, [
+      el("span", { class: "where-k", text: "Where?" }),
+      el("span", { class: "where-v", text: whereLabel() }),
+    ]),
+    state.whereOpen ? wherePicker() : null,
+  ]);
+}
+
+function wherePicker() {
+  return el("div", { class: "where-picker" }, [
+    el("input", {
+      id: "where-query",
+      type: "text",
+      value: state.whereQuery,
+      placeholder: "Place name or address",
+      maxlength: "80",
+      autocomplete: "off",
+      enterkeyhint: "search",
+      oninput: (event) => {
+        state.whereQuery = event.target.value;
+        const typed = event.target.value.trim();
+        state.where.mode = typed ? "place" : "none";
+        state.where.place = typed;
+        state.where.lat = null;
+        state.where.lng = null;
+        state.where.precise = false;
+        const label = document.querySelector(".where-v");
+        if (label) label.textContent = typed || "Nowhere";
+        scheduleWhereSearch();
+      },
+    }),
+    state.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
+    state.whereResults.length
+      ? el("div", { class: "where-results" }, state.whereResults.map((hit) => el("button", {
+          class: "where-hit",
+          type: "button",
+          text: hit.name,
+          onclick: () => chooseWhereHit(hit),
+        })))
+      : null,
+    el("button", {
+      class: "where-action",
+      type: "button",
+      text: "Use my current location",
+      onclick: () => { void useCurrentWhere(); },
+    }),
+    el("button", {
+      class: "where-action",
+      type: "button",
+      text: state.whereMap ? "Hide map" : "Pick on map",
+      onclick: () => {
+        state.whereMap = !state.whereMap;
+        render();
+      },
+    }),
+    state.whereMap ? el("div", { id: "where-map", class: "where-map" }) : null,
+    state.where.mode !== "none"
+      ? el("button", {
+          class: "where-action",
+          type: "button",
+          text: "Clear place",
+          onclick: () => {
+            state.where = emptyWhere();
+            state.whereQuery = "";
+            state.whereResults = [];
+            state.whereMap = false;
+            render();
+          },
+        })
+      : null,
+    el("p", { class: "where-hint", text: "Leave this blank, or type a name without picking a pin." }),
+  ]);
+}
+
+function chooseWhereHit(hit) {
+  state.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
+  state.whereQuery = hit.name;
+  state.whereResults = [];
+  state.whereSearching = false;
+  render();
+}
+
+function scheduleWhereSearch() {
+  clearTimeout(whereTimer);
+  const query = state.whereQuery.trim();
+  if (query.length < 2) {
+    state.whereResults = [];
+    state.whereSearching = false;
+    return;
+  }
+  whereTimer = setTimeout(() => {
+    state.whereSearching = true;
+    const label = document.querySelector(".where-picker");
+    if (label && !document.querySelector(".where-hint")) {
+      /* render once the results arrive */
+    }
+    api(`/api/geocode?q=${encodeURIComponent(query)}`).then((data) => {
+      if (state.whereQuery.trim() !== query) return;
+      state.whereResults = data.results || [];
+      state.whereSearching = false;
+      render();
+    }).catch(() => {
+      state.whereSearching = false;
+      state.whereResults = [];
+      render();
+    });
+  }, 400);
+}
+
+async function useCurrentWhere() {
+  if (!navigator.geolocation) {
+    state.error = "This browser can't share location. The rest still works.";
+    render();
+    scheduleErrorClear();
+    return;
+  }
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 0,
+      });
+    });
+    state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    state.where = { mode: "here", place: "", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
+    state.whereQuery = "";
+    state.whereResults = [];
+    state.error = "";
+    render();
+  } catch {
+    state.error = "Location stayed off. Everything else still works.";
+    render();
+    scheduleErrorClear();
+  }
+}
+
+function scheduleReverse(lat, lng) {
+  clearTimeout(reverseTimer);
+  reverseTimer = setTimeout(() => {
+    api(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`).then((data) => {
+      if (state.where.lat !== lat || state.where.lng !== lng) return;
+      if (state.whereQuery.trim() || !data.place) return;
+      state.where.place = data.place;
+      state.whereQuery = data.place;
+      state.where.mode = "place";
+      render();
+    }).catch(() => {});
+  }, 400);
+}
+
+function openNotification(note) {
+  if (note.kind === "social" && note.refId) {
+    state.focusSocial = note.refId;
+    state.tab = "home";
+    state.sheet = null;
+  }
+  render();
+}
+
+function addDarkTiles(L, map) {
+  const tileUrl = state.meta?.mapTileUrl
+    || "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+  const tileAttribution = state.meta?.mapTileAttribution
+    || "© Esri, HERE, Garmin, OpenStreetMap contributors";
+  L.tileLayer(tileUrl, {
+    attribution: tileAttribution,
+    subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
+    detectRetina: tileUrl.includes("{r}"),
+    maxZoom: 20,
+  }).addTo(map);
+}
+
+async function mountWhereMap() {
+  const host = document.getElementById("where-map");
+  if (!host || !state.whereMap || state.sheet !== "free") return;
+  const L = await loadLeaflet();
+  if (!host.isConnected || !state.whereMap || state.sheet !== "free") return;
+  if (whereLeaflet) {
+    whereLeaflet.remove();
+    whereLeaflet = null;
+  }
+  const lat = state.where.lat ?? state.viewerLocation?.lat ?? 52.52;
+  const lng = state.where.lng ?? state.viewerLocation?.lng ?? 13.405;
+  const zoom = state.where.lat != null || state.viewerLocation ? 15 : 12;
+  const map = L.map(host, { zoomControl: false });
+  map.setView([lat, lng], zoom);
+  addDarkTiles(L, map);
+  const marker = L.marker([lat, lng], {
+    draggable: true,
+    icon: L.divIcon({
+      className: "pin pin-social",
+      html: `<span class="pin-letter"></span>`,
+      iconSize: [PIN_PX, PIN_PX],
+      iconAnchor: [PIN_PX / 2, PIN_PX / 2],
+    }),
+  }).addTo(map);
+  const apply = (ll) => {
+    state.where.mode = "place";
+    state.where.lat = ll.lat;
+    state.where.lng = ll.lng;
+    state.where.precise = true;
+    const label = document.querySelector(".where-v");
+    if (label) label.textContent = state.where.place || "Dropped pin";
+    scheduleReverse(ll.lat, ll.lng);
+  };
+  marker.on("dragend", () => apply(marker.getLatLng()));
+  map.on("click", (event) => {
+    marker.setLatLng(event.latlng);
+    apply(event.latlng);
+  });
+  whereLeaflet = map;
+  setTimeout(() => map.invalidateSize(), 60);
+}
 
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
@@ -904,16 +1223,7 @@ async function mountMap() {
   if (!pins.length) return;
   const map = L.map(host, { zoomControl: false });
   L.control.zoom({ position: "topright" }).addTo(map);
-  const tileUrl = state.meta?.mapTileUrl
-    || "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
-  const tileAttribution = state.meta?.mapTileAttribution
-    || "© Esri, HERE, Garmin, OpenStreetMap contributors";
-  L.tileLayer(tileUrl, {
-    attribution: tileAttribution,
-    subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
-    detectRetina: tileUrl.includes("{r}"),
-    maxZoom: 20,
-  }).addTo(map);
+  addDarkTiles(L, map);
   for (const pin of pins) {
     const marker = L.marker([pin.lat, pin.lng], {
       icon: L.divIcon({
@@ -1132,7 +1442,15 @@ function el(tag, attrs = {}, children = []) {
 function openSheet(name) {
   state.sheet = name;
   state.error = "";
-  if (name === "free") state.noteDraft = mySocial()?.note ?? "";
+  if (name === "free") {
+    state.noteDraft = mySocial()?.note ?? "";
+    state.where = whereFromSocial(mySocial());
+    state.whereQuery = state.where.place;
+    state.whereOpen = false;
+    state.whereResults = [];
+    state.whereSearching = false;
+    state.whereMap = false;
+  }
   if (name === "plan") {
     state.noteDraft = "";
     state.placeDraft = "";
@@ -1143,6 +1461,11 @@ function openSheet(name) {
 
 function closeSheet() {
   state.sheet = null;
+  state.whereMap = false;
+  if (whereLeaflet) {
+    whereLeaflet.remove();
+    whereLeaflet = null;
+  }
   render();
 }
 
@@ -1233,15 +1556,12 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
-  const where = await sharedPoint();
-  const locationNote = state.error;
-  if (locationNote) render();
   await run(async () => {
-    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...where } });
+    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload() } });
     state.sheet = null;
-    state.error = locationNote;
+    state.whereMap = false;
     await refresh({ initial: true });
-  }, locationNote);
+  });
 }
 
 async function onCreatePlan(event) {

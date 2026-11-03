@@ -9,6 +9,7 @@
   --danger: #ff453a;
   --phone: 480px;
   --tab: calc(64px + env(safe-area-inset-bottom));
+  --kb-offset: 0px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -297,6 +298,13 @@ button:disabled { cursor: default; opacity: 0.55; }
   padding: 12px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
+button.row {
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
 .row .grow { flex: 1; min-width: 0; }
 .row h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .row p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
@@ -415,14 +423,51 @@ input[type="text"], input[type="url"] {
 .sheet {
   position: fixed;
   left: 50%;
-  bottom: 0;
+  bottom: var(--kb-offset);
   transform: translateX(-50%);
   width: min(var(--phone), 100%);
+  max-height: calc(100dvh - var(--kb-offset) - env(safe-area-inset-top) - 8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--sheet);
   border-radius: 22px 22px 0 0;
   padding: 8px 20px calc(20px + env(safe-area-inset-bottom));
   z-index: 31;
 }
+.where { margin-top: 12px; }
+.where-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #2c2c2e;
+  border: 0;
+  color: #fff;
+  border-radius: 14px;
+  min-height: 52px;
+  padding: 0 16px;
+  font-size: 16px;
+  text-align: left;
+}
+.where-k { color: var(--muted); font-size: 15px; flex: none; }
+.where-v { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.where-picker { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.where-results { display: flex; flex-direction: column; gap: 6px; }
+.where-hit, .where-action {
+  width: 100%;
+  text-align: left;
+  background: #2c2c2e;
+  border: 0;
+  color: #fff;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+.where-hint { margin: 0; color: var(--muted); font-size: 13px; }
+.where-map { height: 180px; border-radius: 16px; overflow: hidden; background: #141416; }
+.card.focused { outline: 2px solid #ff4d8d; outline-offset: 2px; }
 .grabber {
   width: 36px;
   height: 5px;
