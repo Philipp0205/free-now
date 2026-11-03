@@ -308,6 +308,59 @@ function deniedSteps(signals) {
   return ["Allow notifications for this site in the browser's site settings."];
 }
 
+export const INSTALL_LATER_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** True on the first visit, and again once three days have passed since Not now. */
+export function installReminderDue(storedAt, now) {
+  if (storedAt == null || storedAt === "") return true;
+  const at = Number(storedAt);
+  if (!Number.isFinite(at)) return true;
+  return now - at >= INSTALL_LATER_MS;
+}
+
+/** Push cannot work in this browser until Hangry is installed. */
+export function needsInstallForPush(signals) {
+  if (signals.platform === "ios") return !signals.standalone;
+  if (signals.platform === "android") return signals.canInstall === false || Boolean(signals.inApp);
+  return signals.permission === "unsupported";
+}
+
+export function installPrompt(signals, { canPrompt = false } = {}) {
+  if (signals.platform === "ios") {
+    const safari = Boolean(signals.safari && !signals.inApp);
+    return {
+      kind: safari ? "ios" : "ios-other",
+      title: "Install Hangry",
+      lede: safari
+        ? "Add Hangry to your Home Screen to get notifications."
+        : "Open Hangry in Safari, then add it to your Home Screen.",
+      steps: safari
+        ? ["Tap the Share button.", "Tap Add to Home Screen.", "Open Hangry from the icon."]
+        : ["Open this page in Safari.", "Tap Share, then Add to Home Screen."],
+      offerInstall: false,
+      copyLink: !safari,
+    };
+  }
+  if (signals.platform === "android" && (signals.canInstall === false || signals.inApp)) {
+    return {
+      kind: "firefox",
+      title: "Install Hangry",
+      lede: "For notifications, open Hangry in Chrome and tap Install app.",
+      steps: [],
+      offerInstall: false,
+      copyLink: true,
+    };
+  }
+  return {
+    kind: "native",
+    title: "Install Hangry",
+    lede: "Install Hangry to get notifications.",
+    steps: canPrompt ? [] : ["Open the browser menu.", "Tap Install app or Add to Home screen."],
+    offerInstall: Boolean(canPrompt),
+    copyLink: false,
+  };
+}
+
 function guideLede(signals) {
   if (signals.platform === "ios") {
     return "iPhone notifications need the Home Screen app. A Safari tab can't receive them.";
