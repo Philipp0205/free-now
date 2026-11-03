@@ -193,6 +193,7 @@ export function readArriveAt(value: unknown, now: number, tz: string, start: num
   } catch {
     throw new HttpError(400, "Pick a time you can arrive.");
   }
-  if (at <= now || at < start || at > end) throw new HttpError(400, "Pick a time you can arrive.");
+  const earliestMinute = Math.max(Math.floor(start / 60_000) * 60_000, Math.floor(now / 60_000) * 60_000);
+  if (at < earliestMinute || at > end) throw new HttpError(400, "Pick a time you can arrive.");
   return at;
 }

@@ -46,6 +46,7 @@ import {
   rotateInvite,
   deleteSessionByHash,
   insertSession,
+  updateCircleName,
   updateUserName,
   upsertPushSub,
   type CircleRow,
@@ -254,6 +255,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "PATCH" && pathname === "/api/me") {
     const name = cleanLabel(body.name, "name", 24);
+    if (name !== me.name) {
+      const circle = getCircleForUser(deps.db, me.id);
+      if (!circle || !viewerIsAdmin(deps.db, me.id, circle)) {
+        throw new HttpError(403, "Only an admin can change a name others see.");
+      }
+    }
     updateUserName(deps.db, me.id, name);
     const updated = { ...me, name };
     sendJson(res, 200, mePayload(deps, req, updated));
@@ -305,6 +312,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     requireAdmin(deps, circle.id, me.id);
     clearRemoval(deps.db, circle.id, parseId(removal[1]));
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "PATCH" && pathname === "/api/circles") {
+    const circle = requireCircle(deps, me.id);
+    if (!viewerIsAdmin(deps.db, me.id, circle)) throw new HttpError(403, "Only an admin can do that.");
+    const name = cleanLabel(body.name, "circle name", 32);
+    updateCircleName(deps.db, circle.id, name);
+    const fresh = getCircleForUser(deps.db, me.id);
+    if (!fresh) throw new HttpError(500, "circle missing");
+    sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
   }
 
@@ -866,6 +884,18 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
 function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {
   if (!reply?.blocked) return null;
   return reply.removed_by?.trim() || "Someone";
+}
+
+/** Circle creator, or a circle admin once the admin column exists. */
+function viewerIsAdmin(db: DatabaseSync, userId: string, circle: CircleRow): boolean {
+  const columns = db.prepare("PRAGMA table_info(memberships)").all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === "is_admin")) {
+    const row = db.prepare(
+      "SELECT is_admin AS admin FROM memberships WHERE user_id = ? AND circle_id = ?",
+    ).get(userId, circle.id) as { admin: number } | undefined;
+    return Boolean(row?.admin);
+  }
+  return circle.created_by === userId;
 }
 
 export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: string | null = null) {
