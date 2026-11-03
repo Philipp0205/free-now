@@ -831,9 +831,9 @@ function socialCard(social) {
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
       : null,
-    photo ? photoHero(social) : null,
+    photo ? photoBackdrop(social) : null,
     el("div", { class: "card-copy" }, [
-      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+      photo ? photoStage(social, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
       el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
@@ -854,9 +854,9 @@ function planCard(plan) {
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
       : null,
-    photo ? photoHero(plan) : null,
+    photo ? photoBackdrop(plan) : null,
     el("div", { class: "card-copy" }, [
-      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+      photo ? photoStage(plan, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
@@ -866,15 +866,43 @@ function planCard(plan) {
   ]);
 }
 
-/** The host's photo runs edge to edge across the top of the card and fades into it. */
-function photoHero(item) {
-  const photo = item.photos[0];
-  return el("button", {
-    class: "photo-hero",
-    type: "button",
-    "aria-label": "Show photo full screen",
-    onclick: () => openLightbox(photo.id),
-  }, [photoImg(photo.id)]);
+/** The same photo, blurred across the full width of the card, fading into it. */
+function photoBackdrop(item) {
+  return el("div", { class: "photo-backdrop", "aria-hidden": "true" }, [photoImg(item.photos[0].id)]);
+}
+
+/** The host's photo in its frame, centred on the card, with the people who are in floating beside it. */
+function photoStage(item, people) {
+  return el("div", { class: "photo-stage" }, [
+    avatarCloud(people),
+    photoFrame(item.photos[0]),
+  ]);
+}
+
+function avatarCloud(people) {
+  const shown = people.slice(0, 3);
+  const extra = people.length - shown.length;
+  return el("div", { class: "avatar-cloud", "aria-label": people.map((person) => person.name).join(", ") }, [
+    ...shown.map((person, index) => avatar(person, [40, 30, 36][index], `cloud-${index}`)),
+    extra > 0 ? el("span", { class: "avatar cloud-more", text: `+${extra}` }) : null,
+  ]);
+}
+
+function photoFrame(photo) {
+  return el("div", { class: "photo-frame" }, [
+    el("button", {
+      class: "photo-open",
+      type: "button",
+      "aria-label": "Open photo",
+      onclick: () => openLightbox(photo.id),
+    }, [photoImg(photo.id)]),
+    el("button", {
+      class: "photo-expand",
+      type: "button",
+      "aria-label": "Show photo full screen",
+      onclick: () => openLightbox(photo.id),
+    }, [icon("expand")]),
+  ]);
 }
 
 /** Photos need the session header, so they are fetched once and shown from an object URL. */
