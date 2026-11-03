@@ -1393,6 +1393,38 @@ test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
   }
 });
 
+test("a failed chat send goes out again when the connection returns", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  let fail = true;
+  await page.route("**/api/**/chat", (route) => {
+    if (fail && route.request().method() === "POST") {
+      fail = false;
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal error" }) });
+    }
+    return route.continue();
+  });
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator("#chat-input").fill("Held");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByText("Something went wrong. Retrying…").waitFor();
+    await page.getByText("Held", { exact: true }).waitFor({ timeout: 8000 });
+    assert.equal(await page.getByText("Something went wrong. Retrying…").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("you can edit your name, and an admin can edit the circle name", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {
@@ -1444,9 +1476,12 @@ test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => 
       await page.locator("#chat-input").focus();
       await page.waitForTimeout(500);
       const box = await page.locator(".chat-compose").boundingBox();
+      const message = await page.locator(".chat-msg").last().boundingBox();
       assert.ok(box);
+      assert.ok(message);
       assert.ok(box.y + box.height <= 364, JSON.stringify(box));
       assert.ok(box.height >= 44, JSON.stringify(box));
+      assert.ok(message.y + message.height <= box.y + 1, JSON.stringify({ message, box }));
       await page.getByRole("button", { name: "Back" }).click();
       await page.getByRole("button", { name: "Circle", exact: true }).click();
       const circleChat = page.getByRole("button", { name: "Circle chat" });

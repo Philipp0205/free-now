@@ -62,13 +62,21 @@ export function nextChatPushDelay(lastPushAt: number, now: number): number {
 
 type Job = {
   deps: ChatDeps;
-  count: number;
-  senderName: string;
-  preview: string;
+  windowStart: number;
+  firstAuthor: string;
+  firstName: string;
+  firstPreview: string;
+  laterAuthors: Set<string>;
+  laterCount: number;
+  prompted: boolean;
   timer: ReturnType<typeof setTimeout>;
 };
 
 const jobs = new Map<string, Job>();
+
+export function chatWindowRemaining(windowStart: number, now: number): number {
+  return Math.max(0, windowStart + CHAT_BATCH_MS - now);
+}
 
 export async function routeChat(
   deps: ChatDeps,
@@ -150,7 +158,7 @@ export async function postThread(
     "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at) VALUES (?, ?, ?, ?, 'text', ?)",
   ).run(id, access.chat.id, userId, text, now);
   markRead(deps.db, access.chat.id, userId, now);
-  scheduleChatNotice(deps, access.chat.id, userName, text);
+  scheduleChatNotice(deps, access.chat.id, userId, userName, text);
   return threadPayload(deps, access, userId);
 }
 
@@ -161,6 +169,7 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
     messageId,
   );
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
+  if (row.kind !== "text") throw new ChatError(403, "You can't delete that.");
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
   if (!chat) throw new ChatError(404, "message not found");
   const circle = memberCircle(deps, userId);
@@ -199,29 +208,34 @@ export function closeEventChat(db: DatabaseSync, circleId: string, kind: "social
   ).run(now, circleId, kind, refId);
 }
 
-export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderName: string, preview: string): void {
+export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderId: string, senderName: string, preview: string): void {
   const existing = jobs.get(chatId);
   if (existing) {
-    clearTimeout(existing.timer);
-    existing.count += 1;
-    existing.senderName = senderName;
-    existing.preview = preview;
+    existing.laterCount += 1;
+    existing.laterAuthors.add(senderId);
     existing.deps = deps;
-    existing.timer = arm(chatId, nextChatPushDelay(lastPushAt(deps.db, chatId), deps.now()));
     return;
   }
   jobs.set(chatId, {
     deps,
-    count: 1,
-    senderName,
-    preview,
-    timer: arm(chatId, nextChatPushDelay(lastPushAt(deps.db, chatId), deps.now())),
+    windowStart: deps.now(),
+    firstAuthor: senderId,
+    firstName: senderName,
+    firstPreview: preview,
+    laterAuthors: new Set(),
+    laterCount: 0,
+    prompted: false,
+    timer: arm(chatId, 0),
   });
 }
 
 export async function flushChatNotices(force = false): Promise<void> {
-  const ids = [...jobs.keys()];
-  for (const id of ids) await fireChatNotice(id, force);
+  for (let pass = 0; pass < 4; pass += 1) {
+    const ids = [...jobs.keys()];
+    if (ids.length === 0) return;
+    for (const id of ids) await fireChatNotice(id, force);
+    if (!force) return;
+  }
 }
 
 function arm(chatId: string, delay: number): ReturnType<typeof setTimeout> {
@@ -241,36 +255,73 @@ async function fireChatNotice(chatId: string, force: boolean): Promise<void> {
     jobs.delete(chatId);
     return;
   }
-  const delay = nextChatPushDelay(chat.last_push_at, job.deps.now());
-  if (!force && delay > CHAT_BATCH_MS) {
-    job.timer = arm(chatId, delay);
+  if (!job.prompted) {
+    job.prompted = true;
+    await deliverChatPush(job.deps, chat, new Set([job.firstAuthor]), `${job.firstName}: ${job.firstPreview}`.slice(0, 140));
+    const remain = force ? 0 : chatWindowRemaining(job.windowStart, job.deps.now());
+    if (job.laterCount === 0 && remain === 0) {
+      jobs.delete(chatId);
+      return;
+    }
+    job.timer = arm(chatId, remain);
     return;
   }
+  if (job.laterCount === 0) {
+    jobs.delete(chatId);
+    return;
+  }
+  const count = job.laterCount;
+  const authors = job.laterAuthors;
   jobs.delete(chatId);
-  const latest = one<{ user_id: string }>(
-    job.deps.db,
-    "SELECT user_id FROM messages WHERE chat_id = ? AND kind = 'text' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
-    chatId,
-  );
-  const recipients = listMembers(job.deps.db, chat.circle_id).filter((member) => {
-    if (isMuted(job.deps.db, chatId, member.id)) return false;
-    if (job.count === 1 && latest?.user_id === member.id) return false;
+  await deliverChatPush(job.deps, chat, authors, `${count} new message${count === 1 ? "" : "s"}`);
+}
+
+async function deliverChatPush(deps: ChatDeps, chat: ChatRow, authors: Set<string>, body: string): Promise<void> {
+  const recipients = chatAudience(deps.db, chat).filter((member) => {
+    if (isMuted(deps.db, chat.id, member.id)) return false;
+    if (authors.has(member.id)) return false;
     return true;
   });
   if (recipients.length === 0) return;
   const title = chat.kind === "circle" ? (chat.title || "Circle chat") : (chat.title || "Chat");
-  const body = job.count === 1 ? `${job.senderName}: ${job.preview}`.slice(0, 140) : `${job.count} new messages`;
   const ref = chat.kind === "circle" ? "circle" : `${chat.kind}:${chat.ref_id}`;
-  job.deps.db.prepare("UPDATE chats SET last_push_at = ? WHERE id = ?").run(job.deps.now(), chatId);
-  await notifyUsers(job.deps.db, job.deps.push, job.deps.now(), recipients.map((member) => ({
+  deps.db.prepare("UPDATE chats SET last_push_at = ? WHERE id = ?").run(deps.now(), chat.id);
+  await notifyUsers(deps.db, deps.push, deps.now(), recipients.map((member) => ({
     userId: member.id,
     title,
     body,
     kind: "chat",
     refId: ref,
-    tag: `chat:${chatId}`,
+    tag: `chat:${chat.id}`,
     url: `/?chat=${encodeURIComponent(ref)}`,
+    skipAlert: true,
   })));
+}
+
+function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
+  const members = listMembers(db, chat.circle_id);
+  if (chat.kind === "circle") return members;
+  const allowed = new Set<string>();
+  if (chat.host_id) allowed.add(chat.host_id);
+  const coming = chat.kind === "social"
+    ? all<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM social_joins WHERE social_id = ? AND blocked = 0 AND reply IN ('coming', 'join')",
+      chat.ref_id,
+    )
+    : all<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM plan_joins WHERE plan_id = ? AND blocked = 0 AND reply IN ('coming', 'join')",
+      chat.ref_id,
+    );
+  for (const row of coming) allowed.add(row.user_id);
+  const writers = all<{ user_id: string }>(
+    db,
+    "SELECT DISTINCT user_id FROM messages WHERE chat_id = ? AND kind = 'text' AND deleted_at IS NULL",
+    chat.id,
+  );
+  for (const row of writers) allowed.add(row.user_id);
+  return members.filter((member) => allowed.has(member.id));
 }
 
 function threadPayload(deps: ChatDeps, access: Access, userId: string) {
@@ -291,6 +342,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     refId: access.chat.ref_id,
     title: access.title,
     closed: access.closed,
+    removed: access.blocked,
     muted: isMuted(deps.db, access.chat.id, userId),
     messages: messages.map((message) => ({
       id: message.id,
@@ -299,9 +351,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       at: message.created_at,
       system: message.kind === "system",
       mine: message.user_id === userId,
-      canDelete: message.kind === "text"
-        ? message.user_id === userId || admin || host
-        : admin || host,
+      canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
     })),
   };
 }
@@ -322,25 +372,28 @@ function accessThread(deps: ChatDeps, userId: string, kind: "circle" | "social" 
     closed = true;
   }
   if (writing && closed) throw new ChatError(403, "This chat is closed.");
-  if (writing && looked.blocked) throw new ChatError(403, "The host removed you from this.");
+  if (writing && looked.blocked) throw new ChatError(403, `${looked.removedBy?.trim() || "Someone"} removed you from this.`);
   return { chat, title: looked.title || chat.title || "Chat", closed, blocked: looked.blocked };
 }
 
-function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: string, refId: string, now: number): { missing: boolean; closed: boolean; blocked: boolean; title: string; hostId: string | null } {
+function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: string, refId: string, now: number): { missing: boolean; closed: boolean; blocked: boolean; removedBy: string | null; title: string; hostId: string | null } {
   if (kind === "circle") {
-    return { missing: false, closed: false, blocked: false, title: "Circle chat", hostId: null };
+    return { missing: false, closed: false, blocked: false, removedBy: null, title: "Circle chat", hostId: null };
   }
   if (kind === "social") {
     const social = getSocial(deps.db, refId);
+    const socialReply = getSocialReply(deps.db, refId, userId);
     if (!social || social.circle_id !== circleId) {
       const existing = findChat(deps.db, circleId, "social", refId);
-      if (!existing) return { missing: true, closed: true, blocked: false, title: "", hostId: null };
-      return { missing: false, closed: true, blocked: Boolean(getSocialReply(deps.db, refId, userId)?.blocked), title: existing.title, hostId: existing.host_id };
+      if (!existing) return { missing: true, closed: true, blocked: false, removedBy: null, title: "", hostId: null };
+      const prior = getSocialReply(deps.db, refId, userId);
+      return { missing: false, closed: true, blocked: Boolean(prior?.blocked), removedBy: prior?.removed_by ?? null, title: existing.title, hostId: existing.host_id };
     }
     return {
       missing: false,
       closed: social.expires_at <= now,
-      blocked: Boolean(getSocialReply(deps.db, social.id, userId)?.blocked),
+      blocked: Boolean(socialReply?.blocked),
+      removedBy: socialReply?.removed_by ?? null,
       title: social.note.trim() || "Free now",
       hostId: social.creator_id,
     };
@@ -348,14 +401,16 @@ function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: strin
   const plan = getPlan(deps.db, refId);
   if (!plan || plan.circle_id !== circleId) {
     const existing = findChat(deps.db, circleId, "plan", refId);
-    if (!existing) return { missing: true, closed: true, blocked: false, title: "", hostId: null };
-    return { missing: false, closed: true, blocked: Boolean(getPlanReply(deps.db, refId, userId)?.blocked), title: existing.title, hostId: existing.host_id };
+    if (!existing) return { missing: true, closed: true, blocked: false, removedBy: null, title: "", hostId: null };
+      const prior = getPlanReply(deps.db, refId, userId);
+      return { missing: false, closed: true, blocked: Boolean(prior?.blocked), removedBy: prior?.removed_by ?? null, title: existing.title, hostId: existing.host_id };
   }
   const today = isoDate(now, deps.config.tz);
   return {
     missing: false,
     closed: plan.for_date < today,
     blocked: Boolean(getPlanReply(deps.db, plan.id, userId)?.blocked),
+    removedBy: getPlanReply(deps.db, plan.id, userId)?.removed_by ?? null,
     title: plan.note.trim() || "Plan",
     hostId: plan.creator_id,
   };

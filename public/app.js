@@ -74,6 +74,7 @@ const state = {
   startChoice: "",
   etaFor: "",
   chat: null,
+  chatQueue: null,
   chatThread: null,
   chatReturn: "home",
   chatDraft: "",
@@ -256,6 +257,7 @@ function scheduleOfflineRetry(delay) {
       state.statusMessage = "";
       render();
       refresh({ initial: true }).catch(() => {});
+      void flushChatQueue();
       void considerReminders();
     } catch (error) {
       if (error.status === 401) return;
@@ -429,7 +431,9 @@ function syncKeyboardInset() {
     touchUi,
   });
   document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+  document.documentElement.style.setProperty("--vv-top", `${Math.max(0, Math.round(vv.offsetTop || 0))}px`);
   document.documentElement.style.setProperty("--vv-height", `${Math.max(0, Math.round(viewportHeight))}px`);
+  if (state.chat) stickChatLog();
   const bar = document.querySelector(".tabbar");
   const rect = bar?.getBoundingClientRect();
   const overlaps = rect
@@ -644,6 +648,7 @@ function render() {
   const nextLog = document.querySelector(".chat-log");
   if (nextLog) nextLog.scrollTop = state.chatStick || chatNearEnd ? nextLog.scrollHeight : chatY;
   state.chatStick = false;
+  if (state.chat) stickChatLog();
   if (state.focusSheet) {
     state.focusSheet = false;
     document.getElementById("sheet-note")?.focus({ preventScroll: true });
@@ -1036,8 +1041,8 @@ function closeChat() {
 function chatScreen() {
   const thread = state.chatThread;
   const title = thread?.title || "Chat";
-  return el("section", { class: "chat-screen", "aria-label": title }, [
-    RETRY_NOTE.has(state.error) ? el("p", { class: "status-banner", role: "status", text: state.error }) : null,
+  return     el("section", { class: "chat-screen", "aria-label": title }, [
+    state.statusMessage ? el("p", { class: "status-banner", role: "status", text: state.statusMessage }) : null,
     el("header", { class: "chat-head" }, [
       el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closeChat }),
       el("h1", { text: title }),
@@ -1053,7 +1058,9 @@ function chatScreen() {
     el("div", { class: "chat-log", id: "chat-log" }, thread
       ? thread.messages.map((message) => message.system ? systemLine(message) : messageRow(message))
       : [el("p", { class: "help", text: "Loading…" })]),
-    thread?.closed
+    thread?.removed
+      ? el("p", { class: "chat-closed", text: "You were removed from this event." })
+      : thread?.closed
       ? el("p", { class: "chat-closed", text: "This chat is closed." })
       : el("form", { class: "chat-compose", onsubmit: sendChat }, [
           el("input", {
@@ -1099,16 +1106,61 @@ function messageWhen(ms) {
   return `${part.day.slice(5)} ${hm}`;
 }
 
+function stickChatLog() {
+  const log = document.querySelector(".chat-log");
+  const bar = document.querySelector(".chat-compose, .chat-closed");
+  if (!log) return;
+  const view = window.visualViewport;
+  const viewBottom = (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight);
+  const limit = Math.min(viewBottom, bar?.getBoundingClientRect().top ?? viewBottom) - 8;
+  const last = log.lastElementChild;
+  if (!last) return;
+  const box = last.getBoundingClientRect();
+  if (box.bottom > limit) log.scrollTop += box.bottom - limit;
+}
+
 async function sendChat(event) {
   event.preventDefault();
   if (!state.chat) return;
   const text = state.chatDraft.trim();
   if (!text) return;
-  await run(async () => {
-    state.chatThread = (await api(chatTargetUrl(state.chat), { method: "POST", body: { text } })).chat;
+  const target = { kind: state.chat.kind, id: state.chat.id };
+  state.chatQueue = { target, text };
+  try {
+    state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: { text } })).chat;
     state.chatDraft = "";
+    state.chatQueue = null;
+    state.statusMessage = "";
     state.chatStick = true;
-  });
+  } catch (error) {
+    if (error.status === 401) return;
+    if (isNetworkFailure(error) || error.status >= 500) {
+      noteConnectionProblem(error);
+      scheduleOfflineRetry(1000);
+    } else {
+      state.chatQueue = null;
+      state.error = error.message || "Something went wrong";
+    }
+  }
+  render();
+}
+
+async function flushChatQueue() {
+  const queued = state.chatQueue;
+  if (!queued) return;
+  try {
+    const thread = (await api(chatTargetUrl(queued.target), { method: "POST", body: { text: queued.text } })).chat;
+    state.chatQueue = null;
+    state.chatDraft = "";
+    state.statusMessage = "";
+    if (state.chat && state.chat.kind === queued.target.kind && state.chat.id === queued.target.id) {
+      state.chatThread = thread;
+    }
+    state.chatStick = true;
+    render();
+  } catch (error) {
+    if (error.status !== 401 && (isNetworkFailure(error) || error.status >= 500)) noteConnectionProblem(error);
+  }
 }
 
 async function toggleMute() {
