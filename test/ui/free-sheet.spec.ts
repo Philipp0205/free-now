@@ -1081,6 +1081,109 @@ test("an admin manages members from the circle list", { timeout: 90_000 }, async
   }
 });
 
+test("the host can remove someone who is in", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    const remove = page.getByRole("button", { name: "Remove Fritz" });
+    await remove.waitFor();
+    const end = page.getByRole("button", { name: "End Coffee" });
+    await end.waitFor();
+    const height = await remove.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+    const endHeight = await end.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+    assert.ok(height >= 44, `remove is ${height}px`);
+    assert.ok(endHeight >= 44, `end is ${endHeight}px`);
+    await remove.click();
+    await page.getByText("They can't join Coffee again.").waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("an admin sees edit, end, and remove on someone else's cards", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const join = (name: string) => fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const fritz = await join("Fritz");
+    const sam = await join("Sam");
+    const postAs = (tokenValue: string, pathname: string, body: unknown) => fetch(`${baseUrl}${pathname}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenValue}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((response) => response.json());
+    const coffee = await postAs(fritz.token, "/api/socials", { note: "Coffee" });
+    const dinner = await postAs(fritz.token, "/api/plans", { note: "Dinner" });
+    const now = new Date();
+    const ahead = new Date(now.getTime() + 90 * 60 * 1000);
+    const sameDay = ahead.getUTCDate() === now.getUTCDate();
+    const laterClock = sameDay
+      ? `${String(ahead.getUTCHours()).padStart(2, "0")}:${String(ahead.getUTCMinutes()).padStart(2, "0")}`
+      : null;
+    const walk = laterClock
+      ? await postAs(sam.token, "/api/socials", { note: "Walk", startsAt: laterClock })
+      : null;
+    const replyAs = (tokenValue: string, pathname: string) => fetch(`${baseUrl}${pathname}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenValue}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await replyAs(sam.token, `/api/socials/${coffee.social.id}/reply`);
+    await replyAs(sam.token, `/api/plans/${dinner.plan.id}/reply`);
+    if (walk?.social?.id) await replyAs(fritz.token, `/api/socials/${walk.social.id}/reply`);
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    const cards: Array<[string, string]> = [["Coffee", "Sam"], ["Dinner", "Sam"]];
+    if (walk?.social?.id) cards.splice(1, 0, ["Walk", "Fritz"]);
+    for (const [label, guest] of cards) {
+      const card = page.locator("article", { has: page.getByRole("heading", { name: label, exact: true }) });
+      await card.scrollIntoViewIfNeeded();
+      const edit = card.getByRole("button", { name: `Edit ${label}` });
+      const end = card.getByRole("button", { name: `End ${label}` });
+      const remove = card.getByRole("button", { name: `Remove ${guest}` });
+      await edit.waitFor();
+      await end.waitFor();
+      await remove.waitFor();
+      const heights = await Promise.all([edit, end, remove].map((button) => button.evaluate((node) => Math.round(node.getBoundingClientRect().height))));
+      assert.ok(heights.every((height) => height >= 44), `${label} tools are ${heights.join(", ")}px`);
+    }
+    const coffeeCard = page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) });
+    await coffeeCard.getByRole("button", { name: "Edit Coffee" }).click();
+    await page.getByRole("dialog", { name: "Edit" }).waitFor();
+    await page.getByText("Time (empty means now)").waitFor();
+    await page.screenshot({ path: shot("admin-event-tools.png") });
+  } finally {
+    await page.context().close();
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },

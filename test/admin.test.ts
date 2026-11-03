@@ -155,6 +155,190 @@ test("an admin can edit or end someone else's free post and plan", async () => {
   });
 });
 
+test("host and admin can change every event, and a member cannot", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Bea", code: created.circle.inviteCode },
+      status: 201,
+    });
+    const sam = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Sam", code: created.circle.inviteCode },
+      status: 201,
+    });
+    const nia = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Nia", code: created.circle.inviteCode },
+      status: 201,
+    });
+    await api(port, "POST", `/api/circles/members/${bea.user.id}`, {
+      token: alex.token,
+      body: { admin: true },
+      status: 200,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: nia.token,
+      body: { endpoint: "https://push.example/nia", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: bea.token,
+      body: { endpoint: "https://push.example/bea", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const social = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Coffee", place: "Cafe" },
+      status: 201,
+    });
+    const plan = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Bouldering", place: "Gym" },
+      status: 201,
+    });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: nia.token,
+      body: { reply: "in" },
+      status: 200,
+    });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: nia.token,
+      body: { reply: "in" },
+      status: 200,
+    });
+
+    async function denied(method: string, pathname: string, body?: unknown) {
+      const result = await api(port, method, pathname, { token: sam.token, body, status: 403 });
+      assert.equal(result.error, "Only the host can do that.");
+    }
+
+    const socialEdit = { note: "Tea", place: "Park", startsAt: "18:00" };
+    await denied("PATCH", `/api/socials/${social.social.id}`, socialEdit);
+    const byHost = await api(port, "PATCH", `/api/socials/${social.social.id}`, { token: alex.token, body: socialEdit, status: 200 });
+    assert.equal(byHost.social.note, "Tea");
+    assert.equal(byHost.social.place, "Park");
+    assert.ok(byHost.social.startsAt > START);
+    const byAdmin = await api(port, "PATCH", `/api/socials/${social.social.id}`, {
+      token: bea.token,
+      body: { note: "Cocoa", place: "Bar", startsAt: null },
+      status: 200,
+    });
+    assert.equal(byAdmin.social.note, "Cocoa");
+    assert.equal(byAdmin.social.place, "Bar");
+    assert.equal(byAdmin.social.startsAt, null);
+
+    const later = await api(port, "POST", "/api/socials", {
+      token: bea.token,
+      body: { note: "Walk", place: "Park", startsAt: "18:30" },
+      status: 201,
+    });
+    await denied("PATCH", `/api/socials/${later.social.id}`, { note: "Nope", place: "Nope", startsAt: "19:00" });
+    const laterHost = await api(port, "PATCH", `/api/socials/${later.social.id}`, {
+      token: bea.token,
+      body: { note: "Stroll", place: "River", startsAt: "19:00" },
+      status: 200,
+    });
+    assert.equal(laterHost.social.note, "Stroll");
+    assert.equal(laterHost.social.place, "River");
+    assert.ok(laterHost.social.startsAt > byHost.social.startsAt);
+    const laterAdmin = await api(port, "PATCH", `/api/socials/${later.social.id}`, {
+      token: alex.token,
+      body: { note: "Dusk walk", place: "Bridge", startsAt: "19:30" },
+      status: 200,
+    });
+    assert.equal(laterAdmin.social.note, "Dusk walk");
+    assert.equal(laterAdmin.social.place, "Bridge");
+    assert.ok(laterAdmin.social.startsAt > laterHost.social.startsAt);
+
+    const planEdit = { note: "Climbing", place: "Wall", time: "19:40" };
+    await denied("PATCH", `/api/plans/${plan.plan.id}`, planEdit);
+    const planHost = await api(port, "PATCH", `/api/plans/${plan.plan.id}`, { token: alex.token, body: planEdit, status: 200 });
+    assert.equal(planHost.plan.note, "Climbing");
+    assert.equal(planHost.plan.place, "Wall");
+    assert.equal(planHost.plan.time, "19:40");
+    const planAdmin = await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
+      token: bea.token,
+      body: { note: "Boulder", place: "Cave", time: "20:00" },
+      status: 200,
+    });
+    assert.equal(planAdmin.plan.note, "Boulder");
+    assert.equal(planAdmin.plan.place, "Cave");
+    assert.equal(planAdmin.plan.time, "20:00");
+
+    await denied("DELETE", `/api/socials/${social.social.id}/people/${nia.user.id}`);
+    await api(port, "DELETE", `/api/socials/${social.social.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Alex removed you from Cocoa");
+    const stillIn = await api(port, "GET", "/api/me", { token: nia.token });
+    assert.equal(stillIn.circle.name, "friends");
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, {
+      token: nia.token,
+      body: { reply: "in" },
+      status: 403,
+    });
+    await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: nia.token,
+      body: { reply: "in" },
+      status: 200,
+    });
+    await denied("DELETE", `/api/socials/${later.social.id}/people/${nia.user.id}`);
+    await api(port, "DELETE", `/api/socials/${later.social.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Bea removed you from Dusk walk");
+
+    await denied("DELETE", `/api/plans/${plan.plan.id}/people/${nia.user.id}`);
+    await api(port, "DELETE", `/api/plans/${plan.plan.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Alex removed you from Boulder");
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: nia.token,
+      body: { reply: "in" },
+      status: 403,
+    });
+    const dinner = await api(port, "POST", "/api/plans", {
+      token: bea.token,
+      body: { note: "Dinner", place: "Kitchen" },
+      status: 201,
+    });
+    await denied("PATCH", `/api/plans/${dinner.plan.id}`, { note: "Nope", place: "Nope", time: "21:00" });
+    const dinnerHost = await api(port, "PATCH", `/api/plans/${dinner.plan.id}`, {
+      token: bea.token,
+      body: { note: "Dinner", place: "Kitchen", time: "18:00" },
+      status: 200,
+    });
+    assert.equal(dinnerHost.plan.time, "18:00");
+    const dinnerAdmin = await api(port, "PATCH", `/api/plans/${dinner.plan.id}`, {
+      token: alex.token,
+      body: { note: "Supper", place: "Table", time: "18:30" },
+      status: 200,
+    });
+    assert.equal(dinnerAdmin.plan.note, "Supper");
+    assert.equal(dinnerAdmin.plan.place, "Table");
+    assert.equal(dinnerAdmin.plan.time, "18:30");
+    await api(port, "POST", `/api/plans/${dinner.plan.id}/reply`, {
+      token: nia.token,
+      body: { reply: "in" },
+      status: 200,
+    });
+    await denied("DELETE", `/api/plans/${dinner.plan.id}/people/${nia.user.id}`);
+    await api(port, "DELETE", `/api/plans/${dinner.plan.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Bea removed you from Supper");
+
+    await denied("DELETE", `/api/socials/${social.social.id}`);
+    await api(port, "DELETE", `/api/socials/${social.social.id}`, { token: alex.token, status: 204 });
+    await denied("DELETE", `/api/socials/${later.social.id}`);
+    await api(port, "DELETE", `/api/socials/${later.social.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.title, "Ended");
+    assert.equal(sent.at(-1)?.body, "Alex ended Dusk walk");
+    await denied("DELETE", `/api/plans/${plan.plan.id}`);
+    await api(port, "DELETE", `/api/plans/${plan.plan.id}`, { token: alex.token, status: 204 });
+    await denied("DELETE", `/api/plans/${dinner.plan.id}`);
+    await api(port, "DELETE", `/api/plans/${dinner.plan.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Alex ended Supper");
+    const socials = await api(port, "GET", "/api/socials", { token: alex.token });
+    const plans = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.equal(socials.socials.length, 0);
+    assert.equal(plans.plans.length, 0);
+  });
+});
+
 test("opening an older database makes the creator the admin", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hangry-admin-"));
   const file = path.join(dir, "old.sqlite");

@@ -119,6 +119,9 @@ export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, b
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
   const reply = normalizeReply(body.reply);
+  if (reply === "coming" && getSocialReply(deps.db, social.id, user.id)?.blocked) {
+    throw new HttpError(403, "The host removed you from this.");
+  }
   const live = social.starts_at == null || social.starts_at <= now;
   let eta: number | null = null;
   let arriveAt: number | null = null;
