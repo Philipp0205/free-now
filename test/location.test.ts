@@ -69,7 +69,7 @@ test("shared locations are rounded, optional, and kept off push text", async () 
       status: 201,
     });
     assert.deepEqual(social.social.location, { lat: 52.52, lng: 13.405 });
-    assert.equal(sent[0].body, "Alex is free now");
+    assert.equal(sent[0].body, "Alex is free now – Rooftop coffee??");
     assert.equal(sent[0].body.includes("52."), false);
     assert.equal(sent[0].title.includes("13."), false);
 
@@ -124,7 +124,7 @@ test("a meetup place is stored, pushed, and can be a name without a pin", async 
     });
     assert.equal(social.social.place, "Café Einstein");
     assert.deepEqual(social.social.location, { lat: 52.520008, lng: 13.404954 });
-    assert.equal(sent[0].body, "Alex is free – meet at Café Einstein");
+    assert.equal(sent[0].body, "Alex is free – meet at Café Einstein – Coffee?");
     assert.equal(sent[0].url, `/?social=${social.social.id}`);
     assert.equal(JSON.stringify(sent[0]).includes("52.52"), false);
 

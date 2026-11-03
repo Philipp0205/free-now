@@ -143,7 +143,7 @@ test("later today pushes once, then reminds only people who are coming", async (
       status: 201,
     });
     assert.equal(social.social.place, "Café X");
-    assert.equal(sent[0].body, "Philipp is free from 18:00 – meet at Café X");
+    assert.equal(sent[0].body, "Philipp is free from 18:00 – meet at Café X – Dinner");
     assert.ok(social.social.startsAt > START);
 
     await api(port, "POST", `/api/socials/${social.social.id}/reply`, {

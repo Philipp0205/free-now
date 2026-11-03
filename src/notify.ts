@@ -30,27 +30,35 @@ export function audiencePlace(place: string): string {
   return /^near you$/i.test(spot) ? "nearby" : spot;
 }
 
-export function freePushBody(name: string, place: string, fromTime = "", shifted = false): string {
+/** How a place reads after "near" or "at", so "Near Schlossplatz" never becomes "at Near …". */
+export function placeTail(place: string): string {
+  const spot = place.trim();
+  if (!spot || /^near you$/i.test(spot)) return "nearby";
+  if (/^near\s+/i.test(spot)) return `near ${spot.replace(/^near\s+/i, "")}`;
+  return `at ${spot}`;
+}
+
+export function freePushBody(name: string, place: string, fromTime = "", shifted = false, note = ""): string {
   const spot = place.trim();
   const when = fromTime.trim();
   const base = when
     ? (shifted ? `${name} is now free from ${when}` : `${name} is free from ${when}`)
     : "";
-  if (spot === "near you") return base ? `${base}, nearby` : `${name} is free nearby`;
-  if (/^near /i.test(spot)) {
-    const phrase = `near ${spot.slice(5)}`;
-    return base ? `${base}, ${phrase}` : `${name} is free ${phrase}`;
-  }
-  if (base) return spot ? `${base} – meet at ${spot}` : base;
-  if (!spot) return `${name} is free now`;
-  return `${name} is free – meet at ${spot}`;
+  const tail = spot ? placeTail(spot) : "";
+  let line: string;
+  if (!spot) line = base || `${name} is free now`;
+  else if (tail === "nearby") line = base ? `${base}, nearby` : `${name} is free nearby`;
+  else if (tail.startsWith("near ")) line = base ? `${base}, ${tail}` : `${name} is free ${tail}`;
+  else if (base) line = `${base} – meet ${tail}`;
+  else line = `${name} is free – meet ${tail}`;
+  const extra = note.trim();
+  return extra ? `${line} – ${extra}` : line;
 }
 
 export function startingNowBody(name: string, place: string): string {
-  const raw = place.trim();
-  if (!raw) return `Starting now: ${name}`;
-  if (/^near you$/i.test(raw)) return `Starting now: ${name}, nearby`;
-  return `Starting now: ${name} at ${raw}`;
+  const spot = place.trim();
+  if (!spot) return `Starting now: ${name}`;
+  return `Starting now: ${name} ${placeTail(spot)}`;
 }
 
 export function planReplyBody(name: string, note: string, reply: string): string {
