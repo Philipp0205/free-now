@@ -64,7 +64,7 @@ async function circleOfTwo(ctx: Ctx) {
   return { alex: alex.token as string, veit: veit.token as string, sam: sam.token as string };
 }
 
-test("the host adds gallery photos to a social and the circle sees them", async () => {
+test("the host adds a gallery photo to a social and the circle sees it", async () => {
   await withApp(async (ctx) => {
     const { alex, veit, sam } = await circleOfTwo(ctx);
     const social = (await call(ctx, "POST", "/api/socials", alex, { note: "cooking sesh at my place?" })).json.social;
@@ -72,11 +72,10 @@ test("the host adds gallery photos to a social and the circle sees them", async 
 
     const first = await upload(ctx, `/api/socials/${social.id}/photos`, alex, JPEG);
     assert.equal(first.status, 201);
-    const second = await upload(ctx, `/api/socials/${social.id}/photos`, alex, PNG, "image/png");
-    assert.equal(second.json.photos.length, 2);
+    assert.equal(first.json.photos.length, 1);
 
     const listed = (await call(ctx, "GET", "/api/socials", veit)).json.socials[0];
-    assert.deepEqual(listed.photos.map((photo: { id: string }) => photo.id), second.json.photos.map((photo: { id: string }) => photo.id));
+    assert.deepEqual(listed.photos.map((photo: { id: string }) => photo.id), first.json.photos.map((photo: { id: string }) => photo.id));
 
     const file = await fetch(`${ctx.base}/api/photos/${listed.photos[0].id}`, { headers: { authorization: `Bearer ${veit}` } });
     assert.equal(file.status, 200);
@@ -90,7 +89,7 @@ test("the host adds gallery photos to a social and the circle sees them", async 
   });
 });
 
-test("only the host can change photos, and only real images up to the limit", async () => {
+test("only the host can change the photo, and it is one real image", async () => {
   await withApp(async (ctx) => {
     const { alex, veit } = await circleOfTwo(ctx);
     const social = (await call(ctx, "POST", "/api/socials", alex, { note: "dinner" })).json.social;
@@ -100,14 +99,17 @@ test("only the host can change photos, and only real images up to the limit", as
     assert.equal((await upload(ctx, path, alex, new TextEncoder().encode("<svg onload=alert(1)>"), "image/svg+xml")).status, 415);
     assert.equal((await upload(ctx, path, alex, JPEG, "text/plain")).status, 415);
 
-    for (let i = 0; i < 6; i += 1) assert.equal((await upload(ctx, path, alex, JPEG)).status, 201);
-    assert.equal((await upload(ctx, path, alex, JPEG)).status, 409);
+    assert.equal((await upload(ctx, path, alex, JPEG)).status, 201);
+    assert.equal((await upload(ctx, path, alex, PNG, "image/png")).status, 409);
 
     const photos = (await call(ctx, "GET", "/api/socials", alex)).json.socials[0].photos;
     assert.equal((await call(ctx, "DELETE", `${path}/${photos[0].id}`, veit)).status, 403);
     const removed = await call(ctx, "DELETE", `${path}/${photos[0].id}`, alex);
     assert.equal(removed.status, 200);
-    assert.equal(removed.json.photos.length, 5);
+    assert.equal(removed.json.photos.length, 0);
+    const replaced = await upload(ctx, path, alex, PNG, "image/png");
+    assert.equal(replaced.status, 201);
+    assert.equal(replaced.json.photos.length, 1);
   });
 });
 
