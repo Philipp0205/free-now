@@ -266,6 +266,8 @@ function friendlyMessage(raw, status) {
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
+  if (status === 403 || lower.includes("only an admin")) return "Only an admin can do that.";
+  if (lower.includes("needs an admin")) return "A circle needs an admin.";
   if (status === 401) return "Please sign in again.";
   return "Something went wrong. Try again.";
 }
@@ -885,6 +887,7 @@ function socialCard(social) {
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : replyActions(social),
+      hostTools("social", social),
     ]),
   ]);
 }
@@ -904,6 +907,7 @@ function planCard(plan) {
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : planReplyButtons(plan),
+      hostTools("plan", plan),
     ]),
   ]);
 }
@@ -931,15 +935,10 @@ function circleScreen() {
         }),
       ]),
     ]),
-    el("div", { class: "list" }, circle.members.map((member) =>
-      el("div", { class: "row" }, [
-        avatar(member, 40),
-        el("div", { class: "grow" }, [
-          el("h3", { text: member.name }),
-          member.id === state.me.user.id ? el("p", { text: "You" }) : null,
-        ]),
-      ]),
-    )),
+    el("div", { class: "list" }, [
+      el("h2", { class: "members-title", text: "Members" }),
+      ...circle.members.map((member) => memberRow(member)),
+    ]),
   ]);
 }
 
@@ -1113,8 +1112,158 @@ function notificationsSheet() {
   ]);
 }
 
+function youAreAdmin() {
+  return Boolean(state.me?.circle?.youAreAdmin);
+}
+
+function memberRow(member) {
+  const self = member.id === state.me.user.id;
+  return el("div", { class: "row member-row" }, [
+    avatar(member, 40),
+    el("div", { class: "grow" }, [
+      el("h3", {}, [
+        el("span", { text: member.name }),
+        member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
+      ]),
+      self ? el("p", { text: "You" }) : null,
+    ]),
+    youAreAdmin() && !self
+      ? el("button", {
+          class: "text-btn",
+          type: "button",
+          text: "Manage",
+          "aria-label": `Manage ${member.name}`,
+          onclick: () => openMemberMenu(member),
+        })
+      : null,
+  ]);
+}
+
+function openMemberMenu(member) {
+  state.memberMenu = member;
+  state.sheet = "member";
+  render();
+}
+
+function memberSheet() {
+  const member = state.memberMenu;
+  if (!member) return el("div");
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-label": member.name }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: member.name }),
+        el("p", { class: "help", text: member.admin ? "Admin" : "Member" }),
+      ]),
+      el("div", { class: "actions" }, [
+        member.admin
+          ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
+          : el("button", { class: "action", type: "button", text: "Make admin", onclick: () => setMemberAdmin(member, true) }),
+        el("button", {
+          class: "action",
+          type: "button",
+          text: "Remove from circle",
+          onclick: () => confirmRemoveMember(member),
+        }),
+      ]),
+    ]),
+  ]);
+}
+
+async function setMemberAdmin(member, admin) {
+  await run(async () => {
+    const data = await api(`/api/circles/members/${member.id}`, { method: "POST", body: { admin } });
+    state.me = { ...state.me, circle: data.circle };
+    state.sheet = null;
+  });
+}
+
+function confirmRemoveMember(member) {
+  state.sheet = null;
+  state.confirm = {
+    title: `Remove ${member.name}?`,
+    body: "They lose access right away. Their free posts and plans in this circle end.",
+    confirmLabel: "Remove",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/circles/members/${member.id}`, { method: "DELETE" });
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
+}
+
+function hostTools(kind, item) {
+  if (!youAreAdmin() || !item?.creator || item.creator.id === state.me.user.id) return null;
+  return el("div", { class: "reply-row" }, [
+    el("button", { class: "chip", type: "button", text: "Edit", "aria-label": `Edit ${item.creator.name}`, onclick: () => openAdminEdit(kind, item) }),
+    el("button", { class: "chip", type: "button", text: "End", "aria-label": `End ${item.creator.name}`, onclick: () => endAsAdmin(kind, item) }),
+  ]);
+}
+
+function openAdminEdit(kind, item) {
+  state.adminEdit = { kind, id: item.id, note: item.note || "", place: item.place || "" };
+  state.sheet = "admin-edit";
+  render();
+}
+
+function adminEditSheet() {
+  const edit = state.adminEdit;
+  if (!edit) return el("div");
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Edit", onsubmit: saveAdminEdit }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Edit" }),
+        el("p", { class: "help", text: "This updates it for everyone in the circle." }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
+        sheetField("Place", "admin-place", edit.place, (value) => { edit.place = value; }, { maxlength: "80" }),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", { class: "btn", type: "submit", text: "Save" }),
+      ]),
+    ]),
+  ]);
+}
+
+async function saveAdminEdit(event) {
+  event.preventDefault();
+  const edit = state.adminEdit;
+  if (!edit) return;
+  const note = document.getElementById("admin-note")?.value ?? edit.note;
+  const place = document.getElementById("admin-place")?.value ?? edit.place;
+  await run(async () => {
+    await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body: { note, place } });
+    state.sheet = null;
+    await refresh({ initial: true });
+  });
+}
+
+function endAsAdmin(kind, item) {
+  const who = item.creator?.name || "They";
+  state.confirm = {
+    title: "End this?",
+    body: kind === "plan" ? `${who} will be told this plan ended.` : `${who} will be told this ended.`,
+    confirmLabel: "End",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/${kind}s/${item.id}`, { method: "DELETE" });
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
+}
+
 function sheet() {
   if (state.sheet === "notifications") return notificationsSheet();
+  if (state.sheet === "member") return memberSheet();
+  if (state.sheet === "admin-edit") return adminEditSheet();
   if (state.sheet === "action") {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
@@ -2172,7 +2321,9 @@ function mapCard(pin) {
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
     social && !pin.own ? replySummary(social) : null,
     social && !pin.own ? replyActions(social) : null,
+    social?.creator ? hostTools("social", social) : null,
     plan && !pin.own ? planPinActions(plan) : null,
+    plan?.creator ? hostTools("plan", plan) : null,
     el("div", { class: "map-card-actions" }, [
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
     ]),
