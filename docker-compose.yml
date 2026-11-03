@@ -8,7 +8,7 @@ services:
       DB_PATH: /data/free-now.sqlite
       PUBLIC_BASE_URL: http://localhost:3000
       # Production: set this to the custom domain once it is chosen.
-      APP_TZ: UTC
+      APP_TZ: Europe/Berlin
       # Uncomment after `npm run vapid` and paste the keys.
       # VAPID_PUBLIC_KEY: ""
       # VAPID_PRIVATE_KEY: ""

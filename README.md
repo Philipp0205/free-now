@@ -72,7 +72,7 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `VAPID_PRIVATE_KEY` | unset | Web Push private key. Set both, or neither. |
 | `VAPID_SUBJECT` | `mailto:admin@localhost` | Contact URL sent to the push service. `mailto:` or `https:`. |
 | `SOCIAL_TTL_MS` | `7200000` | How long a social stays active (2 hours). |
-| `APP_TZ` | `UTC` | Timezone that decides what "tomorrow" means. Example: `Europe/Berlin`. |
+| `APP_TZ` | `Europe/Berlin` | Timezone that decides what "tomorrow" means. Override it if the circle lives elsewhere. |
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 
@@ -173,4 +173,4 @@ railway.json    Dockerfile builder and health check
 - The buzzer token and recovery code are the same secret, stored in the database so it can be shown again. Protect the SQLite file.
 - Clearing site data without saving that secret signs you out for good.
 - Invite codes are unguessable enough for a circle of friends and are not rate-limited.
-- "Tomorrow" follows `APP_TZ`, not each phone's timezone.
+- "Tomorrow" follows `APP_TZ` (Europe/Berlin unless you set it), not each phone's timezone.
