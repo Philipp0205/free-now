@@ -830,7 +830,7 @@ test("a confirm sheet closes when its content is dragged at 412", { timeout: 90_
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.getByRole("button", { name: "End Coffee" }).click();
     await page.locator(".sheet-confirm .sheet-body").waitFor();
     await dragDown(page, page.locator(".sheet-confirm .sheet-body"));
     await page.locator(".sheet-confirm").waitFor({ state: "detached" });

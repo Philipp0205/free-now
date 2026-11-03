@@ -10,6 +10,8 @@ import {
   addSocialJoin,
   blockPlanGuest,
   blockSocialGuest,
+  clearRemoval,
+  removalBlocksJoin,
   deletePlanById,
   deletePushSubForUser,
   deleteSocialById,
@@ -278,6 +280,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const circle = requireLiveInvite(deps.db, code, deps.now());
     const current = getCircleForUser(deps.db, me.id);
     if (current && current.id !== circle.id) throw new HttpError(409, "you are already in a circle");
+    if (!current && removalBlocksJoin(deps.db, circle.id, me.id, circle.invite_code)) {
+      throw new HttpError(403, "An admin removed you from this circle.");
+    }
     if (!current) addMember(deps.db, circle.id, me.id, deps.now());
     sendJson(res, 200, { circle: circlePayload(deps, req, circle, me.id) });
     return;
@@ -290,6 +295,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const fresh = getCircleForUser(deps.db, me.id);
     if (!fresh) throw new HttpError(500, "circle missing");
     sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
+    return;
+  }
+
+  const removal = matchPath(pathname, /^\/api\/circles\/removals\/([^/]+)$/);
+  if (removal && method === "DELETE") {
+    const circle = requireCircle(deps, me.id);
+    requireAdmin(deps, circle.id, me.id);
+    clearRemoval(deps.db, circle.id, parseId(removal[1]));
+    sendEmpty(res, 204);
     return;
   }
 
@@ -509,7 +523,8 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
   const now = deps.now();
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
-  if (getSocialReply(deps.db, social.id, user.id)?.blocked) throw new HttpError(403, "The host removed you from this.");
+  const socialBlock = getSocialReply(deps.db, social.id, user.id);
+  if (socialBlock?.blocked) throw new HttpError(403, removedMessage(socialBlock.removed_by));
   if (!hasSocialJoin(deps.db, social.id, user.id)) {
     addSocialJoin(deps.db, social.id, user.id, now);
     await notifyUsers(deps.db, deps.push, now, [
@@ -587,13 +602,13 @@ async function removeSocialGuest(deps: AppDeps, user: UserRow, rawSocialId: stri
   assertEventHost(deps, user, circle.id, social.creator_id);
   const guest = listMembers(deps.db, circle.id).find((member) => member.id === guestId);
   if (!guest) throw new HttpError(404, "member not found");
-  blockSocialGuest(deps.db, social.id, guestId, deps.now());
+  blockSocialGuest(deps.db, social.id, guestId, deps.now(), user.name);
   const eventName = social.note.trim() || "Free now";
   await notifyUsers(deps.db, deps.push, deps.now(), [
     {
       userId: guestId,
       title: "Removed",
-      body: `${social.creator_name} removed you from ${eventName}`,
+      body: `${user.name} removed you from ${eventName}`,
       kind: "removed",
       refId: social.id,
       tag: `removed:social:${social.id}:${guestId}`,
@@ -611,17 +626,22 @@ async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, 
   assertEventHost(deps, user, circle.id, plan.creator_id);
   const guest = listMembers(deps.db, circle.id).find((member) => member.id === guestId);
   if (!guest) throw new HttpError(404, "member not found");
-  blockPlanGuest(deps.db, plan.id, guestId, deps.now());
+  blockPlanGuest(deps.db, plan.id, guestId, deps.now(), user.name);
   await notifyUsers(deps.db, deps.push, deps.now(), [
     {
       userId: guestId,
       title: "Removed",
-      body: `${plan.creator_name} removed you from ${plan.note}`,
+      body: `${user.name} removed you from ${plan.note}`,
       kind: "removed",
       refId: plan.id,
       tag: `removed:plan:${plan.id}:${guestId}`,
     },
   ]);
+}
+
+function removedMessage(actor: string | null | undefined): string {
+  const name = actor?.trim() || "Someone";
+  return `${name} removed you from this.`;
 }
 
 function requireAdmin(deps: AppDeps, circleId: string, userId: string): void {
