@@ -12,6 +12,7 @@ import {
 import { eventTitle, freePushBody, notifyUsers, replyPushBody } from "./notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import { addDays, clockLabel, isoDate, zonedDateTime } from "./time.js";
+import { recordEventLine, replyLogText } from "./chat.js";
 import { HttpError, parseId, requireCircle, socialPayload, type AppDeps } from "./app.js";
 
 export async function publishSocial(
@@ -148,6 +149,18 @@ export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, b
   const etaOnly = previous?.reply === "coming" && reply === "coming" && !arriveChanged;
   const held = cancelReplyPush(key);
   const arriveLabel = arriveAt ? clockLabel(arriveAt, deps.config.tz) : "";
+  if (changed) {
+    recordEventLine(deps.db, {
+      circleId: circle.id,
+      kind: "social",
+      refId: social.id,
+      hostId: social.creator_id,
+      title: social.note.trim() || "Free now",
+      actorId: user.id,
+      text: replyLogText(user.name, reply, eta, arriveLabel, previous?.reply === "coming" || previous?.reply === "join"),
+      now,
+    });
+  }
   const notice = () => notifyUsers(deps.db, deps.push, now, [
     {
       userId: social.creator_id,
