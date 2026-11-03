@@ -41,6 +41,7 @@ const state = {
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
   viewerLocation: null,
+  mapCenter: null,
   mapCard: null,
   where: emptyWhere(),
   whereOpen: false,
@@ -1079,7 +1080,7 @@ let mapWrap = null;
 let liveMarkers = new Map();
 let openMapPin = null;
 let whereLeaflet = null;
-const TILE_MAX_ZOOM = 16;
+const TILE_MAX_ZOOM = 19;
 let whereTimer = 0;
 let reverseTimer = 0;
 const PIN_PX = 36;
@@ -1315,9 +1316,11 @@ function wherePicker() {
       ? el("div", { class: "where-results" }, state.whereResults.map((hit) => el("button", {
           class: "where-hit",
           type: "button",
-          text: hit.name,
           onclick: () => chooseWhereHit(hit),
-        })))
+        }, [
+          el("span", { class: "where-hit-name", text: hit.name }),
+          hitMeta(hit) ? el("span", { class: "where-hit-meta", text: hitMeta(hit) }) : null,
+        ])))
       : null,
     el("button", {
       class: "where-action",
@@ -1353,6 +1356,33 @@ function wherePicker() {
   ]);
 }
 
+function hitMeta(hit) {
+  const distance = Number.isFinite(hit.distanceM) ? formatDistance(hit.distanceM) : "";
+  return [distance, hit.address].filter(Boolean).join(" · ");
+}
+
+function searchOrigin() {
+  if (state.viewerLocation) return state.viewerLocation;
+  if (state.mapCenter) return state.mapCenter;
+  for (const social of state.socials || []) {
+    if (social.location) return social.location;
+  }
+  for (const plan of state.plans || []) {
+    if (plan.location) return plan.location;
+  }
+  return null;
+}
+
+function noteMapCenter(map) {
+  const save = () => {
+    const center = map.getCenter();
+    if (!center) return;
+    state.mapCenter = { lat: center.lat, lng: center.lng };
+  };
+  map.on("moveend", save);
+  save();
+}
+
 function chooseWhereHit(hit) {
   state.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
   state.whereQuery = hit.name;
@@ -1375,7 +1405,9 @@ function scheduleWhereSearch() {
     if (label && !document.querySelector(".where-hint")) {
       /* render once the results arrive */
     }
-    api(`/api/geocode?q=${encodeURIComponent(query)}`).then((data) => {
+    const origin = searchOrigin();
+    const near = origin ? `&lat=${encodeURIComponent(origin.lat)}&lng=${encodeURIComponent(origin.lng)}` : "";
+    api(`/api/geocode?q=${encodeURIComponent(query)}${near}`).then((data) => {
       if (state.whereQuery.trim() !== query) return;
       state.whereResults = data.results || [];
       state.whereSearching = false;
@@ -1439,11 +1471,11 @@ function openNotification(note) {
   render();
 }
 
-function addDarkTiles(L, map) {
+function addMapTiles(L, map) {
   const tileUrl = state.meta?.mapTileUrl
-    || "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+    || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
   const tileAttribution = state.meta?.mapTileAttribution
-    || "© Esri, HERE, Garmin, OpenStreetMap contributors";
+    || "© Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
   L.tileLayer(tileUrl, {
     attribution: tileAttribution,
     subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
@@ -1531,7 +1563,8 @@ async function mountWhereMap() {
   const zoom = state.where.lat != null || state.viewerLocation ? 15 : 12;
   const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
   map.setView([lat, lng], Math.min(zoom, TILE_MAX_ZOOM));
-  addDarkTiles(L, map);
+  addMapTiles(L, map);
+  noteMapCenter(map);
   const marker = L.marker([lat, lng], {
     draggable: true,
     icon: L.divIcon({
@@ -1598,7 +1631,7 @@ async function mountMap() {
   if (liveMap) destroyLiveMap();
   const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
   L.control.zoom({ position: "topright" }).addTo(map);
-  addDarkTiles(L, map);
+  addMapTiles(L, map);
   liveMap = map;
   syncMapMarkers(L, pins);
   if (state.viewerLocation) {
@@ -1606,6 +1639,7 @@ async function mountMap() {
   } else {
     map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [36, 36], maxZoom: 15 });
   }
+  noteMapCenter(map);
   setTimeout(() => map.invalidateSize(), 60);
 }
 

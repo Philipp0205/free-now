@@ -211,7 +211,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const lng = Number(url.searchParams.get("lng"));
     if (q) {
       if (q.length > 80) throw new HttpError(400, "query is too long");
-      sendJson(res, 200, { results: await searchPlaces(q) });
+      const nearLat = Number(url.searchParams.get("lat"));
+      const nearLng = Number(url.searchParams.get("lng"));
+      const bias = url.searchParams.has("lat") && url.searchParams.has("lng")
+        && Number.isFinite(nearLat) && Number.isFinite(nearLng)
+        ? { lat: nearLat, lng: nearLng }
+        : null;
+      sendJson(res, 200, { results: await searchPlaces(q, bias) });
       return;
     }
     if (url.searchParams.has("lat") || url.searchParams.has("lng")) {
