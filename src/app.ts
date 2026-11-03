@@ -48,6 +48,7 @@ import {
   rotateInvite,
   deleteSessionByHash,
   insertSession,
+  updatePlan,
   updateSocial,
   updateUserName,
   upsertPushSub,
@@ -410,6 +411,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const planId = matchPath(pathname, /^\/api\/plans\/([^/]+)$/);
+  if (planId && method === "PATCH") {
+    const note = cleanNote(body.note, true);
+    const place = cleanPlace(body.place);
+    sendJson(res, 200, { plan: await editPlan(deps, me, planId[1], note, place, readPoint(body)) });
+    return;
+  }
+
   if (planId && method === "DELETE") {
     const id = parseId(planId[1]);
     const changes = deletePlan(deps.db, id, me.id);
@@ -754,6 +762,47 @@ async function publishPlan(
   const plan = getPlan(deps.db, id);
   if (!plan) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, plan, today, tomorrow);
+}
+
+/** Only the host edits a plan. Friends who said they're coming hear about a change. */
+async function editPlan(
+  deps: AppDeps,
+  user: UserRow,
+  rawId: string,
+  note: string,
+  place: string,
+  point?: { lat: number; lng: number } | null,
+) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (plan.creator_id !== user.id) throw new HttpError(403, "only the host can edit this plan");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  const tomorrow = addDays(today, 1);
+  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  updatePlan(deps.db, plan.id, note, place, point);
+  if (plan.note !== note || plan.place !== place) {
+    const coming = listPlanJoins(deps.db, plan.id).filter((join) => join.reply === "coming");
+    await notifyUsers(
+      deps.db,
+      deps.push,
+      now,
+      coming.map((join) => ({
+        userId: join.id,
+        title: "Plan changed",
+        body: place ? `${user.name}: ${note} · ${audiencePlace(place)}` : `${user.name}: ${note}`,
+        kind: "plan",
+        refId: plan.id,
+        tag: `plan:${plan.id}`,
+        url: `/?plan=${plan.id}`,
+      })),
+    );
+  }
+  const fresh = getPlan(deps.db, plan.id);
+  if (!fresh) throw new HttpError(500, "plan missing");
+  return planPayload(deps.db, fresh, today, tomorrow);
 }
 
 async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
