@@ -74,9 +74,7 @@ const state = {
 };
 
 const PHOTO_EDGE = 1600;
-const PHOTOS_PER_EVENT = 6;
 const photoUrls = new Map();
-const photoIndex = new Map();
 
 const deepLinkParams = new URLSearchParams(location.search);
 const planFocus = deepLinkParams.get("plan");
@@ -579,7 +577,6 @@ function render() {
     });
   }
   if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
-  restorePhotoScroll();
   bindSheetSwipe();
   syncSheetHistory();
   if (state.focusSocial) {
@@ -824,18 +821,19 @@ function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
   const people = [social.creator, ...social.joined.filter((person) => person.reply !== "declined")];
   const upcoming = social.startsAt && social.startsAt > Date.now();
-  const photos = social.photos?.length > 0;
+  const photo = social.photos?.length > 0;
   const base = upcoming ? "card card-now later" : "card card-now";
   return el("article", {
-    class: `${state.focusSocial === social.id ? "card card-now focused" : base}${photos ? " has-photos" : ""}`,
+    class: `${state.focusSocial === social.id ? "card card-now focused" : base}${photo ? " has-photo" : ""}`,
     "data-social": social.id,
   }, [
     el("div", { class: "card-bg" }),
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
       : null,
+    photo ? photoHero(social) : null,
     el("div", { class: "card-copy" }, [
-      photos ? photoStage(social, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
       el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
@@ -848,16 +846,17 @@ function socialCard(social) {
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const people = [plan.creator, ...plan.joined];
-  const photos = plan.photos?.length > 0;
-  return el("article", photos
-    ? { class: "card card-now card-plan has-photos" }
+  const photo = plan.photos?.length > 0;
+  return el("article", photo
+    ? { class: "card card-now card-plan has-photo" }
     : { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
       : null,
+    photo ? photoHero(plan) : null,
     el("div", { class: "card-copy" }, [
-      photos ? photoStage(plan, people) : el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
@@ -867,65 +866,15 @@ function planCard(plan) {
   ]);
 }
 
-/** The host's gallery photos, centred on the card, with the people who are in floating beside them. */
-function photoStage(item, people) {
-  return el("div", { class: "photo-stage" }, [
-    avatarCloud(people),
-    photoFrame(item),
-  ]);
-}
-
-function avatarCloud(people) {
-  const shown = people.slice(0, 3);
-  const extra = people.length - shown.length;
-  return el("div", { class: "avatar-cloud", "aria-label": people.map((person) => person.name).join(", ") }, [
-    ...shown.map((person, index) => avatar(person, [40, 30, 36][index], `cloud-${index}`)),
-    extra > 0 ? el("span", { class: "avatar cloud-more", text: `+${extra}` }) : null,
-  ]);
-}
-
-function photoFrame(item) {
-  const photos = item.photos;
-  const strip = el("div", {
-    class: "photo-strip-view",
-    "data-photos": item.id,
-    onscroll: (event) => {
-      const node = event.currentTarget;
-      const index = Math.round(node.scrollLeft / Math.max(1, node.clientWidth));
-      photoIndex.set(item.id, index);
-      node.parentElement?.querySelectorAll(".photo-dot").forEach((dot, at) => dot.classList.toggle("on", at === index));
-    },
-  }, photos.map((photo, index) =>
-    el("button", {
-      class: "photo-slide",
-      type: "button",
-      "aria-label": `Open photo ${index + 1} of ${photos.length}`,
-      onclick: () => openLightbox(photos, index),
-    }, [photoImg(photo.id)]),
-  ));
-  const current = Math.min(photoIndex.get(item.id) ?? 0, photos.length - 1);
-  return el("div", { class: "photo-frame" }, [
-    strip,
-    el("button", {
-      class: "photo-expand",
-      type: "button",
-      "aria-label": "Show photos full screen",
-      onclick: () => openLightbox(photos, photoIndex.get(item.id) ?? 0),
-    }, [icon("expand")]),
-    photos.length > 1
-      ? el("div", { class: "photo-dots", "aria-hidden": "true" }, photos.map((_, index) =>
-          el("span", { class: index === current ? "photo-dot on" : "photo-dot" })))
-      : null,
-  ]);
-}
-
-function restorePhotoScroll() {
-  document.querySelectorAll("[data-photos]").forEach((node) => {
-    const index = photoIndex.get(node.getAttribute("data-photos")) ?? 0;
-    if (index) node.scrollLeft = index * node.clientWidth;
-  });
-  const box = document.querySelector(".lightbox-strip");
-  if (box && state.lightbox) box.scrollLeft = state.lightbox.index * box.clientWidth;
+/** The host's photo runs edge to edge across the top of the card and fades into it. */
+function photoHero(item) {
+  const photo = item.photos[0];
+  return el("button", {
+    class: "photo-hero",
+    type: "button",
+    "aria-label": "Show photo full screen",
+    onclick: () => openLightbox(photo.id),
+  }, [photoImg(photo.id)]);
 }
 
 /** Photos need the session header, so they are fetched once and shown from an object URL. */
@@ -953,8 +902,8 @@ async function loadPhoto(id) {
   }
 }
 
-function openLightbox(photos, index) {
-  state.lightbox = { photos, index };
+function openLightbox(id) {
+  state.lightbox = id;
   render();
 }
 
@@ -964,21 +913,9 @@ function closeLightbox() {
 }
 
 function lightboxView() {
-  const { photos, index } = state.lightbox;
-  return el("div", { class: "lightbox", role: "dialog", "aria-modal": "true", "aria-label": "Photos" }, [
-    el("div", {
-      class: "lightbox-strip",
-      onscroll: (event) => {
-        const node = event.currentTarget;
-        const at = Math.round(node.scrollLeft / Math.max(1, node.clientWidth));
-        if (!state.lightbox || at === state.lightbox.index) return;
-        state.lightbox.index = at;
-        const count = document.querySelector(".lightbox-count");
-        if (count) count.textContent = `${at + 1} / ${photos.length}`;
-      },
-    }, photos.map((photo) => el("div", { class: "lightbox-slide" }, [photoImg(photo.id)]))),
+  return el("div", { class: "lightbox", role: "dialog", "aria-modal": "true", "aria-label": "Photo", onclick: closeLightbox }, [
+    photoImg(state.lightbox),
     el("button", { class: "lightbox-close", type: "button", "aria-label": "Close", onclick: closeLightbox }, [icon("close")]),
-    photos.length > 1 ? el("span", { class: "lightbox-count", text: `${index + 1} / ${photos.length}` }) : null,
   ]);
 }
 
@@ -990,53 +927,50 @@ function sheetPhotos() {
 
 function photoBlock() {
   const kept = sheetPhotos();
-  const room = PHOTOS_PER_EVENT - kept.length - state.photoDrafts.length;
-  const thumb = (img, label, onRemove) => el("div", { class: "photo-thumb" }, [
-    img,
-    el("button", { class: "photo-remove", type: "button", "aria-label": label, onclick: onRemove }, [icon("close")]),
-  ]);
+  const draft = state.photoDrafts[0];
+  const shown = draft ? el("img", { src: draft.url, alt: "" }) : kept.length ? photoImg(kept[0].id) : null;
   return el("div", { class: "sheet-group" }, [
-    el("span", { class: "sheet-label", text: "Photos (optional)" }),
+    el("span", { class: "sheet-label", text: "Photo (optional)" }),
     el("div", { class: "photo-picker" }, [
-      ...kept.map((photo) => thumb(photoImg(photo.id), "Remove photo", () => {
-        state.photoRemovals = [...state.photoRemovals, photo.id];
-        render();
-      })),
-      ...state.photoDrafts.map((draft) => thumb(el("img", { src: draft.url, alt: "" }), "Remove photo", () => {
-        URL.revokeObjectURL(draft.url);
-        state.photoDrafts = state.photoDrafts.filter((item) => item !== draft);
-        render();
-      })),
-      room > 0
-        ? el("label", { class: "photo-add" }, [
-            icon("photo"),
-            el("span", { text: kept.length || state.photoDrafts.length ? "More" : "Add" }),
-            el("input", { class: "photo-input", type: "file", accept: "image/*", multiple: "", onchange: onPickPhotos }),
+      shown
+        ? el("div", { class: "photo-thumb" }, [
+            shown,
+            el("button", { class: "photo-remove", type: "button", "aria-label": "Remove photo", onclick: () => {
+              clearPhotoPick();
+              render();
+            } }, [icon("close")]),
           ])
         : null,
+      el("label", { class: "photo-add" }, [
+        icon("photo"),
+        el("span", { text: shown ? "Replace" : "Add" }),
+        el("input", { class: "photo-input", type: "file", accept: "image/*", onchange: onPickPhotos }),
+      ]),
     ]),
   ]);
 }
 
+/** Drops the picked photo and marks the saved one for removal, so the next save leaves none. */
+function clearPhotoPick() {
+  for (const draft of state.photoDrafts) URL.revokeObjectURL(draft.url);
+  state.photoDrafts = [];
+  state.photoRemovals = [...state.photoRemovals, ...sheetPhotos().map((photo) => photo.id)];
+}
+
 async function onPickPhotos(event) {
   const input = event.currentTarget;
-  const files = [...(input.files ?? [])];
+  const [file] = input.files ?? [];
   input.value = "";
-  const room = PHOTOS_PER_EVENT - sheetPhotos().length - state.photoDrafts.length;
-  if (files.length > room) state.error = `Up to ${PHOTOS_PER_EVENT} photos.`;
-  for (const file of files.slice(0, Math.max(0, room))) {
-    try {
-      const blob = await shrinkPhoto(file);
-      state.photoDrafts = [...state.photoDrafts, { blob, url: URL.createObjectURL(blob) }];
-    } catch {
-      state.error = "That photo could not be read.";
-    }
-    render();
+  if (!file) return;
+  try {
+    const blob = await shrinkPhoto(file);
+    clearPhotoPick();
+    state.photoDrafts = [{ blob, url: URL.createObjectURL(blob) }];
+  } catch {
+    state.error = "That photo could not be read.";
   }
-  if (state.error) {
-    render();
-    scheduleErrorClear();
-  }
+  render();
+  if (state.error) scheduleErrorClear();
 }
 
 /** A gallery photo is often 5–12 MB. A 1600 px JPEG looks the same on a phone and uploads quickly. */
