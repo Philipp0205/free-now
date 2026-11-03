@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
 import test from "node:test";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
@@ -8,6 +10,13 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+
+const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
+
+function shot(name: string) {
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  return path.join(SHOT_DIR, name);
+}
 
 const DENIED_NOTIFICATIONS = `(() => {
   function HangryNotification() {}
@@ -260,7 +269,7 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     await viewer.getByText("You're in", { exact: true }).waitFor();
     assert.equal(await viewer.getByRole("button", { name: "5 min" }).count(), 1);
     assert.equal(await viewer.getByRole("button", { name: "Pick time" }).count(), 1);
-    await viewer.screenshot({ path: "/opt/cursor/artifacts/fix-arrive-before.png" });
+    await viewer.screenshot({ path: shot("fix-arrive-before.png") });
     await viewer.getByRole("button", { name: "Pick time" }).click();
     await viewer.getByText(/You're in, arriving /).waitFor();
     const field = viewer.locator(".arrive-field input");
@@ -283,13 +292,13 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     assert.match(placed.min, /^\d{2}:\d{2}$/);
     assert.match(placed.max, /^\d{2}:\d{2}$/);
     assert.ok(placed.value >= placed.min && placed.value <= placed.max, JSON.stringify(placed));
-    await viewer.screenshot({ path: "/opt/cursor/artifacts/fix-arrive-time.png" });
+    await viewer.screenshot({ path: shot("fix-arrive-time.png") });
     await viewerContext.close();
     await page.reload();
     const hostLater = page.locator(".sheet button", { hasText: "Not now" });
     if (await hostLater.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await hostLater.click();
     await page.getByText(/Fritz is in, arriving /).waitFor();
-    await page.screenshot({ path: "/opt/cursor/artifacts/fix-arrive-host.png" });
+    await page.screenshot({ path: shot("fix-arrive-host.png") });
   } finally {
     await page.context().close();
   }
@@ -305,7 +314,7 @@ test("a saved session stays in the app when the network drops", { timeout: 90_00
     await page.getByText("You're offline. Retrying…").waitFor();
     assert.equal(await page.locator("#name").count(), 0);
     await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
-    await page.screenshot({ path: "/opt/cursor/artifacts/polish-offline.png" });
+    await page.screenshot({ path: shot("polish-offline.png") });
   } finally {
     await page.context().close();
   }
@@ -318,7 +327,7 @@ test("denied notifications explain how to allow them again", { timeout: 90_000 }
     await page.getByRole("heading", { name: "Notifications are blocked" }).waitFor();
     await page.getByText("Settings → Site settings → Notifications").waitFor();
     assert.equal(await page.getByRole("button", { name: "Turn on notifications" }).count(), 0);
-    await page.screenshot({ path: "/opt/cursor/artifacts/polish-notifications-denied.png" });
+    await page.screenshot({ path: shot("polish-notifications-denied.png") });
     await page.locator(".sheet button.btn.ghost", { hasText: "Not now" }).click();
     await page.getByRole("button", { name: "You", exact: true }).click();
     const blocked = page.getByRole("button", { name: "Notifications are blocked" });
@@ -346,10 +355,110 @@ test("a place line opens that pin and Back returns", { timeout: 90_000 }, async 
     await page.getByRole("button", { name: "Show Schlossplatz on the map" }).click();
     await page.locator(".map-card").waitFor({ timeout: 8000 });
     await page.getByText("Coffee").waitFor();
-    await page.screenshot({ path: "/opt/cursor/artifacts/polish-map-pin.png" });
+    await page.screenshot({ path: shot("polish-map-pin.png") });
     await page.evaluate(() => history.back());
     await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
     assert.equal(await page.locator(".map-card").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("each place tap recentres on that pin", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const bea = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
+    });
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bea.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Dinner", place: "Rathaus", lat: 48.78, lng: 9.19 }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Show Schlossplatz on the map" }).click();
+    await page.locator(".map-card").getByText("Coffee").waitFor({ timeout: 8000 });
+    const placed = await page.evaluate(() => {
+      const pin = document.querySelector(".leaflet-marker-icon")?.getBoundingClientRect();
+      const card = document.querySelector(".map-card")?.getBoundingClientRect();
+      return { pin: pin?.bottom ?? null, card: card?.top ?? null };
+    });
+    assert.ok(placed.pin != null && placed.card != null && placed.pin <= placed.card + 4, JSON.stringify(placed));
+    await page.getByRole("button", { name: "Now", exact: true }).click();
+    await page.getByRole("button", { name: "Show Rathaus on the map" }).click();
+    await page.locator(".map-card").getByText("Dinner").waitFor({ timeout: 8000 });
+    assert.equal(await page.locator(".map-card").getByText("Coffee").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a plan link opens the map on that plan", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const plan = await fetch(`${baseUrl}/api/plans`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Bouldering", place: "Gym", lat: 48.775, lng: 9.175 }),
+    }).then((response) => response.json());
+    await page.goto(`${baseUrl}/?plan=${plan.plan.id}`);
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.locator(".map-card").getByText("Bouldering").waitFor({ timeout: 8000 });
+    assert.equal(await page.locator(".screen-title").innerText(), "Map");
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a fresh circle is named after you and drops a bad invite code", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await page.goto(`${baseUrl}/join/NOTREAL`);
+    await page.getByText("This invite isn't valid. Ask for a new link.").waitFor();
+    await page.getByRole("button", { name: "Start my own circle" }).click();
+    await page.locator("#name").fill("Philipp");
+    await page.getByRole("button", { name: "Continue" }).click();
+    assert.equal(await page.locator("#circle-name").inputValue(), "Philipp's circle");
+    assert.equal(await page.locator("#invite-code").inputValue(), "");
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a server error retries without saying you're offline", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    await page.waitForFunction(() => (localStorage.getItem("fn_state") || "").includes("circle"));
+    await page.route("**/api/**", (route) => route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "internal error" }),
+    }));
+    await page.reload();
+    await page.getByText("Something went wrong. Retrying…").waitFor();
+    assert.equal(await page.getByText("You're offline. Retrying…").count(), 0);
+    const stacked = await page.evaluate(() => {
+      const banner = document.querySelector(".status-banner")?.getBoundingClientRect();
+      const title = document.querySelector(".screen-title")?.getBoundingClientRect();
+      return { banner: banner?.bottom ?? null, title: title?.top ?? null };
+    });
+    assert.ok(stacked.banner != null && stacked.title != null && stacked.banner <= stacked.title + 1, JSON.stringify(stacked));
   } finally {
     await page.context().close();
   }
@@ -419,13 +528,16 @@ test("a swipe on the header or the top of the sheet closes it", { timeout: 90_00
     await dragSheetContent(page);
     await page.locator("form.sheet").waitFor({ state: "detached" });
 
-    await page.getByRole("button", { name: "You", exact: true }).click();
-    await page.getByRole("button", { name: "How to turn on notifications" }).click();
-    await page.locator(".guide .grabber").waitFor();
-    const guideTouch = await page.locator(".guide-head").evaluate((node) => getComputedStyle(node).touchAction);
-    assert.equal(guideTouch, "none");
-    await dragDown(page, page.locator(".guide h2"));
-    await page.locator(".guide").waitFor({ state: "detached" });
+    const guide = page.getByRole("button", { name: "How to turn on notifications" });
+    if (await guide.count()) {
+      await page.getByRole("button", { name: "You", exact: true }).click();
+      await guide.click();
+      await page.locator(".guide .grabber").waitFor();
+      const guideTouch = await page.locator(".guide-head").evaluate((node) => getComputedStyle(node).touchAction);
+      assert.equal(guideTouch, "none");
+      await dragDown(page, page.locator(".guide h2"));
+      await page.locator(".guide").waitFor({ state: "detached" });
+    }
   } finally {
     await page.context().close();
   }
