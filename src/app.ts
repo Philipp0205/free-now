@@ -41,7 +41,8 @@ import {
   setSocialReply,
   rotateBuzzToken,
   rotateInvite,
-  rotateSession,
+  deleteSessionByHash,
+  insertSession,
   updateSocial,
   updateUserName,
   upsertPushSub,
@@ -51,7 +52,8 @@ import {
   type UserRow,
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
-import { freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
+import { extractBuzzSecret, humanCode } from "./code.js";
+import { eventTitle, freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import type { PushSender } from "./push.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
@@ -145,7 +147,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const invited = rawCode ? liveInvite(deps.db, rawCode, now) : undefined;
     if (rawCode && !invited) throw new HttpError(404, "invite not found");
     const token = randomToken();
-    const buzzToken = randomToken();
+    const buzzToken = humanCode();
     const id = crypto.randomUUID();
     insertUser(deps.db, {
       id,
@@ -173,11 +175,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/auth/recover") {
-    const secret = typeof body.token === "string" ? body.token.trim() : "";
+    const secret = extractBuzzSecret(typeof body.token === "string" ? body.token : "");
     const existing = secret ? getUserByBuzzToken(deps.db, secret) : undefined;
     if (!existing) throw new HttpError(401, "unknown recovery code");
     const token = randomToken();
-    rotateSession(deps.db, existing.id, sha256(token));
+    insertSession(deps.db, crypto.randomUUID(), existing.id, sha256(token), deps.now());
     sendJson(res, 200, {
       token,
       buzzToken: existing.buzz_token,
@@ -228,7 +230,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/auth/logout") {
-    rotateSession(deps.db, me.id, sha256(randomToken()));
+    const header = req.headers.authorization;
+    const match = /^Bearer\s+(\S+)$/i.exec(Array.isArray(header) ? header[0] : header ?? "");
+    if (match) deleteSessionByHash(deps.db, sha256(match[1]));
     sendEmpty(res, 204);
     return;
   }
@@ -247,7 +251,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/me/buzz-token") {
-    const buzzToken = randomToken();
+    const buzzToken = humanCode();
     rotateBuzzToken(deps.db, me.id, buzzToken);
     sendJson(res, 200, { buzzToken });
     return;
@@ -513,7 +517,7 @@ async function publishSocial(
     );
   }
   if (shouldNotify) {
-    const title = socialTitle(nextNote);
+    const title = shifted ? eventTitle("time") : fromTime ? eventTitle("later") : eventTitle("now");
     const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
     await notifyUsers(
       deps.db,
@@ -548,8 +552,8 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
     await notifyUsers(deps.db, deps.push, now, [
       {
         userId: social.creator_id,
-        title: socialTitle(social.note),
-        body: `${user.name} joined your social!`,
+        title: eventTitle("reply"),
+        body: `${user.name} is in`,
         kind: "join",
         refId: social.id,
         tag: `join:${social.id}:${user.id}`,
@@ -561,6 +565,12 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
   return socialPayload(deps.db, fresh);
 }
 
+function normalizeReply(value: unknown): "coming" | "declined" {
+  if (value === "declined" || value === "cant" || value === "can't") return "declined";
+  if (value === "coming" || value === "join" || value === "in") return "coming";
+  throw new HttpError(400, "reply must be in or can't");
+}
+
 async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
@@ -569,12 +579,10 @@ async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Re
   const now = deps.now();
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
-  const reply = body.reply;
-  if (reply !== "join" && reply !== "coming" && reply !== "declined") {
-    throw new HttpError(400, "reply must be join, coming, or declined");
-  }
+  const reply = normalizeReply(body.reply);
+  const live = social.starts_at == null || social.starts_at <= now;
   let eta: number | null = null;
-  if (reply === "coming" && body.eta != null) {
+  if (reply === "coming" && live && body.eta != null) {
     const minutes = Number(body.eta);
     if (![5, 10, 20].includes(minutes)) throw new HttpError(400, "eta must be 5, 10, or 20");
     eta = minutes;
@@ -589,7 +597,7 @@ async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Re
   const notice = () => notifyUsers(deps.db, deps.push, now, [
     {
       userId: social.creator_id,
-      title: socialTitle(social.note),
+      title: eventTitle("reply"),
       body: replyPushBody(user.name, reply, eta),
       kind: "reply",
       refId: social.id,

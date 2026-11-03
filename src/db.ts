@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -173,6 +174,14 @@ CREATE INDEX IF NOT EXISTS idx_socials_circle ON socials(circle_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_plans_circle ON plans(circle_id, for_date);
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subs(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 `;
 
 let sqliteWarningPatched = false;
@@ -216,6 +225,21 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "lat", "lat REAL");
   ensureColumn(db, "plans", "lng", "lng REAL");
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+  `);
+  const missing = db.prepare(
+    "SELECT id, token_hash, created_at FROM users u WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.token_hash = u.token_hash)",
+  ).all() as Array<{ id: string; token_hash: string; created_at: number }>;
+  const insert = db.prepare("INSERT INTO sessions (id, user_id, token_hash, created_at) VALUES (?, ?, ?, ?)");
+  for (const user of missing) insert.run(crypto.randomUUID(), user.id, user.token_hash, user.created_at);
+  db.prepare("UPDATE social_joins SET reply = 'coming' WHERE reply IN ('join', 'in')").run();
   return db;
 }
 
@@ -244,10 +268,28 @@ export function insertUser(db: DatabaseSync, user: UserRow): void {
   db.prepare(
     "INSERT INTO users (id, name, token_hash, buzz_token, created_at) VALUES (?, ?, ?, ?, ?)",
   ).run(user.id, user.name, user.token_hash, user.buzz_token, user.created_at);
+  insertSession(db, crypto.randomUUID(), user.id, user.token_hash, user.created_at);
+}
+
+export function insertSession(db: DatabaseSync, id: string, userId: string, tokenHash: string, createdAt: number): void {
+  db.prepare("INSERT INTO sessions (id, user_id, token_hash, created_at) VALUES (?, ?, ?, ?)").run(
+    id,
+    userId,
+    tokenHash,
+    createdAt,
+  );
+}
+
+export function deleteSessionByHash(db: DatabaseSync, tokenHash: string): void {
+  db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
 }
 
 export function getUserByTokenHash(db: DatabaseSync, tokenHash: string): UserRow | undefined {
-  return one<UserRow>(db, "SELECT * FROM users WHERE token_hash = ?", tokenHash);
+  return one<UserRow>(
+    db,
+    `SELECT u.* FROM users u JOIN sessions s ON s.user_id = u.id WHERE s.token_hash = ?`,
+    tokenHash,
+  );
 }
 
 export function getUserByBuzzToken(db: DatabaseSync, buzzToken: string): UserRow | undefined {
@@ -465,7 +507,7 @@ export function hasSocialJoin(db: DatabaseSync, socialId: string, userId: string
 }
 
 export function addSocialJoin(db: DatabaseSync, socialId: string, userId: string, joinedAt: number): void {
-  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min) VALUES (?, ?, ?, 'join', NULL)").run(
+  db.prepare("INSERT INTO social_joins (social_id, user_id, joined_at, reply, eta_min) VALUES (?, ?, ?, 'coming', NULL)").run(
     socialId,
     userId,
     joinedAt,

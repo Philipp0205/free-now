@@ -123,6 +123,7 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
 
     await page.getByRole("button", { name: "Let friends know you're free now" }).click();
     await page.locator("#sheet-note").waitFor();
+    await page.locator("#sheet-note").focus();
     const closed = await measure(page);
     assert.equal(closed.touchUi, true, "Pixel emulation should be a touch UI");
     assert.equal(closed.kb, 0);
@@ -151,7 +152,6 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
 
     await page.locator(".scrim").click({ position: { x: 16, y: 16 } });
     await page.locator(".sheet").waitFor({ state: "detached" });
-    await page.locator("button[aria-label='Create']").first().click();
     await page.getByRole("button", { name: "Plan tomorrow" }).click();
     await page.locator(".sheet").getByRole("heading", { name: "Tomorrow" }).waitFor();
     await page.waitForTimeout(FIELD_REVEAL_MS + 250);
@@ -167,12 +167,13 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
     assertSheetAboveKeyboard(cramped);
     const overflow = await page.evaluate(() => {
       const sheet = document.querySelector(".sheet");
+      const scroller = document.querySelector(".sheet-scroll") || sheet;
       const input = document.getElementById("sheet-note");
-      if (!sheet || !input) return null;
+      if (!sheet || !scroller || !input) return null;
       const sheetRect = sheet.getBoundingClientRect();
       const inputRect = input.getBoundingClientRect();
       return {
-        scrolls: sheet.scrollHeight > sheet.clientHeight + 1,
+        scrolls: scroller.scrollHeight > scroller.clientHeight + 1,
         inputInside: inputRect.top >= sheetRect.top - 1 && inputRect.bottom <= sheetRect.bottom + 1,
       };
     });
