@@ -17,10 +17,21 @@ export function socialTitle(note: string): string {
   return note ? `"${note}"` : "Free now";
 }
 
-export function freePushBody(name: string, place: string): string {
+export function freePushBody(name: string, place: string, fromTime = ""): string {
   const spot = place.trim();
+  const when = fromTime.trim();
+  if (when) {
+    const base = `${name} is free from ${when}`;
+    return spot ? `${base} – meet at ${spot}` : base;
+  }
   if (!spot) return `${name} is free now`;
   return `${name} is free – meet at ${spot}`;
+}
+
+export function replyPushBody(name: string, reply: string, etaMin: number | null): string {
+  if (reply === "declined") return `${name} can't make it`;
+  if (reply === "coming") return etaMin ? `${name} is on my way – ${etaMin} min` : `${name} is on my way`;
+  return `${name} joined your social!`;
 }
 
 export async function notifyUsers(
