@@ -1,4 +1,5 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
+import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 
 const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
@@ -83,13 +84,6 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
-bindKeyboard();
-document.addEventListener("focusin", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLElement) || !target.closest(".sheet")) return;
-  setTimeout(() => target.scrollIntoView({ block: "center", inline: "nearest" }), 80);
-});
-
 boot();
 setInterval(() => {
   if (!document.hidden) refresh().catch(() => {});
@@ -167,6 +161,168 @@ function isTyping() {
   return tag === "INPUT" || tag === "TEXTAREA";
 }
 
+let restingHeight = 0;
+let restingWidth = 0;
+let revealTimer = 0;
+
+function isTextField(node) {
+  return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement;
+}
+
+function prefersTouchUi() {
+  if (window.matchMedia?.("(pointer: coarse)")?.matches) return true;
+  return navigator.maxTouchPoints > 0 && !!window.matchMedia?.("(hover: none)")?.matches;
+}
+
+function readVirtualKeyboard() {
+  const empty = { height: 0, top: null, bottom: null };
+  if (!prefersTouchUi()) return empty;
+  const rect = navigator.virtualKeyboard?.boundingRect;
+  if (!rect || !Number.isFinite(rect.height) || rect.height <= 0) return empty;
+  return { height: rect.height, top: rect.top, bottom: rect.bottom };
+}
+
+function syncKeyboardInset() {
+  const vv = window.visualViewport;
+  const layoutHeight = window.innerHeight;
+  if (!vv) {
+    document.documentElement.style.setProperty("--kb-offset", "0px");
+    document.documentElement.style.setProperty("--vv-height", `${layoutHeight}px`);
+    document.documentElement.classList.remove("kb-open");
+    return;
+  }
+  const viewportHeight = vv.height;
+  const offset = keyboardOffset(layoutHeight, viewportHeight, vv.offsetTop);
+  const focused = isTyping();
+  const width = window.innerWidth;
+  if (!restingHeight) {
+    restingHeight = viewportHeight;
+    restingWidth = width;
+  } else if (Math.abs(width - restingWidth) > 80) {
+    restingHeight = viewportHeight;
+    restingWidth = width;
+  } else if (!focused && offset < KEYBOARD_OFFSET_MIN && viewportHeight >= restingHeight - 40) {
+    restingHeight = viewportHeight;
+    restingWidth = width;
+  }
+  const touchUi = prefersTouchUi();
+  const vk = readVirtualKeyboard();
+  const open = keyboardIsOpen({
+    offset,
+    focused,
+    restingHeight,
+    viewportHeight,
+    virtualKeyboardHeight: vk.height,
+    touchUi,
+  });
+  document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+  document.documentElement.style.setProperty("--vv-height", `${Math.max(0, Math.round(viewportHeight))}px`);
+  const bar = document.querySelector(".tabbar");
+  const rect = bar?.getBoundingClientRect();
+  const overlaps = rect
+    ? tabbarOverlapsKeyboard({
+        barTop: rect.top,
+        barBottom: rect.bottom,
+        layoutHeight,
+        offset,
+        shrunk: restingHeight - viewportHeight,
+        virtualKeyboardTop: vk.top,
+        virtualKeyboardBottom: vk.bottom,
+      })
+    : false;
+  document.documentElement.classList.toggle("kb-open", open && overlaps);
+}
+
+function scheduleReveal(node) {
+  window.clearTimeout(revealTimer);
+  revealTimer = window.setTimeout(() => revealField(node), FIELD_REVEAL_MS);
+}
+
+function revealField(node) {
+  if (!node.isConnected || document.activeElement !== node) return;
+  if (node.id === "where-query") {
+    revealWhereResults();
+    return;
+  }
+  if (node.closest(".sheet")) {
+    node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return;
+  }
+  const form = node.closest("form");
+  if (form) {
+    scrollBottomIntoView(form);
+    return;
+  }
+  node.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/** Minimum scroll so the form's bottom edge, including its submit button, clears the keyboard. */
+function scrollBottomIntoView(element) {
+  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+  const overflow = element.getBoundingClientRect().bottom - (viewHeight - 12);
+  if (overflow <= 1) return;
+  scrollParent(element).scrollBy({ top: overflow, left: 0 });
+}
+
+/** Keep the Where? hit list above the keyboard, inside the scrolling sheet. */
+function revealWhereResults() {
+  const list = document.querySelector(".where-results");
+  if (!list?.isConnected) return;
+  const view = window.visualViewport;
+  const viewTop = view?.offsetTop ?? 0;
+  const viewBottom = viewTop + (view?.height ?? window.innerHeight);
+  const rect = list.getBoundingClientRect();
+  const margin = 12;
+  const parent = scrollParent(list);
+  if (rect.bottom > viewBottom - margin) parent.scrollBy({ top: rect.bottom - (viewBottom - margin), left: 0 });
+  else if (rect.top < viewTop + margin) parent.scrollBy({ top: rect.top - (viewTop + margin), left: 0 });
+}
+
+function scrollParent(element) {
+  let node = element.parentElement;
+  while (node) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) return node;
+    node = node.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
+function onViewportResize() {
+  syncKeyboardInset();
+  const active = document.activeElement;
+  if (isTextField(active)) scheduleReveal(active);
+}
+
+function onViewportScroll() {
+  syncKeyboardInset();
+}
+
+function bindKeyboard() {
+  document.addEventListener("focusin", (event) => {
+    if (isTextField(event.target)) scheduleReveal(event.target);
+  });
+  document.addEventListener("focusout", () => {
+    window.setTimeout(syncKeyboardInset, 60);
+  });
+  const vv = window.visualViewport;
+  if (vv) {
+    vv.addEventListener("resize", onViewportResize);
+    vv.addEventListener("scroll", onViewportScroll, { passive: true });
+  }
+  window.addEventListener("resize", onViewportResize);
+  window.addEventListener("orientationchange", () => {
+    restingHeight = 0;
+    syncKeyboardInset();
+  });
+  // Optional. overlaysContent stays off so interactive-widget=resizes-content can still shrink the layout.
+  const vk = navigator.virtualKeyboard;
+  if (vk?.addEventListener) vk.addEventListener("geometrychange", onViewportResize);
+  syncKeyboardInset();
+}
+
+bindKeyboard();
+
 async function api(path, options = {}) {
   const token = options.token === undefined ? state.token : options.token;
   const response = await fetch(path, {
@@ -211,11 +367,11 @@ function render() {
   document.getElementById("app").replaceChildren(view());
   if (state.focusSheet) {
     state.focusSheet = false;
-    document.getElementById("sheet-note")?.focus();
+    document.getElementById("sheet-note")?.focus({ preventScroll: true });
   } else if (activeId) {
     const node = document.getElementById(activeId);
     if (node) {
-      node.focus();
+      node.focus({ preventScroll: true });
       if (caret != null && node.setSelectionRange) {
         try {
           node.setSelectionRange(caret, caret);
@@ -228,6 +384,7 @@ function render() {
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
   if (state.whereMap && state.sheet === "free") queueMicrotask(() => { mountWhereMap().catch(() => {}); });
+  if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
   if (state.focusSocial) {
     const id = state.focusSocial;
     queueMicrotask(() => {
@@ -809,17 +966,26 @@ function canEnableNotifications(signals, guide) {
 
 function mapScreen() {
   const pins = collectPins();
+  if (!pins.length) {
+    destroyLiveMap();
+    mapWrap = null;
+    return el("div", { class: "map-screen" }, [
+      el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Map" })]),
+      el("div", { class: "map-empty" }, [
+        el("h2", { text: "No places yet" }),
+        el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
+      ]),
+    ]);
+  }
+  if (!mapWrap) {
+    mapWrap = el("div", { class: "map-wrap" }, [
+      el("div", { id: "hangry-map", class: "hangry-map" }),
+      el("div", { id: "map-card-host" }),
+    ]);
+  }
   return el("div", { class: "map-screen" }, [
     el("header", { class: "screen-head" }, [el("h1", { class: "screen-title", text: "Map" })]),
-    pins.length
-      ? el("div", { class: "map-wrap" }, [
-          el("div", { id: "hangry-map", class: "hangry-map" }),
-          el("div", { id: "map-card-host" }),
-        ])
-      : el("div", { class: "map-empty" }, [
-          el("h2", { text: "No places yet" }),
-          el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
-        ]),
+    mapWrap,
   ]);
 }
 
@@ -864,27 +1030,17 @@ function collectPins() {
 
 let leafletPromise = null;
 let liveMap = null;
+let mapWrap = null;
+let liveMarkers = new Map();
+let openMapPin = null;
 let whereLeaflet = null;
+const TILE_MAX_ZOOM = 16;
 let whereTimer = 0;
 let reverseTimer = 0;
 const PIN_PX = 36;
 
 function emptyWhere() {
   return { mode: "none", place: "", lat: null, lng: null, precise: false };
-}
-
-function bindKeyboard() {
-  const apply = () => {
-    const viewport = window.visualViewport;
-    const offset = viewport
-      ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))
-      : 0;
-    document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
-  };
-  window.visualViewport?.addEventListener("resize", apply);
-  window.visualViewport?.addEventListener("scroll", apply);
-  window.addEventListener("resize", apply);
-  apply();
 }
 
 function whereFromSocial(social) {
@@ -1106,8 +1262,73 @@ function addDarkTiles(L, map) {
     attribution: tileAttribution,
     subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
     detectRetina: tileUrl.includes("{r}"),
-    maxZoom: 20,
+    maxZoom: TILE_MAX_ZOOM,
+    maxNativeZoom: TILE_MAX_ZOOM,
   }).addTo(map);
+}
+
+function destroyLiveMap() {
+  if (liveMap) liveMap.remove();
+  liveMap = null;
+  liveMarkers = new Map();
+  openMapPin = null;
+}
+
+function pinKey(pin) {
+  return `${pin.kind}:${pin.id}`;
+}
+
+function pinIcon(L, pin) {
+  return L.divIcon({
+    className: `pin pin-${pin.kind}`,
+    html: `<span class="pin-letter">${escapeHtml(pin.initial || "")}</span>`,
+    iconSize: [PIN_PX, PIN_PX],
+    iconAnchor: [PIN_PX / 2, PIN_PX / 2],
+  });
+}
+
+function syncMapMarkers(L, pins) {
+  const next = new Set();
+  for (const pin of pins) {
+    const key = pinKey(pin);
+    next.add(key);
+    const sig = `${pin.lat},${pin.lng},${pin.initial},${pin.kind}`;
+    const existing = liveMarkers.get(key);
+    if (existing) {
+      if (existing.sig !== sig) {
+        existing.marker.setLatLng([pin.lat, pin.lng]);
+        existing.marker.setIcon(pinIcon(L, pin));
+        existing.sig = sig;
+      }
+      existing.marker.off("click");
+      existing.marker.on("click", () => showMapCard(pin));
+      continue;
+    }
+    const marker = L.marker([pin.lat, pin.lng], { icon: pinIcon(L, pin) });
+    marker.on("click", () => showMapCard(pin));
+    marker.addTo(liveMap);
+    liveMarkers.set(key, { marker, sig });
+  }
+  for (const [key, entry] of liveMarkers) {
+    if (next.has(key)) continue;
+    entry.marker.remove();
+    liveMarkers.delete(key);
+    if (openMapPin === key) {
+      openMapPin = null;
+      document.getElementById("map-card-host")?.replaceChildren();
+    }
+  }
+}
+
+function refreshOpenCard(pins) {
+  if (!openMapPin) return;
+  const pin = pins.find((item) => pinKey(item) === openMapPin);
+  if (!pin) {
+    openMapPin = null;
+    document.getElementById("map-card-host")?.replaceChildren();
+    return;
+  }
+  showMapCard(pin);
 }
 
 async function mountWhereMap() {
@@ -1122,8 +1343,8 @@ async function mountWhereMap() {
   const lat = state.where.lat ?? state.viewerLocation?.lat ?? 52.52;
   const lng = state.where.lng ?? state.viewerLocation?.lng ?? 13.405;
   const zoom = state.where.lat != null || state.viewerLocation ? 15 : 12;
-  const map = L.map(host, { zoomControl: false });
-  map.setView([lat, lng], zoom);
+  const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
+  map.setView([lat, lng], Math.min(zoom, TILE_MAX_ZOOM));
   addDarkTiles(L, map);
   const marker = L.marker([lat, lng], {
     draggable: true,
@@ -1177,37 +1398,33 @@ async function mountMap() {
   if (!host || state.tab !== "map") return;
   const L = await loadLeaflet();
   if (!host.isConnected || state.tab !== "map") return;
-  if (liveMap) {
-    liveMap.remove();
-    liveMap = null;
-  }
   const pins = collectPins();
-  if (!pins.length) return;
-  const map = L.map(host, { zoomControl: false });
+  if (!pins.length) {
+    destroyLiveMap();
+    return;
+  }
+  if (liveMap && liveMap.getContainer() === host) {
+    syncMapMarkers(L, pins);
+    refreshOpenCard(pins);
+    liveMap.invalidateSize();
+    return;
+  }
+  if (liveMap) destroyLiveMap();
+  const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
   L.control.zoom({ position: "topright" }).addTo(map);
   addDarkTiles(L, map);
-  for (const pin of pins) {
-    const marker = L.marker([pin.lat, pin.lng], {
-      icon: L.divIcon({
-        className: `pin pin-${pin.kind}`,
-        html: `<span class="pin-letter">${escapeHtml(pin.initial || "")}</span>`,
-        iconSize: [PIN_PX, PIN_PX],
-        iconAnchor: [PIN_PX / 2, PIN_PX / 2],
-      }),
-    });
-    marker.on("click", () => showMapCard(pin));
-    marker.addTo(map);
-  }
+  liveMap = map;
+  syncMapMarkers(L, pins);
   if (state.viewerLocation) {
     map.setView([state.viewerLocation.lat, state.viewerLocation.lng], 14);
   } else {
     map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [36, 36], maxZoom: 15 });
   }
-  liveMap = map;
   setTimeout(() => map.invalidateSize(), 60);
 }
 
 function showMapCard(pin) {
+  openMapPin = pinKey(pin);
   const host = document.getElementById("map-card-host");
   if (!host) return;
   host.replaceChildren(mapCard(pin));
@@ -1687,9 +1904,16 @@ function installDue() {
 }
 
 async function considerReminders() {
-  if (!state.token || !state.me) return;
+  if (!state.token || !state.me || !state.me.circle) {
+    const showing = state.installSheet || state.pushReminder;
+    state.installSheet = false;
+    state.pushReminder = null;
+    if (showing) render();
+    return;
+  }
   const signals = currentSignals();
-  if (!isInstalled() && state.me.circle && installDue()) {
+  const prompt = installPrompt(signals, { canPrompt: Boolean(state.installEvent) });
+  if (!isInstalled() && installDue() && !prompt.quiet) {
     state.installSheet = true;
     state.pushReminder = null;
     render();
@@ -1786,7 +2010,8 @@ async function onInstall() {
 }
 
 function showInstallPill() {
-  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden;
+  const prompt = installPrompt(currentSignals(), { canPrompt: false });
+  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden && !prompt.quiet;
 }
 
 function installPill() {
@@ -1851,12 +2076,19 @@ function installSheetView() {
 }
 
 async function onRotateBuzz() {
-  if (!window.confirm("The old buzzer and recovery code will stop working.")) return;
-  await run(async () => {
-    const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
-    state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
-    state.error = "New secret ready";
-  });
+  state.confirm = {
+    title: "New secret?",
+    body: "The old buzzer and recovery code will stop working.",
+    confirmLabel: "Regenerate",
+    action: async () => {
+      await run(async () => {
+        const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
+        state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
+        state.error = "New secret ready";
+      });
+    },
+  };
+  render();
 }
 
 async function onLeave() {
