@@ -49,6 +49,7 @@ const state = {
   where: emptyWhere(),
   whereOpen: false,
   whereQuery: "",
+  whereAutofill: false,
   whereResults: [],
   whereSearching: false,
   whereMap: false,
@@ -74,6 +75,7 @@ const ICONS = {
   person: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 19.2c.8-2.8 3.2-4.2 6.4-4.2s5.6 1.4 6.4 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -273,6 +275,7 @@ function revealField(node) {
   }
   if (node.closest(".sheet")) {
     node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    scrollFieldAboveDock(node);
     return;
   }
   const form = node.closest("form");
@@ -900,31 +903,38 @@ function sheet() {
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("form", { class: "sheet", role: "dialog", onsubmit: planning ? onCreatePlan : onFree }, [
       el("div", { class: "sheet-scroll" }, [
-      el("div", { class: "grabber" }),
-      el("h2", { text: planning ? "Tomorrow" : later ? "Free later today" : "Free now" }),
-      el("p", {
-        class: "help",
-        text: planning
-          ? "Friends can join. It stays up through tomorrow."
-          : later
-            ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
-            : `Friends in your circle get a push. This lasts ${ttl}.`,
-      }),
-      planning ? null : whenBlock(),
-      field(planning ? "Plan" : "Note", "sheet-note", state.noteDraft, (value) => {
-        state.noteDraft = value;
-      }, {
-        placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
-        maxlength: "80",
-      }),
-      planning
-        ? field("Place", "sheet-place", state.placeDraft, (value) => {
-            state.placeDraft = value;
-          }, { placeholder: "Optional", maxlength: "80" })
-        : whereBlock(),
-      planning ? shareToggle("Use my location") : null,
+        el("div", { class: "grabber" }),
+        el("div", { class: "sheet-form" }, [
+          el("div", { class: "sheet-intro" }, [
+            el("h2", { text: planning ? "Tomorrow" : later ? "Free later today" : "Free now" }),
+            el("p", {
+              class: "help",
+              text: planning
+                ? "Friends can join. It stays up through tomorrow."
+                : later
+                  ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
+                  : `Friends in your circle get a push. This lasts ${ttl}.`,
+            }),
+          ]),
+          planning ? null : whenBlock(),
+          planning ? null : timeBlock(),
+          sheetField(planning ? "Plan" : "Note (optional)", "sheet-note", state.noteDraft, (value) => {
+            state.noteDraft = value;
+            paintSummary();
+          }, {
+            placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
+            maxlength: "80",
+          }),
+          planning
+            ? sheetField("Place (optional)", "sheet-place", state.placeDraft, (value) => {
+                state.placeDraft = value;
+              }, { placeholder: "A park, a cafe, a street", maxlength: "80" })
+            : whereBlock(),
+          planning ? shareToggle("Use my location") : null,
+        ]),
       ]),
       el("div", { class: "sheet-dock stack" }, [
+        planning ? null : el("p", { class: "sheet-summary", text: friendsSummary() }),
         el("button", {
           class: "btn",
           type: "submit",
@@ -1124,6 +1134,7 @@ let openMapPin = null;
 let whereLeaflet = null;
 const TILE_MAX_ZOOM = 19;
 let whereTimer = 0;
+let skipWhereInput = false;
 let reverseTimer = 0;
 const PIN_PX = 36;
 
@@ -1146,10 +1157,15 @@ function whereFromSocial(social) {
 }
 
 function whereLabel() {
+  if (state.where.mode === "here" && /^near you$/i.test(state.where.place || "")) return "Current location";
   if (state.where.place) return state.where.place;
-  if (state.where.mode === "here") return "near you";
+  if (state.where.mode === "here") return "Current location";
   if (state.where.lat != null) return "Dropped pin";
-  return "Nowhere";
+  return "Pick a place";
+}
+
+function whereIsEmpty() {
+  return whereLabel() === "Pick a place";
 }
 
 function isLiveSocial(social) {
@@ -1166,55 +1182,89 @@ function clock(ms) {
   }).format(new Date(ms));
 }
 
-function hourInZone() {
-  const tz = state.meta?.tz || "Europe/Berlin";
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit" }).formatToParts(new Date());
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
-  return hour === 24 ? 0 : hour;
+function whenBlock() {
+  return el("div", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", id: "when-label", text: "When" }),
+    el("div", { class: "segment", role: "group", "aria-labelledby": "when-label" }, [
+      whenChoice("now", "Now"),
+      whenChoice("later", "Later today"),
+    ]),
+  ]);
 }
 
-function whenBlock() {
-  const hour = hourInZone();
-  return el("div", { class: "when" }, [
-    el("button", {
-      class: state.whenMode === "now" ? "chip on" : "chip",
-      type: "button",
-      text: "Now",
-      onclick: () => { state.whenMode = "now"; state.startChoice = ""; render(); },
+function whenChoice(mode, text) {
+  const on = state.whenMode === mode;
+  return el("button", {
+    type: "button",
+    class: on ? "on" : "",
+    "aria-pressed": on ? "true" : "false",
+    text,
+    onclick: () => {
+      state.whenMode = mode;
+      if (mode === "now") state.startChoice = "";
+      render();
+    },
+  });
+}
+
+function timeBlock() {
+  if (state.whenMode !== "later") return null;
+  return el("label", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", text: "Time" }),
+    el("input", {
+      id: "later-time",
+      class: "sheet-control",
+      type: "time",
+      value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
+      oninput: (event) => {
+        state.startChoice = event.target.value;
+        render();
+      },
     }),
-    el("button", {
-      class: state.whenMode === "later" ? "chip on" : "chip",
-      type: "button",
-      text: "Later today",
-      onclick: () => { state.whenMode = "later"; render(); },
+  ]);
+}
+
+function friendsSummary() {
+  const name = state.me?.user?.name?.trim() || "You";
+  const place = (wherePayload().place || "").trim();
+  const later = state.whenMode === "later";
+  const time = later && /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "";
+  if (later && !time) return `Friends get: ${name} is free later today`;
+  return `Friends get: ${freeSheetLine(name, place, time)}`;
+}
+
+function freeSheetLine(name, place, fromTime) {
+  const spot = place.trim();
+  const nearYou = /^near you$/i.test(spot);
+  const near = /^near\s+/i.test(spot) ? spot.replace(/^near\s+/i, "") : "";
+  if (fromTime) {
+    if (near) return `${name} is free from ${fromTime} near ${near}`;
+    if (nearYou || !spot) return `${name} is free from ${fromTime}${nearYou ? ", nearby" : ""}`;
+    return `${name} is free from ${fromTime} at ${spot}`;
+  }
+  if (!spot) return `${name} is free now`;
+  if (nearYou) return `${name} is free nearby`;
+  if (near) return `${name} is free now near ${near}`;
+  return `${name} is free now at ${spot}`;
+}
+
+function paintSummary() {
+  const node = document.querySelector(".sheet-summary");
+  if (node) node.textContent = friendsSummary();
+}
+
+function sheetField(label, id, value, onValue, attrs = {}) {
+  return el("label", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", text: label }),
+    el("input", {
+      id,
+      class: "sheet-control",
+      type: "text",
+      value,
+      autocomplete: "off",
+      ...attrs,
+      oninput: (event) => onValue(event.target.value),
     }),
-    state.whenMode === "later" && hour < 23
-      ? el("button", {
-          class: state.startChoice === "+60" ? "chip on" : "chip",
-          type: "button",
-          text: "In 1 hour",
-          onclick: () => { state.startChoice = "+60"; render(); },
-        })
-      : null,
-    state.whenMode === "later" && hour < 18
-      ? el("button", {
-          class: state.startChoice === "18:00" ? "chip on" : "chip",
-          type: "button",
-          text: "18:00",
-          onclick: () => { state.startChoice = "18:00"; render(); },
-        })
-      : null,
-    state.whenMode === "later"
-      ? el("input", {
-          id: "later-time",
-          type: "time",
-          value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
-          oninput: (event) => {
-            state.startChoice = event.target.value;
-            render();
-          },
-        })
-      : null,
   ]);
 }
 
@@ -1326,20 +1376,38 @@ function wherePayload() {
 }
 
 function whereBlock() {
-  return el("div", { class: "where" }, [
-    el("button", {
-      class: "where-row",
-      type: "button",
-      "aria-expanded": state.whereOpen ? "true" : "false",
-      onclick: () => {
-        state.whereOpen = !state.whereOpen;
-        if (!state.whereOpen) state.whereMap = false;
-        render();
-        if (state.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
-      },
-    }, [
-      el("span", { class: "where-k", text: "Where?" }),
-      el("span", { class: "where-v", text: whereLabel() }),
+  const value = whereLabel();
+  const empty = whereIsEmpty();
+  return el("div", { class: "where sheet-group" }, [
+    el("span", { class: "sheet-label", id: "where-label", text: "Where" }),
+    el("div", { class: empty ? "where-field" : "where-field has-value" }, [
+      el("button", {
+        class: "where-row",
+        type: "button",
+        "aria-labelledby": "where-label",
+        "aria-expanded": state.whereOpen ? "true" : "false",
+        onclick: () => {
+          state.whereOpen = !state.whereOpen;
+          if (!state.whereOpen) state.whereMap = false;
+          render();
+          if (state.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
+        },
+      }, [
+        el("span", { class: empty ? "where-v is-placeholder" : "where-v", text: value }),
+        icon("chevron"),
+      ]),
+      empty
+        ? null
+        : el("button", {
+            class: "where-clear",
+            type: "button",
+            text: "Clear",
+            onclick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              clearWhereSelection(state.whereOpen);
+            },
+          }),
     ]),
     state.whereOpen ? wherePicker() : null,
   ]);
@@ -1349,24 +1417,15 @@ function wherePicker() {
   return el("div", { class: "where-picker" }, [
     el("input", {
       id: "where-query",
+      class: "sheet-control",
       type: "text",
       value: state.whereQuery,
-      placeholder: "Place name or address",
+      placeholder: "Search for a place",
       maxlength: "80",
       autocomplete: "off",
       enterkeyhint: "search",
-      oninput: (event) => {
-        state.whereQuery = event.target.value;
-        const typed = event.target.value.trim();
-        state.where.mode = typed ? "place" : "none";
-        state.where.place = typed;
-        state.where.lat = null;
-        state.where.lng = null;
-        state.where.precise = false;
-        const label = document.querySelector(".where-v");
-        if (label) label.textContent = typed || "Nowhere";
-        scheduleWhereSearch();
-      },
+      onbeforeinput: onWhereBeforeInput,
+      oninput: onWhereInput,
     }),
     state.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
     state.whereResults.length
@@ -1400,13 +1459,7 @@ function wherePicker() {
           class: "where-action",
           type: "button",
           text: "Clear place",
-          onclick: () => {
-            state.where = emptyWhere();
-            state.whereQuery = "";
-            state.whereResults = [];
-            state.whereMap = false;
-            render();
-          },
+          onclick: () => clearWhereSelection(true),
         })
       : null,
   ]);
@@ -1450,11 +1503,132 @@ function pickerFocus() {
 }
 
 function chooseWhereHit(hit) {
+  state.whereAutofill = false;
   state.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
   state.whereQuery = hit.name;
   state.whereResults = [];
   state.whereSearching = false;
   render();
+}
+
+function clearWhereSelection(keepOpen) {
+  state.whereAutofill = false;
+  state.where = emptyWhere();
+  state.whereQuery = "";
+  state.whereResults = [];
+  state.whereSearching = false;
+  state.whereMap = false;
+  state.whereOpen = Boolean(keepOpen);
+  clearTimeout(whereTimer);
+  render();
+  paintSummary();
+  if (keepOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
+}
+
+function swallowNextWhereInput() {
+  skipWhereInput = true;
+  queueMicrotask(() => { skipWhereInput = false; });
+}
+
+function onWhereBeforeInput(event) {
+  if (!state.whereAutofill) return;
+  const type = event.inputType || "";
+  if (type.startsWith("delete")) {
+    event.preventDefault();
+    swallowNextWhereInput();
+    clearWhereSelection(true);
+    return;
+  }
+  if (type.startsWith("insert") && typeof event.data === "string") {
+    event.preventDefault();
+    swallowNextWhereInput();
+    commitTypedWhere(event.data);
+  }
+}
+
+function onWhereInput(event) {
+  if (skipWhereInput) {
+    skipWhereInput = false;
+    event.target.value = state.whereQuery;
+    const end = state.whereQuery.length;
+    try { event.target.setSelectionRange(end, end); } catch { /* the caret can stay */ }
+    return;
+  }
+  if (state.whereAutofill) {
+    const next = event.target.value;
+    const previous = state.whereQuery;
+    if (next.length < previous.length) {
+      clearWhereSelection(true);
+      return;
+    }
+    if (next !== previous && next.startsWith(previous)) {
+      commitTypedWhere(next.slice(previous.length));
+      return;
+    }
+    if (next !== previous) {
+      commitTypedWhere(next);
+      return;
+    }
+  }
+  applyWhereQuery(event.target.value);
+}
+
+function commitTypedWhere(text) {
+  state.whereAutofill = false;
+  state.where = {
+    mode: text.trim() ? "place" : "none",
+    place: text,
+    lat: null,
+    lng: null,
+    precise: false,
+  };
+  state.whereQuery = text;
+  const input = document.getElementById("where-query");
+  if (input) {
+    input.value = text;
+    const end = text.length;
+    try { input.setSelectionRange(end, end); } catch { /* keep the caret where the field left it */ }
+  }
+  const label = document.querySelector(".where-v");
+  if (label) {
+    label.textContent = text.trim() || "Pick a place";
+    label.classList.toggle("is-placeholder", !text.trim());
+  }
+  paintSummary();
+  scheduleWhereSearch();
+}
+
+function applyWhereQuery(value) {
+  state.whereAutofill = false;
+  state.whereQuery = value;
+  const typed = value.trim();
+  state.where.mode = typed ? "place" : "none";
+  state.where.place = typed;
+  state.where.lat = null;
+  state.where.lng = null;
+  state.where.precise = false;
+  const label = document.querySelector(".where-v");
+  if (label) {
+    label.textContent = typed || "Pick a place";
+    label.classList.toggle("is-placeholder", !typed);
+  }
+  paintSummary();
+  scheduleWhereSearch();
+}
+
+function rerenderWhere() {
+  const input = document.activeElement?.id === "where-query" ? document.activeElement : null;
+  const caret = input ? input.selectionStart : null;
+  render();
+  if (!input) return;
+  queueMicrotask(() => {
+    const next = document.getElementById("where-query");
+    if (!next) return;
+    next.focus();
+    if (caret != null) {
+      try { next.setSelectionRange(caret, caret); } catch { /* the field keeps its own caret */ }
+    }
+  });
 }
 
 function scheduleWhereSearch() {
@@ -1477,11 +1651,11 @@ function scheduleWhereSearch() {
       if (state.whereQuery.trim() !== query) return;
       state.whereResults = data.results || [];
       state.whereSearching = false;
-      render();
+      rerenderWhere();
     }).catch(() => {
       state.whereSearching = false;
       state.whereResults = [];
-      render();
+      rerenderWhere();
     });
   }, 400);
 }
@@ -1513,17 +1687,22 @@ async function useCurrentWhere() {
       });
     });
     state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    state.whereAutofill = true;
     state.where = { mode: "here", place: "near you", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
-    state.whereQuery = "near you";
+    state.whereQuery = "Current location";
     state.whereResults = [];
     state.error = "";
+    const keepFocus = document.activeElement?.id === "where-query";
     render();
+    if (keepFocus) queueMicrotask(() => document.getElementById("where-query")?.focus());
     const named = await api(`/api/geocode?lat=${encodeURIComponent(pos.coords.latitude)}&lng=${encodeURIComponent(pos.coords.longitude)}`).catch(() => null);
-    if (state.where.mode === "here" && state.where.lat === pos.coords.latitude) {
-      const place = named?.place || "near you";
+    if (state.where.mode === "here" && state.where.lat === pos.coords.latitude && state.whereAutofill) {
+      const place = named?.place && !/^near you$/i.test(named.place) ? named.place : "near you";
       state.where.place = place;
-      state.whereQuery = place;
+      state.whereQuery = place === "near you" ? "Current location" : place;
+      const stillFocused = document.activeElement?.id === "where-query";
       render();
+      if (stillFocused) queueMicrotask(() => document.getElementById("where-query")?.focus());
     }
   } catch {
     state.error = "Location stayed off. Everything else still works.";
@@ -2008,6 +2187,7 @@ function openSheet(name) {
     state.noteDraft = mySocial()?.note ?? "";
     state.where = whereFromSocial(mySocial());
     state.whereQuery = state.where.place;
+    state.whereAutofill = false;
     state.whereOpen = false;
     state.whereResults = [];
     state.whereSearching = false;
