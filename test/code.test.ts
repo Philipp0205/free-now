@@ -68,8 +68,11 @@ test("a fallback place is nearby in a friend's push, not near you", () => {
   assert.equal(freePushBody("Bea", "near you"), "Bea is free nearby");
   assert.equal(freePushBody("Bea", ""), "Bea is free now");
   assert.equal(freePushBody("Bea", "Near Schlossplatz, Stuttgart-Mitte"), "Bea is free near Schlossplatz, Stuttgart-Mitte");
-  assert.equal(startingNowBody("Bea", "near you"), "Starting now: Bea, nearby");
+  assert.equal(freePushBody("Bea", "Near Schlossplatz", "", false, "Coffee"), "Bea is free near Schlossplatz – Coffee");
+  assert.equal(startingNowBody("Bea", "near you"), "Starting now: Bea nearby");
   assert.equal(startingNowBody("Bea", ""), "Starting now: Bea");
+  assert.equal(startingNowBody("Philipp", "Near Schlossplatz"), "Starting now: Philipp near Schlossplatz");
+  assert.equal(startingNowBody("Philipp", "RATTO Bistrobar"), "Starting now: Philipp at RATTO Bistrobar");
 });
 
 test("plan replies share the Reply title and name the plan", () => {

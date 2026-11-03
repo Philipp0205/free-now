@@ -676,6 +676,10 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
   line-height: 1.35;
   text-align: center;
 }
+.sheet.dragging { transition: none; }
+.sheet:has(.where-results) .sheet-dock { display: none; }
+.time-error { margin: 0; color: var(--danger); font-size: 13px; }
+.grabber { touch-action: none; }
 .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .action {
   width: 100%;
@@ -721,14 +725,14 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--tab) + 12px);
+  top: 12px;
   transform: translateX(-50%);
   width: min(440px, calc(100% - 24px));
   background: #2c2c2e;
   color: #fff;
   border-radius: 14px;
   padding: 12px 14px;
-  z-index: 35;
+  z-index: 40;
   font-size: 14px;
 }
 

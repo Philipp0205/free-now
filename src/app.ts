@@ -532,7 +532,7 @@ async function publishSocial(
       recipients.map((member) => ({
         userId: member.id,
         title,
-        body: freePushBody(user.name, nextPlace, fromTime, shifted),
+        body: freePushBody(user.name, nextPlace, fromTime, shifted, nextNote),
         url: `/?social=${socialId}`,
         kind: "social",
         refId: socialId,
@@ -940,27 +940,27 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
   if (body.startsInMin != null) {
     const minutes = Number(body.startsInMin);
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 18 * 60) {
-      throw new HttpError(400, "start time is not later today");
+      throw new HttpError(400, "Pick a time later today");
     }
     return assertLaterToday(now + minutes * 60 * 1000, now, tz);
   }
   if (body.startsAt == null) return null;
   if (typeof body.startsAt === "string") {
-    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "start time is not later today");
+    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "Pick a time later today");
     try {
       return assertLaterToday(zonedDateTime(isoDate(now, tz), body.startsAt, tz), now, tz);
     } catch {
-      throw new HttpError(400, "start time is not later today");
+      throw new HttpError(400, "Pick a time later today");
     }
   }
   const instant = Number(body.startsAt);
-  if (!Number.isFinite(instant)) throw new HttpError(400, "start time is not later today");
+  if (!Number.isFinite(instant)) throw new HttpError(400, "Pick a time later today");
   return assertLaterToday(instant, now, tz);
 }
 
 function assertLaterToday(instant: number, now: number, tz: string): number {
-  if (instant <= now) throw new HttpError(400, "start time is not later today");
-  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "start time is not later today");
+  if (instant <= now) throw new HttpError(400, "Pick a time later today");
+  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "Pick a time later today");
   return instant;
 }
 

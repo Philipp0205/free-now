@@ -165,6 +165,81 @@ test("one delete clears an untouched current location in Chrome and Firefox", { 
   }
 });
 
+test("back, escape, and a swipe close the sheet without leaving", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Philipp");
+    const home = page.url();
+    await page.keyboard.press("Escape");
+    await page.locator("form.sheet").waitFor({ state: "detached" });
+    assert.equal(page.url(), home);
+
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator("form.sheet").waitFor();
+    await page.evaluate(() => history.back());
+    await page.locator("form.sheet").waitFor({ state: "detached" });
+    assert.equal(page.url(), home);
+
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator(".grabber").waitFor();
+    const handle = await page.locator("form.sheet .grabber").boundingBox();
+    assert.ok(handle);
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + 180, { steps: 10 });
+    await page.mouse.up();
+    await page.locator("form.sheet").waitFor({ state: "detached" });
+    assert.equal(page.url(), home);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("later today defaults to the next half hour", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Philipp");
+    await page.getByRole("button", { name: "Later today" }).click();
+    const value = await page.locator("#later-time").inputValue();
+    assert.match(value, /^\d{2}:(00|30)$/);
+    assert.equal(await page.getByRole("button", { name: "I'm free later" }).isDisabled(), false);
+    await page.locator("#later-time").evaluate((input) => {
+      const field = input as HTMLInputElement;
+      field.value = "00:00";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.getByText("Pick a time later today").waitFor();
+    const summary = await page.locator(".sheet-summary").boundingBox();
+    const toast = await page.locator(".toast").count();
+    assert.equal(toast, 0);
+    assert.ok(summary);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("picking on the map drops a pin and names the place", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  await page.context().route("**/api/geocode?**", (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("q")) return route.fulfill({ json: { results: [] } });
+    return route.fulfill({ json: { place: PLACE } });
+  });
+  try {
+    await openFreeSheet(page, "Philipp");
+    await page.locator("button.where-row").click();
+    await page.getByRole("button", { name: "Pick on map" }).click();
+    await page.locator("#where-map .leaflet-marker-icon").waitFor({ timeout: 8000 });
+    await page.locator("#where-map").click({ position: { x: 30, y: 40 } });
+    await page.locator(".where-v", { hasText: PLACE }).waitFor({ timeout: 8000 });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.context().close();
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean) {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },

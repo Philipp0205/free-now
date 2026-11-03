@@ -442,8 +442,12 @@ function render() {
   }
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
-  if (state.whereMap && state.sheet === "free") queueMicrotask(() => { mountWhereMap().catch(() => {}); });
+  if (state.whereMap && state.sheet === "free") {
+    queueMicrotask(() => { mountWhereMap().catch((error) => console.error("where map failed", error)); });
+  }
   if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
+  bindSheetSwipe();
+  syncSheetHistory();
   if (state.focusSocial) {
     const id = state.focusSocial;
     queueMicrotask(() => {
@@ -471,7 +475,7 @@ function view() {
   }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
-  if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+  if (state.error && state.error !== TIME_LATER_ERROR) root.append(el("div", { class: "toast", role: "status", text: state.error }));
   return root;
 }
 
@@ -897,6 +901,7 @@ function sheet() {
     ]);
   }
   const planning = state.sheet === "plan";
+  const editing = !planning && Boolean(mySocial());
   const later = !planning && state.whenMode === "later";
   const ttl = ttlLabel(state.meta?.socialTtlMs ?? 7200000);
   return el("div", {}, [
@@ -906,7 +911,7 @@ function sheet() {
         el("div", { class: "grabber" }),
         el("div", { class: "sheet-form" }, [
           el("div", { class: "sheet-intro" }, [
-            el("h2", { text: planning ? "Tomorrow" : later ? "Free later today" : "Free now" }),
+            el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
             el("p", {
               class: "help",
               text: planning
@@ -938,11 +943,11 @@ function sheet() {
         el("button", {
           class: "btn",
           type: "submit",
-          text: planning ? "Add plan" : later ? "I'm free later" : "I'm free",
+          text: planning ? "Add plan" : editing ? "Update" : later ? "I'm free later" : "I'm free",
           disabled: later && !laterTimeChosen(),
         }),
         !planning && mySocial()
-          ? el("button", { class: "btn ghost", type: "button", text: "I'm no longer free", onclick: () => endSocial(mySocial()) })
+          ? el("button", { class: "btn ghost", type: "button", text: "End", onclick: () => endSocial(mySocial()) })
           : null,
       ]),
     ]),
@@ -1201,51 +1206,122 @@ function whenChoice(mode, text) {
     text,
     onclick: () => {
       state.whenMode = mode;
-      if (mode === "now") state.startChoice = "";
+      if (mode === "now") {
+        state.startChoice = "";
+        if (state.error === TIME_LATER_ERROR) state.error = "";
+      } else ensureLaterTime();
       render();
     },
   });
 }
 
+const TIME_LATER_ERROR = "Pick a time later today";
+
+function zonedParts(ms) {
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date(ms));
+  const read = (type) => parts.find((part) => part.type === type)?.value ?? "";
+  let hour = Number(read("hour"));
+  if (hour === 24) hour = 0;
+  return {
+    day: `${read("year")}-${read("month")}-${read("day")}`,
+    hour,
+    minute: Number(read("minute")),
+  };
+}
+
+function clockText(hour, minute) {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function nextLaterSlot(now = Date.now()) {
+  const earliest = now + 15 * 60 * 1000;
+  const today = zonedParts(now).day;
+  const part = zonedParts(earliest);
+  if (part.day !== today) return "";
+  let { hour, minute } = part;
+  if (minute !== 0 && minute !== 30) {
+    if (minute < 30) minute = 30;
+    else { minute = 0; hour += 1; }
+  }
+  if (hour >= 24) return "";
+  return clockText(hour, minute);
+}
+
+function minLaterClock(now = Date.now()) {
+  const part = zonedParts(now + 60 * 1000);
+  if (part.day !== zonedParts(now).day) return "";
+  return clockText(part.hour, part.minute);
+}
+
+function isLaterToday(hhmm, now = Date.now()) {
+  if (!/^\d{2}:\d{2}$/.test(hhmm)) return false;
+  const min = minLaterClock(now);
+  if (!min) return false;
+  return hhmm >= min;
+}
+
+function ensureLaterTime() {
+  if (!isLaterToday(state.startChoice)) state.startChoice = nextLaterSlot();
+  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice)) state.error = "";
+}
+
 function timeBlock() {
   if (state.whenMode !== "later") return null;
-  return el("label", { class: "sheet-group" }, [
-    el("span", { class: "sheet-label", text: "Time" }),
+  const min = minLaterClock();
+  return el("div", { class: "sheet-group" }, [
+    el("label", { class: "sheet-label", for: "later-time", text: "Time" }),
     el("input", {
       id: "later-time",
       class: "sheet-control",
       type: "time",
+      min: min || null,
       value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
       oninput: (event) => {
         state.startChoice = event.target.value;
+        if (state.startChoice && !isLaterToday(state.startChoice)) state.error = TIME_LATER_ERROR;
+        else if (state.error === TIME_LATER_ERROR) state.error = "";
         render();
       },
     }),
+    state.error === TIME_LATER_ERROR ? el("p", { class: "time-error", text: TIME_LATER_ERROR }) : null,
   ]);
+}
+
+function pushLine(name, place, fromTime, note) {
+  const spot = place.trim();
+  const when = fromTime.trim();
+  const base = when ? `${name} is free from ${when}` : "";
+  const nearYou = /^near you$/i.test(spot);
+  const near = /^near\s+/i.test(spot) ? `near ${spot.replace(/^near\s+/i, "")}` : "";
+  let line;
+  if (!spot) line = base || `${name} is free now`;
+  else if (nearYou) line = base ? `${base}, nearby` : `${name} is free nearby`;
+  else if (near) line = base ? `${base}, ${near}` : `${name} is free ${near}`;
+  else if (base) line = `${base} – meet at ${spot}`;
+  else line = `${name} is free – meet at ${spot}`;
+  return note ? `${line} – ${note}` : line;
 }
 
 function friendsSummary() {
   const name = state.me?.user?.name?.trim() || "You";
   const place = (wherePayload().place || "").trim();
+  const note = state.noteDraft.trim();
   const later = state.whenMode === "later";
   const time = later && /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "";
-  if (later && !time) return `Friends get: ${name} is free later today`;
-  return `Friends get: ${freeSheetLine(name, place, time)}`;
-}
-
-function freeSheetLine(name, place, fromTime) {
-  const spot = place.trim();
-  const nearYou = /^near you$/i.test(spot);
-  const near = /^near\s+/i.test(spot) ? spot.replace(/^near\s+/i, "") : "";
-  if (fromTime) {
-    if (near) return `${name} is free from ${fromTime} near ${near}`;
-    if (nearYou || !spot) return `${name} is free from ${fromTime}${nearYou ? ", nearby" : ""}`;
-    return `${name} is free from ${fromTime} at ${spot}`;
+  if (later && !time) {
+    const line = note ? `${name} is free later today – ${note}` : `${name} is free later today`;
+    return `Friends get: ${line}`;
   }
-  if (!spot) return `${name} is free now`;
-  if (nearYou) return `${name} is free nearby`;
-  if (near) return `${name} is free now near ${near}`;
-  return `${name} is free now at ${spot}`;
+  return `Friends get: ${pushLine(name, place, time, note)}`;
 }
 
 function paintSummary() {
@@ -1269,7 +1345,7 @@ function sheetField(label, id, value, onValue, attrs = {}) {
 }
 
 function laterTimeChosen() {
-  return state.startChoice === "+60" || /^\d{2}:\d{2}$/.test(state.startChoice);
+  return isLaterToday(state.startChoice);
 }
 
 function startPayload() {
@@ -1454,14 +1530,6 @@ function wherePicker() {
       },
     }),
     state.whereMap ? el("div", { id: "where-map", class: "where-map" }) : null,
-    state.where.mode !== "none"
-      ? el("button", {
-          class: "where-action",
-          type: "button",
-          text: "Clear place",
-          onclick: () => clearWhereSelection(true),
-        })
-      : null,
   ]);
 }
 
@@ -1711,17 +1779,19 @@ async function useCurrentWhere() {
   }
 }
 
-function scheduleReverse(lat, lng) {
+function scheduleReverse(lat, lng, replace = false) {
   clearTimeout(reverseTimer);
   reverseTimer = setTimeout(() => {
     api(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`).then((data) => {
       if (state.where.lat !== lat || state.where.lng !== lng) return;
-      if (state.whereQuery.trim() || !data.place) return;
+      if (!data?.place) return;
+      if (!replace && state.whereQuery.trim() && state.whereQuery !== "Dropped pin") return;
       state.where.place = data.place;
       state.whereQuery = data.place;
       state.where.mode = "place";
-      render();
-    }).catch(() => {});
+      state.whereAutofill = false;
+      rerenderWhere();
+    }).catch((error) => console.error("reverse geocode failed", error));
   }, 400);
 }
 
@@ -1826,7 +1896,7 @@ async function mountWhereMap() {
   map.setView([focus.lat, focus.lng], Math.min(focus.zoom, TILE_MAX_ZOOM));
   addMapTiles(L, map);
   map.on("dragend", () => rememberMapCenter(map));
-  const marker = L.marker([lat, lng], {
+  const marker = L.marker([focus.lat, focus.lng], {
     draggable: true,
     icon: L.divIcon({
       className: "pin pin-social",
@@ -1836,13 +1906,20 @@ async function mountWhereMap() {
     }),
   }).addTo(map);
   const apply = (ll) => {
+    state.whereAutofill = false;
     state.where.mode = "place";
     state.where.lat = ll.lat;
     state.where.lng = ll.lng;
     state.where.precise = true;
+    state.where.place = "Dropped pin";
+    state.whereQuery = "Dropped pin";
     const label = document.querySelector(".where-v");
-    if (label) label.textContent = state.where.place || "Dropped pin";
-    scheduleReverse(ll.lat, ll.lng);
+    if (label) {
+      label.textContent = "Dropped pin";
+      label.classList.remove("is-placeholder");
+    }
+    paintSummary();
+    scheduleReverse(ll.lat, ll.lng, true);
   };
   marker.on("dragend", () => apply(marker.getLatLng()));
   map.on("click", (event) => {
@@ -2216,6 +2293,106 @@ function closeSheet() {
   render();
 }
 
+let sheetHistoryPushed = false;
+let ignoreSheetPop = false;
+let closingFromPop = false;
+
+function sheetIsOpen() {
+  return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen);
+}
+
+function dismissTopSheet() {
+  if (state.confirm) {
+    state.confirm = null;
+    render();
+    return;
+  }
+  if (state.installOpen) {
+    state.installOpen = false;
+    render();
+    return;
+  }
+  if (state.onboarding) {
+    state.onboarding = false;
+    render();
+    return;
+  }
+  if (state.installSheet) {
+    state.installSheet = false;
+    render();
+    return;
+  }
+  if (state.sheet) closeSheet();
+}
+
+function syncSheetHistory() {
+  const open = sheetIsOpen();
+  if (open && !sheetHistoryPushed) {
+    history.pushState({ hangrySheet: 1 }, "");
+    sheetHistoryPushed = true;
+    return;
+  }
+  if (!open && sheetHistoryPushed && !closingFromPop) {
+    sheetHistoryPushed = false;
+    ignoreSheetPop = true;
+    history.back();
+  }
+}
+
+function bindSheetSwipe() {
+  document.querySelectorAll(".sheet").forEach((sheet) => {
+    let tracking = false;
+    let startY = 0;
+    let drag = 0;
+    sheet.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("input, textarea, button, a, select")) return;
+      const rect = sheet.getBoundingClientRect();
+      const onHandle = event.target.closest(".grabber");
+      if (!onHandle && event.clientY > rect.top + 64) return;
+      tracking = true;
+      startY = event.clientY;
+      drag = 0;
+      sheet.classList.add("dragging");
+      sheet.setPointerCapture?.(event.pointerId);
+    });
+    sheet.addEventListener("pointermove", (event) => {
+      if (!tracking) return;
+      drag = Math.max(0, event.clientY - startY);
+      sheet.style.transform = `translateX(-50%) translateY(${drag}px)`;
+    });
+    const finish = () => {
+      if (!tracking) return;
+      tracking = false;
+      sheet.classList.remove("dragging");
+      sheet.style.transform = "";
+      if (drag > 72) dismissTopSheet();
+    };
+    sheet.addEventListener("pointerup", finish);
+    sheet.addEventListener("pointercancel", finish);
+  });
+}
+
+window.addEventListener("popstate", () => {
+  if (ignoreSheetPop) {
+    ignoreSheetPop = false;
+    return;
+  }
+  if (!sheetIsOpen()) {
+    sheetHistoryPushed = false;
+    return;
+  }
+  sheetHistoryPushed = false;
+  closingFromPop = true;
+  dismissTopSheet();
+  closingFromPop = false;
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !sheetIsOpen()) return;
+  event.preventDefault();
+  dismissTopSheet();
+});
+
 async function onTab(id) {
   state.tab = id;
   state.sheet = null;
@@ -2308,7 +2485,11 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
-  if (state.whenMode === "later" && !laterTimeChosen()) return;
+  if (state.whenMode === "later" && !isLaterToday(state.startChoice)) {
+    state.error = TIME_LATER_ERROR;
+    render();
+    return;
+  }
   await run(async () => {
     await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload() } });
     state.sheet = null;
