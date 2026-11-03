@@ -2,7 +2,7 @@
 
 Hangry is a small, installable web app for an invite-only circle of friends. Tap once when you're free. Everyone in the circle gets a push. They tap Join, and you hear about it.
 
-It is a PWA: home-screen install on Android and on iPhone (iOS 16.4+), no app store. The server, the SQLite database, and the web push setup all live in this repo. The repo and the npm package are named `free-now`. The name people see is Hangry. The public site is whatever you set in `PUBLIC_BASE_URL`. The custom domain is not chosen yet.
+It is a PWA: home-screen install on Android and on iPhone (iOS 16.4+), no app store. The server, the SQLite database, and the web push setup all live in this repo. The repo and the npm package are named `free-now`. The name people see is Hangry. The public site is whatever you set in `PUBLIC_BASE_URL`. Requests that still arrive on the previous Railway hostname are redirected there.
 
 ## Run it locally
 

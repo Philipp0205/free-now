@@ -6,7 +6,14 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
-const COLORS = ["#ff375f", "#ff9f0a", "#30d158", "#64d2ff", "#bf5af2", "#ff6482", "#ac8e68", "#5e5ce6"];
+const COLORS = [
+  "#9d174d", "#9a3412", "#166534", "#155e75", "#5b21b6", "#9f1239", "#3f3f46", "#1e3a8a",
+  "#7f1d1d", "#7c2d12", "#14532d", "#164e63", "#4c1d95", "#831843", "#134e4a", "#312e81",
+];
+
+let sheetHistoryPushed = false;
+let ignoreSheetPop = false;
+let closingFromPop = false;
 
 const state = {
   booting: true,
@@ -54,6 +61,7 @@ const state = {
   whereSearching: false,
   whereMap: false,
   focusSocial: "",
+  deepLink: null,
   invitePreview: null,
   inviteError: "",
   whenMode: "now",
@@ -61,8 +69,11 @@ const state = {
   etaFor: "",
 };
 
-const socialFocus = new URLSearchParams(location.search).get("social");
-if (socialFocus) state.focusSocial = socialFocus;
+const deepLinkParams = new URLSearchParams(location.search);
+const planFocus = deepLinkParams.get("plan");
+const socialFocus = deepLinkParams.get("social");
+if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
+else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
 if (joinPath) state.pendingCode = joinPath[1].toUpperCase();
 state.codeDraft = state.pendingCode;
@@ -103,14 +114,16 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh().catch(() => {});
 });
 
+render();
+
 async function boot() {
   try {
     state.meta = await api("/api/meta", { token: null });
     if (state.pendingCode) {
       try {
         state.invitePreview = await api(`/api/invites/${state.pendingCode}`, { token: null });
-      } catch {
-        state.inviteError = "This invite link has expired.";
+      } catch (error) {
+        state.inviteError = error.status === 410 ? "expired" : "invalid";
       }
     }
     if (state.token) {
@@ -132,15 +145,104 @@ async function boot() {
       }
     }
   } catch (error) {
-    state.error = error.message || "Could not reach Hangry";
+    if (state.token && error.status !== 401) {
+      restoreCachedState();
+      noteConnectionProblem(error);
+      scheduleOfflineRetry(1000);
+    } else {
+      state.error = friendlyMessage(error.message, error.status);
+    }
   } finally {
     state.booting = false;
+    if (state.me && !state.me.circle && state.circleDraft === "friends") {
+      state.circleDraft = `${state.me.user.name}'s circle`;
+    }
     render();
-    refresh({ initial: true }).catch(() => {});
-    rememberViewerLocation();
-    void considerReminders();
+    if (!state.offline) {
+      refresh({ initial: true }).catch(() => {});
+      rememberViewerLocation();
+      void considerReminders();
+    }
     if (state.focusSocial) history.replaceState(null, "", "/");
   }
+}
+
+function persistCachedState() {
+  if (!state.token || !state.me) return;
+  try {
+    localStorage.setItem("fn_state", JSON.stringify({
+      me: state.me,
+      socials: state.socials,
+      plans: state.plans,
+      notifications: state.notifications,
+    }));
+  } catch {
+    /* storage can be full */
+  }
+}
+
+function restoreCachedState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("fn_state") || "null");
+    if (!saved?.me) return false;
+    state.me = saved.me;
+    state.socials = saved.socials || [];
+    state.plans = saved.plans || [];
+    state.notifications = saved.notifications || [];
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isNetworkFailure(error) {
+  const status = error?.status;
+  return status == null || status === 0;
+}
+
+function noteConnectionProblem(error) {
+  state.offline = isNetworkFailure(error);
+  state.error = state.offline ? "You're offline. Retrying…" : error.status >= 500
+    ? "Something went wrong. Retrying…"
+    : friendlyMessage(error.message, error.status);
+}
+
+function scheduleOfflineRetry(delay) {
+  clearTimeout(state.offlineTimer);
+  state.offlineTimer = setTimeout(async () => {
+    try {
+      if (!state.meta) state.meta = await api("/api/meta", { token: null });
+      if (state.token) state.me = await api("/api/me");
+      state.offline = false;
+      if (state.error === "You're offline. Retrying…" || state.error === "Something went wrong. Retrying…") state.error = "";
+      render();
+      refresh({ initial: true }).catch(() => {});
+      void considerReminders();
+    } catch (error) {
+      if (error.status === 401) return;
+      noteConnectionProblem(error);
+      render();
+      scheduleOfflineRetry(Math.min(delay * 2, 30000));
+    }
+  }, delay);
+}
+
+const RETRY_NOTE = new Set(["You're offline. Retrying…", "Something went wrong. Retrying…"]);
+
+function friendlyMessage(raw, status) {
+  const text = String(raw || "");
+  const lower = text.toLowerCase();
+  if (status >= 500) return "Something went wrong. Retrying…";
+  if (!text || lower.includes("failed to fetch") || status === 0) return "You're offline. Retrying…";
+  if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
+  if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
+  if (status === 410 || lower.includes("expired")) return "This invite has expired. Ask for a new link.";
+  if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
+  if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
+  if (lower.includes("pick a time")) return "Pick a time later today.";
+  if (lower.includes("already in a circle")) return "You're already in a circle.";
+  if (status === 401) return "Please sign in again.";
+  return "Something went wrong. Try again.";
 }
 
 async function refresh({ initial = false } = {}) {
@@ -176,6 +278,8 @@ async function refresh({ initial = false } = {}) {
     members: state.me?.circle?.members ?? null,
     banner: state.banner?.id ?? null,
   });
+  persistCachedState();
+  if (consumeDeepLink()) return;
   if (signature === state.signature) return;
   state.signature = signature;
   if (state.sheet || state.installOpen || isTyping()) return;
@@ -374,7 +478,9 @@ bindKeyboard();
 
 async function api(path, options = {}) {
   const token = options.token === undefined ? state.token : options.token;
-  const response = await fetch(path, {
+  let response;
+  try {
+    response = await fetch(path, {
     method: options.method ?? "GET",
     headers: {
       ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
@@ -382,6 +488,11 @@ async function api(path, options = {}) {
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
+  } catch {
+    const error = new Error("You're offline. Retrying…");
+    error.status = 0;
+    throw error;
+  }
   const text = await response.text();
   let data = null;
   if (text) {
@@ -402,7 +513,7 @@ async function api(path, options = {}) {
       state.pushReminder = null;
       if (!state.booting) render();
     }
-    const error = new Error(data?.error || `Request failed (${response.status})`);
+    const error = new Error(friendlyMessage(data?.error, response.status));
     error.status = response.status;
     throw error;
   }
@@ -420,6 +531,7 @@ function clearSession() {
 }
 
 function render() {
+  assignAvatarColors();
   const activeId = state.focusSheet ? null : document.activeElement?.id || null;
   const caret = document.activeElement?.selectionStart ?? null;
   const y = document.scrollingElement?.scrollTop ?? 0;
@@ -467,7 +579,15 @@ function render() {
 function view() {
   const root = el("div", {});
   if (state.booting) {
-    root.append(el("div", { class: "boot" }, [el("button", { class: "orb", "aria-label": "Loading", disabled: true })]));
+    root.append(el("div", { class: "boot" }, [el("div", { class: "orb live", "aria-label": "Loading" })]));
+    return root;
+  }
+  if (state.offline && state.token && !state.me) {
+    root.append(el("div", { class: "boot" }, [
+      el("div", { class: "orb live", "aria-hidden": "true" }),
+      el("p", { class: "lede", text: "You're offline. Retrying…" }),
+    ]));
+    if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
     return root;
   }
   if (!state.token || !state.me) {
@@ -483,7 +603,9 @@ function view() {
   }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
-  if (state.error && state.error !== TIME_LATER_ERROR) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+  if (state.error && state.error !== TIME_LATER_ERROR && !RETRY_NOTE.has(state.error)) {
+    root.append(el("div", { class: "toast", role: "status", text: state.error }));
+  }
   return root;
 }
 
@@ -497,7 +619,11 @@ function welcome() {
         class: "lede",
         text: state.invitePreview?.name
           ? `Join ${state.invitePreview.name}`
-          : state.inviteError || "A private circle. Tap when you're free.",
+          : state.inviteError === "expired"
+            ? "This invite has expired. Ask for a new link."
+            : state.inviteError === "invalid"
+              ? "This invite isn't valid. Ask for a new link."
+              : "A private circle. Tap when you're free.",
       }),
     ]),
     recovering
@@ -512,6 +638,7 @@ function welcome() {
             text: "Back",
             onclick: () => {
               state.sheet = null;
+              state.codeDraft = "";
               state.error = "";
               render();
             },
@@ -527,6 +654,21 @@ function welcome() {
             text: state.invitePreview?.name ? `Join ${state.invitePreview.name}` : "Continue",
             disabled: Boolean(state.inviteError),
           }),
+          state.inviteError
+            ? el("button", {
+                class: "btn secondary",
+                type: "button",
+                text: "Start my own circle",
+                onclick: () => {
+                  state.inviteError = "";
+                  state.invitePreview = null;
+                  state.pendingCode = "";
+                  state.codeDraft = "";
+                  history.replaceState(null, "", "/");
+                  render();
+                },
+              })
+            : null,
           el("button", {
             class: "btn ghost",
             type: "button",
@@ -538,14 +680,15 @@ function welcome() {
               render();
             },
           }),
-          el("button", {
-            class: "btn ghost",
-            type: "button",
-            text: "Install for notifications",
-            onclick: openInstallGuide,
-          }),
         ]),
   ]);
+}
+
+function useNamedCircleDefault() {
+  const name = state.me?.user?.name?.trim();
+  if (name && (state.circleDraft === "friends" || !state.circleDraft.trim())) {
+    state.circleDraft = `${name}'s circle`;
+  }
 }
 
 function setup() {
@@ -572,6 +715,7 @@ function setup() {
 
 function shell() {
   const phone = el("div", { class: "phone" });
+  if (RETRY_NOTE.has(state.error)) phone.append(el("p", { class: "status-banner", role: "status", text: state.error }));
   if (state.tab === "home") phone.append(home());
   if (state.tab === "map") phone.append(mapScreen());
   if (state.tab === "circle") phone.append(circleScreen());
@@ -587,7 +731,7 @@ function screenHeader(title) {
   return el("header", { class: "screen-head" }, [
     el("h1", { class: "screen-title", text: title }),
     el("button", {
-      class: "icon-btn",
+      class: state.tab === "alerts" ? "icon-btn on" : "icon-btn",
       type: "button",
       "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
       onclick: () => { void onTab("alerts"); },
@@ -601,7 +745,6 @@ function screenHeader(title) {
 function home() {
   const mine = mySocial();
   const parts = [screenHeader("Now")];
-  if (showInstallPill()) parts.push(installPill());
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
@@ -678,7 +821,7 @@ function socialCard(social) {
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
       el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
-      placeLine(social.location, social.place),
+      placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : replyActions(social),
     ]),
@@ -697,7 +840,7 @@ function planCard(plan) {
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
-      placeLine(plan.location, plan.place),
+      placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : planReplyButtons(plan),
     ]),
@@ -716,19 +859,13 @@ function circleScreen() {
         el("button", {
           class: "btn",
           type: "button",
-          text: "Copy code",
-          onclick: () => copyText(circle.inviteCode, "Invite code copied"),
-        }),
-        el("button", {
-          class: "btn secondary",
-          type: "button",
           text: "Share invite",
           onclick: () => shareInvite(),
         }),
         el("button", {
-          class: "btn ghost",
+          class: "text-btn",
           type: "button",
-          text: "New invite link",
+          text: "New link",
           onclick: () => rotateInvite(),
         }),
       ]),
@@ -738,7 +875,7 @@ function circleScreen() {
         avatar(member, 40),
         el("div", { class: "grow" }, [
           el("h3", { text: member.name }),
-          el("p", { text: member.id === state.me.user.id ? "You" : "In the circle" }),
+          member.id === state.me.user.id ? el("p", { text: "You" }) : null,
         ]),
       ]),
     )),
@@ -749,13 +886,18 @@ function alertsScreen() {
   const items = state.notifications.length
     ? state.notifications.map((note) =>
         el("button", {
-          class: "row",
+          class: "alert-card",
           type: "button",
           onclick: () => openNotification(note),
         }, [
           note.readAt ? null : el("span", { class: "unread", "aria-label": "Unread" }),
-          el("div", { class: "grow" }, [el("h3", { text: note.title }), el("p", { text: note.body })]),
-          el("span", { class: "time", text: ago(note.createdAt) }),
+          el("div", { class: "grow" }, [
+            el("div", { class: "alert-top" }, [
+              el("h3", { text: note.title }),
+              el("span", { class: "time", text: ago(note.createdAt) }),
+            ]),
+            el("p", { text: note.body }),
+          ]),
         ]),
       )
     : [el("p", { class: "help", style: "padding: 8px 20px", text: "When a friend is free, it shows up here." })];
@@ -774,9 +916,8 @@ function alertsScreen() {
 }
 
 function youScreen() {
-  const origin = state.meta?.publicBaseUrl || location.origin;
   const code = state.me.user.buzzToken;
-  const curl = `curl -X POST ${origin}/api/buzz/${code} \\\n  -H 'content-type: application/json' \\\n  -d '{"note":"Rooftop coffee??"}'`;
+  const denied = "Notification" in window && Notification.permission === "denied";
   return el("div", {}, [
     screenHeader("You"),
     el("div", { class: "profile-hero" }, [
@@ -795,25 +936,20 @@ function youScreen() {
           ? "Add VAPID keys to deliver real phone notifications. Until then, alerts stay in this app — enough for two browser profiles."
           : "Install Hangry on your phone, then allow notifications, so a join reaches your pocket.",
       }),
+      denied ? el("ol", { class: "guide-reenable" }, reenableSteps().map((line) => el("li", { text: line }))) : null,
       el("button", {
-        class: "btn secondary",
+        class: "btn",
         type: "button",
-        text: currentGuide().status === "on"
-          ? "Notification status"
-          : currentGuide().status === "denied"
-            ? "How to turn them back on"
-            : "How to turn on notifications",
-        onclick: openInstallGuide,
+        text: denied
+          ? "Notifications are blocked"
+          : state.pushOn
+            ? "Notifications are on"
+            : state.pushBusy
+              ? "Waiting…"
+              : "Turn on notifications",
+        disabled: denied || state.pushOn || state.pushBusy,
+        onclick: () => { void onEnablePush(); },
       }),
-      currentGuide().status === "on" || currentGuide().status === "denied"
-        ? null
-        : el("button", {
-            class: "btn",
-            type: "button",
-            text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Enable notifications" : "Push needs VAPID keys",
-            disabled: state.pushBusy || !state.meta?.vapidPublicKey,
-            onclick: onEnablePush,
-          }),
       state.meta?.vapidPublicKey
         ? el("button", {
             class: "btn ghost",
@@ -827,41 +963,33 @@ function youScreen() {
         : null,
     ]),
     el("div", { class: "panel" }, [
-      el("h3", { text: "Recovery code" }),
-      el("p", { class: "code-block", text: code }),
-      el("p", { class: "help", text: "Save this. It is how you sign back in on another phone." }),
-      el("div", { class: "stack" }, [
-        el("button", {
-          class: "btn secondary",
-          type: "button",
-          text: "Copy",
-          onclick: () => copyText(code, "Recovery code copied"),
-        }),
-        el("button", {
-          class: "btn ghost",
-          type: "button",
-          text: "New code",
-          onclick: onRotateBuzz,
-        }),
-      ]),
       el("button", {
         class: "text-btn",
         type: "button",
-        text: state.advanced ? "Hide advanced" : "Advanced (ESP32 buzzer)",
+        text: state.showRecovery ? "Hide recovery code" : "Show recovery code",
         onclick: () => {
-          state.advanced = !state.advanced;
+          state.showRecovery = !state.showRecovery;
           render();
         },
       }),
-      state.advanced
+      state.showRecovery
         ? el("div", {}, [
-            el("pre", { class: "curl", text: curl }),
-            el("button", {
-              class: "btn ghost",
-              type: "button",
-              text: "Copy curl",
-              onclick: () => copyText(curl, "curl copied"),
-            }),
+            el("p", { class: "code-block", text: code }),
+            el("p", { class: "help", text: "Save this. It is how you sign back in on another phone." }),
+            el("div", { class: "stack" }, [
+              el("button", {
+                class: "btn secondary",
+                type: "button",
+                text: "Copy",
+                onclick: () => copyText(code, "Recovery code copied"),
+              }),
+              el("button", {
+                class: "btn ghost",
+                type: "button",
+                text: "New code",
+                onclick: onRotateBuzz,
+              }),
+            ]),
           ])
         : null,
     ]),
@@ -1233,7 +1361,7 @@ function whenChoice(mode, text) {
   });
 }
 
-const TIME_LATER_ERROR = "Pick a time later today";
+const TIME_LATER_ERROR = "Pick a time later today.";
 
 function zonedParts(ms) {
   const tz = state.meta?.tz || "Europe/Berlin";
@@ -1377,11 +1505,17 @@ function inReply(person) {
   return person.reply === "coming" || person.reply === "join" || person.reply === "in";
 }
 
+function arriveClock(person) {
+  return person?.arriveAt ? clock(person.arriveAt) : "";
+}
+
 function replyLine(person, social) {
   const upcoming = social.startsAt && social.startsAt > Date.now();
-  const eta = !upcoming && person.etaMin ? person.etaMin : null;
+  const eta = !upcoming && person.etaMin && !person.arriveAt ? person.etaMin : null;
+  const arriving = arriveClock(person);
   const mine = person.id === state.me.user.id;
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
+  if (arriving) return mine ? `You're in, arriving ${arriving}` : `${person.name} is in, arriving ${arriving}`;
   if (mine) return eta ? `You're in · ${eta} min` : "You're in";
   return eta ? `${person.name} · there in ${eta} min` : `${person.name} is in`;
 }
@@ -1396,13 +1530,16 @@ function replyActions(social) {
   const mine = social.joined.find((person) => person.id === state.me.user.id);
   const upcoming = social.startsAt && social.startsAt > Date.now();
   const inNow = mine && inReply(mine) && mine.reply !== "declined";
+  const picking = state.arriveFor === `social:${social.id}`;
+  const showClock = Boolean(mine?.arriveAt) || picking;
+  const limits = socialArriveLimits(social);
   return el("div", {}, [
     el("div", { class: "reply-row" }, [
       el("button", {
         class: inNow ? "chip on" : "chip",
         type: "button",
         text: "I'm in",
-        onclick: () => replyTo(social, "in", upcoming ? null : mine?.etaMin ?? null),
+        onclick: () => replyTo(social, "in", mine?.arriveAt ? null : (upcoming ? null : mine?.etaMin ?? null), mine?.arriveAt ? clock(mine.arriveAt) : null),
       }),
       el("button", {
         class: mine?.reply === "declined" ? "chip on" : "chip",
@@ -1412,21 +1549,121 @@ function replyActions(social) {
       }),
     ]),
     inNow && !upcoming
-      ? el("div", { class: "eta-row" }, [5, 10, 20].map((minutes) => el("button", {
-          class: mine?.etaMin === minutes ? "chip on" : "chip",
+      ? el("div", { class: "eta-row" }, [
+          ...[5, 10, 20].map((minutes) => el("button", {
+            class: mine?.etaMin === minutes && !mine?.arriveAt ? "chip on" : "chip",
+            type: "button",
+            text: `${minutes} min`,
+            onclick: () => replyTo(social, "in", minutes, null),
+          })),
+          el("button", {
+            class: mine?.arriveAt || picking ? "chip on" : "chip",
+            type: "button",
+            text: "Pick time",
+            onclick: () => replyTo(social, "in", null, nextFiveClock()),
+          }),
+        ])
+      : null,
+    inNow && upcoming
+      ? el("button", {
+          class: mine?.arriveAt || picking ? "chip on" : "chip",
           type: "button",
-          text: `${minutes} min`,
-          onclick: () => replyTo(social, "in", minutes),
-        })))
+          text: "Arriving at",
+          onclick: () => replyTo(social, "in", null, clock(social.startsAt)),
+        })
+      : null,
+    showClock && inNow
+      ? el("label", { class: "sheet-group arrive-field" }, [
+          el("span", { class: "sheet-label", text: "Arriving at" }),
+          el("input", {
+            class: "sheet-control",
+            type: "time",
+            min: limits.min,
+            max: limits.max,
+            value: mine?.arriveAt ? clock(mine.arriveAt) : (upcoming ? clock(social.startsAt) : nextFiveClock()),
+            onchange: (event) => replyTo(social, "in", null, event.target.value),
+          }),
+        ])
       : null,
   ]);
 }
 
-async function replyTo(social, reply, eta = null) {
+async function replyTo(social, reply, eta = null, arriveAt = null) {
   await run(async () => {
-    await api(`/api/socials/${social.id}/reply`, { method: "POST", body: { reply, eta } });
+    const body = { reply };
+    if (eta != null) body.eta = eta;
+    if (arriveAt) body.arriveAt = arriveAt;
+    await api(`/api/socials/${social.id}/reply`, { method: "POST", body });
+    state.arriveFor = arriveAt ? `social:${social.id}` : "";
     await refresh({ initial: true });
+    if (arriveAt) revealArriveField();
   });
+}
+
+function revealArriveField() {
+  const field = document.querySelector(".arrive-field");
+  const scroller = document.scrollingElement;
+  if (!field || !scroller) return;
+  const tabTop = document.querySelector(".tabbar")?.getBoundingClientRect().top ?? window.innerHeight;
+  let box = field.getBoundingClientRect();
+  const limit = tabTop - 12;
+  if (box.bottom > limit) scroller.scrollTop += box.bottom - limit;
+  box = field.getBoundingClientRect();
+  if (box.top < 8) scroller.scrollTop += box.top - 8;
+}
+
+function arriveLimits(startMs, endMs) {
+  const earliest = Math.max(startMs, Date.now() + 60 * 1000);
+  if (!Number.isFinite(earliest) || !Number.isFinite(endMs) || earliest > endMs) return { min: null, max: null };
+  if (zonedParts(earliest).day !== zonedParts(endMs).day) return { min: null, max: null };
+  return { min: clock(earliest), max: clock(endMs) };
+}
+
+function socialArriveLimits(social) {
+  const start = social.startsAt && social.startsAt > Date.now() ? social.startsAt : Date.now();
+  return arriveLimits(start, social.expiresAt);
+}
+
+function planArriveLimits(plan) {
+  if (!plan?.forDate) return { min: null, max: null };
+  const midnight = zonedMidnight(plan.forDate);
+  const start = midnight + 6 * 60 * 60 * 1000;
+  const end = midnight + (23 * 60 + 59) * 60 * 1000;
+  return arriveLimits(start, end);
+}
+
+function defaultPlanClock(plan) {
+  const limits = planArriveLimits(plan);
+  let value = "18:00";
+  if (limits.min && value < limits.min) value = limits.min;
+  if (limits.max && value > limits.max) value = limits.max;
+  return value;
+}
+
+function zonedMidnight(day) {
+  const guess = Date.parse(`${day}T00:00:00Z`);
+  if (!Number.isFinite(guess)) return NaN;
+  const part = zonedParts(guess);
+  const shown = Date.parse(`${part.day}T${clockText(part.hour, part.minute)}:00Z`);
+  return guess - (shown - guess);
+}
+
+function nextIsoDay(day) {
+  const [year, month, date] = day.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, date));
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+function nextFiveClock(now = Date.now()) {
+  let { hour, minute } = zonedParts(now);
+  minute += 1;
+  if (minute >= 60) { minute -= 60; hour += 1; }
+  const rem = minute % 5;
+  if (rem) minute += 5 - rem;
+  if (minute >= 60) { minute -= 60; hour += 1; }
+  if (hour >= 24) hour -= 24;
+  return clockText(hour, minute);
 }
 
 async function shareInvite() {
@@ -1824,12 +2061,36 @@ function scheduleReverse(lat, lng, replace = false) {
 }
 
 function openNotification(note) {
-  if (note.kind === "social" && note.refId) {
-    state.focusSocial = note.refId;
-    state.tab = "home";
+  const social = note.refId ? state.socials.find((item) => item.id === note.refId) : null;
+  const plan = !social && note.refId ? state.plans.find((item) => item.id === note.refId) : null;
+  const kind = social ? "social" : plan ? "plan" : "";
+  const item = social || plan;
+  if (item?.location) {
+    showOnMap(kind, item.id);
+    return;
+  }
+  if (item || note.kind === "social" || note.kind === "plan" || note.kind === "plan-reply" || note.kind === "reply" || note.kind === "join") {
+    state.tab = "map";
     state.sheet = null;
+    state.focusSocial = "";
   }
   render();
+}
+
+function consumeDeepLink() {
+  if (!state.deepLink) return false;
+  const { kind, id } = state.deepLink;
+  const list = kind === "plan" ? state.plans : state.socials;
+  const item = list.find((entry) => entry.id === id);
+  state.deepLink = null;
+  if (!item) return false;
+  if (item.location) {
+    showOnMap(kind, item.id);
+    return true;
+  }
+  state.tab = "map";
+  state.sheet = null;
+  return false;
 }
 
 function addMapTiles(L, map) {
@@ -1993,8 +2254,10 @@ async function mountMap() {
   }
   if (liveMap && liveMap.getContainer() === host) {
     syncMapMarkers(L, pins);
-    refreshOpenCard(pins);
     liveMap.invalidateSize();
+    const focus = takeFocusPin(pins);
+    if (focus) focusMapPin(liveMap, focus);
+    else refreshOpenCard(pins);
     reserveAttribution();
     return;
   }
@@ -2005,11 +2268,9 @@ async function mountMap() {
   liveMap = map;
   watchAttribution(map);
   syncMapMarkers(L, pins);
-  if (state.viewerLocation) {
-    map.setView([state.viewerLocation.lat, state.viewerLocation.lng], 14);
-  } else {
-    map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [36, 36], maxZoom: 15 });
-  }
+  const focus = takeFocusPin(pins);
+  if (focus) focusMapPin(map, focus);
+  else map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
   rememberMapCenter(map);
   map.on("dragend", () => rememberMapCenter(map));
   setTimeout(() => map.invalidateSize(), 60);
@@ -2035,6 +2296,22 @@ function reserveAttribution() {
   const gap = Math.ceil(mapEl.getBoundingClientRect().bottom - attr.getBoundingClientRect().top) + 8;
   if (gap < 16) return;
   wrap.style.setProperty("--attr-h", `${gap}px`);
+}
+
+function takeFocusPin(pins) {
+  if (!state.focusPin) return null;
+  const focus = pins.find((pin) => pinKey(pin) === state.focusPin);
+  if (focus) state.focusPin = "";
+  return focus || null;
+}
+
+function focusMapPin(map, pin) {
+  map.invalidateSize();
+  map.setView([pin.lat, pin.lng], 16, { animate: false });
+  showMapCard(pin);
+  const card = document.querySelector(".map-card");
+  const lift = Math.round((card?.getBoundingClientRect().height ?? 180) / 2 + 16);
+  map.panBy([0, lift], { animate: false });
 }
 
 function showMapCard(pin) {
@@ -2068,7 +2345,9 @@ function mapCard(pin) {
 
 function planReplyLine(person) {
   const mine = person.id === state.me.user.id;
+  const arriving = arriveClock(person);
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
+  if (arriving) return mine ? `You're in, arriving ${arriving}` : `${person.name} is in, arriving ${arriving}`;
   return mine ? "You're in" : `${person.name} is in`;
 }
 
@@ -2082,19 +2361,43 @@ function planReplyButtons(plan) {
   const mine = plan.joined.find((person) => person.id === state.me.user.id);
   const inNow = Boolean(mine) && mine.reply !== "declined";
   const declined = mine?.reply === "declined";
-  return el("div", { class: "reply-row" }, [
-    el("button", {
-      class: inNow ? "chip on" : "chip",
-      type: "button",
-      text: "I'm in",
-      onclick: () => replyToPlan(plan, "in"),
-    }),
-    el("button", {
-      class: declined ? "chip on" : "chip",
-      type: "button",
-      text: "Can't",
-      onclick: () => replyToPlan(plan, "declined"),
-    }),
+  const limits = planArriveLimits(plan);
+  return el("div", {}, [
+    el("div", { class: "reply-row" }, [
+      el("button", {
+        class: inNow ? "chip on" : "chip",
+        type: "button",
+        text: "I'm in",
+        onclick: () => replyToPlan(plan, "in"),
+      }),
+      el("button", {
+        class: declined ? "chip on" : "chip",
+        type: "button",
+        text: "Can't",
+        onclick: () => replyToPlan(plan, "declined"),
+      }),
+    ]),
+    inNow
+      ? el("button", {
+          class: mine?.arriveAt ? "chip on" : "chip",
+          type: "button",
+          text: "Arriving at",
+          onclick: () => replyToPlan(plan, "in", defaultPlanClock(plan)),
+        })
+      : null,
+    inNow && mine?.arriveAt
+      ? el("label", { class: "sheet-group arrive-field" }, [
+          el("span", { class: "sheet-label", text: "Arriving at" }),
+          el("input", {
+            class: "sheet-control",
+            type: "time",
+            min: limits.min,
+            max: limits.max,
+            value: clock(mine.arriveAt),
+            onchange: (event) => replyToPlan(plan, "in", event.target.value),
+          }),
+        ])
+      : null,
   ]);
 }
 
@@ -2108,10 +2411,13 @@ function planPinActions(plan) {
   ]);
 }
 
-async function replyToPlan(plan, reply) {
+async function replyToPlan(plan, reply, arriveAt = null) {
   await run(async () => {
-    await api(`/api/plans/${plan.id}/reply`, { method: "POST", body: { reply } });
+    const body = { reply };
+    if (arriveAt) body.arriveAt = arriveAt;
+    await api(`/api/plans/${plan.id}/reply`, { method: "POST", body });
     await refresh({ initial: true });
+    if (arriveAt) revealArriveField();
   });
 }
 
@@ -2167,7 +2473,7 @@ function audiencePlace(place) {
   return /^near you$/i.test(spot) ? "nearby" : spot;
 }
 
-function placeLine(location, placeName) {
+function placeLine(location, placeName, target) {
   const named = audiencePlace(placeName);
   if (!location && !named) return null;
   const distance = location && state.viewerLocation
@@ -2175,17 +2481,30 @@ function placeLine(location, placeName) {
     : "";
   const where = named || "nearby";
   const text = distance ? `${where} · ${distance}` : where;
-  if (!location) return el("p", { class: "place-line static", text });
-  return el("a", {
+  if (!location || !target) return el("p", { class: "place-line static", text });
+  return el("button", {
     class: "place-line",
-    href: mapsHref(location.lat, location.lng, named || "Hangry"),
-    target: mapsExternal() ? "_blank" : null,
-    rel: mapsExternal() ? "noreferrer" : null,
-    "aria-label": `Open in Maps, ${text}`,
+    type: "button",
+    "aria-label": `Show ${text} on the map`,
+    onclick: () => showOnMap(target.kind, target.id),
   }, [
     el("span", { class: "place-pin", "aria-hidden": "true" }),
     el("span", { text }),
   ]);
+}
+
+function showOnMap(kind, id) {
+  if (state.tab !== "map") {
+    state.mapReturnTab = state.tab;
+    if (!state.mapHistory) {
+      history.pushState({ hangryMap: 1 }, "");
+      state.mapHistory = true;
+    }
+  }
+  state.focusPin = `${kind}:${id}`;
+  state.tab = "map";
+  state.sheet = null;
+  render();
 }
 
 function escapeHtml(value) {
@@ -2324,10 +2643,6 @@ function closeSheet() {
   render();
 }
 
-let sheetHistoryPushed = false;
-let ignoreSheetPop = false;
-let closingFromPop = false;
-
 function sheetIsOpen() {
   return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen);
 }
@@ -2441,14 +2756,20 @@ window.addEventListener("popstate", () => {
     ignoreSheetPop = false;
     return;
   }
-  if (!sheetIsOpen()) {
+  if (sheetIsOpen()) {
     sheetHistoryPushed = false;
+    closingFromPop = true;
+    dismissTopSheet();
+    closingFromPop = false;
     return;
   }
   sheetHistoryPushed = false;
-  closingFromPop = true;
-  dismissTopSheet();
-  closingFromPop = false;
+  if (state.mapHistory) {
+    state.mapHistory = false;
+    state.tab = state.mapReturnTab || "home";
+    state.focusPin = "";
+    render();
+  }
 });
 
 document.addEventListener("keydown", (event) => {
@@ -2500,6 +2821,7 @@ async function onStart(event) {
       }
     }
     state.pushSnooze = false;
+    if (!state.me.circle) useNamedCircleDefault();
     render();
     refresh({ initial: true }).catch(() => {});
     void considerReminders();
@@ -2748,25 +3070,51 @@ async function considerReminders() {
   }
   state.pushOn = await devicePushOn();
   const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
-  const wantInstall = !isInstalled() && installDue() && !prompt.quiet;
-  const wantPush = !state.pushOn && !state.pushSnooze;
-  state.onboarding = wantInstall || wantPush;
+  const due = reminderDue();
+  const denied = "Notification" in window && Notification.permission === "denied";
+  const wantInstall = due && !isInstalled() && installDue() && !prompt.quiet && !denied;
+  const wantPush = due && !state.pushOn && !denied;
+  const wantDenied = due && denied;
+  state.onboarding = wantInstall || wantPush || wantDenied;
   state.installSheet = false;
   state.pushReminder = null;
   render();
 }
 
+function reminderDue() {
+  const at = Number(localStorage.getItem(INSTALL_LATER_KEY) || 0);
+  if (!at) return true;
+  return Date.now() - at >= 3 * 24 * 60 * 60 * 1000;
+}
+
+function reenableSteps() {
+  const firefox = /firefox|fennec/i.test(navigator.userAgent);
+  if (firefox) {
+    return [
+      "Open the Firefox menu",
+      "Settings → Site permissions → Notifications",
+      "Allow Hangry",
+    ];
+  }
+  return [
+    "Open the Chrome menu",
+    "Settings → Site settings → Notifications",
+    "Allow Hangry",
+  ];
+}
+
 function dismissOnboarding() {
   state.pushSnooze = true;
-  if (!isInstalled()) localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
+  localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
   state.onboarding = false;
   render();
 }
 
 function onboardingSheet() {
   const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
-  const showInstall = !isInstalled() && !prompt.quiet;
-  const showPush = !state.pushOn;
+  const denied = "Notification" in window && Notification.permission === "denied";
+  const showInstall = !denied && !isInstalled() && !prompt.quiet;
+  const showPush = !denied && !state.pushOn;
   const actions = [];
   if (showPush) {
     actions.push(el("button", {
@@ -2786,17 +3134,21 @@ function onboardingSheet() {
     el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": "Get started" }, [
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
-        el("h2", { text: showPush ? "Turn on notifications" : "Add to home screen" }),
+        el("h2", { text: denied ? "Notifications are blocked" : showPush ? "Turn on notifications" : "Add to home screen" }),
         el("p", {
           class: "help",
-          text: showPush
-            ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
-            : "Add Hangry to your home screen so it stays one tap away.",
+          text: denied
+            ? "Hangry can't ask again until notifications are allowed in the browser."
+            : showPush
+              ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
+              : "Add Hangry to your home screen so it stays one tap away.",
         }),
       ]),
-      showInstall && prompt.steps.length
-        ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
-        : null,
+      denied
+        ? el("ol", { class: "guide-reenable" }, reenableSteps().map((line) => el("li", { text: line })))
+        : showInstall && prompt.steps.length
+          ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
+          : null,
       el("div", { class: "stack" }, actions),
     ]),
   ]);
@@ -3031,11 +3383,11 @@ function remaining(expiresAt) {
 }
 
 function ago(ts) {
-  const seconds = Math.max(0, (Date.now() - ts) / 1000);
-  if (seconds < 45) return "now";
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86400)}d ago`;
+  const seconds = Math.max(0, (Date.now() - Number(ts || 0)) / 1000);
+  if (seconds < 60) return "Just now";
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} h ago`;
+  return `${Math.round(seconds / 86400)} d ago`;
 }
 
 function ttlLabel(ms) {
@@ -3052,9 +3404,35 @@ function bgFor(id) {
 }
 
 function colorFor(id) {
+  if (state.colorMap?.has(id)) return state.colorMap.get(id);
   let hash = 0;
-  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  for (const char of id || "") hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return COLORS[hash % COLORS.length];
+}
+
+function assignAvatarColors() {
+  const ids = new Set();
+  for (const member of state.me?.circle?.members || []) ids.add(member.id);
+  if (state.me?.user?.id) ids.add(state.me.user.id);
+  for (const social of state.socials || []) {
+    ids.add(social.creator?.id);
+    for (const person of social.joined || []) ids.add(person.id);
+  }
+  const used = new Set();
+  const map = new Map();
+  for (const id of [...ids].filter(Boolean).sort()) {
+    let hash = 0;
+    for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    let index = hash % COLORS.length;
+    let guard = 0;
+    while (used.has(COLORS[index]) && guard < COLORS.length) {
+      index = (index + 1) % COLORS.length;
+      guard += 1;
+    }
+    used.add(COLORS[index]);
+    map.set(id, COLORS[index]);
+  }
+  state.colorMap = map;
 }
 
 function initial(name) {
