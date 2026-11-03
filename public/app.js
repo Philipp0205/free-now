@@ -1,7 +1,9 @@
+import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 
 const TOKEN_KEY = "fn_token";
-const IOS_HINT_KEY = "fn_ios_hint_off";
+const INSTALLED_KEY = "fn_installed";
+const INSTALL_LATER_KEY = "fn_install_later";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 const COLORS = ["#ff375f", "#ff9f0a", "#30d158", "#64d2ff", "#bf5af2", "#ff6482", "#ac8e68", "#5e5ce6"];
 
@@ -29,7 +31,12 @@ const state = {
   bootstrappedNotifs: false,
   focusSheet: false,
   installEvent: null,
+  installOpen: false,
   pushBusy: false,
+  pushReminder: null,
+  pushSnooze: false,
+  installSheet: false,
+  installPillHidden: false,
 };
 
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
@@ -49,6 +56,13 @@ window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   state.installEvent = event;
   render();
+});
+
+window.addEventListener("appinstalled", () => {
+  localStorage.setItem(INSTALLED_KEY, "1");
+  state.installEvent = null;
+  state.installSheet = false;
+  void considerReminders();
 });
 
 if ("serviceWorker" in navigator) {
@@ -80,6 +94,7 @@ async function boot() {
     state.booting = false;
     render();
     refresh({ initial: true }).catch(() => {});
+    void considerReminders();
   }
 }
 
@@ -118,7 +133,7 @@ async function refresh({ initial = false } = {}) {
   });
   if (signature === state.signature) return;
   state.signature = signature;
-  if (state.sheet || isTyping()) return;
+  if (state.sheet || state.installOpen || isTyping()) return;
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
@@ -347,6 +362,12 @@ function view() {
   } else {
     root.append(shell());
   }
+  if (state.installOpen) root.append(installGuideView());
+  if (state.installSheet && !state.sheet && !state.confirm && !state.installOpen) {
+    root.append(installSheetView());
+  } else if (state.pushReminder && !state.pushSnooze && !state.sheet && !state.confirm && !state.installOpen) {
+    root.append(pushReminderSheet());
+  }
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
   if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
@@ -393,6 +414,12 @@ function welcome() {
               state.error = "";
               render();
             },
+          }),
+          el("button", {
+            class: "btn ghost",
+            type: "button",
+            text: "Install for notifications",
+            onclick: openInstallGuide,
           }),
         ]),
   ]);
@@ -455,7 +482,7 @@ function home() {
       ]),
     ]),
   ];
-  if (showIosHint()) parts.push(iosHint());
+  if (showInstallPill()) parts.push(installPill());
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
@@ -631,18 +658,31 @@ function youScreen() {
     ]),
     el("div", { class: "panel" }, [
       el("h3", { text: "Notifications" }),
+      notificationStatus(),
       el("p", {
         text: state.meta?.devMode
           ? "Add VAPID keys to deliver real phone notifications. Until then, alerts stay in this app — enough for two browser profiles."
-          : "Turn on notifications so a join actually reaches your pocket. On iPhone this only works after you add Hangry to the Home Screen (iOS 16.4+).",
+          : "Install Hangry on your phone, then allow notifications, so a join reaches your pocket.",
       }),
       el("button", {
-        class: "btn",
+        class: "btn secondary",
         type: "button",
-        text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Turn on notifications" : "Push needs VAPID keys",
-        disabled: state.pushBusy || !state.meta?.vapidPublicKey,
-        onclick: onEnablePush,
+        text: currentGuide().status === "on"
+          ? "Notification status"
+          : currentGuide().status === "denied"
+            ? "How to turn them back on"
+            : "How to turn on notifications",
+        onclick: openInstallGuide,
       }),
+      currentGuide().status === "on" || currentGuide().status === "denied"
+        ? null
+        : el("button", {
+            class: "btn",
+            type: "button",
+            text: state.pushBusy ? "Waiting…" : state.meta?.vapidPublicKey ? "Enable notifications" : "Push needs VAPID keys",
+            disabled: state.pushBusy || !state.meta?.vapidPublicKey,
+            onclick: onEnablePush,
+          }),
       state.meta?.vapidPublicKey
         ? el("button", {
             class: "btn ghost",
@@ -761,41 +801,106 @@ function banner(note) {
   ]);
 }
 
-function iosHint() {
-  return el("div", { class: "ios-hint" }, [
-    el("div", { class: "ios-hint-body" }, [
-      el("button", {
-        type: "button",
-        text: "Add to Home Screen for notifications",
-        onclick: () => {
-          state.iosHintOpen = !state.iosHintOpen;
-          render();
-        },
-      }),
-      state.iosHintOpen
-        ? el("p", { text: "In Safari, tap Share, then Add to Home Screen, and open Hangry from the icon. iOS 16.4 or newer." })
-        : null,
-    ]),
-    el("button", {
-      class: "ios-dismiss",
+function currentSignals() {
+  const standalone = window.matchMedia("(display-mode: standalone)").matches
+    || window.matchMedia("(display-mode: fullscreen)").matches
+    || window.navigator.standalone === true;
+  const notificationPermission = "Notification" in window ? Notification.permission : "unsupported";
+  return readInstallSignals({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints || 0,
+    standalone,
+    notificationPermission,
+  });
+}
+
+function currentGuide() {
+  return installGuide(currentSignals());
+}
+
+function notificationStatus() {
+  const guide = currentGuide();
+  if (guide.status === "on") return el("p", { class: "status-on", text: "Notifications on" });
+  if (guide.status === "denied") return el("p", { class: "status-off", text: "Notifications blocked" });
+  return null;
+}
+
+function openInstallGuide() {
+  state.installOpen = true;
+  state.error = "";
+  render();
+}
+
+function closeInstallGuide() {
+  state.installOpen = false;
+  render();
+}
+
+function installGuideView() {
+  const guide = currentGuide();
+  const signals = currentSignals();
+  const actions = [];
+  if (state.installEvent && !signals.standalone) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: onInstall }));
+  }
+  if (canEnableNotifications(signals, guide)) {
+    actions.push(el("button", {
+      class: "btn",
       type: "button",
-      "aria-label": "Dismiss",
-      text: "×",
-      onclick: () => {
-        localStorage.setItem(IOS_HINT_KEY, "1");
-        state.iosHintOpen = false;
-        render();
-      },
-    }),
+      text: state.pushBusy ? "Waiting…" : "Enable notifications",
+      disabled: state.pushBusy,
+      onclick: onEnablePush,
+    }));
+  }
+  if (guide.offerCopyLink) {
+    actions.unshift(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallGuide }));
+  return el("div", { class: "guide-scrim" }, [
+    el("section", { class: "guide", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-title" }, [
+      el("div", { class: "guide-head" }, [
+        el("h2", {
+          id: "install-title",
+          text: guide.status === "on" || guide.status === "denied" ? "Notifications" : guide.headline,
+        }),
+      ]),
+      guide.status === "on" ? el("p", { class: "status-on", text: "Notifications on" }) : null,
+      guide.status === "denied" ? el("p", { class: "status-off", text: "Notifications blocked" }) : null,
+      el("p", { class: "lede", text: guide.lede }),
+      ...guide.groups.map((group) => el("section", { class: "guide-group" }, [
+        group.label ? el("h3", { text: group.label }) : null,
+        group.steps.length
+          ? el("ol", { class: "guide-steps" }, group.steps.map((item, index) => el("li", { class: item.done ? "done" : "" }, [
+              el("span", { class: "n", text: item.done ? "✓" : String(index + 1) }),
+              el("div", {}, [
+                el("strong", { text: item.title }),
+                el("p", { text: item.detail }),
+              ]),
+            ])))
+          : null,
+        group.reenable.length
+          ? el("ol", { class: "guide-reenable" }, group.reenable.map((line) => el("li", { text: line })))
+          : null,
+        group.note ? el("p", { class: "guide-note", text: group.note }) : null,
+      ])),
+      el("div", { class: "stack" }, actions),
+    ]),
   ]);
 }
 
-function showIosHint() {
-  if (localStorage.getItem(IOS_HINT_KEY) === "1") return false;
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
-    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-  return ios && !standalone;
+function canEnableNotifications(signals, guide) {
+  if (!state.meta?.vapidPublicKey) return false;
+  if (guide.status === "on" || guide.status === "denied" || guide.status === "wrong-browser") return false;
+  if (signals.permission !== "default") return false;
+  if (signals.platform === "ios") return signals.standalone && signals.safari;
+  if (signals.platform === "android") return !signals.inApp;
+  return false;
 }
 
 function field(label, id, value, onValue, attrs = {}) {
@@ -902,8 +1007,10 @@ async function onStart(event) {
         state.error = error.message;
       }
     }
+    state.pushSnooze = false;
     render();
     refresh({ initial: true }).catch(() => {});
+    void considerReminders();
   } catch (error) {
     state.error = error.message;
     render();
@@ -919,8 +1026,10 @@ async function onRecover(event) {
     state.token = data.token;
     state.sheet = null;
     state.me = await api("/api/me");
+    state.pushSnooze = false;
     render();
     refresh({ initial: true }).catch(() => {});
+    void considerReminders();
   } catch (error) {
     state.error = error.message;
     render();
@@ -933,6 +1042,7 @@ async function onCreateCircle(event) {
     await api("/api/circles", { method: "POST", body: { name: state.circleDraft || "friends" } });
     state.me = await api("/api/me");
   });
+  void considerReminders();
 }
 
 async function onJoinCircle(event) {
@@ -942,6 +1052,7 @@ async function onJoinCircle(event) {
     state.me = await api("/api/me");
     if (state.pendingCode) history.replaceState(null, "", "/");
   });
+  void considerReminders();
 }
 
 async function onFree(event) {
@@ -1054,7 +1165,12 @@ async function onRename(event) {
 }
 
 async function onEnablePush() {
-  if (!state.meta?.vapidPublicKey) return;
+  if (!state.meta?.vapidPublicKey) {
+    state.error = "Push needs VAPID keys";
+    render();
+    scheduleErrorClear();
+    return;
+  }
   state.pushBusy = true;
   render();
   try {
@@ -1071,6 +1187,7 @@ async function onEnablePush() {
       body: { endpoint: json.endpoint, keys: json.keys },
     });
     state.error = "Notifications are on";
+    state.pushReminder = null;
   } catch (error) {
     state.error = error.message || "Could not enable notifications";
   } finally {
@@ -1078,22 +1195,198 @@ async function onEnablePush() {
     render();
     scheduleErrorClear();
   }
+  void considerPushReminder();
 }
 
 async function onTestPush() {
   await run(async () => {
-    await api("/api/push/test", { method: "POST", body: {} });
+    const result = await api("/api/push/test", { method: "POST", body: {} });
     await refresh({ initial: true });
-    state.error = "Test sent";
+    state.error = pushTestMessage(result?.subscriptions);
   });
+}
+
+function isInstalled() {
+  if (localStorage.getItem(INSTALLED_KEY) === "1") return true;
+  return window.matchMedia("(display-mode: standalone)").matches
+    || window.matchMedia("(display-mode: fullscreen)").matches
+    || window.navigator.standalone === true;
+}
+
+function installDue() {
+  return installReminderDue(localStorage.getItem(INSTALL_LATER_KEY), Date.now());
+}
+
+async function considerReminders() {
+  if (!state.token || !state.me || !state.me.circle) {
+    const showing = state.installSheet || state.pushReminder;
+    state.installSheet = false;
+    state.pushReminder = null;
+    if (showing) render();
+    return;
+  }
+  const signals = currentSignals();
+  const prompt = installPrompt(signals, { canPrompt: Boolean(state.installEvent) });
+  if (!isInstalled() && installDue() && !prompt.quiet) {
+    state.installSheet = true;
+    state.pushReminder = null;
+    render();
+    return;
+  }
+  if (state.installSheet) return;
+  if (!isInstalled() && needsInstallForPush(signals)) {
+    state.pushReminder = null;
+    render();
+    return;
+  }
+  await considerPushReminder();
+}
+
+async function considerPushReminder() {
+  if (!state.token || !state.me || state.pushSnooze || state.installSheet) return;
+  const signals = currentSignals();
+  if (signals.permission !== "granted") {
+    state.pushReminder = pushReminder(signals, { hasSubscription: false, serverKnows: false });
+    render();
+    return;
+  }
+  const endpoint = await localSubscriptionEndpoint();
+  let serverKnows = false;
+  if (endpoint) {
+    try {
+      const status = await api("/api/push/status", { method: "POST", body: { endpoint } });
+      serverKnows = Boolean(status?.known);
+    } catch {
+      serverKnows = false;
+    }
+  }
+  state.pushReminder = pushReminder(signals, { hasSubscription: Boolean(endpoint), serverKnows });
+  render();
+}
+
+function localSubscriptionEndpoint() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return Promise.resolve("");
+  const ready = navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription());
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 1500));
+  return Promise.race([ready, timeout]).then((subscription) => subscription?.endpoint || "").catch(() => "");
+}
+
+function pushReminderSheet() {
+  const reminder = state.pushReminder;
+  if (!reminder) return el("div");
+  const snooze = () => {
+    state.pushSnooze = true;
+    render();
+  };
+  const actions = [];
+  if (reminder.kind === "enable") {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: state.pushBusy ? "Waiting…" : "Turn on notifications",
+      disabled: state.pushBusy,
+      onclick: () => onEnablePush(),
+    }));
+  } else if (reminder.kind === "guide") {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Open the install guide",
+      onclick: openInstallGuide,
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: snooze }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: snooze }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": reminder.title }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: reminder.title }),
+      el("p", { class: "help", text: reminder.lede }),
+      reminder.steps?.length
+        ? el("ol", { class: "guide-reenable" }, reminder.steps.map((line) => el("li", { text: line })))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 async function onInstall() {
   if (!state.installEvent) return;
   state.installEvent.prompt();
-  await state.installEvent.userChoice;
+  const choice = await state.installEvent.userChoice;
   state.installEvent = null;
+  if (choice?.outcome === "accepted") {
+    localStorage.setItem(INSTALLED_KEY, "1");
+    state.installSheet = false;
+  }
   render();
+  void considerReminders();
+}
+
+function showInstallPill() {
+  const prompt = installPrompt(currentSignals(), { canPrompt: false });
+  return Boolean(state.me?.circle) && !isInstalled() && !state.installPillHidden && !prompt.quiet;
+}
+
+function installPill() {
+  return el("div", { class: "install-pill" }, [
+    el("button", {
+      class: "text",
+      type: "button",
+      text: "Install Hangry to get notifications",
+      onclick: () => {
+        state.installSheet = true;
+        state.pushReminder = null;
+        render();
+      },
+    }),
+    el("button", {
+      class: "ios-dismiss",
+      type: "button",
+      "aria-label": "Hide install reminder",
+      text: "×",
+      onclick: () => {
+        state.installPillHidden = true;
+        render();
+      },
+    }),
+  ]);
+}
+
+function dismissInstallSheet() {
+  localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
+  state.installSheet = false;
+  render();
+  void considerReminders();
+}
+
+function installSheetView() {
+  const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
+  const actions = [];
+  if (prompt.offerInstall) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: () => onInstall() }));
+  }
+  if (prompt.copyLink) {
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: dismissInstallSheet }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissInstallSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": prompt.title }, [
+      el("div", { class: "grabber" }),
+      el("h2", { text: prompt.title }),
+      el("p", { class: "help", text: prompt.lede }),
+      prompt.steps.length
+        ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 async function onRotateBuzz() {

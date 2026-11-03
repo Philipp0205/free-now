@@ -28,7 +28,7 @@ Use two browser profiles, or a normal window and a private window. They do not s
 
 Tomorrow plans use the **+** button. Friends join those the same way. A social ends on its own after about two hours (change `SOCIAL_TTL_MS`), or the creator can end it early.
 
-Real phone push is a separate step. Generate VAPID keys, set them in the environment, restart, and use **Turn on notifications** in the You tab. On an iPhone that button only works after the app is on the Home Screen.
+Real phone push is a separate step. Generate VAPID keys, set them in the environment, restart, then follow [Install on your phone](#install-on-your-phone). The same guide is in the app, on the welcome screen and under You → notifications.
 
 ## Tests
 
@@ -85,18 +85,47 @@ npm run vapid
 Put the printed lines in the environment and restart. Then, on a phone:
 
 1. Open the site over HTTPS (localhost is the only HTTP exception).
-2. Install it (below).
-3. You → **Turn on notifications**. Allow the prompt.
-4. **Send a test push** to confirm the phone actually receives one.
+2. Install it and allow notifications, using the steps below.
+3. You → **Send a test push** to confirm the phone actually receives one.
 
-## Install the app
+## Install on your phone
 
-The manifest, icons, and service worker are served by the same Node process.
+Hangry notifies a phone only after it is installed and notification permission is allowed. The in-app guide (welcome screen, and You → notifications) shows these steps for the phone you are on. The icon is a soft pink-to-red glow on black.
 
-- **Android (Chrome):** the browser offers install, or use the menu → Install app / Add to Home screen. Push works in the browser tab too, but the home-screen icon is the one that matches the product.
-- **iPhone (Safari, iOS 16.4 or newer):** tap Share → Add to Home Screen, then open Hangry from that icon. The app shows this hint on iPhones that are still inside Safari. iOS will not deliver Web Push to a normal Safari tab.
+### iPhone (Safari, iOS 16.4 or newer)
 
-The icon is a soft pink-to-red glow on black.
+Notifications do not work in a Safari tab, or in an in-app browser such as Instagram or WhatsApp. Open the link in Safari first.
+
+1. Open Hangry in Safari.
+2. Tap the Share button, then **Add to Home Screen**.
+3. Open Hangry from the home-screen icon.
+4. Tap **Enable notifications**.
+5. Tap **Allow**.
+
+If you previously tapped Don't Allow: open iPhone Settings → Notifications → Hangry and turn **Allow Notifications** on. If Hangry is not listed, add it to the Home Screen and open it from the icon, then try Enable notifications again.
+
+### Android (Chrome)
+
+1. Install Hangry. Tap the install prompt if Chrome shows one. Otherwise open the three-dot menu **⋮** and choose **Install app** or **Add to Home screen**.
+2. Open Hangry from the home-screen icon.
+3. Tap **Enable notifications**.
+4. Tap **Allow**.
+
+If a push never arrives, check both of these:
+
+- The site's notification permission is Allow. In Chrome, tap the lock icon → Permissions → Notifications, or menu **⋮** → Settings → Site settings → Notifications.
+- Hangry is allowed to notify you. Android Settings → Apps → Hangry → Notifications, then set Battery to **Unrestricted**.
+
+### Troubleshooting
+
+- **Opened from Instagram or WhatsApp.** Those in-app browsers cannot install Hangry or receive its pushes. Use the menu and open the link in Safari (iPhone) or Chrome (Android).
+- **Added from Firefox, or another browser that is not Chrome.** A home-screen shortcut from Firefox does not receive Hangry's notifications. Copy the link, open it in Chrome, and tap **Install app**. Then open Android Settings → Apps → Hangry, turn Notifications on, and set Battery to **Unrestricted**.
+- **Still looking at a Safari tab.** iOS only delivers Web Push to the Home Screen app, and only on iOS 16.4 or newer.
+- **The install prompt never appears.** On Android, use Chrome's three-dot menu **⋮** → Install app or Add to Home screen. The site has to be HTTPS (localhost is the only exception).
+- **Don't Allow.** Follow the re-enable steps for that phone above. The Enable button cannot override a blocked permission.
+- **Android goes quiet after a day.** Battery optimisation paused the app. Set Hangry to Unrestricted, and confirm the site permission is still Allow.
+- **No phone push at all, on any device.** The server has no VAPID keys, so alerts stay inside the app. Run `npm run vapid`, set the three variables, and restart.
+- **Changed the domain.** Old push subscriptions belong to the previous origin. Open the new URL, install again if needed, and tap Enable notifications.
 
 ## Docker
 
@@ -145,7 +174,7 @@ The hostname is not decided yet. When it is, point it at Railway like this:
 
 - Requires iOS or iPadOS **16.4 or newer**.
 - The app must be added to the Home Screen and opened from that icon. A Safari tab can load the UI and can register a service worker, but it will not show Web Push.
-- Permission has to be granted from a tap inside the installed app (You → Turn on notifications). iOS ignores permission requests that are not from a user gesture.
+- Permission has to be granted from a tap inside the installed app (You → Enable notifications). iOS ignores permission requests that are not from a user gesture.
 - Apple can delay or drop pushes if the installed app has not been opened for a while.
 - Notification actions, images, and vibration are more limited than on Android.
 - There is no App Store build. That is the point of the PWA.
