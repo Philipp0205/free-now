@@ -18,6 +18,7 @@ import {
   getCircleForUser,
   getPlan,
   getSocial,
+  getSocialReply,
   getUserByBuzzToken,
   getUserByTokenHash,
   hasPlanJoin,
@@ -37,7 +38,9 @@ import {
   removeMember,
   removePlanJoin,
   removeSocialJoin,
+  setSocialReply,
   rotateBuzzToken,
+  rotateInvite,
   rotateSession,
   updateSocial,
   updateUserName,
@@ -48,9 +51,10 @@ import {
   type UserRow,
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
-import { freePushBody, notifyUsers, socialTitle } from "./notify.js";
+import { freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
+import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import type { PushSender } from "./push.js";
-import { addDays, isoDate, whenLabel } from "./time.js";
+import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 
 export type AppDeps = {
   db: DatabaseSync;
@@ -137,6 +141,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (method === "POST" && pathname === "/api/auth/start") {
     const name = cleanLabel(body.name, "name", 24);
     const now = deps.now();
+    const rawCode = body.code == null || body.code === "" ? "" : cleanCode(body.code);
+    const invited = rawCode ? liveInvite(deps.db, rawCode, now) : undefined;
+    if (rawCode && !invited) throw new HttpError(404, "invite not found");
     const token = randomToken();
     const buzzToken = randomToken();
     const id = crypto.randomUUID();
@@ -147,7 +154,21 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       buzz_token: buzzToken,
       created_at: now,
     });
-    sendJson(res, 201, { token, buzzToken, user: { id, name } });
+    if (invited) addMember(deps.db, invited.id, id, now);
+    sendJson(res, 201, {
+      token,
+      buzzToken,
+      user: { id, name },
+      circle: invited ? circlePayload(deps, req, invited) : null,
+    });
+    return;
+  }
+
+  const invitePreview = matchPath(pathname, /^\/api\/invites\/([^/]+)$/);
+  if (invitePreview && method === "GET") {
+    const circle = liveInvite(deps.db, cleanCode(decodeURIComponent(invitePreview[1])), deps.now());
+    if (!circle) throw new HttpError(404, "invite not found");
+    sendJson(res, 200, { name: circle.name });
     return;
   }
 
@@ -177,7 +198,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!buzzer) throw new HttpError(404, "unknown token");
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
-    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body));
+    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
@@ -237,12 +258,22 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/circles/join") {
     const code = cleanCode(body.code);
-    const circle = getCircleByCode(deps.db, code);
+    const circle = liveInvite(deps.db, code, deps.now());
     if (!circle) throw new HttpError(404, "invite not found");
     const current = getCircleForUser(deps.db, me.id);
     if (current && current.id !== circle.id) throw new HttpError(409, "you are already in a circle");
     if (!current) addMember(deps.db, circle.id, me.id, deps.now());
     sendJson(res, 200, { circle: circlePayload(deps, req, circle) });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/circles/invite") {
+    const circle = requireCircle(deps, me.id);
+    const now = deps.now();
+    rotateInvite(deps.db, circle.id, inviteCode(), now + INVITE_TTL_MS);
+    const fresh = getCircleForUser(deps.db, me.id);
+    if (!fresh) throw new HttpError(500, "circle missing");
+    sendJson(res, 200, { circle: circlePayload(deps, req, fresh) });
     return;
   }
 
@@ -263,8 +294,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body));
+    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
+    return;
+  }
+
+  const socialReply = matchPath(pathname, /^\/api\/socials\/([^/]+)\/reply$/);
+  if (socialReply && method === "POST") {
+    sendJson(res, 200, { social: await replySocial(deps, me, socialReply[1], body) });
     return;
   }
 
@@ -408,6 +445,7 @@ async function publishSocial(
   note: string | undefined,
   point?: { lat: number; lng: number } | null,
   place?: string,
+  start?: number | null,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id);
   const now = deps.now();
@@ -415,16 +453,26 @@ async function publishSocial(
   let created = false;
   let socialId: string;
   let shouldNotify = true;
+  let shifted = false;
   // A missing note on a live social keeps the current text. The original
   // createdAt stays put; expiry moves to now + TTL so the window is a full
   // TTL from this buzz and the two timestamps still describe one social.
   // A missing place and missing coordinates keep the saved meetup.
+  // A missing start keeps a scheduled time. A later-today social lasts TTL from that time.
   const nextNote = note === undefined ? (existing?.note ?? "") : note;
   const keepWhere = place === undefined && point === undefined;
   const nextPlace = place === undefined ? (existing?.place ?? "") : place;
   const nextPoint = point === undefined
     ? (existing?.lat == null || existing?.lng == null ? null : { lat: existing.lat, lng: existing.lng })
     : point;
+  const nextStart = start === undefined ? (existing?.starts_at ?? null) : start;
+  const anchor = nextStart != null && nextStart > now ? nextStart : now;
+  const expiresAt = anchor + deps.config.socialTtlMs;
+  const fromTime = nextStart != null && nextStart > now ? clockLabel(nextStart, deps.config.tz) : "";
+  const schedule = {
+    startsAt: nextStart,
+    remindedAt: nextStart != null && nextStart > now ? null : now,
+  };
   if (!existing) {
     created = true;
     socialId = crypto.randomUUID();
@@ -434,24 +482,28 @@ async function publishSocial(
       creatorId: user.id,
       note: nextNote,
       createdAt: now,
-      expiresAt: now + deps.config.socialTtlMs,
+      expiresAt,
       lat: nextPoint?.lat ?? null,
       lng: nextPoint?.lng ?? null,
       place: nextPlace,
+      startsAt: nextStart,
     });
   } else {
     socialId = existing.id;
     const gap = now - existing.last_notified_at;
     const noteChanged = existing.note !== nextNote;
     const whereChanged = !keepWhere && (existing.place !== nextPlace || existing.lat !== (nextPoint?.lat ?? null) || existing.lng !== (nextPoint?.lng ?? null));
-    shouldNotify = noteChanged || whereChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs;
+    const startChanged = (existing.starts_at ?? null) !== nextStart;
+    shifted = startChanged;
+    shouldNotify = startChanged || (noteChanged || whereChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs);
     updateSocial(
       deps.db,
       existing.id,
       nextNote,
-      now + deps.config.socialTtlMs,
+      expiresAt,
       shouldNotify ? now : existing.last_notified_at,
       keepWhere ? undefined : { point: nextPoint, place: nextPlace },
+      start === undefined && !startChanged ? undefined : schedule,
     );
   }
   if (shouldNotify) {
@@ -464,7 +516,7 @@ async function publishSocial(
       recipients.map((member) => ({
         userId: member.id,
         title,
-        body: freePushBody(user.name, nextPlace),
+        body: freePushBody(user.name, nextPlace, fromTime, shifted),
         url: `/?social=${socialId}`,
         kind: "social",
         refId: socialId,
@@ -497,6 +549,56 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
         tag: `join:${social.id}:${user.id}`,
       },
     ]);
+  }
+  const fresh = getSocial(deps.db, social.id);
+  if (!fresh) throw new HttpError(500, "social missing");
+  return socialPayload(deps.db, fresh);
+}
+
+async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const social = getSocial(deps.db, id);
+  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  const now = deps.now();
+  if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
+  if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
+  const reply = body.reply;
+  if (reply !== "join" && reply !== "coming" && reply !== "declined") {
+    throw new HttpError(400, "reply must be join, coming, or declined");
+  }
+  let eta: number | null = null;
+  if (reply === "coming" && body.eta != null) {
+    const minutes = Number(body.eta);
+    if (![5, 10, 20].includes(minutes)) throw new HttpError(400, "eta must be 5, 10, or 20");
+    eta = minutes;
+  }
+  const previous = getSocialReply(deps.db, social.id, user.id);
+  const changed = !previous || previous.reply !== reply || (previous.eta_min ?? null) !== eta;
+  setSocialReply(deps.db, social.id, user.id, now, reply, eta);
+  const key = `${social.id}:${user.id}`;
+  const becameComing = reply === "coming" && previous?.reply !== "coming";
+  const etaOnly = previous?.reply === "coming" && reply === "coming";
+  const held = cancelReplyPush(key);
+  const notice = () => notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: social.creator_id,
+      title: socialTitle(social.note),
+      body: replyPushBody(user.name, reply, eta),
+      kind: "reply",
+      refId: social.id,
+      tag: `reply:${social.id}:${user.id}`,
+      url: `/?social=${social.id}`,
+    },
+  ]);
+  if (held || (becameComing && eta != null)) {
+    await notice();
+  } else if (becameComing) {
+    scheduleReplyPush(key, notice);
+  } else if (etaOnly) {
+    /* The host already got the coming push. An ETA a moment later stays on the card. */
+  } else if (changed) {
+    await notice();
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
@@ -605,6 +707,7 @@ function createCircle(deps: AppDeps, userId: string, name: string, now: number):
       invite_code: inviteCode(),
       created_by: userId,
       created_at: now,
+      invite_expires_at: now + INVITE_TTL_MS,
     };
     try {
       insertCircle(deps.db, circle, userId, now);
@@ -639,6 +742,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
     id: social.id,
     note: social.note,
     createdAt: social.created_at,
+    startsAt: social.starts_at,
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
@@ -647,6 +751,8 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
       id: join.id,
       name: join.name,
       joinedAt: join.joined_at,
+      reply: join.reply ?? "join",
+      etaMin: join.eta_min ?? null,
     })),
   };
 }
@@ -748,6 +854,50 @@ function readPoint(body: Record<string, unknown>): { lat: number; lng: number } 
   const lng = roundCoord(body.lng, "lng", precise ? 6 : 3);
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) throw new HttpError(400, "location is out of range");
   return { lat, lng };
+}
+
+const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+function liveInvite(db: DatabaseSync, code: string, now: number): CircleRow | undefined {
+  const circle = getCircleByCode(db, code);
+  if (!circle) return undefined;
+  if (circle.invite_expires_at == null || circle.invite_expires_at <= now) return undefined;
+  return circle;
+}
+
+/** Undefined keeps a scheduled start. Null means free right now. A clock time is later today in APP_TZ. */
+function readStart(body: Record<string, unknown>, now: number, tz: string): number | null | undefined {
+  if (body.later === true && body.startsAt == null && body.startsInMin == null) {
+    throw new HttpError(400, "pick a time later today");
+  }
+  if (!Object.prototype.hasOwnProperty.call(body, "startsAt") && !Object.prototype.hasOwnProperty.call(body, "startsInMin")) {
+    return undefined;
+  }
+  if (body.startsInMin != null) {
+    const minutes = Number(body.startsInMin);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 18 * 60) {
+      throw new HttpError(400, "start time is not later today");
+    }
+    return assertLaterToday(now + minutes * 60 * 1000, now, tz);
+  }
+  if (body.startsAt == null) return null;
+  if (typeof body.startsAt === "string") {
+    if (!/^\d{2}:\d{2}$/.test(body.startsAt)) throw new HttpError(400, "start time is not later today");
+    try {
+      return assertLaterToday(zonedDateTime(isoDate(now, tz), body.startsAt, tz), now, tz);
+    } catch {
+      throw new HttpError(400, "start time is not later today");
+    }
+  }
+  const instant = Number(body.startsAt);
+  if (!Number.isFinite(instant)) throw new HttpError(400, "start time is not later today");
+  return assertLaterToday(instant, now, tz);
+}
+
+function assertLaterToday(instant: number, now: number, tz: string): number {
+  if (instant <= now) throw new HttpError(400, "start time is not later today");
+  if (isoDate(instant, tz) !== isoDate(now, tz)) throw new HttpError(400, "start time is not later today");
+  return instant;
 }
 
 function readPlace(body: Record<string, unknown>): string | undefined {

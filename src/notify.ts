@@ -17,10 +17,26 @@ export function socialTitle(note: string): string {
   return note ? `"${note}"` : "Free now";
 }
 
-export function freePushBody(name: string, place: string): string {
+export function freePushBody(name: string, place: string, fromTime = "", shifted = false): string {
   const spot = place.trim();
+  const when = fromTime.trim();
+  if (when) {
+    const base = shifted ? `${name} is now free from ${when}` : `${name} is free from ${when}`;
+    return spot ? `${base} – meet at ${spot}` : base;
+  }
   if (!spot) return `${name} is free now`;
   return `${name} is free – meet at ${spot}`;
+}
+
+export function startingNowBody(name: string, place: string): string {
+  const spot = place.trim();
+  return spot ? `Starting now: ${name} at ${spot}` : `Starting now: ${name}`;
+}
+
+export function replyPushBody(name: string, reply: string, etaMin: number | null): string {
+  if (reply === "declined") return `${name} can't make it`;
+  if (reply === "coming") return etaMin ? `${name} is on the way – ${etaMin} min` : `${name} is on the way`;
+  return `${name} joined your social!`;
 }
 
 export async function notifyUsers(

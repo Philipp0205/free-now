@@ -159,7 +159,20 @@ button:disabled { cursor: default; opacity: 0.55; }
   overflow: hidden;
   isolation: isolate;
 }
-.card-now { height: 176px; }
+.card-now {
+  height: auto;
+  min-height: 176px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.card-now .card-copy {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  padding: 16px;
+}
 .card-bg, .card-shade { position: absolute; inset: 0; }
 .card-now .card-bg {
   background:
@@ -379,7 +392,7 @@ pre.curl {
   word-break: break-all;
 }
 label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
-input[type="text"], input[type="url"] {
+input[type="text"], input[type="url"], input[type="time"] {
   width: 100%;
   background: #1c1c1e;
   border: 0;
@@ -484,6 +497,18 @@ html.kb-open .tabbar {
 .sheet textarea {
   scroll-margin: 12px;
 }
+.when, .reply-row, .eta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip {
+  border: 0;
+  background: #2c2c2e;
+  color: #fff;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.chip.on { background: #fff; color: #000; }
+.reply-line { margin: 4px 0 0; color: #d1d1d6; font-size: 14px; }
 .where { margin-top: 12px; }
 .where-row {
   width: 100%;

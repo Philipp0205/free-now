@@ -49,6 +49,11 @@ const state = {
   whereSearching: false,
   whereMap: false,
   focusSocial: "",
+  invitePreview: null,
+  inviteError: "",
+  whenMode: "now",
+  startChoice: "",
+  etaFor: "",
 };
 
 const socialFocus = new URLSearchParams(location.search).get("social");
@@ -95,12 +100,29 @@ document.addEventListener("visibilitychange", () => {
 async function boot() {
   try {
     state.meta = await api("/api/meta", { token: null });
+    if (state.pendingCode) {
+      try {
+        state.invitePreview = await api(`/api/invites/${state.pendingCode}`, { token: null });
+      } catch {
+        state.inviteError = "This invite link has expired.";
+      }
+    }
     if (state.token) {
       try {
         state.me = await api("/api/me");
       } catch (error) {
         if (error.status !== 401) throw error;
         clearSession();
+      }
+    }
+    if (state.token && state.me && state.pendingCode && !state.inviteError && !state.me.circle) {
+      try {
+        await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
+        state.me = await api("/api/me");
+        history.replaceState(null, "", "/");
+        state.pendingCode = "";
+      } catch (error) {
+        state.error = error.message;
       }
     }
   } catch (error) {
@@ -424,7 +446,12 @@ function welcome() {
     el("div", { class: "hero" }, [
       el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
       el("h1", { class: "wordmark", text: "Hangry" }),
-      el("p", { class: "lede", text: "A private circle. Tap when you're free." }),
+      el("p", {
+        class: "lede",
+        text: state.invitePreview?.name
+          ? `Join ${state.invitePreview.name}`
+          : state.inviteError || "A private circle. Tap when you're free.",
+      }),
     ]),
     recovering
       ? el("form", { class: "stack", onsubmit: onRecover }, [
@@ -447,7 +474,12 @@ function welcome() {
           field("Your name", "name", state.nameDraft, (value) => {
             state.nameDraft = value;
           }, { placeholder: "Alex", maxlength: "24", autocomplete: "nickname" }),
-          el("button", { class: "btn", type: "submit", text: "Continue" }),
+          el("button", {
+            class: "btn",
+            type: "submit",
+            text: state.invitePreview?.name ? `Join ${state.invitePreview.name}` : "Continue",
+            disabled: Boolean(state.inviteError),
+          }),
           el("button", {
             class: "btn ghost",
             type: "button",
@@ -531,7 +563,7 @@ function home() {
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
-        class: mine ? "orb live" : "orb",
+        class: mine && isLiveSocial(mine) ? "orb live" : "orb",
         type: "button",
         "aria-label": "Let friends know you're free now",
         "aria-pressed": mine ? "true" : "false",
@@ -539,7 +571,7 @@ function home() {
       }),
       mine
         ? el("p", { class: "hint" }, [
-            el("strong", { text: "You're free now" }),
+            el("strong", { text: mine.startsAt && mine.startsAt > Date.now() ? `Free from ${clock(mine.startsAt)}` : "You're free now" }),
             document.createTextNode(mine.note || "Friends have been told"),
           ])
         : el("p", { class: "hint" }, [
@@ -549,20 +581,24 @@ function home() {
           ]),
     ]),
   );
-  if (state.me.circle.members.length < 2) {
-    parts.push(
-      el("button", {
-        class: "invite-chip",
-        type: "button",
-        onclick: () => copyText(state.me.circle.inviteCode, "Invite code copied"),
-      }, [
-        document.createTextNode("Invite "),
-        el("strong", { text: state.me.circle.inviteCode }),
-      ]),
-    );
+  parts.push(
+    el("button", {
+      class: "invite-chip",
+      type: "button",
+      text: "Share invite",
+      onclick: () => shareInvite(),
+    }),
+  );
+  const live = state.socials.filter((social) => isLiveSocial(social) || social.creator.id === state.me.user.id);
+  const later = state.socials.filter((social) => !isLiveSocial(social) && social.creator.id !== state.me.user.id);
+  if (live.length) {
+    parts.push(el("div", { class: "section" }, [el("div", { class: "cards" }, live.map(socialCard))]));
   }
-  if (state.socials.length) {
-    parts.push(el("div", { class: "section" }, [el("div", { class: "cards" }, state.socials.map(socialCard))]));
+  if (later.length) {
+    parts.push(el("section", { class: "section" }, [
+      el("h2", { text: "Later today" }),
+      el("div", { class: "cards" }, later.map(socialCard)),
+    ]));
   }
   const tomorrow = el("section", { class: "section" }, [
     el("h2", { text: "Tomorrow" }),
@@ -583,29 +619,23 @@ function home() {
 
 function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
-  const joined = social.joined.some((person) => person.id === state.me.user.id);
-  const people = [social.creator, ...social.joined];
-  const names = social.joined.map((person) => person.name);
+  const people = [social.creator, ...social.joined.filter((person) => person.reply !== "declined")];
+  const upcoming = social.startsAt && social.startsAt > Date.now();
   return el("article", {
-    class: state.focusSocial === social.id ? "card card-now focused" : "card card-now",
+    class: state.focusSocial === social.id ? "card card-now focused" : upcoming ? "card card-now later" : "card card-now",
     "data-social": social.id,
   }, [
     el("div", { class: "card-bg" }),
     mine
       ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
-      : el("button", {
-          class: "pill",
-          type: "button",
-          text: joined ? "Joined" : "Join",
-          disabled: joined,
-          onclick: () => joinSocial(social),
-        }),
+      : null,
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
-      el("h3", { text: social.note || "Free now" }),
-      el("p", { text: `${social.creator.name} · ${remaining(social.expiresAt)}` }),
+      el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
+      el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
       placeLine(social.location, social.place),
-      el("p", { text: names.length ? `${names.join(", ")} joined` : "Waiting for friends" }),
+      replySummary(social),
+      mine ? null : replyActions(social),
     ]),
   ]);
 }
@@ -641,7 +671,7 @@ function circleScreen() {
     el("div", { class: "panel" }, [
       el("h3", { text: circle.name }),
       el("div", { class: "code-block", text: circle.inviteCode }),
-      el("p", { class: "help", text: "Anyone with this code joins your circle. That's the whole address book." }),
+      el("p", { class: "help", text: "Share the link. It lasts 14 days. New invite link turns the old one off." }),
       el("div", { class: "stack" }, [
         el("button", {
           class: "btn",
@@ -652,8 +682,14 @@ function circleScreen() {
         el("button", {
           class: "btn secondary",
           type: "button",
-          text: "Copy invite link",
-          onclick: () => copyText(circle.inviteUrl, "Invite link copied"),
+          text: "Share invite",
+          onclick: () => shareInvite(),
+        }),
+        el("button", {
+          class: "btn ghost",
+          type: "button",
+          text: "New invite link",
+          onclick: () => rotateInvite(),
         }),
       ]),
     ]),
@@ -817,18 +853,22 @@ function sheet() {
     ]);
   }
   const planning = state.sheet === "plan";
+  const later = !planning && state.whenMode === "later";
   const ttl = ttlLabel(state.meta?.socialTtlMs ?? 7200000);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("form", { class: "sheet", role: "dialog", onsubmit: planning ? onCreatePlan : onFree }, [
       el("div", { class: "grabber" }),
-      el("h2", { text: planning ? "Tomorrow" : "Free now" }),
+      el("h2", { text: planning ? "Tomorrow" : later ? "Free later today" : "Free now" }),
       el("p", {
         class: "help",
         text: planning
           ? "Friends can join. It stays up through tomorrow."
-          : `Friends in your circle get a push. This lasts ${ttl}.`,
+          : later
+            ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
+            : `Friends in your circle get a push. This lasts ${ttl}.`,
       }),
+      planning ? null : whenBlock(),
       field(planning ? "Plan" : "Note", "sheet-note", state.noteDraft, (value) => {
         state.noteDraft = value;
       }, {
@@ -842,7 +882,12 @@ function sheet() {
         : whereBlock(),
       planning ? shareToggle("Use my location") : null,
       el("div", { class: "stack", style: "margin-top:14px" }, [
-        el("button", { class: "btn", type: "submit", text: planning ? "Add plan" : "I'm free" }),
+        el("button", {
+          class: "btn",
+          type: "submit",
+          text: planning ? "Add plan" : later ? "I'm free later" : "I'm free",
+          disabled: later && !laterTimeChosen(),
+        }),
         !planning && mySocial()
           ? el("button", { class: "btn ghost", type: "button", text: "I'm no longer free", onclick: () => endSocial(mySocial()) })
           : null,
@@ -1062,6 +1107,147 @@ function whereLabel() {
   if (state.where.place) return state.where.place;
   if (state.where.lat != null) return "Dropped pin";
   return "Nowhere";
+}
+
+function isLiveSocial(social) {
+  return !social?.startsAt || social.startsAt <= Date.now();
+}
+
+function clock(ms) {
+  const tz = state.meta?.tz || "Europe/Berlin";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(ms));
+}
+
+function hourInZone() {
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit" }).formatToParts(new Date());
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
+  return hour === 24 ? 0 : hour;
+}
+
+function whenBlock() {
+  const hour = hourInZone();
+  return el("div", { class: "when" }, [
+    el("button", {
+      class: state.whenMode === "now" ? "chip on" : "chip",
+      type: "button",
+      text: "Now",
+      onclick: () => { state.whenMode = "now"; state.startChoice = ""; render(); },
+    }),
+    el("button", {
+      class: state.whenMode === "later" ? "chip on" : "chip",
+      type: "button",
+      text: "Later today",
+      onclick: () => { state.whenMode = "later"; render(); },
+    }),
+    state.whenMode === "later" && hour < 23
+      ? el("button", {
+          class: state.startChoice === "+60" ? "chip on" : "chip",
+          type: "button",
+          text: "In 1 hour",
+          onclick: () => { state.startChoice = "+60"; render(); },
+        })
+      : null,
+    state.whenMode === "later" && hour < 18
+      ? el("button", {
+          class: state.startChoice === "18:00" ? "chip on" : "chip",
+          type: "button",
+          text: "18:00",
+          onclick: () => { state.startChoice = "18:00"; render(); },
+        })
+      : null,
+    state.whenMode === "later"
+      ? el("input", {
+          id: "later-time",
+          type: "time",
+          value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
+          oninput: (event) => {
+            state.startChoice = event.target.value;
+            render();
+          },
+        })
+      : null,
+  ]);
+}
+
+function laterTimeChosen() {
+  return state.startChoice === "+60" || /^\d{2}:\d{2}$/.test(state.startChoice);
+}
+
+function startPayload() {
+  if (state.whenMode !== "later") return { startsAt: null };
+  if (state.startChoice === "+60") return { later: true, startsInMin: 60 };
+  if (/^\d{2}:\d{2}$/.test(state.startChoice)) return { later: true, startsAt: state.startChoice };
+  return { later: true };
+}
+
+function replySummary(social) {
+  const coming = social.joined.filter((person) => person.reply === "coming");
+  const declined = social.joined.filter((person) => person.reply === "declined");
+  const joined = social.joined.filter((person) => !person.reply || person.reply === "join");
+  const lines = [];
+  if (coming.length) {
+    lines.push(coming.map((person) => person.etaMin ? `${person.name} · ${person.etaMin} min` : `${person.name} is on the way`).join(", "));
+  }
+  if (joined.length) lines.push(`${joined.map((person) => person.name).join(", ")} joined`);
+  if (declined.length) lines.push(`${declined.map((person) => person.name).join(", ")} can't make it`);
+  if (!lines.length) return el("p", { text: "Waiting for friends" });
+  return el("div", {}, lines.map((line) => el("p", { class: "reply-line", text: line })));
+}
+
+function replyActions(social) {
+  const mine = social.joined.find((person) => person.id === state.me.user.id);
+  const showEta = mine?.reply === "coming";
+  return el("div", {}, [
+    el("div", { class: "reply-row" }, [
+      el("button", { class: mine?.reply === "join" ? "chip on" : "chip", type: "button", text: "Join", onclick: () => replyTo(social, "join") }),
+      el("button", { class: mine?.reply === "coming" ? "chip on" : "chip", type: "button", text: "On my way", onclick: () => replyTo(social, "coming", mine?.etaMin ?? null) }),
+      el("button", { class: mine?.reply === "declined" ? "chip on" : "chip", type: "button", text: "Can't make it", onclick: () => replyTo(social, "declined") }),
+    ]),
+    showEta
+      ? el("div", { class: "eta-row" }, [5, 10, 20].map((minutes) => el("button", {
+          class: mine?.etaMin === minutes ? "chip on" : "chip",
+          type: "button",
+          text: `${minutes} min`,
+          onclick: () => replyTo(social, "coming", minutes),
+        })))
+      : null,
+  ]);
+}
+
+async function replyTo(social, reply, eta = null) {
+  await run(async () => {
+    await api(`/api/socials/${social.id}/reply`, { method: "POST", body: { reply, eta } });
+    await refresh({ initial: true });
+  });
+}
+
+async function shareInvite() {
+  const circle = state.me?.circle;
+  if (!circle) return;
+  const payload = { title: "Hangry", text: `Join ${circle.name} on Hangry`, url: circle.inviteUrl };
+  if (navigator.share) {
+    try {
+      await navigator.share(payload);
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+  await copyText(circle.inviteUrl, "Invite link copied");
+}
+
+async function rotateInvite() {
+  await run(async () => {
+    const data = await api("/api/circles/invite", { method: "POST", body: {} });
+    state.me = { ...state.me, circle: data.circle };
+    state.error = "New invite link ready. The old one no longer works.";
+  });
 }
 
 function wherePayload() {
@@ -1629,6 +1815,10 @@ function openSheet(name) {
     state.whereResults = [];
     state.whereSearching = false;
     state.whereMap = false;
+    const mine = mySocial();
+    const upcoming = mine?.startsAt && mine.startsAt > Date.now();
+    state.whenMode = upcoming ? "later" : "now";
+    state.startChoice = upcoming ? clock(mine.startsAt) : "";
   }
   if (name === "plan") {
     state.noteDraft = "";
@@ -1672,11 +1862,18 @@ async function onStart(event) {
   event.preventDefault();
   state.error = "";
   try {
-    const data = await api("/api/auth/start", { method: "POST", body: { name: state.nameDraft }, token: null });
+    const data = await api("/api/auth/start", {
+      method: "POST",
+      body: { name: state.nameDraft, code: state.pendingCode || undefined },
+      token: null,
+    });
     localStorage.setItem(TOKEN_KEY, data.token);
     state.token = data.token;
     state.me = await api("/api/me");
-    if (state.pendingCode) {
+    if (data.circle) {
+      history.replaceState(null, "", "/");
+      state.pendingCode = "";
+    } else if (state.pendingCode) {
       try {
         await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
         state.me = await api("/api/me");
@@ -1737,8 +1934,9 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
+  if (state.whenMode === "later" && !laterTimeChosen()) return;
   await run(async () => {
-    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload() } });
+    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload() } });
     state.sheet = null;
     state.whereMap = false;
     await refresh({ initial: true });
