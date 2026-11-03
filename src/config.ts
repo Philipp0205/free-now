@@ -26,7 +26,7 @@ const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 // still names the city and the streets at zooms 12–16. It has data through
 // zoom 19 here; 20+ is the "Map data not yet available" placeholder.
 const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-const DEFAULT_MAP_TILE_ATTRIBUTION = "© Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
+const DEFAULT_MAP_TILE_ATTRIBUTION = "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Config {
   const port = readPort(env.PORT);
