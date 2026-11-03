@@ -7,7 +7,6 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Config } from "./config.js";
 import {
   addMember,
-  addPlanJoin,
   addSocialJoin,
   countUpcomingPlans,
   deletePlan,
@@ -17,11 +16,11 @@ import {
   getCircleByCode,
   getCircleForUser,
   getPlan,
+  getPlanReply,
   getSocial,
   getSocialReply,
   getUserByBuzzToken,
   getUserByTokenHash,
-  hasPlanJoin,
   hasSocialJoin,
   insertCircle,
   insertPlan,
@@ -38,10 +37,12 @@ import {
   removeMember,
   removePlanJoin,
   removeSocialJoin,
+  setPlanReply,
   setSocialReply,
   rotateBuzzToken,
   rotateInvite,
-  rotateSession,
+  deleteSessionByHash,
+  insertSession,
   updateSocial,
   updateUserName,
   upsertPushSub,
@@ -51,7 +52,8 @@ import {
   type UserRow,
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
-import { freePushBody, notifyUsers, replyPushBody, socialTitle } from "./notify.js";
+import { extractBuzzSecret, humanCode } from "./code.js";
+import { audiencePlace, eventTitle, freePushBody, notifyUsers, planReplyBody, replyPushBody, socialTitle } from "./notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import type { PushSender } from "./push.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
@@ -145,7 +147,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const invited = rawCode ? liveInvite(deps.db, rawCode, now) : undefined;
     if (rawCode && !invited) throw new HttpError(404, "invite not found");
     const token = randomToken();
-    const buzzToken = randomToken();
+    const buzzToken = humanCode();
     const id = crypto.randomUUID();
     insertUser(deps.db, {
       id,
@@ -173,11 +175,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/auth/recover") {
-    const secret = typeof body.token === "string" ? body.token.trim() : "";
+    const secret = extractBuzzSecret(typeof body.token === "string" ? body.token : "");
     const existing = secret ? getUserByBuzzToken(deps.db, secret) : undefined;
     if (!existing) throw new HttpError(401, "unknown recovery code");
     const token = randomToken();
-    rotateSession(deps.db, existing.id, sha256(token));
+    insertSession(deps.db, crypto.randomUUID(), existing.id, sha256(token), deps.now());
     sendJson(res, 200, {
       token,
       buzzToken: existing.buzz_token,
@@ -228,7 +230,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/auth/logout") {
-    rotateSession(deps.db, me.id, sha256(randomToken()));
+    const header = req.headers.authorization;
+    const match = /^Bearer\s+(\S+)$/i.exec(Array.isArray(header) ? header[0] : header ?? "");
+    if (match) deleteSessionByHash(deps.db, sha256(match[1]));
     sendEmpty(res, 204);
     return;
   }
@@ -247,7 +251,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/me/buzz-token") {
-    const buzzToken = randomToken();
+    const buzzToken = humanCode();
     rotateBuzzToken(deps.db, me.id, buzzToken);
     sendJson(res, 200, { buzzToken });
     return;
@@ -348,6 +352,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const note = cleanNote(body.note, true);
     const place = cleanPlace(body.place);
     sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body)) });
+    return;
+  }
+
+  const planReply = matchPath(pathname, /^\/api\/plans\/([^/]+)\/reply$/);
+  if (planReply && method === "POST") {
+    sendJson(res, 200, { plan: await replyPlan(deps, me, planReply[1], body) });
     return;
   }
 
@@ -513,7 +523,7 @@ async function publishSocial(
     );
   }
   if (shouldNotify) {
-    const title = socialTitle(nextNote);
+    const title = shifted ? eventTitle("time") : fromTime ? eventTitle("later") : eventTitle("now");
     const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
     await notifyUsers(
       deps.db,
@@ -548,8 +558,8 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
     await notifyUsers(deps.db, deps.push, now, [
       {
         userId: social.creator_id,
-        title: socialTitle(social.note),
-        body: `${user.name} joined your social!`,
+        title: eventTitle("reply"),
+        body: `${user.name} is in`,
         kind: "join",
         refId: social.id,
         tag: `join:${social.id}:${user.id}`,
@@ -561,6 +571,12 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
   return socialPayload(deps.db, fresh);
 }
 
+function normalizeReply(value: unknown): "coming" | "declined" {
+  if (value === "declined" || value === "cant" || value === "can't") return "declined";
+  if (value === "coming" || value === "join" || value === "in") return "coming";
+  throw new HttpError(400, "reply must be in or can't");
+}
+
 async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
@@ -569,12 +585,10 @@ async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Re
   const now = deps.now();
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
-  const reply = body.reply;
-  if (reply !== "join" && reply !== "coming" && reply !== "declined") {
-    throw new HttpError(400, "reply must be join, coming, or declined");
-  }
+  const reply = normalizeReply(body.reply);
+  const live = social.starts_at == null || social.starts_at <= now;
   let eta: number | null = null;
-  if (reply === "coming" && body.eta != null) {
+  if (reply === "coming" && live && body.eta != null) {
     const minutes = Number(body.eta);
     if (![5, 10, 20].includes(minutes)) throw new HttpError(400, "eta must be 5, 10, or 20");
     eta = minutes;
@@ -589,7 +603,7 @@ async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Re
   const notice = () => notifyUsers(deps.db, deps.push, now, [
     {
       userId: social.creator_id,
-      title: socialTitle(social.note),
+      title: eventTitle("reply"),
       body: replyPushBody(user.name, reply, eta),
       kind: "reply",
       refId: social.id,
@@ -655,7 +669,7 @@ async function publishPlan(
     recipients.map((member) => ({
       userId: member.id,
       title: "Tomorrow",
-      body: place ? `${user.name}: ${note} · ${place}` : `${user.name}: ${note}`,
+      body: place ? `${user.name}: ${note} · ${audiencePlace(place)}` : `${user.name}: ${note}`,
       kind: "plan",
       refId: id,
       tag: `plan:${id}`,
@@ -676,22 +690,65 @@ async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
   const tomorrow = addDays(today, 1);
   if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
-  if (!hasPlanJoin(deps.db, plan.id, user.id)) {
-    addPlanJoin(deps.db, plan.id, user.id, now);
-    await notifyUsers(deps.db, deps.push, now, [
-      {
-        userId: plan.creator_id,
-        title: socialTitle(plan.note),
-        body: `${user.name} joined your plan`,
-        kind: "plan-join",
-        refId: plan.id,
-        tag: `plan-join:${plan.id}:${user.id}`,
-      },
-    ]);
-  }
+  await setPlanComing(deps, user, plan, now);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, fresh, today, tomorrow);
+}
+
+async function setPlanComing(
+  deps: AppDeps,
+  user: UserRow,
+  plan: PlanRow,
+  now: number,
+): Promise<void> {
+  const previous = getPlanReply(deps.db, plan.id, user.id);
+  if (previous?.reply === "coming") return;
+  setPlanReply(deps.db, plan.id, user.id, now, "coming");
+  await notifyPlanReply(deps, user, plan, now, "coming");
+}
+
+async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id);
+  const plan = getPlan(deps.db, id);
+  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
+  const reply = normalizeReply(body.reply);
+  if (reply === "coming") {
+    await setPlanComing(deps, user, plan, now);
+  } else {
+    const previous = getPlanReply(deps.db, plan.id, user.id);
+    if (previous?.reply !== "declined") {
+      setPlanReply(deps.db, plan.id, user.id, now, "declined");
+      await notifyPlanReply(deps, user, plan, now, "declined");
+    }
+  }
+  const fresh = getPlan(deps.db, plan.id);
+  if (!fresh) throw new HttpError(500, "plan missing");
+  return planPayload(deps.db, fresh, today, addDays(today, 1));
+}
+
+async function notifyPlanReply(
+  deps: AppDeps,
+  user: UserRow,
+  plan: PlanRow,
+  now: number,
+  reply: "coming" | "declined",
+): Promise<void> {
+  await notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: plan.creator_id,
+      title: eventTitle("reply"),
+      body: planReplyBody(user.name, plan.note, reply),
+      kind: "plan-reply",
+      refId: plan.id,
+      tag: `plan-reply:${plan.id}:${user.id}`,
+    },
+  ]);
 }
 
 function leavePlan(deps: AppDeps, user: UserRow, rawId: string) {
@@ -777,6 +834,7 @@ function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: s
       id: join.id,
       name: join.name,
       joinedAt: join.joined_at,
+      reply: join.reply ?? "coming",
     })),
   };
 }

@@ -123,6 +123,7 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
 
     await page.getByRole("button", { name: "Let friends know you're free now" }).click();
     await page.locator("#sheet-note").waitFor();
+    await page.locator("#sheet-note").focus();
     const closed = await measure(page);
     assert.equal(closed.touchUi, true, "Pixel emulation should be a touch UI");
     assert.equal(closed.kb, 0);
@@ -151,7 +152,6 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
 
     await page.locator(".scrim").click({ position: { x: 16, y: 16 } });
     await page.locator(".sheet").waitFor({ state: "detached" });
-    await page.locator("button[aria-label='Create']").first().click();
     await page.getByRole("button", { name: "Plan tomorrow" }).click();
     await page.locator(".sheet").getByRole("heading", { name: "Tomorrow" }).waitFor();
     await page.waitForTimeout(FIELD_REVEAL_MS + 250);
@@ -167,12 +167,13 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
     assertSheetAboveKeyboard(cramped);
     const overflow = await page.evaluate(() => {
       const sheet = document.querySelector(".sheet");
+      const scroller = document.querySelector(".sheet-scroll") || sheet;
       const input = document.getElementById("sheet-note");
-      if (!sheet || !input) return null;
+      if (!sheet || !scroller || !input) return null;
       const sheetRect = sheet.getBoundingClientRect();
       const inputRect = input.getBoundingClientRect();
       return {
-        scrolls: sheet.scrollHeight > sheet.clientHeight + 1,
+        scrolls: scroller.scrollHeight > scroller.clientHeight + 1,
         inputInside: inputRect.top >= sheetRect.top - 1 && inputRect.bottom <= sheetRect.bottom + 1,
       };
     });
@@ -235,6 +236,47 @@ test("join form clears a 280px keyboard on a 360x640 phone", { timeout: 90_000 }
   } finally {
     await page.close();
     await context.close();
+  }
+});
+
+test("where search stays above the pinned I'm free bar", { timeout: 90_000 }, async () => {
+  const page = await mobilePage(true);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.goto(baseUrl);
+    await signUp(page, "Bea");
+    await createCircle(page);
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator("#sheet-note").waitFor();
+    await page.locator("button.where-row").click();
+    const query = page.locator("#where-query");
+    await query.waitFor();
+    await query.focus();
+    await setViewport(page, { height: 330, offsetTop: 0 });
+    await page.waitForTimeout(FIELD_REVEAL_MS + 300);
+    const placed = await page.evaluate(() => {
+      const field = document.getElementById("where-query")?.getBoundingClientRect();
+      const dock = document.querySelector(".sheet-dock")?.getBoundingClientRect();
+      const view = window.visualViewport;
+      return {
+        fieldTop: field?.top ?? null,
+        fieldBottom: field?.bottom ?? null,
+        dockTop: dock?.top ?? null,
+        viewHeight: view?.height ?? null,
+        focused: document.activeElement?.id ?? "",
+      };
+    });
+    assert.equal(placed.focused, "where-query", JSON.stringify(placed));
+    assert.equal(placed.viewHeight, 330);
+    assert.ok(placed.fieldTop != null && placed.fieldBottom != null && placed.dockTop != null, JSON.stringify(placed));
+    assert.ok(placed.fieldTop >= -1, JSON.stringify(placed));
+    assert.ok(placed.fieldBottom <= placed.dockTop - 8, JSON.stringify(placed));
+    await paintKeyboard(page);
+    await shot(page, "mobile_where_above_dock");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
   }
 });
 

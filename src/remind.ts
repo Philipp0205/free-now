@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listComingUserIds } from "./db.js";
-import { notifyUsers, socialTitle, startingNowBody } from "./notify.js";
+import { eventTitle, notifyUsers, startingNowBody } from "./notify.js";
 import type { PushSender } from "./push.js";
 
 type DueSocial = {
@@ -27,7 +27,7 @@ export async function sendStartReminders(db: DatabaseSync, push: PushSender, now
         now,
         people.map((userId) => ({
           userId,
-          title: socialTitle(social.note),
+          title: eventTitle("start"),
           body: startingNowBody(social.creator_name, social.place ?? ""),
           url: `/?social=${social.id}`,
           kind: "social-start",
