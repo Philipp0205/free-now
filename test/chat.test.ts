@@ -47,6 +47,49 @@ async function api(port: number, method: string, pathname: string, options: { to
   return json;
 }
 
+test("each recipient hears messages they did not write, and a removed writer is left out", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const ada = await api(port, "POST", "/api/auth/start", { body: { name: "Ada", code: created.circle.inviteCode }, status: 201 });
+    const nia = await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: created.circle.inviteCode }, status: 201 });
+    for (const person of [alex, ada, nia]) {
+      await api(port, "POST", "/api/push/subscribe", {
+        token: person.token,
+        body: { endpoint: `https://push.example/${person.user.id}`, keys: { p256dh: "p", auth: "a" } },
+        status: 204,
+      });
+    }
+    const social = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Dinner" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, { token: ada.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, { token: nia.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", `/api/socials/${social.social.id}/chat`, { token: nia.token, body: { text: "earlier" }, status: 201 });
+    await flushChatNotices(true);
+    sent.length = 0;
+    await api(port, "DELETE", `/api/socials/${social.social.id}/people/${nia.user.id}`, { token: alex.token, status: 204 });
+    await api(port, "POST", `/api/socials/${social.social.id}/chat`, { token: alex.token, body: { text: "dinner?" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/chat`, { token: ada.token, body: { text: "yes!" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/chat`, { token: alex.token, body: { text: "ok" }, status: 201 });
+    await flushChatNotices(true);
+    const bodies = (id: string) => sent
+      .filter((item) => item.endpoint.includes(id) && item.payload.tag.startsWith("chat:"))
+      .map((item) => item.payload.body);
+    assert.deepEqual(bodies(nia.user.id), []);
+    assert.deepEqual(bodies(alex.user.id), ["Ada: yes!"]);
+    assert.deepEqual(bodies(ada.user.id), ["Alex: dinner?", "1 new message"]);
+
+    await api(port, "POST", "/api/circles/chat", { token: nia.token, body: { text: "before I go" }, status: 201 });
+    await flushChatNotices(true);
+    sent.length = 0;
+    await api(port, "POST", "/api/circles/leave", { token: nia.token, status: 200 });
+    await api(port, "POST", "/api/circles/chat", { token: alex.token, body: { text: "after" }, status: 201 });
+    await flushChatNotices(true);
+    assert.deepEqual(bodies(nia.user.id), []);
+    assert.deepEqual(bodies(ada.user.id), ["Alex: after"]);
+    assert.deepEqual(bodies(alex.user.id), []);
+  });
+});
+
 test("a chat batch window stays fixed from the first message", () => {
   assert.equal(chatWindowRemaining(1_000, 1_000), CHAT_BATCH_MS);
   assert.equal(chatWindowRemaining(1_000, 1_000 + 4_000), CHAT_BATCH_MS - 4_000);

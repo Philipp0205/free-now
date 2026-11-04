@@ -1119,17 +1119,23 @@ function stickChatLog() {
   if (box.bottom > limit) log.scrollTop += box.bottom - limit;
 }
 
+function unsentTail(typed, sent) {
+  if (!sent || typed === sent) return typed === sent ? "" : typed;
+  if (typed.startsWith(sent)) return typed.slice(sent.length).replace(/^\s+/, "");
+  return typed;
+}
+
 async function sendChat(event) {
   event.preventDefault();
-  if (!state.chat) return;
+  if (!state.chat || state.chatQueue) return;
   const text = state.chatDraft.trim();
   if (!text) return;
   const target = { kind: state.chat.kind, id: state.chat.id };
   state.chatQueue = { target, text };
   try {
     state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: { text } })).chat;
-    state.chatDraft = "";
     state.chatQueue = null;
+    state.chatDraft = unsentTail(state.chatDraft, text);
     state.statusMessage = "";
     state.chatStick = true;
   } catch (error) {
@@ -1151,7 +1157,7 @@ async function flushChatQueue() {
   try {
     const thread = (await api(chatTargetUrl(queued.target), { method: "POST", body: { text: queued.text } })).chat;
     state.chatQueue = null;
-    state.chatDraft = "";
+    state.chatDraft = unsentTail(state.chatDraft, queued.text);
     state.statusMessage = "";
     if (state.chat && state.chat.kind === queued.target.kind && state.chat.id === queued.target.id) {
       state.chatThread = thread;

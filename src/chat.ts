@@ -60,16 +60,18 @@ export function nextChatPushDelay(lastPushAt: number, now: number): number {
   return Math.max(CHAT_BATCH_MS, CHAT_GAP_MS - since);
 }
 
+type Slot = {
+  windowStart: number;
+  firstBody: string;
+  pending: number;
+  prompted: boolean;
+  busy: boolean;
+  timer: ReturnType<typeof setTimeout>;
+};
+
 type Job = {
   deps: ChatDeps;
-  windowStart: number;
-  firstAuthor: string;
-  firstName: string;
-  firstPreview: string;
-  laterAuthors: Set<string>;
-  laterCount: number;
-  prompted: boolean;
-  timer: ReturnType<typeof setTimeout>;
+  slots: Map<string, Slot>;
 };
 
 const jobs = new Map<string, Job>();
@@ -209,85 +211,110 @@ export function closeEventChat(db: DatabaseSync, circleId: string, kind: "social
 }
 
 export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderId: string, senderName: string, preview: string): void {
-  const existing = jobs.get(chatId);
-  if (existing) {
-    existing.laterCount += 1;
-    existing.laterAuthors.add(senderId);
-    existing.deps = deps;
-    return;
+  const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
+  if (!chat) return;
+  const body = `${senderName}: ${preview}`.slice(0, 140);
+  const now = deps.now();
+  let job = jobs.get(chatId);
+  if (!job) {
+    job = { deps, slots: new Map() };
+    jobs.set(chatId, job);
   }
-  jobs.set(chatId, {
-    deps,
-    windowStart: deps.now(),
-    firstAuthor: senderId,
-    firstName: senderName,
-    firstPreview: preview,
-    laterAuthors: new Set(),
-    laterCount: 0,
-    prompted: false,
-    timer: arm(chatId, 0),
-  });
+  job.deps = deps;
+  for (const member of noticeRecipients(deps.db, chat, senderId)) {
+    const slot = job.slots.get(member.id);
+    if (!slot) {
+      const created: Slot = {
+        windowStart: now,
+        firstBody: body,
+        pending: 0,
+        prompted: false,
+        busy: false,
+        timer: armSlot(chatId, member.id, 0),
+      };
+      job.slots.set(member.id, created);
+      continue;
+    }
+    slot.pending += 1;
+  }
+  if (job.slots.size === 0) jobs.delete(chatId);
 }
 
 export async function flushChatNotices(force = false): Promise<void> {
   for (let pass = 0; pass < 4; pass += 1) {
-    const ids = [...jobs.keys()];
-    if (ids.length === 0) return;
-    for (const id of ids) await fireChatNotice(id, force);
+    const work: Array<[string, string]> = [];
+    for (const [chatId, job] of jobs) {
+      for (const userId of job.slots.keys()) work.push([chatId, userId]);
+    }
+    if (work.length === 0) return;
+    for (const [chatId, userId] of work) await fireSlot(chatId, userId, force);
     if (!force) return;
   }
 }
 
-function arm(chatId: string, delay: number): ReturnType<typeof setTimeout> {
+function armSlot(chatId: string, userId: string, delay: number): ReturnType<typeof setTimeout> {
   const timer = setTimeout(() => {
-    void fireChatNotice(chatId, false);
+    void fireSlot(chatId, userId, false);
   }, delay);
   timer.unref?.();
   return timer;
 }
 
-async function fireChatNotice(chatId: string, force: boolean): Promise<void> {
+function dropSlot(chatId: string, userId: string): void {
   const job = jobs.get(chatId);
   if (!job) return;
-  clearTimeout(job.timer);
-  const chat = one<ChatRow>(job.deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
-  if (!chat) {
-    jobs.delete(chatId);
-    return;
-  }
-  if (!job.prompted) {
-    job.prompted = true;
-    await deliverChatPush(job.deps, chat, new Set([job.firstAuthor]), `${job.firstName}: ${job.firstPreview}`.slice(0, 140));
-    const remain = force ? 0 : chatWindowRemaining(job.windowStart, job.deps.now());
-    if (job.laterCount === 0 && remain === 0) {
-      jobs.delete(chatId);
-      return;
-    }
-    job.timer = arm(chatId, remain);
-    return;
-  }
-  if (job.laterCount === 0) {
-    jobs.delete(chatId);
-    return;
-  }
-  const count = job.laterCount;
-  const authors = job.laterAuthors;
-  jobs.delete(chatId);
-  await deliverChatPush(job.deps, chat, authors, `${count} new message${count === 1 ? "" : "s"}`);
+  const slot = job.slots.get(userId);
+  if (slot) clearTimeout(slot.timer);
+  job.slots.delete(userId);
+  if (job.slots.size === 0) jobs.delete(chatId);
 }
 
-async function deliverChatPush(deps: ChatDeps, chat: ChatRow, authors: Set<string>, body: string): Promise<void> {
-  const recipients = chatAudience(deps.db, chat).filter((member) => {
-    if (isMuted(deps.db, chat.id, member.id)) return false;
-    if (authors.has(member.id)) return false;
-    return true;
-  });
+async function fireSlot(chatId: string, userId: string, force: boolean): Promise<void> {
+  const job = jobs.get(chatId);
+  const slot = job?.slots.get(userId);
+  if (!job || !slot || slot.busy) return;
+  clearTimeout(slot.timer);
+  slot.busy = true;
+  const chat = one<ChatRow>(job.deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
+  if (!chat || !recipientStillEligible(job.deps.db, chat, userId)) {
+    slot.busy = false;
+    dropSlot(chatId, userId);
+    return;
+  }
+  if (!slot.prompted) {
+    slot.prompted = true;
+    await deliverChatPush(job.deps, chat, [userId], slot.firstBody);
+    slot.busy = false;
+    if (!jobs.get(chatId)?.slots.get(userId)) return;
+    const remain = force ? 0 : chatWindowRemaining(slot.windowStart, job.deps.now());
+    if (slot.pending === 0 && remain === 0) {
+      dropSlot(chatId, userId);
+      return;
+    }
+    slot.timer = armSlot(chatId, userId, remain);
+    return;
+  }
+  if (slot.pending === 0) {
+    slot.busy = false;
+    dropSlot(chatId, userId);
+    return;
+  }
+  const count = slot.pending;
+  slot.pending = 0;
+  slot.busy = false;
+  dropSlot(chatId, userId);
+  await deliverChatPush(job.deps, chat, [userId], `${count} new message${count === 1 ? "" : "s"}`);
+}
+
+async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[], body: string): Promise<void> {
+  const allowed = new Set(chatAudience(deps.db, chat).map((member) => member.id));
+  const recipients = userIds.filter((id) => allowed.has(id) && !isMuted(deps.db, chat.id, id));
   if (recipients.length === 0) return;
   const title = chat.kind === "circle" ? (chat.title || "Circle chat") : (chat.title || "Chat");
   const ref = chat.kind === "circle" ? "circle" : `${chat.kind}:${chat.ref_id}`;
   deps.db.prepare("UPDATE chats SET last_push_at = ? WHERE id = ?").run(deps.now(), chat.id);
-  await notifyUsers(deps.db, deps.push, deps.now(), recipients.map((member) => ({
-    userId: member.id,
+  await notifyUsers(deps.db, deps.push, deps.now(), recipients.map((userId) => ({
+    userId,
     title,
     body,
     kind: "chat",
@@ -298,11 +325,30 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, authors: Set<strin
   })));
 }
 
+function noticeRecipients(db: DatabaseSync, chat: ChatRow, senderId: string): Array<{ id: string }> {
+  return chatAudience(db, chat).filter((member) => member.id !== senderId && !isMuted(db, chat.id, member.id));
+}
+
+function recipientStillEligible(db: DatabaseSync, chat: ChatRow, userId: string): boolean {
+  if (isMuted(db, chat.id, userId)) return false;
+  return chatAudience(db, chat).some((member) => member.id === userId);
+}
+
 function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
   const members = listMembers(db, chat.circle_id);
   if (chat.kind === "circle") return members;
+  const memberIds = new Set(members.map((member) => member.id));
+  const blocked = new Set(
+    all<{ user_id: string }>(
+      db,
+      chat.kind === "social"
+        ? "SELECT user_id FROM social_joins WHERE social_id = ? AND blocked = 1"
+        : "SELECT user_id FROM plan_joins WHERE plan_id = ? AND blocked = 1",
+      chat.ref_id,
+    ).map((row) => row.user_id),
+  );
   const allowed = new Set<string>();
-  if (chat.host_id) allowed.add(chat.host_id);
+  if (chat.host_id && memberIds.has(chat.host_id) && !blocked.has(chat.host_id)) allowed.add(chat.host_id);
   const coming = chat.kind === "social"
     ? all<{ user_id: string }>(
       db,
@@ -314,13 +360,18 @@ function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
       "SELECT user_id FROM plan_joins WHERE plan_id = ? AND blocked = 0 AND reply IN ('coming', 'join')",
       chat.ref_id,
     );
-  for (const row of coming) allowed.add(row.user_id);
+  for (const row of coming) {
+    if (memberIds.has(row.user_id) && !blocked.has(row.user_id)) allowed.add(row.user_id);
+  }
   const writers = all<{ user_id: string }>(
     db,
     "SELECT DISTINCT user_id FROM messages WHERE chat_id = ? AND kind = 'text' AND deleted_at IS NULL",
     chat.id,
   );
-  for (const row of writers) allowed.add(row.user_id);
+  for (const row of writers) {
+    if (!memberIds.has(row.user_id) || blocked.has(row.user_id)) continue;
+    allowed.add(row.user_id);
+  }
   return members.filter((member) => allowed.has(member.id));
 }
 
