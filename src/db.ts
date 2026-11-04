@@ -638,6 +638,70 @@ export function clearCircleRemovals(db: DatabaseSync, circleId: string): void {
   db.prepare("DELETE FROM circle_removals WHERE circle_id = ?").run(circleId);
 }
 
+export type CircleDeleteCounts = {
+  messages: number;
+  chat_reads: number;
+  chat_mutes: number;
+  chats: number;
+  social_joins: number;
+  socials: number;
+  plan_joins: number;
+  plans: number;
+  memberships: number;
+  circle_removals: number;
+  notifications: number;
+  circles: number;
+};
+
+export type CircleDeleteResult = {
+  circle: { id: string; name: string };
+  counts: CircleDeleteCounts;
+};
+
+/**
+ * Removes one circle and everything that belongs to it. One transaction.
+ *
+ * Tables that reference circle_id:
+ * memberships, socials, plans, notifications, circle_removals, chats.
+ *
+ * Also removed in that same transaction (no circle_id column of their own;
+ * they hang off the rows above): social_joins, plan_joins, messages,
+ * chat_reads, chat_mutes.
+ *
+ * Accounts, sessions, and push subscriptions stay. Those belong to the person.
+ */
+export function deleteCircle(db: DatabaseSync, circleId: string): CircleDeleteResult | null {
+  let result: CircleDeleteResult | null = null;
+  withTx(db, () => {
+    const circle = one<{ id: string; name: string }>(db, "SELECT id, name FROM circles WHERE id = ?", circleId);
+    if (!circle) return;
+    const inChats = "chat_id IN (SELECT id FROM chats WHERE circle_id = ?)";
+    const inSocials = "social_id IN (SELECT id FROM socials WHERE circle_id = ?)";
+    const inPlans = "plan_id IN (SELECT id FROM plans WHERE circle_id = ?)";
+    const counts: CircleDeleteCounts = {
+      messages: removed(db, `DELETE FROM messages WHERE ${inChats}`, circleId),
+      chat_reads: removed(db, `DELETE FROM chat_reads WHERE ${inChats}`, circleId),
+      chat_mutes: removed(db, `DELETE FROM chat_mutes WHERE ${inChats}`, circleId),
+      chats: removed(db, "DELETE FROM chats WHERE circle_id = ?", circleId),
+      social_joins: removed(db, `DELETE FROM social_joins WHERE ${inSocials}`, circleId),
+      socials: removed(db, "DELETE FROM socials WHERE circle_id = ?", circleId),
+      plan_joins: removed(db, `DELETE FROM plan_joins WHERE ${inPlans}`, circleId),
+      plans: removed(db, "DELETE FROM plans WHERE circle_id = ?", circleId),
+      memberships: removed(db, "DELETE FROM memberships WHERE circle_id = ?", circleId),
+      circle_removals: removed(db, "DELETE FROM circle_removals WHERE circle_id = ?", circleId),
+      notifications: removed(db, "DELETE FROM notifications WHERE circle_id = ?", circleId),
+      circles: removed(db, "DELETE FROM circles WHERE id = ?", circleId),
+    };
+    if (counts.circles !== 1) throw new Error("circle missing");
+    result = { circle: { id: circle.id, name: circle.name }, counts };
+  });
+  return result;
+}
+
+function removed(db: DatabaseSync, sql: string, ...params: Array<string | number>): number {
+  return Number(db.prepare(sql).run(...params).changes);
+}
+
 export function insertSocial(
   db: DatabaseSync,
   social: {
