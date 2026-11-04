@@ -8,6 +8,7 @@ import {
   isCircleAdmin,
   listMembers,
 } from "./db.js";
+import { CHAT_COLORS, assignChatColors, preferredColor } from "./chat-color.js";
 import { notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
 import { isoDate } from "./time.js";
@@ -387,6 +388,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   );
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
+  const colors = assignChatColors(listMembers(deps.db, access.chat.circle_id).map((member) => member.id));
   return {
     id: access.chat.id,
     kind: access.chat.kind,
@@ -395,6 +397,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     closed: access.closed,
     removed: access.blocked,
     muted: isMuted(deps.db, access.chat.id, userId),
+    palette: [...CHAT_COLORS],
     messages: messages.map((message) => ({
       id: message.id,
       name: message.name,
@@ -402,6 +405,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       at: message.created_at,
       system: message.kind === "system",
       mine: message.user_id === userId,
+      color: message.kind === "text" ? (colors.get(message.user_id) ?? preferredColor(message.user_id)) : null,
       canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
     })),
   };

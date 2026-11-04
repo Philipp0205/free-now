@@ -1486,6 +1486,99 @@ test("you can edit your name, and an admin can edit the circle name", { timeout:
   }
 });
 
+test("each person keeps a distinct chat color", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const join = (name: string) => fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const fritz = await join("Fritz");
+    const nia = await join("Nia");
+    const post = (who: { token: string }, text: string) => fetch(`${baseUrl}/api/circles/chat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    await post({ token }, "From Alex");
+    await post(fritz, "From Fritz");
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await page.evaluate((value) => localStorage.setItem("fn_token", value), nia.token);
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("button", { name: "Circle chat" }).click();
+    await page.getByText("From Fritz").waitFor();
+    const read = () => page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll(".chat-msg")];
+      const screen = getComputedStyle(document.querySelector(".chat-screen")).backgroundColor;
+      return rows.map((row) => {
+        const name = row.querySelector("strong");
+        const bubble = name ? getComputedStyle(name).color : "";
+        const parts = (color) => (color.match(/\\d+/g) || ["0", "0", "0"]).slice(0, 3).map(Number);
+        const lum = (color) => {
+          const rgb = parts(color).map((value) => {
+            const channel = value / 255;
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        };
+        const a = bubble ? lum(bubble) : 0;
+        const b = lum(screen);
+        return {
+          text: row.querySelector("p")?.textContent || "",
+          color: bubble,
+          data: row.getAttribute("data-color"),
+          contrast: bubble ? (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) : 0,
+        };
+      });
+    })()`);
+    const first = await read();
+    const alex = first.find((row) => row.text === "From Alex");
+    const fritzMsg = first.find((row) => row.text === "From Fritz");
+    assert.ok(alex && fritzMsg);
+    assert.ok(alex.data != null && fritzMsg.data != null);
+    assert.notEqual(alex.data, fritzMsg.data);
+    assert.ok(alex.contrast >= 4.5, JSON.stringify(alex));
+    assert.ok(fritzMsg.contrast >= 4.5, JSON.stringify(fritzMsg));
+    await page.reload();
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("button", { name: "Circle chat" }).click();
+    await page.getByText("From Fritz").waitFor();
+    const second = await read();
+    assert.equal(second.find((row) => row.text === "From Alex")?.color, alex.color);
+    assert.equal(second.find((row) => row.text === "From Fritz")?.color, fritzMsg.color);
+    await page.locator("#chat-input").fill("From Nia");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.locator(".chat-msg.mine").waitFor();
+    assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), null);
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Now", exact: true }).click();
+    await page.getByRole("button", { name: /^Chat/ }).click();
+    await page.locator(".chat-system").waitFor();
+    assert.equal(await page.locator(".chat-system").getAttribute("data-color"), null);
+    const accented = await page.locator(".chat-msg[data-color]").count();
+    assert.equal(accented, 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => {
   for (const agent of [CHROME_UA, FIREFOX_UA]) {
     const page = await phonePage(agent, false);
