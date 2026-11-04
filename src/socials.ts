@@ -104,7 +104,7 @@ export async function publishSocial(
   }
   const social = getSocial(deps.db, socialId);
   if (!social) throw new HttpError(500, "social missing");
-  return { created, social: socialPayload(deps.db, social) };
+  return { created, social: socialPayload(deps.db, social, user.id) };
 }
 
 function removedMessage(actor: string | null | undefined): string {
@@ -187,7 +187,7 @@ export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, b
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
-  return socialPayload(deps.db, fresh);
+  return socialPayload(deps.db, fresh, user.id);
 }
 
 export function readArriveAt(value: unknown, now: number, tz: string, start: number, end: number): number {

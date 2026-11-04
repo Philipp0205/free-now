@@ -1,4 +1,4 @@
-const CACHE = "hangry-v8";
+const CACHE = "hangry-v9";
 const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/map.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -29,13 +29,13 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let data = { title: "Hangry", body: "Someone is free", url: "/", tag: "hangry" };
+  let data = { title: "Hangry", body: "Someone is free", url: "/", tag: "hangry", id: "" };
   try {
     if (event.data) data = { ...data, ...event.data.json() };
   } catch {
     /* keep the fallback copy */
   }
-  event.waitUntil(
+  event.waitUntil(Promise.all([
     self.registration.showNotification(data.title, {
       body: data.body,
       icon: "/icons/icon-192.png",
@@ -43,8 +43,18 @@ self.addEventListener("push", (event) => {
       tag: data.tag,
       data: { url: data.url || "/" },
     }),
-  );
+    ackPush(data.id),
+  ]));
 });
+
+function ackPush(id) {
+  if (!id) return Promise.resolve();
+  return fetch("/api/push/ack", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id }),
+  }).catch(() => {});
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
