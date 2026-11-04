@@ -714,6 +714,7 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
   const circle = requireCircle(deps, user.id);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (social.expires_at <= deps.now()) throw new HttpError(410, "That post has ended.");
   assertEventHost(deps, user, circle.id, social.creator_id);
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
   const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (social.place ?? "");

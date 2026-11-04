@@ -262,6 +262,7 @@ function friendlyMessage(raw, status) {
   if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
   if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
   if (lower.includes("plan has ended")) return "That plan has ended.";
+  if (lower.includes("post has ended")) return "That post has ended.";
   if (status === 410 || lower.includes("expired")) return "This invite has expired. Ask for a new link.";
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
