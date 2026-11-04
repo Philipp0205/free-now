@@ -746,8 +746,8 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
   if (timeChanged) changes.push({ name: "Time", next: startsAt == null ? "" : clockLabel(startsAt, deps.config.tz) });
   if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
   if (changes.length) {
-    const coming = listSocialJoins(deps.db, social.id).filter((join) => isInReply(join.reply) && join.id !== user.id);
     const label = note.trim() || "Free now";
+    const coming = listSocialJoins(deps.db, social.id).filter((join) => isInReply(join.reply) && join.id !== user.id && join.id !== social.creator_id);
     await pushEdit(
       deps,
       deps.now(),
@@ -757,6 +757,17 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
       social.id,
       `/?social=${social.id}`,
     );
+    if (user.id !== social.creator_id) {
+      await pushEdit(
+        deps,
+        deps.now(),
+        [social.creator_id],
+        `${user.name} edited your free post: ${label}`,
+        changeBody(changes),
+        social.id,
+        `/?social=${social.id}`,
+      );
+    }
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
@@ -813,7 +824,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   if (timeChanged) changes.push({ name: "Time", next: atTime ?? "" });
   if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
   if (changes.length) {
-    const coming = listPlanJoins(deps.db, plan.id).filter((join) => isInReply(join.reply) && join.id !== user.id);
+    const coming = listPlanJoins(deps.db, plan.id).filter((join) => isInReply(join.reply) && join.id !== user.id && join.id !== plan.creator_id);
     await pushEdit(
       deps,
       now,
@@ -823,6 +834,17 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
       plan.id,
       `/?plan=${plan.id}`,
     );
+    if (user.id !== plan.creator_id) {
+      await pushEdit(
+        deps,
+        now,
+        [plan.creator_id],
+        `${user.name} edited your plan: ${note}`,
+        changeBody(changes),
+        plan.id,
+        `/?plan=${plan.id}`,
+      );
+    }
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");

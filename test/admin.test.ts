@@ -559,3 +559,56 @@ test("editing an ended free post stays ended and does not push", async () => {
     assert.equal(listed.socials.length, 0);
   });
 });
+
+test("an admin editing someone else's plan or free post tells the host, and the host's own edit does not", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    await api(port, "POST", `/api/circles/members/${fritz.user.id}`, { token: alex.token, body: { admin: true }, status: 200 });
+    for (const person of [alex, fritz, sam]) {
+      await api(port, "POST", "/api/push/subscribe", {
+        token: person.token,
+        body: { endpoint: `https://push.example/${person.user.id}`, keys: { p256dh: "p", auth: "a" } },
+        status: 204,
+      });
+    }
+    const plan = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Bouldering" }, status: 201 });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, { token: sam.token, body: { reply: "in" }, status: 200 });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${plan.plan.id}`, { token: alex.token, body: { note: "Bouldering at 7" }, status: 200 });
+    const own = sent.map((item) => item.title);
+    assert.equal(own.some((title) => title.includes("edited your plan")), false);
+    assert.deepEqual(own, ["Plan changed: Bouldering at 7"]);
+    assert.equal(sent[0]?.endpoint, `https://push.example/${sam.user.id}`);
+
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
+      token: fritz.token,
+      body: { note: "Bouldering at 8", time: "20:00" },
+      status: 200,
+    });
+    const hostPlan = sent.find((item) => item.endpoint === `https://push.example/${alex.user.id}`);
+    const samPlan = sent.find((item) => item.endpoint === `https://push.example/${sam.user.id}`);
+    const fritzPlan = sent.find((item) => item.endpoint === `https://push.example/${fritz.user.id}`);
+    assert.equal(hostPlan?.title, "Fritz edited your plan: Bouldering at 8");
+    assert.match(hostPlan?.body ?? "", /Note is now Bouldering at 8/);
+    assert.match(hostPlan?.body ?? "", /Time is now 20:00/);
+    assert.equal(samPlan?.title, "Plan changed: Bouldering at 8");
+    assert.equal(fritzPlan, undefined);
+    assert.equal(sent.length, 2);
+
+    const social = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Coffee" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, { token: sam.token, body: { reply: "in" }, status: 200 });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/socials/${social.social.id}`, { token: alex.token, body: { note: "Tea" }, status: 200 });
+    assert.equal(sent.some((item) => item.title.includes("edited your")), false);
+    sent.length = 0;
+    await api(port, "PATCH", `/api/socials/${social.social.id}`, { token: fritz.token, body: { place: "Cafe" }, status: 200 });
+    const hostPost = sent.find((item) => item.endpoint === `https://push.example/${alex.user.id}`);
+    assert.equal(hostPost?.title, "Fritz edited your free post: Tea");
+    assert.match(hostPost?.body ?? "", /Place is now Cafe/);
+    assert.equal(sent.filter((item) => item.endpoint === `https://push.example/${alex.user.id}`).length, 1);
+  });
+});
