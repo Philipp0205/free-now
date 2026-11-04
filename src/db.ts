@@ -873,11 +873,12 @@ export function insertPlan(
     lat: number | null;
     lng: number | null;
     place: string;
+    atTime?: string | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     plan.id,
     plan.circleId,
@@ -888,6 +889,7 @@ export function insertPlan(
     plan.lat,
     plan.lng,
     plan.place,
+    plan.atTime ?? null,
   );
 }
 

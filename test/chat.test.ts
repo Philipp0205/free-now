@@ -185,3 +185,28 @@ test("circle members can chat on an event, and a removed person cannot post", as
     await api(port, "POST", `/api/plans/${plan.plan.id}/chat`, { token: sam.token, body: { text: "Next week?" }, status: 201 });
   });
 });
+
+test("unread totals follow each circle, and an open chat marks a new message read", async () => {
+  await withApp(async ({ port }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
+    const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: home.circle.inviteCode }, status: 201 });
+    await api(port, "POST", `/api/circles/chat?circle=${home.circle.id}`, { token: sam.token, body: { text: "Dinner?" }, status: 201 });
+    const social = await api(port, "POST", `/api/socials?circle=${home.circle.id}`, { token: alex.token, body: { note: "Coffee" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply?circle=${home.circle.id}`, { token: sam.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", `/api/socials/${social.social.id}/chat?circle=${home.circle.id}`, { token: sam.token, body: { text: "On my way" }, status: 201 });
+    const summary = await api(port, "GET", `/api/chats?circle=${uni.circle.id}`, { token: alex.token });
+    assert.equal(summary.unreadByCircle[home.circle.id], 3);
+    assert.equal(summary.unreadByCircle[uni.circle.id], 0);
+    assert.equal(summary.circle.unread, 0);
+
+    await api(port, "GET", `/api/circles/chat?circle=${home.circle.id}`, { token: alex.token });
+    await api(port, "POST", `/api/circles/chat?circle=${home.circle.id}`, { token: sam.token, body: { text: "Still there?" }, status: 201 });
+    await api(port, "GET", `/api/circles/chat?circle=${home.circle.id}`, { token: alex.token });
+    const after = await api(port, "GET", `/api/chats?circle=${home.circle.id}`, { token: alex.token });
+    assert.equal(after.circle.unread, 0);
+    assert.equal(after.events.find((row: { id: string }) => row.id === social.social.id).unread, 2);
+    assert.equal(after.unreadByCircle[home.circle.id], 2);
+  });
+});
