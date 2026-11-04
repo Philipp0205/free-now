@@ -266,6 +266,7 @@ function friendlyMessage(raw, status) {
   if (status === 410 || lower.includes("expired")) return "This invite has expired. Ask for a new link.";
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
+  if (lower.includes("only an admin")) return "Only an admin can do that.";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
   if (lower.includes("removed you from this circle")) return "An admin removed you from this circle.";
@@ -921,6 +922,12 @@ function circleScreen() {
     screenHeader("Circle"),
     el("div", { class: "panel" }, [
       el("h3", { text: circle.name }),
+      youAreAdmin()
+        ? el("form", { class: "stack", onsubmit: onRenameCircle }, [
+            field("Circle name", "circle-rename", circle.name, () => {}, { maxlength: "32" }),
+            el("button", { class: "btn secondary", type: "submit", text: "Save circle name" }),
+          ])
+        : null,
       el("div", { class: "code-block", text: circle.inviteCode }),
       el("p", { class: "help", text: "Share the link. It lasts 14 days. New invite link turns the old one off." }),
       el("div", { class: "stack" }, [
@@ -987,8 +994,9 @@ function youScreen() {
       el("strong", { text: state.me.user.name }),
     ]),
     el("form", { class: "panel stack", onsubmit: onRename }, [
-      field("Name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
+      field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
       el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
+      el("p", { class: "help", text: "Friends see this name on your cards." }),
     ]),
     el("div", { class: "panel" }, [
       el("button", {
@@ -1731,7 +1739,7 @@ function replyLine(person, social) {
   const arriving = arriveClock(person);
   const mine = person.id === state.me.user.id;
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
-  if (arriving) return mine ? `You're in, arriving ${arriving}` : `${person.name} is in, arriving ${arriving}`;
+  if (arriving) return mine ? "You're in" : `${person.name} is in, arriving ${arriving}`;
   if (mine) return eta ? `You're in · ${eta} min` : "You're in";
   return eta ? `${person.name} · there in ${eta} min` : `${person.name} is in`;
 }
@@ -1743,144 +1751,119 @@ function replySummary(social) {
 }
 
 function replyActions(social) {
-  const mine = social.joined.find((person) => person.id === state.me.user.id);
-  const upcoming = social.startsAt && social.startsAt > Date.now();
-  const inNow = mine && inReply(mine) && mine.reply !== "declined";
-  const picking = state.arriveFor === `social:${social.id}`;
-  const showClock = Boolean(mine?.arriveAt) || picking;
-  const limits = socialArriveLimits(social);
-  return el("div", {}, [
+  return replyControls("social", social);
+}
+
+function replyControls(kind, item) {
+  const mine = item.joined.find((person) => person.id === state.me.user.id);
+  const inNow = Boolean(mine) && inReply(mine) && mine.reply !== "declined";
+  const declined = mine?.reply === "declined";
+  const chosen = arriveClock(mine);
+  const preset = arrivalDefault(kind, item);
+  return el("div", { class: "reply-actions" }, [
     el("div", { class: "reply-row" }, [
       el("button", {
         class: inNow ? "chip on" : "chip",
         type: "button",
         text: "I'm in",
-        onclick: () => replyTo(social, "in", mine?.arriveAt ? null : (upcoming ? null : mine?.etaMin ?? null), mine?.arriveAt ? clock(mine.arriveAt) : null),
+        onclick: () => sendReply(kind, item, "in"),
       }),
       el("button", {
-        class: mine?.reply === "declined" ? "chip on" : "chip",
+        class: declined ? "chip on" : "chip",
         type: "button",
         text: "Can't",
-        onclick: () => replyTo(social, "declined"),
+        onclick: () => sendReply(kind, item, "declined"),
       }),
     ]),
-    inNow && !upcoming
-      ? el("div", { class: "eta-row" }, [
-          ...[5, 10, 20].map((minutes) => el("button", {
-            class: mine?.etaMin === minutes && !mine?.arriveAt ? "chip on" : "chip",
-            type: "button",
-            text: `${minutes} min`,
-            onclick: () => replyTo(social, "in", minutes, null),
-          })),
-          el("button", {
-            class: mine?.arriveAt || picking ? "chip on" : "chip",
-            type: "button",
-            text: "Pick time",
-            onclick: () => replyTo(social, "in", null, nextFiveClock()),
-          }),
-        ])
-      : null,
-    inNow && upcoming
-      ? el("button", {
-          class: mine?.arriveAt || picking ? "chip on" : "chip",
-          type: "button",
-          text: "Arriving at",
-          onclick: () => replyTo(social, "in", null, clock(social.startsAt)),
-        })
-      : null,
-    showClock && inNow
-      ? el("label", { class: "sheet-group arrive-field" }, [
-          el("span", { class: "sheet-label", text: "Arriving at" }),
-          el("input", {
-            class: "sheet-control",
-            type: "time",
-            min: limits.min,
-            max: limits.max,
-            value: mine?.arriveAt ? clock(mine.arriveAt) : (upcoming ? clock(social.startsAt) : nextFiveClock()),
-            onchange: (event) => replyTo(social, "in", null, event.target.value),
-          }),
-        ])
-      : null,
+    timeChip(kind, item, chosen || preset, Boolean(chosen)),
   ]);
 }
 
-async function replyTo(social, reply, eta = null, arriveAt = null) {
+function timeChip(kind, item, value, chosen) {
+  const label = chosen ? `Arriving ${value}` : "Pick time";
+  return el("label", { class: "chip time-chip" }, [
+    el("span", { text: label }),
+    el("input", {
+      type: "time",
+      step: "60",
+      value: /^\d{2}:\d{2}$/.test(value) ? value : "",
+      "aria-label": label,
+      onchange: (event) => chooseArrival(kind, item, event.target.value),
+    }),
+  ]);
+}
+
+function chooseArrival(kind, item, value) {
+  if (!/^\d{2}:\d{2}$/.test(value)) return;
+  if (!arrivalAllowed(kind, item, value)) {
+    state.error = "Pick a time you can arrive.";
+    render();
+    scheduleErrorClear();
+    return;
+  }
+  void sendReply(kind, item, "in", value);
+}
+
+async function sendReply(kind, item, reply, arriveAt = null) {
   await run(async () => {
     const body = { reply };
-    if (eta != null) body.eta = eta;
     if (arriveAt) body.arriveAt = arriveAt;
-    await api(`/api/socials/${social.id}/reply`, { method: "POST", body });
-    state.arriveFor = arriveAt ? `social:${social.id}` : "";
+    await api(`/api/${kind}s/${item.id}/reply`, { method: "POST", body });
     await refresh({ initial: true });
-    if (arriveAt) revealArriveField();
   });
 }
 
-function revealArriveField() {
-  const field = document.querySelector(".arrive-field");
-  const scroller = document.scrollingElement;
-  if (!field || !scroller) return;
-  const tabTop = document.querySelector(".tabbar")?.getBoundingClientRect().top ?? window.innerHeight;
-  let box = field.getBoundingClientRect();
-  const limit = tabTop - 12;
-  if (box.bottom > limit) scroller.scrollTop += box.bottom - limit;
-  box = field.getBoundingClientRect();
-  if (box.top < 8) scroller.scrollTop += box.top - 8;
+function arrivalDefault(kind, item) {
+  const bounds = arrivalBounds(kind, item);
+  if (kind === "plan") {
+    let value = "18:00";
+    if (bounds.sameDay && bounds.min && value < bounds.min) value = bounds.min;
+    if (bounds.sameDay && bounds.max && value > bounds.max) value = bounds.max;
+    return value;
+  }
+  const scheduled = item.startsAt && item.startsAt > Date.now() ? clock(item.startsAt) : "";
+  if (scheduled && (!bounds.sameDay || (!bounds.min || scheduled >= bounds.min) && (!bounds.max || scheduled <= bounds.max))) {
+    return scheduled;
+  }
+  return bounds.min || clock(Date.now());
 }
 
-function arriveLimits(startMs, endMs) {
-  const earliest = Math.max(startMs, Date.now() + 60 * 1000);
-  if (!Number.isFinite(earliest) || !Number.isFinite(endMs) || earliest > endMs) return { min: null, max: null };
+function arrivalAllowed(kind, item, hhmm) {
+  const bounds = arrivalBounds(kind, item);
+  if (!bounds.sameDay || !bounds.min || !bounds.max) return true;
+  return hhmm >= bounds.min && hhmm <= bounds.max;
+}
+
+function arrivalBounds(kind, item) {
+  const now = Date.now();
   const tz = state.meta?.tz || "Europe/Berlin";
-  if (zonedParts(earliest, tz).day !== zonedParts(endMs, tz).day) return { min: null, max: null };
-  return { min: clock(earliest), max: clock(endMs) };
+  const start = kind === "plan"
+    ? clockInstant(item.forDate, "06:00")
+    : (item.startsAt && item.startsAt > now ? item.startsAt : now);
+  const end = kind === "plan" ? clockInstant(item.forDate, "23:59") : item.expiresAt;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return { min: "", max: "", sameDay: false };
+  const earliest = Math.max(Math.floor(start / 60000) * 60000, Math.floor(now / 60000) * 60000);
+  if (earliest > end) return { min: "", max: "", sameDay: false };
+  const sameDay = zonedParts(earliest, tz).day === zonedParts(end, tz).day;
+  return { min: clock(earliest), max: clock(end), sameDay };
 }
 
-function socialArriveLimits(social) {
-  const start = social.startsAt && social.startsAt > Date.now() ? social.startsAt : Date.now();
-  return arriveLimits(start, social.expiresAt);
-}
-
-function planArriveLimits(plan) {
-  if (!plan?.forDate) return { min: null, max: null };
-  const midnight = zonedMidnight(plan.forDate);
-  const start = midnight + 6 * 60 * 60 * 1000;
-  const end = midnight + (23 * 60 + 59) * 60 * 1000;
-  return arriveLimits(start, end);
-}
-
-function defaultPlanClock(plan) {
-  const limits = planArriveLimits(plan);
-  let value = "18:00";
-  if (limits.min && value < limits.min) value = limits.min;
-  if (limits.max && value > limits.max) value = limits.max;
-  return value;
-}
-
-function zonedMidnight(day) {
-  const guess = Date.parse(`${day}T00:00:00Z`);
-  if (!Number.isFinite(guess)) return NaN;
-  const part = zonedParts(guess, state.meta?.tz || "Europe/Berlin");
-  const shown = Date.parse(`${part.day}T${clockText(part.hour, part.minute)}:00Z`);
-  return guess - (shown - guess);
-}
-
-function nextIsoDay(day) {
+function clockInstant(day, hhmm) {
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const match = /^(\d{2}):(\d{2})$/.exec(hhmm || "");
+  if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return NaN;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
   const [year, month, date] = day.split("-").map(Number);
-  const next = new Date(Date.UTC(year, month - 1, date));
-  next.setUTCDate(next.getUTCDate() + 1);
-  return next.toISOString().slice(0, 10);
-}
-
-function nextFiveClock(now = Date.now()) {
-  let { hour, minute } = zonedParts(now, state.meta?.tz || "Europe/Berlin");
-  minute += 1;
-  if (minute >= 60) { minute -= 60; hour += 1; }
-  const rem = minute % 5;
-  if (rem) minute += 5 - rem;
-  if (minute >= 60) { minute -= 60; hour += 1; }
-  if (hour >= 24) hour -= 24;
-  return clockText(hour, minute);
+  let utc = Date.UTC(year, month - 1, date, hour, minute);
+  for (let i = 0; i < 4; i += 1) {
+    const got = zonedParts(utc, tz);
+    const [gy, gm, gd] = got.day.split("-").map(Number);
+    const delta = Date.UTC(year, month - 1, date, hour, minute) - Date.UTC(gy, gm - 1, gd, got.hour, got.minute);
+    if (delta === 0) break;
+    utc += delta;
+  }
+  return utc;
 }
 
 async function shareInvite() {
@@ -2367,7 +2350,7 @@ function planReplyLine(person) {
   const mine = person.id === state.me.user.id;
   const arriving = arriveClock(person);
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
-  if (arriving) return mine ? `You're in, arriving ${arriving}` : `${person.name} is in, arriving ${arriving}`;
+  if (arriving) return mine ? "You're in" : `${person.name} is in, arriving ${arriving}`;
   return mine ? "You're in" : `${person.name} is in`;
 }
 
@@ -2413,47 +2396,7 @@ function confirmRemoveGuest(kind, event, person) {
 }
 
 function planReplyButtons(plan) {
-  const mine = plan.joined.find((person) => person.id === state.me.user.id);
-  const inNow = Boolean(mine) && mine.reply !== "declined";
-  const declined = mine?.reply === "declined";
-  const limits = planArriveLimits(plan);
-  return el("div", {}, [
-    el("div", { class: "reply-row" }, [
-      el("button", {
-        class: inNow ? "chip on" : "chip",
-        type: "button",
-        text: "I'm in",
-        onclick: () => replyToPlan(plan, "in"),
-      }),
-      el("button", {
-        class: declined ? "chip on" : "chip",
-        type: "button",
-        text: "Can't",
-        onclick: () => replyToPlan(plan, "declined"),
-      }),
-    ]),
-    inNow
-      ? el("button", {
-          class: mine?.arriveAt ? "chip on" : "chip",
-          type: "button",
-          text: "Arriving at",
-          onclick: () => replyToPlan(plan, "in", defaultPlanClock(plan)),
-        })
-      : null,
-    inNow && mine?.arriveAt
-      ? el("label", { class: "sheet-group arrive-field" }, [
-          el("span", { class: "sheet-label", text: "Arriving at" }),
-          el("input", {
-            class: "sheet-control",
-            type: "time",
-            min: limits.min,
-            max: limits.max,
-            value: clock(mine.arriveAt),
-            onchange: (event) => replyToPlan(plan, "in", event.target.value),
-          }),
-        ])
-      : null,
-  ]);
+  return replyControls("plan", plan);
 }
 
 function removedNote(item) {
@@ -2470,16 +2413,6 @@ function planPinActions(plan) {
       : null,
     planReplyButtons(plan),
   ]);
-}
-
-async function replyToPlan(plan, reply, arriveAt = null) {
-  await run(async () => {
-    const body = { reply };
-    if (arriveAt) body.arriveAt = arriveAt;
-    await api(`/api/plans/${plan.id}/reply`, { method: "POST", body });
-    await refresh({ initial: true });
-    if (arriveAt) revealArriveField();
-  });
 }
 
 function shareToggle(label) {
@@ -3076,6 +3009,16 @@ async function onRename(event) {
   await run(async () => {
     state.me = await api("/api/me", { method: "PATCH", body: { name: input.value } });
     state.error = "Name saved";
+  });
+}
+
+async function onRenameCircle(event) {
+  event.preventDefault();
+  const input = document.getElementById("circle-rename");
+  await run(async () => {
+    const data = await api("/api/circles", { method: "PATCH", body: { name: input.value } });
+    state.me = { ...state.me, circle: data.circle };
+    state.error = "Circle name saved";
   });
 }
 
