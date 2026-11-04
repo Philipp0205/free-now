@@ -1294,10 +1294,10 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
 
 function readClock(value: unknown): string | null {
   if (value == null || value === "") return null;
-  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) throw new HttpError(400, "Pick a time later today.");
+  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) throw new HttpError(400, "Pick a valid time, like 19:30");
   const hour = Number(value.slice(0, 2));
   const minute = Number(value.slice(3, 5));
-  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a time later today.");
+  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a valid time, like 19:30");
   return value;
 }
 

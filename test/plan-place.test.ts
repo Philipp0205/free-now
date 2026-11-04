@@ -25,8 +25,10 @@ test("a plan keeps an optional time and a cleared pin drops the coordinates", as
     assert.equal(plain.plan.time, null);
     assert.equal(sent[1]?.payload.body, "Alex: Walk");
 
-    await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Nope", time: "25:99" }, status: 400 });
-    await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Nope", time: "evening" }, status: 400 });
+    const late = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Nope", time: "25:99" }, status: 400 });
+    assert.equal(late.error, "Pick a valid time, like 19:30");
+    const words = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Nope", time: "evening" }, status: 400 });
+    assert.equal(words.error, "Pick a valid time, like 19:30");
 
     const pinned = await api(port, "POST", "/api/plans", {
       token: alex.token,

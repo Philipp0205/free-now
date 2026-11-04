@@ -727,10 +727,19 @@ html.kb-open .tabbar {
   padding: 0;
 }
 form.sheet { display: flex; flex-direction: column; overflow: hidden; }
-.sheet-scroll { overflow-x: hidden; overflow-y: auto; min-height: 0; flex: 1; padding-top: 16px; }
+.sheet-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* Room for the focus ring, which overflow would otherwise clip. */
+  padding: 16px 6px 12px;
+}
 .sheet-dock {
   position: sticky;
   bottom: 0;
+  flex-shrink: 0;
   background: var(--sheet);
   padding-top: 16px;
   z-index: 2;
@@ -850,14 +859,11 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
   gap: 6px;
   position: relative;
   z-index: 5;
-  max-height: min(280px, 46dvh);
+  max-height: min(220px, 42dvh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   scroll-margin: 12px;
   background: var(--sheet);
-}
-.sheet:has(.where-results),
-.sheet:has(.where-results) .sheet-scroll {
-  overflow: visible;
 }
 .where-hit, .where-action {
   width: 100%;

@@ -190,9 +190,37 @@ test("chat badge, banner, and per-circle dots follow unread", { timeout: 90_000 
   }
 });
 
-async function phone() {
+test("the last place result is reachable on a 320x568 screen", { timeout: 90_000 }, async () => {
+  const page = await phone(320, 568);
+  try {
+    const hits = [1, 2, 3, 4, 5].map((n) => ({
+      name: `Cafe ${n}`,
+      address: `Street ${n}`,
+      lat: 48.7 + n / 100,
+      lng: 9.1,
+      distanceM: n * 100,
+    }));
+    await page.route("**/api/geocode?**", (route) => route.fulfill({ json: { results: hits } }));
+    await signIn(page, "Alex");
+    await page.getByRole("button", { name: "Plan tomorrow" }).click();
+    await page.getByRole("button", { name: "Where" }).click();
+    await page.locator("#where-query").fill("Cafe");
+    const last = page.locator(".where-hit", { hasText: "Cafe 5" });
+    await last.waitFor();
+    await last.scrollIntoViewIfNeeded();
+    const box = await last.boundingBox();
+    assert.ok(box, "last result has no box");
+    assert.ok(box.y >= 0 && box.y + box.height <= 568, JSON.stringify(box));
+    await last.click();
+    await page.locator(".where-v", { hasText: "Cafe 5" }).waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
+async function phone(width = 390, height = 844) {
   const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
+    viewport: { width, height },
     isMobile: true,
     hasTouch: true,
     userAgent: CHROME_UA,

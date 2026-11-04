@@ -273,6 +273,8 @@ export async function searchPlaces(query: string, bias: SearchBias = null, fetch
   const local = point != null;
   const paced = fetchJson === getJson;
   if (paced) await pace();
+  // Documented Photon params only (q, limit, lat, lon, location_bias_scale, bbox).
+  // getJson sends the User-Agent. A 403 or other non-OK is logged there, without the query.
   const photonUrl = local
     ? `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&lat=${point.lat}&lon=${point.lng}&location_bias_scale=0.6&bbox=${bboxAround(point.lat, point.lng, LOCAL_KM)}`
     : `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&bbox=${GERMANY_BBOX}`;
@@ -377,7 +379,26 @@ export async function reversePlace(lat: number, lng: number, fetchJson: JsonGett
 const MAPS_LINK_MAX = 2000;
 const MAPS_REDIRECTS = 3;
 const MAPS_TIMEOUT_MS = 3000;
-const GOOGLE_SUFFIX = "(?:[a-z]{2,3}|(?:com|co|org|net|ac|gov|ne)\\.[a-z]{2})";
+/** Suffix after "google." for the public Search domains. A fixed list, not any TLD. */
+const GOOGLE_DOMAINS = new Set(
+  [
+    "com", "ad", "ae", "com.af", "com.ag", "al", "am", "co.ao", "com.ar", "as", "at", "com.au", "az",
+    "ba", "com.bd", "be", "bf", "bg", "com.bh", "bi", "bj", "com.bn", "com.bo", "com.br", "bs", "bt",
+    "co.bw", "by", "com.bz", "ca", "cd", "cf", "cg", "ch", "ci", "co.ck", "cl", "cm", "cn", "com.co",
+    "co.cr", "com.cu", "cv", "com.cy", "cz", "de", "dj", "dk", "dm", "com.do", "dz", "com.ec", "ee",
+    "com.eg", "es", "com.et", "fi", "com.fj", "fm", "fr", "ga", "ge", "gg", "com.gh", "com.gi", "gl",
+    "gm", "gr", "com.gt", "gy", "com.hk", "hn", "hr", "ht", "hu", "co.id", "ie", "co.il", "im", "co.in",
+    "iq", "is", "it", "je", "com.jm", "jo", "co.jp", "co.ke", "com.kh", "ki", "kg", "co.kr", "com.kw",
+    "kz", "la", "com.lb", "li", "lk", "co.ls", "lt", "lu", "lv", "com.ly", "co.ma", "md", "me", "mg",
+    "mk", "ml", "com.mm", "mn", "ms", "com.mt", "mu", "mv", "mw", "com.mx", "com.my", "co.mz", "com.na",
+    "com.ng", "com.ni", "ne", "nl", "no", "com.np", "nr", "nu", "co.nz", "com.om", "com.pa", "com.pe",
+    "com.pg", "com.ph", "com.pk", "pl", "pn", "com.pr", "ps", "pt", "com.py", "com.qa", "ro", "ru", "rw",
+    "com.sa", "com.sb", "sc", "se", "com.sg", "sh", "si", "sk", "com.sl", "sn", "so", "sm", "sr", "st",
+    "com.sv", "td", "tg", "co.th", "com.tj", "tl", "tm", "tn", "to", "com.tr", "tt", "com.tw", "co.tz",
+    "com.ua", "co.ug", "co.uk", "com.uy", "co.uz", "com.vc", "co.ve", "vg", "co.vi", "com.vn", "vu", "ws",
+    "rs", "co.za", "co.zm", "co.zw", "cat",
+  ].map((suffix) => `google.${suffix}`),
+);
 
 type RedirectResponse = {
   status: number;
@@ -386,12 +407,13 @@ type RedirectResponse = {
 };
 
 export function isMapsLinkInput(value: string): boolean {
-  return allowedMapsUrl(value.trim()) != null;
+  const url = parseHttpUrl(value.trim());
+  return url != null && (asMapsUrl(url) != null || isShortLink(url));
 }
 
 /** A Google Maps URL reduced to a pin, or to the place text in /maps/place/. */
 export function parseMapsLink(value: string): { lat: number; lng: number; name: string } | { query: string } | null {
-  const url = allowedMapsUrl(value.trim());
+  const url = asMapsUrl(parseHttpUrl(value.trim()));
   if (!url) return null;
   const name = placeText(url);
   const point = mapsPoint(url);
@@ -470,36 +492,71 @@ function coordPair(latText: string, lngText: string): { lat: number; lng: number
   return { lat, lng };
 }
 
-function allowedMapsUrl(value: string): URL | null {
-  let url: URL;
+function parseHttpUrl(value: string): URL | null {
+  if (!value) return null;
   try {
-    url = new URL(value);
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    return url;
   } catch {
     return null;
   }
-  if (url.protocol !== "https:") return null;
-  const host = url.hostname.toLowerCase().replace(/\.$/, "");
-  const path = url.pathname;
-  if (host === "maps.app.goo.gl") return url;
-  const mapsPath = path === "/maps" || path.startsWith("/maps/");
-  if (!mapsPath) return null;
-  if (host === "goo.gl") return url;
-  if (new RegExp(`^www\\.google\\.${GOOGLE_SUFFIX}$`).test(host)) return url;
-  if (new RegExp(`^maps\\.google\\.${GOOGLE_SUFFIX}$`).test(host)) return url;
-  return null;
+}
+
+function hostName(url: URL): string {
+  return url.hostname.toLowerCase().replace(/\.$/, "");
+}
+
+function mapsPath(pathname: string): boolean {
+  return pathname === "/maps" || pathname.startsWith("/maps/");
+}
+
+function listedGoogle(host: string): boolean {
+  return GOOGLE_DOMAINS.has(host);
+}
+
+/** www.google.<ccTLD> or maps.google.<ccTLD> with a /maps path. Parsed locally, never fetched. */
+function asMapsUrl(url: URL | null): URL | null {
+  if (!url || !mapsPath(url.pathname)) return null;
+  const host = hostName(url);
+  const bare = host.startsWith("www.") ? host.slice(4) : host.startsWith("maps.") ? host.slice(5) : "";
+  return bare && listedGoogle(bare) ? url : null;
+}
+
+function isShortLink(url: URL): boolean {
+  const host = hostName(url);
+  if (host === "maps.app.goo.gl") return true;
+  return host === "goo.gl" && mapsPath(url.pathname);
+}
+
+function isConsentHost(host: string): boolean {
+  return host.startsWith("consent.") && listedGoogle(host.slice("consent.".length));
+}
+
+/** consent.google.* puts the original maps URL in continue=. */
+function mapsUrlFromConsent(url: URL): URL | null {
+  if (!isConsentHost(hostName(url))) return null;
+  const cont = url.searchParams.get("continue");
+  if (!cont) return null;
+  return asMapsUrl(parseHttpUrl(cont));
 }
 
 async function followMaps(
   start: string,
   fetchImpl: (url: string, init?: RequestInit) => Promise<RedirectResponse>,
 ): Promise<string | null> {
-  let current = start;
-  for (let followed = 0; followed <= MAPS_REDIRECTS; followed += 1) {
-    if (!allowedMapsUrl(current)) return null;
-    if (followed === MAPS_REDIRECTS) return current;
+  const initial = parseHttpUrl(start);
+  if (!initial) return null;
+  const direct = asMapsUrl(initial);
+  if (direct) return direct.toString();
+  if (!isShortLink(initial)) return null;
+
+  let current = initial;
+  for (let hop = 0; hop < MAPS_REDIRECTS; hop += 1) {
+    if (!isShortLink(current)) return null;
     let response: RedirectResponse;
     try {
-      response = await fetchImpl(current, {
+      response = await fetchImpl(current.toString(), {
         redirect: "manual",
         signal: AbortSignal.timeout(MAPS_TIMEOUT_MS),
       });
@@ -508,15 +565,21 @@ async function followMaps(
     }
     await response.body?.cancel?.().catch(() => {});
     const location = response.headers.get("location");
-    if (response.status >= 300 && response.status < 400 && location) {
-      try {
-        current = new URL(location, current).toString();
-      } catch {
-        return null;
-      }
+    if (response.status < 300 || response.status >= 400 || !location) return null;
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      return null;
+    }
+    if (next.protocol !== "https:") return null;
+    const maps = asMapsUrl(next) ?? mapsUrlFromConsent(next);
+    if (maps) return maps.toString();
+    if (isShortLink(next)) {
+      current = next;
       continue;
     }
-    return current;
+    return null;
   }
-  return allowedMapsUrl(current) ? current : null;
+  return null;
 }
