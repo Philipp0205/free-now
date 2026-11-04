@@ -1,4 +1,5 @@
 import path from "node:path";
+import { configuredAdminToken } from "./admin-query.js";
 import { assertTimeZone } from "./time.js";
 
 export type VapidConfig = {
@@ -18,6 +19,8 @@ export type Config = {
   renotifyMs: number;
   mapTileUrl: string;
   mapTileAttribution: string;
+  /** Set only when ADMIN_TOKEN is at least 32 characters. Otherwise the admin routes stay hidden. */
+  adminToken: string | null;
 };
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
@@ -47,6 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     renotifyMs: 30_000,
     mapTileUrl: readTileUrl(env.MAP_TILE_URL),
     mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
+    adminToken: configuredAdminToken(env.ADMIN_TOKEN),
   };
 }
 
