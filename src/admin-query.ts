@@ -1,6 +1,6 @@
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import http from "node:http";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 export const ADMIN_TOKEN_MIN = 32;
 export const ADMIN_ROW_CAP = 500;
@@ -21,8 +21,22 @@ const READ_PRAGMAS = new Set([
   "database_list",
 ]);
 
-const readers = new Map<string, DatabaseSync>();
 const failures = new Map<string, { count: number; resetAt: number }>();
+
+export class AdminQueryTimeout extends Error {
+  constructor() {
+    super("timeout");
+    this.name = "AdminQueryTimeout";
+  }
+}
+
+/** SQLite rejected a statement that the allowlist had already accepted. */
+export class AdminQueryFailed extends Error {
+  constructor() {
+    super("query failed");
+    this.name = "AdminQueryFailed";
+  }
+}
 
 export function configuredAdminToken(value: string | undefined): string | null {
   const token = value?.trim() ?? "";
@@ -45,31 +59,54 @@ export function resetAdminFailures(): void {
 }
 
 export function closeAdminReaders(): void {
-  for (const db of readers.values()) db.close();
-  readers.clear();
+  // Queries open their own short-lived process. Nothing is cached on the server.
 }
 
-function readerFor(dbPath: string): DatabaseSync {
-  const existing = readers.get(dbPath);
-  if (existing) return existing;
-  const db = new DatabaseSync(dbPath, { readOnly: true, timeout: ADMIN_BUSY_MS });
-  readers.set(dbPath, db);
-  return db;
-}
-
+/**
+ * Client address for the failure limiter.
+ * Railway's proxy appends the address it actually accepted, so the rightmost
+ * X-Forwarded-For hop is that client. A left-hand value is whatever the caller
+ * sent and is not trusted. With no forwarding header, the socket address is used.
+ */
 export function adminFailureKey(req: http.IncomingMessage): string {
+  const forwarded = headerValue(req.headers["x-forwarded-for"]);
+  const hop = rightmostForwarded(forwarded);
+  if (hop) return hop;
   return req.socket?.remoteAddress || "unknown";
 }
 
+function headerValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
+
+function rightmostForwarded(header: string): string {
+  const hop = header.split(",").map((part) => part.trim()).filter(Boolean).at(-1) ?? "";
+  if (!hop || hop.length > 128 || /[\s/]/.test(hop)) return "";
+  return hop;
+}
+
+function pruneAdminFailures(now: number): void {
+  for (const [key, slot] of failures) {
+    if (now >= slot.resetAt) failures.delete(key);
+  }
+}
+
+export function adminFailureSlots(): number {
+  return failures.size;
+}
+
 export function adminFailuresOpen(key: string, now: number): boolean {
+  pruneAdminFailures(now);
   const slot = failures.get(key);
-  if (!slot || now >= slot.resetAt) return true;
+  if (!slot) return true;
   return slot.count < ADMIN_FAIL_LIMIT;
 }
 
 export function noteAdminFailure(key: string, now: number): void {
+  pruneAdminFailures(now);
   const slot = failures.get(key);
-  if (!slot || now >= slot.resetAt) {
+  if (!slot) {
     failures.set(key, { count: 1, resetAt: now + ADMIN_FAIL_WINDOW_MS });
     return;
   }
@@ -164,52 +201,136 @@ function remainderHasSql(rest: string): boolean {
   return false;
 }
 
-export type AdminRows = { columns: string[]; rows: unknown[][] };
+export type AdminRows = { columns: string[]; rows: unknown[][]; truncated: boolean };
 
 /**
- * Node 22's StatementSync does not expose `reader` yet. When it does, that flag
- * is sqlite3_stmt_readonly (false for INSERT RETURNING). Otherwise a statement
- * that returns no columns is not a read (INSERT, ATTACH, BEGIN).
+ * node:sqlite cannot interrupt a statement, and worker.terminate waits out the
+ * native call. The query runs in a child process that is killed at the deadline,
+ * so the server stays responsive and a timeout is not a partial result.
  */
-function isReadStatement(stmt: StatementSync): boolean {
-  const flagged = (stmt as StatementSync & { reader?: boolean }).reader;
-  if (typeof flagged === "boolean") return flagged;
-  return stmt.columns().length > 0;
+const ADMIN_CHILD = `
+import { DatabaseSync } from "node:sqlite";
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+function fail(kind) {
+  process.stdout.write(JSON.stringify({ ok: false, kind }));
 }
-
-export function runReadQuery(dbPath: string, sql: string, params: unknown[]): AdminRows {
-  assertSingleRead(sql);
-  const values = readParams(params);
-  const db = readerFor(dbPath);
-  let stmt: StatementSync;
+function jsonValue(value) {
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Uint8Array) return Buffer.from(value).toString("base64");
+  return value ?? null;
+}
+try {
+  const db = new DatabaseSync(input.dbPath, { readOnly: true, timeout: ${ADMIN_BUSY_MS} });
+  let stmt;
   try {
-    stmt = db.prepare(sql);
+    stmt = db.prepare(input.sql);
   } catch {
-    throw new Error("query is not allowed");
+    fail("failed");
+    db.close();
+    process.exit(0);
   }
-  if (!isReadStatement(stmt)) throw new Error("query is not allowed");
   const columns = stmt.columns().map((column) => column.name);
-  const rows: unknown[][] = [];
-  const deadline = Date.now() + ADMIN_DEADLINE_MS;
+  const reader = stmt.reader;
+  if (typeof reader === "boolean" ? reader === false : columns.length === 0) {
+    fail("denied");
+    db.close();
+    process.exit(0);
+  }
+  const rows = [];
+  let truncated = false;
   try {
-    for (const row of stmt.iterate(...values)) {
-      if (rows.length >= ADMIN_ROW_CAP || Date.now() > deadline) break;
-      const record = row as Record<string, unknown>;
-      rows.push(columns.map((name) => jsonValue(record[name])));
+    for (const row of stmt.iterate(...input.params)) {
+      if (rows.length >= input.rowCap) {
+        truncated = true;
+        break;
+      }
+      rows.push(columns.map((name) => jsonValue(row[name])));
     }
   } catch {
-    throw new Error("query is not allowed");
+    fail("failed");
+    db.close();
+    process.exit(0);
   }
-  return { columns, rows };
+  process.stdout.write(JSON.stringify({ ok: true, columns, rows, truncated }));
+  db.close();
+} catch {
+  fail("failed");
+}
+`;
+
+export async function runReadQuery(dbPath: string, sql: string, params: unknown[]): Promise<AdminRows> {
+  assertSingleRead(sql);
+  const values = readParams(params);
+  return runChildQuery(dbPath, sql, values);
 }
 
-export function readSchema(dbPath: string): Array<{ name: string; sql: string }> {
-  const result = runReadQuery(
+export async function readSchema(dbPath: string): Promise<Array<{ name: string; sql: string }>> {
+  const result = await runReadQuery(
     dbPath,
     "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     [],
   );
   return result.rows.map((row) => ({ name: String(row[0] ?? ""), sql: String(row[1] ?? "") }));
+}
+
+function runChildQuery(
+  dbPath: string,
+  sql: string,
+  params: Array<string | number | null | bigint>,
+): Promise<AdminRows> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      "--disable-warning=ExperimentalWarning",
+      "--input-type=module",
+      "--eval",
+      ADMIN_CHILD,
+    ], { stdio: ["pipe", "pipe", "ignore"] });
+    let out = "";
+    let settled = false;
+    const done = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      done(() => {
+        child.kill("SIGKILL");
+        reject(new AdminQueryTimeout());
+      });
+    }, ADMIN_DEADLINE_MS);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      out += chunk;
+    });
+    child.stdout.on("error", () => {});
+    child.on("error", () => done(() => reject(new AdminQueryFailed())));
+    child.on("exit", () => {
+      done(() => {
+        let message: { ok?: boolean; kind?: string; columns?: string[]; rows?: unknown[][]; truncated?: boolean };
+        try {
+          message = JSON.parse(out) as typeof message;
+        } catch {
+          reject(new AdminQueryFailed());
+          return;
+        }
+        if (message.ok) {
+          resolve({
+            columns: message.columns ?? [],
+            rows: message.rows ?? [],
+            truncated: Boolean(message.truncated),
+          });
+          return;
+        }
+        if (message.kind === "failed") reject(new AdminQueryFailed());
+        else reject(new Error("query is not allowed"));
+      });
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(JSON.stringify({ dbPath, sql, params, rowCap: ADMIN_ROW_CAP }));
+  });
 }
 
 function readParams(params: unknown[]): Array<string | number | null | bigint> {
@@ -229,8 +350,3 @@ function readParams(params: unknown[]): Array<string | number | null | bigint> {
   });
 }
 
-function jsonValue(value: unknown): unknown {
-  if (typeof value === "bigint") return value.toString();
-  if (value instanceof Uint8Array) return Buffer.from(value).toString("base64");
-  return value ?? null;
-}
