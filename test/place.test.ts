@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { audiencePlace, formatDistance, haversine } from "../public/place.js";
+import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "../public/place.js";
 
 test("near you reads as nearby", () => {
   assert.equal(audiencePlace("near you"), "nearby");
@@ -34,4 +34,40 @@ test("haversine matches one degree of latitude", () => {
   const oneDegreeNorth = { lat: 1, lng: 0 };
   assert.equal(haversine(equator, oneDegreeNorth), 111194.92664455874);
   assert.equal(haversine(oneDegreeNorth, equator), 111194.92664455874);
+});
+
+test("the client knows a Google Maps link from any other URL", () => {
+  for (const link of [
+    "https://www.google.com/maps/place/Cafe+Ada/",
+    "https://google.com/maps/place/Cafe+Ada/",
+    "https://google.co.uk/maps/@51.5,-0.12,15z",
+    "https://maps.google.com/?q=48.7674,9.1708",
+    "https://maps.google.de/maps/place/Cafe",
+    "https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8",
+    "https://goo.gl/maps/abc",
+    "  https://google.com/maps  ",
+  ]) {
+    assert.equal(isMapsLink(link), true, link);
+  }
+  for (const other of [
+    "https://example.com/maps/place/Cafe",
+    "https://google.com/search?q=cafe",
+    "https://notgoogle.com/maps/place/Cafe",
+    "http://google.com/maps/place/Cafe",
+    "https://goo.gl/not-maps",
+    "google.com/maps",
+    "Cafe Ada",
+  ]) {
+    assert.equal(isMapsLink(other), false, other);
+  }
+});
+
+test("anything starting with http or https looks like a URL", () => {
+  assert.equal(looksLikeUrl("https://example.com"), true);
+  assert.equal(looksLikeUrl("http://example.com"), true);
+  assert.equal(looksLikeUrl("  HTTPS://Example.com "), true);
+  assert.equal(looksLikeUrl("Cafe Ada"), false);
+  assert.equal(looksLikeUrl("www.example.com"), false);
+  assert.equal(looksLikeUrl(""), false);
+  assert.equal(looksLikeUrl(null), false);
 });

@@ -1,7 +1,7 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 import { clockText, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, zonedParts } from "./when.js";
-import { audiencePlace, formatDistance, haversine } from "./place.js";
+import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
 
 const TOKEN_KEY = "fn_token";
@@ -65,6 +65,7 @@ const state = {
   whereAutofill: false,
   whereResults: [],
   whereSearching: false,
+  whereHint: "",
   whereMap: false,
   focusSocial: "",
   deepLink: null,
@@ -141,6 +142,7 @@ if ("serviceWorker" in navigator) {
 }
 
 const FINDING_PLACE = "Finding address…";
+const URL_HINT = "Paste a Google Maps link or type a place";
 const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap } = bindMap({
   state,
   whereTarget: () => whereBag(),
@@ -606,18 +608,29 @@ function scrollBottomIntoView(element) {
   scrollParent(element).scrollBy({ top: overflow, left: 0 });
 }
 
-/** Keep the Where? hit list above the keyboard, inside the scrolling sheet. */
+/** Keep the Where? hit list above the dock and the keyboard, without pushing the search field under the sheet head. */
 function revealWhereResults() {
   const list = document.querySelector(".where-results");
   if (!list?.isConnected) return;
+  const sheet = list.closest(".sheet");
+  const dock = sheet?.querySelector(".sheet-dock");
+  const head = sheet?.querySelector(".sheet-head");
+  const query = document.getElementById("where-query");
   const view = window.visualViewport;
   const viewTop = view?.offsetTop ?? 0;
   const viewBottom = viewTop + (view?.height ?? window.innerHeight);
-  const rect = list.getBoundingClientRect();
   const margin = 12;
-  const parent = scrollParent(list);
-  if (rect.bottom > viewBottom - margin) parent.scrollBy({ top: rect.bottom - (viewBottom - margin), left: 0 });
-  else if (rect.top < viewTop + margin) parent.scrollBy({ top: rect.top - (viewTop + margin), left: 0 });
+  const limit = Math.min(dock?.getBoundingClientRect().top ?? viewBottom, viewBottom) - margin;
+  const floor = Math.max(viewTop + margin, (head?.getBoundingClientRect().bottom ?? viewTop) + margin);
+  const rect = list.getBoundingClientRect();
+  const parent = sheet?.querySelector(".sheet-scroll") || scrollParent(list);
+  if (rect.bottom > limit) {
+    const anchor = (query || list).getBoundingClientRect().top;
+    const delta = Math.min(rect.bottom - limit, anchor - floor);
+    if (delta > 1) parent.scrollBy({ top: delta, left: 0 });
+  } else if (rect.top < floor) {
+    parent.scrollBy({ top: rect.top - floor, left: 0 });
+  }
 }
 
 function scrollParent(element) {
@@ -1818,17 +1831,20 @@ function adminEditSheet() {
         el("p", { class: "help", text: "This updates it for everyone in the circle." }),
       ]),
       el("div", { class: "sheet-scroll" }, [
-        sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
-        el("label", { class: "sheet-group" }, [
-          el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
-          el("input", {
-            id: "admin-time",
-            class: "sheet-control",
-            type: "time",
-            value: edit.time,
-          }),
+        el("div", { class: "sheet-form" }, [
+          sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
+          el("label", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
+            el("input", {
+              id: "admin-time",
+              class: "sheet-control",
+              type: "time",
+              value: edit.time,
+              oninput: (event) => { edit.time = event.target.value; },
+            }),
+          ]),
+          whereBlock(edit),
         ]),
-        whereBlock(edit),
       ]),
       el("div", { class: "sheet-dock" }, [
         el("button", { class: "btn", type: "submit", text: "Save" }),
@@ -2151,6 +2167,7 @@ function emptyWhereSession() {
     whereAutofill: false,
     whereResults: [],
     whereSearching: false,
+    whereHint: "",
     whereMap: false,
     whereArea: "",
     whereFallback: "",
@@ -2179,7 +2196,7 @@ function whereFromSocial(social) {
 
 function namedPlace(value) {
   const text = String(value || "").trim();
-  if (!text || text === FINDING_PLACE || /^https:\/\//i.test(text)) return "";
+  if (!text || text === FINDING_PLACE || looksLikeUrl(text)) return "";
   return text;
 }
 
@@ -2585,7 +2602,8 @@ function wherePicker(bag = state) {
       onbeforeinput: (event) => onWhereBeforeInput(bag, event),
       oninput: (event) => onWhereInput(bag, event),
     }),
-    bag.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
+    bag.whereHint ? el("p", { class: "where-hint", role: "status", text: bag.whereHint }) : null,
+    !bag.whereHint && bag.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
     bag.whereResults.length
       ? el("div", { class: "where-results" }, bag.whereResults.map((hit) => el("button", {
           class: "where-hit",
@@ -2642,6 +2660,7 @@ function chooseWhereHit(bag, hit) {
   bag.whereQuery = hit.name;
   bag.whereResults = [];
   bag.whereSearching = false;
+  bag.whereHint = "";
   render();
 }
 
@@ -2655,6 +2674,7 @@ function clearWhereSelection(bag, keepOpen) {
   bag.whereQuery = "";
   bag.whereResults = [];
   bag.whereSearching = false;
+  bag.whereHint = "";
   bag.whereMap = false;
   bag.whereOpen = Boolean(keepOpen);
   clearTimeout(whereTimer);
@@ -2775,7 +2795,7 @@ function rerenderWhere() {
 function limitWhereQuery(value) {
   const text = String(value ?? "");
   const trimmed = text.trim();
-  if (/^https:\/\//i.test(trimmed)) return trimmed.slice(0, 2000);
+  if (looksLikeUrl(trimmed)) return trimmed.slice(0, 2000);
   return text.slice(0, 80);
 }
 
@@ -2786,19 +2806,22 @@ function searchQuery(value) {
 function scheduleWhereSearch(bag = state) {
   clearTimeout(whereTimer);
   const query = searchQuery(bag.whereQuery);
-  if (!/^https:\/\//i.test(query) && query.length < 2) {
+  const maps = isMapsLink(query);
+  const hint = looksLikeUrl(query) && !maps ? URL_HINT : "";
+  if ((bag.whereHint || "") !== hint) {
+    bag.whereHint = hint;
+    if (hint) bag.whereResults = [];
+    rerenderWhere();
+  }
+  if (hint || (!maps && query.length < 2)) {
     bag.whereResults = [];
     bag.whereSearching = false;
     return;
   }
   whereTimer = setTimeout(() => {
     bag.whereSearching = true;
-    const label = document.querySelector(".where-picker");
-    if (label && !document.querySelector(".where-hint")) {
-      /* render once the results arrive */
-    }
     const origin = searchOrigin();
-    const near = origin && !/^https:\/\//i.test(query) ? `&lat=${encodeURIComponent(origin.lat)}&lng=${encodeURIComponent(origin.lng)}` : "";
+    const near = origin && !maps ? `&lat=${encodeURIComponent(origin.lat)}&lng=${encodeURIComponent(origin.lng)}` : "";
     api(`/api/geocode?q=${encodeURIComponent(query)}${near}`).then((data) => {
       if (searchQuery(bag.whereQuery) !== query) return;
       bag.whereResults = data.results || [];
@@ -2984,15 +3007,17 @@ function mapCard(pin) {
   const plan = pin.kind === "plan"
     ? state.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
     : null;
+  const tools = social?.creator ? eventTools("social", social) : plan?.creator ? eventTools("plan", plan) : null;
   return el("article", { class: "map-card" }, [
-    el("strong", { text: pin.title }),
+    el("div", { class: "map-card-head" }, [
+      el("strong", { text: pin.title }),
+      tools,
+    ]),
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
     social && !pin.own ? replySummary(social) : null,
     social && !pin.own ? removedNote(social) || replyActions(social) : null,
-    social?.creator ? eventTools("social", social) : null,
     plan && !pin.own ? planPinActions(plan) : null,
-    plan?.creator ? eventTools("plan", plan) : null,
     el("div", { class: "map-card-actions" }, [
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
     ]),
@@ -3242,6 +3267,7 @@ function openSheet(name) {
     state.whereOpen = false;
     state.whereResults = [];
     state.whereSearching = false;
+    state.whereHint = "";
     state.whereMap = false;
     const mine = mySocial();
     const upcoming = mine?.startsAt && mine.startsAt > Date.now();
