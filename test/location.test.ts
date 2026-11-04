@@ -1,51 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { clearExpiredLocations, insertCircle, insertPlan, insertSocial, insertUser, listActiveSocials, openDb, sweep } from "../src/db.js";
-import type { PushPayload, PushSender } from "../src/push.js";
+import { api, withApp } from "./http.js";
 
-const START = Date.parse("2026-06-01T15:00:00.000Z");
-
-async function withApp(fn: (port: number, sent: PushPayload[]) => Promise<void>) {
-  const sent: PushPayload[] = [];
-  const db = openDb(":memory:");
-  const push: PushSender = { async send(_sub, payload) { sent.push(payload); } };
-  const config = loadConfig({ PORT: "3000", APP_TZ: "UTC", DB_PATH: ":memory:" });
-  const server = http.createServer(createApp({ db, push, config: { ...config, dbPath: ":memory:" }, now: () => START }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const port = (server.address() as AddressInfo).port;
-  try {
-    await fn(port, sent);
-  } finally {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  }
-}
-
-async function api(port: number, method: string, pathname: string, options: { token?: string; body?: unknown; status?: number } = {}) {
-  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
-    method,
-    headers: {
-      ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
-  const text = await response.text();
-  const json = text ? JSON.parse(text) : null;
-  if (options.status !== undefined && response.status !== options.status) {
-    throw new Error(`${method} ${pathname} -> ${response.status} ${text}`);
-  }
-  return json;
-}
+// The old location harness pinned now() to the start instant.
+const locationOptions = { now: "fixed" as const };
 
 async function circle(port: number) {
   const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
@@ -61,7 +25,7 @@ async function circle(port: number) {
 }
 
 test("shared locations are rounded, optional, and kept off push text", async () => {
-  await withApp(async (port, sent) => {
+  await withApp(async ({ port, sent }) => {
     const { alex } = await circle(port);
     const social = await api(port, "POST", "/api/socials", {
       token: alex.token,
@@ -92,11 +56,11 @@ test("shared locations are rounded, optional, and kept off push text", async () 
       body: { note: "nope", lat: 120, lng: 10 },
       status: 400,
     });
-  });
+  }, locationOptions);
 });
 
 test("a plan can name a place and share a pin without putting coordinates in the push", async () => {
-  await withApp(async (port, sent) => {
+  await withApp(async ({ port, sent }) => {
     const { alex, veit } = await circle(port);
     const plan = await api(port, "POST", "/api/plans", {
       token: alex.token,
@@ -111,11 +75,11 @@ test("a plan can name a place and share a pin without putting coordinates in the
     const listed = await api(port, "GET", "/api/plans", { token: veit.token });
     assert.equal(listed.plans[0].place, "Roof");
     assert.deepEqual(listed.plans[0].location, { lat: 52.52, lng: 13.405 });
-  });
+  }, locationOptions);
 });
 
 test("a meetup place is stored, pushed, and can be a name without a pin", async () => {
-  await withApp(async (port, sent) => {
+  await withApp(async ({ port, sent }) => {
     const { alex } = await circle(port);
     const social = await api(port, "POST", "/api/socials", {
       token: alex.token,
@@ -143,7 +107,7 @@ test("a meetup place is stored, pushed, and can be a name without a pin", async 
     });
     assert.equal(kept.social.place, "the roof");
     assert.equal(kept.social.location, null);
-  });
+  }, locationOptions);
 });
 
 test("map tiles default to a labelled street map and can be overridden", async () => {
@@ -160,11 +124,11 @@ test("map tiles default to a labelled street map and can be overridden", async (
   assert.equal(custom.mapTileUrl, "https://tiles.example/{z}/{x}/{y}.png");
   assert.equal(custom.mapTileAttribution, "© Example");
   assert.throws(() => loadConfig({ MAP_TILE_URL: "http://tiles.example/{z}/{x}/{y}.png" }), /MAP_TILE_URL/);
-  await withApp(async (port) => {
+  await withApp(async ({ port }) => {
     const meta = await api(port, "GET", "/api/meta");
     assert.equal(meta.mapTileUrl, defaults.mapTileUrl);
     assert.equal(meta.mapTileAttribution, defaults.mapTileAttribution);
-  });
+  }, locationOptions);
 });
 
 test("an expired social row has NULL coordinates while the row remains", () => {
