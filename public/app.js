@@ -73,12 +73,21 @@ const state = {
   whenMode: "now",
   startChoice: "",
   etaFor: "",
+  chat: null,
+  chatQueue: null,
+  chatThread: null,
+  chatReturn: "home",
+  chatDraft: "",
+  chatStick: false,
+  chatSummary: { circle: { unread: 0, muted: false }, events: [] },
 };
 
 const deepLinkParams = new URLSearchParams(location.search);
 const planFocus = deepLinkParams.get("plan");
 const socialFocus = deepLinkParams.get("social");
-if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
+const chatFocus = deepLinkParams.get("chat");
+if (chatFocus) state.deepLink = { kind: "chat", id: chatFocus };
+else if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
 else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
 if (state.deepLink) {
   const url = new URL(location.href);
@@ -131,7 +140,13 @@ const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap } = bindMap({
 
 boot();
 setInterval(() => {
-  if (!document.hidden && state.token) refresh().catch(() => {});
+  if (!document.hidden && state.token) {
+    refresh().catch((error) => {
+      if (error?.status === 401) return;
+      noteConnectionProblem(error);
+      render();
+    });
+  }
 }, 3000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh().catch(() => {});
@@ -242,6 +257,7 @@ function scheduleOfflineRetry(delay) {
       state.statusMessage = "";
       render();
       refresh({ initial: true }).catch(() => {});
+      void flushChatQueue();
       void considerReminders();
     } catch (error) {
       if (error.status === 401) return;
@@ -275,6 +291,11 @@ function friendlyMessage(raw, status) {
     if (named && named[1].toLowerCase() !== "the host") return text.endsWith(".") ? text : `${text}.`;
     return "The host removed you from this.";
   }
+  if (lower.includes("chat is closed")) return "This chat is closed.";
+  if (lower.includes("1000")) return "Keep it under 1000 characters.";
+  if (lower.includes("write a message")) return "Write a message.";
+  if (lower.includes("can't delete")) return "You can't delete that.";
+  if (lower.includes("were removed")) return "You were removed from this event.";
   if (lower.includes("only the host")) return "Only the host can do that.";
   if (status === 403 || lower.includes("only an admin")) return "Only an admin can do that.";
   if (lower.includes("needs an admin")) return "A circle needs an admin.";
@@ -288,12 +309,16 @@ async function refresh({ initial = false } = {}) {
   let plans;
   let notifications;
   let me;
+  let summary;
+  let thread;
   try {
-    [socials, plans, notifications, me] = await Promise.all([
+    [socials, plans, notifications, me, summary, thread] = await Promise.all([
       api("/api/socials"),
       api("/api/plans"),
       api("/api/notifications"),
       api("/api/me"),
+      api("/api/chats"),
+      state.chat ? api(chatTargetUrl(state.chat)) : Promise.resolve(null),
     ]);
   } catch (error) {
     if (error.status === 401) return;
@@ -308,6 +333,8 @@ async function refresh({ initial = false } = {}) {
   state.plans = plans.plans;
   state.notifications = notifications.notifications;
   state.me = me;
+  state.chatSummary = summary;
+  if (thread?.chat) state.chatThread = thread.chat;
   const newest = state.notifications[0];
   if (!state.bootstrappedNotifs) {
     state.latestNotifId = newest?.id ?? null;
@@ -328,6 +355,8 @@ async function refresh({ initial = false } = {}) {
     notifications: state.notifications.map((note) => [note.id, note.readAt]),
     members: state.me?.circle?.members ?? null,
     banner: state.banner?.id ?? null,
+    chats: state.chatSummary,
+    thread: state.chatThread?.messages?.map((message) => message.id) ?? null,
   });
   persistCachedState();
   const hadStatus = Boolean(state.statusMessage);
@@ -402,7 +431,9 @@ function syncKeyboardInset() {
     touchUi,
   });
   document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+  document.documentElement.style.setProperty("--vv-top", `${Math.max(0, Math.round(vv.offsetTop || 0))}px`);
   document.documentElement.style.setProperty("--vv-height", `${Math.max(0, Math.round(viewportHeight))}px`);
+  if (state.chat) stickChatLog();
   const bar = document.querySelector(".tabbar");
   const rect = bar?.getBoundingClientRect();
   const overlaps = rect
@@ -608,9 +639,16 @@ function render() {
   const caret = document.activeElement?.selectionStart ?? null;
   const y = document.scrollingElement?.scrollTop ?? 0;
   const sheetY = document.querySelector(".sheet-scroll")?.scrollTop ?? 0;
+  const chatLog = document.querySelector(".chat-log");
+  const chatY = chatLog?.scrollTop ?? 0;
+  const chatNearEnd = chatLog ? chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 48 : true;
   document.getElementById("app").replaceChildren(view());
   const sheetScroll = document.querySelector(".sheet-scroll");
   if (sheetScroll) sheetScroll.scrollTop = sheetY;
+  const nextLog = document.querySelector(".chat-log");
+  if (nextLog) nextLog.scrollTop = state.chatStick || chatNearEnd ? nextLog.scrollHeight : chatY;
+  state.chatStick = false;
+  if (state.chat) stickChatLog();
   if (state.focusSheet) {
     state.focusSheet = false;
     document.getElementById("sheet-note")?.focus({ preventScroll: true });
@@ -788,6 +826,10 @@ function setup() {
 
 function shell() {
   const phone = el("div", { class: "phone" });
+  if (state.chat) {
+    phone.append(chatScreen());
+    return phone;
+  }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
   if (state.tab === "home") phone.append(home());
   if (state.tab === "map") phone.append(mapScreen());
@@ -895,6 +937,7 @@ function socialCard(social) {
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : removedNote(social) || replyActions(social),
+      chatEntry("social", social),
     ]),
   ]);
 }
@@ -912,6 +955,7 @@ function planCard(plan) {
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : removedNote(plan) || planReplyButtons(plan),
+      chatEntry("plan", plan),
     ]),
   ]);
 }
@@ -934,6 +978,13 @@ function circleScreen() {
         el("button", {
           class: "btn",
           type: "button",
+          text: circleUnread() ? `Circle chat · ${circleUnread()}` : "Circle chat",
+          "aria-label": circleUnread() ? `Circle chat, ${circleUnread()} new` : "Circle chat",
+          onclick: () => { void openChat({ kind: "circle" }); },
+        }),
+        el("button", {
+          class: "btn",
+          type: "button",
           text: "Share invite",
           onclick: () => shareInvite(),
         }),
@@ -950,6 +1001,217 @@ function circleScreen() {
       ...circle.members.map((member) => memberRow(member)),
     ]),
   ]);
+}
+
+function circleUnread() {
+  return state.chatSummary?.circle?.unread || 0;
+}
+
+function eventUnread(kind, id) {
+  return state.chatSummary?.events?.find((row) => row.kind === kind && row.id === id)?.unread || 0;
+}
+
+function chatTargetUrl(target) {
+  if (target.kind === "circle") return "/api/circles/chat";
+  return `/api/${target.kind}s/${target.id}/chat`;
+}
+
+async function openChat(target) {
+  state.chatReturn = state.tab;
+  state.chat = target;
+  state.chatStick = true;
+  if (target.kind === "circle") state.chatSummary.circle.unread = 0;
+  else {
+    const row = state.chatSummary?.events?.find((item) => item.kind === target.kind && item.id === target.id);
+    if (row) row.unread = 0;
+  }
+  await run(async () => {
+    state.chatThread = (await api(chatTargetUrl(target))).chat;
+  });
+}
+
+function closeChat() {
+  state.chat = null;
+  state.chatThread = null;
+  state.chatDraft = "";
+  state.tab = state.chatReturn || "home";
+  render();
+}
+
+function chatScreen() {
+  const thread = state.chatThread;
+  const title = thread?.title || "Chat";
+  return     el("section", { class: "chat-screen", "aria-label": title }, [
+    state.statusMessage ? el("p", { class: "status-banner", role: "status", text: state.statusMessage }) : null,
+    el("header", { class: "chat-head" }, [
+      el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closeChat }),
+      el("h1", { text: title }),
+      thread
+        ? el("button", {
+            class: "text-btn",
+            type: "button",
+            text: thread.muted ? "Unmute" : "Mute",
+            onclick: () => { void toggleMute(); },
+          })
+        : null,
+    ]),
+    el("div", { class: "chat-log", id: "chat-log" }, thread
+      ? thread.messages.map((message) => message.system ? systemLine(message) : messageRow(message))
+      : [el("p", { class: "help", text: "Loading…" })]),
+    thread?.removed
+      ? el("p", { class: "chat-closed", text: "You were removed from this event." })
+      : thread?.closed
+      ? el("p", { class: "chat-closed", text: "This chat is closed." })
+      : el("form", { class: "chat-compose", onsubmit: sendChat }, [
+          el("input", {
+            id: "chat-input",
+            class: "sheet-control",
+            type: "text",
+            maxlength: "1000",
+            placeholder: "Message",
+            value: state.chatDraft,
+            autocomplete: "off",
+            oninput: (event) => { state.chatDraft = event.target.value; },
+          }),
+          el("button", { class: "btn chat-send", type: "submit", text: "Send" }),
+        ]),
+  ]);
+}
+
+function systemLine(message) {
+  return el("p", { class: "chat-system" }, [
+    el("span", { text: message.text }),
+    el("time", { text: messageWhen(message.at) }),
+  ]);
+}
+
+function personAccent(message) {
+  if (message.mine || message.system || message.color == null) return "";
+  return state.chatThread?.palette?.[message.color] || "";
+}
+
+function messageRow(message) {
+  const accent = personAccent(message);
+  return el("article", {
+    class: message.mine ? "chat-msg mine" : "chat-msg",
+    "data-color": accent ? String(message.color) : null,
+    style: accent ? `--person:${accent}` : null,
+  }, [
+    el("header", {}, [
+      el("strong", { text: message.mine ? "You" : message.name }),
+      el("time", { text: messageWhen(message.at) }),
+    ]),
+    el("p", { text: message.text }),
+    message.canDelete
+      ? el("button", { class: "text-btn", type: "button", text: "Delete", onclick: () => confirmDeleteMessage(message) })
+      : null,
+  ]);
+}
+
+function messageWhen(ms) {
+  const part = zonedParts(ms);
+  const today = zonedParts(Date.now());
+  const hm = clockText(part.hour, part.minute);
+  if (part.day === today.day) return hm;
+  return `${part.day.slice(5)} ${hm}`;
+}
+
+function stickChatLog() {
+  const log = document.querySelector(".chat-log");
+  const bar = document.querySelector(".chat-compose, .chat-closed");
+  if (!log) return;
+  const view = window.visualViewport;
+  const viewBottom = (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight);
+  const limit = Math.min(viewBottom, bar?.getBoundingClientRect().top ?? viewBottom) - 8;
+  const last = log.lastElementChild;
+  if (!last) return;
+  const box = last.getBoundingClientRect();
+  if (box.bottom > limit) log.scrollTop += box.bottom - limit;
+}
+
+function unsentTail(typed, sent) {
+  if (!sent || typed === sent) return typed === sent ? "" : typed;
+  if (typed.startsWith(sent)) return typed.slice(sent.length).replace(/^\s+/, "");
+  return typed;
+}
+
+async function sendChat(event) {
+  event.preventDefault();
+  if (!state.chat || state.chatQueue) return;
+  const text = state.chatDraft.trim();
+  if (!text) return;
+  const target = { kind: state.chat.kind, id: state.chat.id };
+  state.chatQueue = { target, text };
+  try {
+    state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: { text } })).chat;
+    state.chatQueue = null;
+    state.chatDraft = unsentTail(state.chatDraft, text);
+    state.statusMessage = "";
+    state.chatStick = true;
+  } catch (error) {
+    if (error.status === 401) return;
+    if (isNetworkFailure(error) || error.status >= 500) {
+      noteConnectionProblem(error);
+      scheduleOfflineRetry(1000);
+    } else {
+      state.chatQueue = null;
+      state.error = error.message || "Something went wrong";
+    }
+  }
+  render();
+}
+
+async function flushChatQueue() {
+  const queued = state.chatQueue;
+  if (!queued) return;
+  try {
+    const thread = (await api(chatTargetUrl(queued.target), { method: "POST", body: { text: queued.text } })).chat;
+    state.chatQueue = null;
+    state.chatDraft = unsentTail(state.chatDraft, queued.text);
+    state.statusMessage = "";
+    if (state.chat && state.chat.kind === queued.target.kind && state.chat.id === queued.target.id) {
+      state.chatThread = thread;
+    }
+    state.chatStick = true;
+    render();
+  } catch (error) {
+    if (error.status !== 401 && (isNetworkFailure(error) || error.status >= 500)) noteConnectionProblem(error);
+  }
+}
+
+async function toggleMute() {
+  if (!state.chat || !state.chatThread) return;
+  const muted = !state.chatThread.muted;
+  await run(async () => {
+    await api(`/api/chats/${state.chatThread.id}/mute`, { method: "POST", body: { muted } });
+    state.chatThread = (await api(chatTargetUrl(state.chat))).chat;
+  });
+}
+
+function confirmDeleteMessage(message) {
+  state.confirm = {
+    title: "Delete this message?",
+    body: "It's removed for everyone in the chat.",
+    confirmLabel: "Delete",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/messages/${message.id}`, { method: "DELETE" });
+        if (state.chat) state.chatThread = (await api(chatTargetUrl(state.chat))).chat;
+      });
+    },
+  };
+  render();
+}
+
+function chatEntry(kind, item) {
+  const unread = eventUnread(kind, item.id);
+  return el("button", {
+    class: "text-btn chat-entry",
+    type: "button",
+    text: unread ? `Chat · ${unread}` : "Chat",
+    "aria-label": unread ? `Chat, ${unread} new` : "Chat",
+    onclick: () => { void openChat({ kind, id: item.id }); },
+  });
 }
 
 function alertsScreen() {
@@ -2281,6 +2543,14 @@ function scheduleReverse(lat, lng, replace = false) {
 }
 
 function openNotification(note) {
+  if (note.kind === "chat" && note.refId) {
+    if (note.refId === "circle") void openChat({ kind: "circle" });
+    else {
+      const [kind, id] = note.refId.split(":");
+      if ((kind === "social" || kind === "plan") && id) void openChat({ kind, id });
+    }
+    return;
+  }
   const social = note.refId ? state.socials.find((item) => item.id === note.refId) : null;
   const plan = !social && note.refId ? state.plans.find((item) => item.id === note.refId) : null;
   const kind = social ? "social" : plan ? "plan" : "";
@@ -2308,6 +2578,16 @@ function clearDeepLinkQuery() {
 
 function consumeDeepLink() {
   if (!state.deepLink) return false;
+  if (state.deepLink.kind === "chat") {
+    const raw = state.deepLink.id;
+    state.deepLink = null;
+    if (raw === "circle") void openChat({ kind: "circle" });
+    else {
+      const [kind, id] = String(raw).split(":");
+      if ((kind === "social" || kind === "plan") && id) void openChat({ kind, id });
+    }
+    return true;
+  }
   const { kind, id } = state.deepLink;
   const list = kind === "plan" ? state.plans : state.socials;
   const item = list.find((entry) => entry.id === id);

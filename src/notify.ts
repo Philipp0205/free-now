@@ -11,6 +11,7 @@ export type Notice = {
   refId: string | null;
   tag: string;
   url?: string;
+  skipAlert?: boolean;
 };
 
 export function socialTitle(note: string): string {
@@ -86,15 +87,17 @@ export async function notifyUsers(
   const deliveries: Array<{ userId: string; endpoint: string; p256dh: string; auth: string; payload: PushPayload }> = [];
   withTx(db, () => {
     for (const notice of notices) {
-      insertNotification(db, {
-        id: crypto.randomUUID(),
-        userId: notice.userId,
-        title: notice.title,
-        body: notice.body,
-        kind: notice.kind,
-        refId: notice.refId,
-        createdAt: now,
-      });
+      if (!notice.skipAlert) {
+        insertNotification(db, {
+          id: crypto.randomUUID(),
+          userId: notice.userId,
+          title: notice.title,
+          body: notice.body,
+          kind: notice.kind,
+          refId: notice.refId,
+          createdAt: now,
+        });
+      }
       for (const sub of listPushSubs(db, notice.userId)) {
         deliveries.push({
           userId: notice.userId,

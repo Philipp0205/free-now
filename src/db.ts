@@ -202,6 +202,44 @@ CREATE TABLE IF NOT EXISTS circle_removals (
   invite_code TEXT NOT NULL,
   PRIMARY KEY (circle_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref_id TEXT NOT NULL DEFAULT '',
+  host_id TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  closed_at INTEGER,
+  last_push_at INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (circle_id, kind, ref_id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  body TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+
+CREATE TABLE IF NOT EXISTS chat_reads (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  read_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, chat_id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_mutes (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, chat_id)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -246,6 +284,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plan_joins", "removed_by", "removed_by TEXT");
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "memberships", "chat_color", "chat_color INTEGER");
   backfillCircleAdmins(db);
   db.prepare(
     "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
