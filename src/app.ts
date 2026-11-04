@@ -79,6 +79,8 @@ import { extractBuzzSecret, humanCode } from "./code.js";
 import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
 import { pushSummaryForViewer, reachForCircle } from "./push-status.js";
+import { clientKey } from "./client-key.js";
+import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
@@ -115,9 +117,15 @@ export class HttpError extends Error {
   }
 }
 
+/** Service worker acks per client (see clientKey). A phone back online can flush a burst at once. */
+export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
+
+type Limits = { ack: RateLimiter };
+
 export function createApp(deps: AppDeps): http.RequestListener {
+  const limits: Limits = { ack: createRateLimiter(ACK_LIMIT) };
   return (req, res) => {
-    void handle(req, res, deps).catch((error: unknown) => {
+    void handle(req, res, deps, limits).catch((error: unknown) => {
       if (error instanceof HttpError || error instanceof ChatError) {
         sendJson(res, error.status, { error: error.message });
         return;
@@ -130,7 +138,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
 
 const LEGACY_HOST = "hangry-production-64c4.up.railway.app";
 
-async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps): Promise<void> {
+async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, limits: Limits): Promise<void> {
   const host = String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase();
   if (host === LEGACY_HOST && deps.config.publicBaseUrl) {
     const dest = new URL(req.url ?? "/", deps.config.publicBaseUrl);
@@ -245,6 +253,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/push/ack") {
+    if (!limits.ack.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
     const id = typeof body.id === "string" ? body.id : "";
     if (!UUID_RE.test(id)) throw new HttpError(400, "invalid id");
     try {

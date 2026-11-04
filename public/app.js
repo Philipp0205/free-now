@@ -3,6 +3,7 @@ import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, t
 import { clockText, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine } from "./place.js";
 import { bindMap } from "./map.js";
+import { nextPushDetail, pushTitle } from "./push-sheet.js";
 
 const TOKEN_KEY = "fn_token";
 const CIRCLE_KEY = "fn_circle";
@@ -396,6 +397,10 @@ async function refresh({ initial = false } = {}) {
   if (consumeDeepLink()) return;
   if (signature === state.signature && !hadStatus) return;
   state.signature = signature;
+  if (syncPushDetail() && !state.confirm && !state.installOpen && !isTyping()) {
+    render();
+    return;
+  }
   if (state.sheet || state.installOpen || isTyping()) return;
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
@@ -1177,7 +1182,7 @@ function socialCard(social) {
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : removedNote(social) || replyActions(social),
-      deliveryLine(social),
+      deliveryLine("social", social),
       chatEntry("social", social),
     ]),
   ]);
@@ -1196,7 +1201,7 @@ function planCard(plan) {
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : removedNote(plan) || planReplyButtons(plan),
-      deliveryLine(plan),
+      deliveryLine("plan", plan),
       chatEntry("plan", plan),
     ]),
   ]);
@@ -1886,30 +1891,37 @@ function endManaged(kind, item) {
   render();
 }
 
-function deliveryLine(item) {
+function deliveryLine(kind, item) {
   const push = item.push;
   if (!push || !push.total) return null;
   return el("button", {
     class: "text-btn push-line",
     type: "button",
     text: `Delivered to ${push.delivered} of ${push.total}`,
-    onclick: () => openPushSheet(item),
+    onclick: () => openPushSheet(kind, item),
   });
 }
 
-function openPushSheet(item) {
-  state.pushDetail = {
-    title: item.note || (item.forDate ? "Plan" : "Free now"),
-    push: item.push,
-  };
+function openPushSheet(kind, item) {
+  state.pushDetail = { kind, id: item.id, title: pushTitle(kind, item), push: item.push };
   state.sheet = "push";
   render();
+}
+
+/** Point the open push sheet at fresh poll data. True when it changed and needs a render. */
+function syncPushDetail() {
+  if (state.sheet !== "push") return false;
+  const next = nextPushDetail(state.pushDetail, state.socials, state.plans);
+  if (!next) return false;
+  state.pushDetail = next;
+  return true;
 }
 
 function pushStatusText(person) {
   if (person.status === "delivered") return "Delivered";
   if (person.status === "sent") return "Sent, not confirmed";
   if (person.status === "failed") return person.httpStatus ? `Failed · ${person.httpStatus}` : "Failed";
+  if (person.status === "not_sent") return "Notifications on · not sent for this event";
   if (person.status === "not_installed") return "Not installed";
   return "Notifications off";
 }

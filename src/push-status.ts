@@ -12,7 +12,8 @@ import {
 /** Active subscription, or why a push cannot land. "not_installed" only after a browser session and never a standalone one. */
 export type Reach = "on" | "off" | "not_installed";
 
-export type PushPersonStatus = "delivered" | "sent" | "failed" | "off" | "not_installed";
+/** "not_sent": notifications are on, but this event has no delivery row for them (older event, joined later, or not pushed). */
+export type PushPersonStatus = "delivered" | "sent" | "failed" | "not_sent" | "off" | "not_installed";
 
 export type PushPerson = {
   id: string;
@@ -45,6 +46,7 @@ export function statusFor(rows: PushBatchRow[], reach: Reach): PushPersonStatus 
   if (rows.some((row) => row.status === "delivered")) return "delivered";
   if (rows.some((row) => row.status === "sent")) return "sent";
   if (rows.some((row) => row.status === "failed")) return "failed";
+  if (reach === "on") return "not_sent";
   if (reach === "not_installed") return "not_installed";
   return "off";
 }

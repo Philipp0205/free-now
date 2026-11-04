@@ -97,6 +97,21 @@ export type MemberRow = {
   is_admin: number;
 };
 
+function pushDeliveriesTable(name: string): string {
+  return `CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sub_id TEXT NOT NULL,
+  circle_id TEXT REFERENCES circles(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  http_status INTEGER,
+  created_at INTEGER NOT NULL
+);`;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -202,18 +217,7 @@ CREATE INDEX IF NOT EXISTS idx_plans_circle ON plans(circle_id, for_date);
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subs(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS push_deliveries (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id),
-  sub_id TEXT NOT NULL,
-  circle_id TEXT REFERENCES circles(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL,
-  ref_id TEXT NOT NULL,
-  batch_id TEXT NOT NULL,
-  status TEXT NOT NULL,
-  http_status INTEGER,
-  created_at INTEGER NOT NULL
-);
+${pushDeliveriesTable("push_deliveries")}
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_ref ON push_deliveries(circle_id, kind, ref_id, created_at);
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -314,6 +318,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "memberships", "chat_color", "chat_color INTEGER");
   migrateMembershipKey(db);
+  migratePushDeliveryCascade(db);
   backfillCircleAdmins(db);
   ensureColumn(db, "users", "display_at", "display_at INTEGER");
   ensureColumn(db, "users", "standalone_at", "standalone_at INTEGER");
@@ -376,6 +381,37 @@ function migrateMembershipKey(db: DatabaseSync): void {
       DROP TABLE memberships;
       ALTER TABLE memberships_next RENAME TO memberships;
       CREATE INDEX IF NOT EXISTS idx_membership_circle ON memberships(circle_id);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+/** The first push_deliveries kept rows after their user was deleted. Rebuild with ON DELETE CASCADE and keep every row. */
+function migratePushDeliveryCascade(db: DatabaseSync): void {
+  const keys = db.prepare("PRAGMA foreign_key_list(push_deliveries)").all() as Array<{ table: string; from: string; on_delete: string }>;
+  const user = keys.find((key) => key.table === "users" && key.from === "user_id");
+  if (user?.on_delete === "CASCADE") return;
+  // foreign_keys cannot change inside a transaction, so switch it off first and back on after.
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS push_deliveries_new;
+      ${pushDeliveriesTable("push_deliveries_new")}
+      INSERT INTO push_deliveries_new (id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at)
+      SELECT id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at FROM push_deliveries;
+      DROP TABLE push_deliveries;
+      ALTER TABLE push_deliveries_new RENAME TO push_deliveries;
+      CREATE INDEX IF NOT EXISTS idx_push_deliveries_ref ON push_deliveries(circle_id, kind, ref_id, created_at);
     `);
     db.exec("COMMIT");
   } catch (error) {

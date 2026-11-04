@@ -731,7 +731,9 @@ html.kb-open .tabbar {
   border: 0;
   padding: 0;
 }
-form.sheet { display: flex; flex-direction: column; overflow: hidden; }
+/* Any sheet with its own scroll area keeps the head pinned and scrolls the list. */
+form.sheet,
+.sheet:has(> .sheet-scroll) { display: flex; flex-direction: column; overflow: hidden; }
 .sheet-scroll {
   overflow-x: hidden;
   overflow-y: auto;

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import http from "node:http";
+import type http from "node:http";
+import { clientKey } from "./client-key.js";
 
 export const ADMIN_TOKEN_MIN = 32;
 export const ADMIN_ROW_CAP = 500;
@@ -62,28 +63,9 @@ export function closeAdminReaders(): void {
   // Queries open their own short-lived process. Nothing is cached on the server.
 }
 
-/**
- * Client address for the failure limiter.
- * Railway's proxy appends the address it actually accepted, so the rightmost
- * X-Forwarded-For hop is that client. A left-hand value is whatever the caller
- * sent and is not trusted. With no forwarding header, the socket address is used.
- */
+/** Client address for the failure limiter. See clientKey for which X-Forwarded-For hop is trusted. */
 export function adminFailureKey(req: http.IncomingMessage): string {
-  const forwarded = headerValue(req.headers["x-forwarded-for"]);
-  const hop = rightmostForwarded(forwarded);
-  if (hop) return hop;
-  return req.socket?.remoteAddress || "unknown";
-}
-
-function headerValue(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) return value[0] ?? "";
-  return value ?? "";
-}
-
-function rightmostForwarded(header: string): string {
-  const hop = header.split(",").map((part) => part.trim()).filter(Boolean).at(-1) ?? "";
-  if (!hop || hop.length > 128 || /[\s/]/.test(hop)) return "";
-  return hop;
+  return clientKey(req);
 }
 
 function pruneAdminFailures(now: number): void {
