@@ -8,7 +8,8 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { openDb } from "../src/db.js";
+import { addMember, insertCircle, insertSocial, insertUser, openDb, setSocialReply } from "../src/db.js";
+import type { PushSender } from "../src/push.js";
 import { sendStartReminders } from "../src/remind.js";
 import { START, api, withApp } from "./http.js";
 
@@ -144,6 +145,134 @@ test("later today pushes once, then reminds only people who are coming", async (
       status: 400,
     });
   }, { tz: "UTC" });
+});
+
+test("a start reminder is due once, and skips closed, later, and unscheduled socials", async () => {
+  const db = openDb(":memory:");
+  const now = 1_700_000_000_000;
+  try {
+    insertUser(db, { id: "host", name: "Philipp", token_hash: "h", buzz_token: "b", created_at: now });
+    insertUser(db, { id: "alex", name: "Alex", token_hash: "h2", buzz_token: "b2", created_at: now });
+    insertCircle(db, {
+      id: "c",
+      name: "friends",
+      invite_code: "ABCD2345",
+      created_by: "host",
+      created_at: now,
+    }, "host", now);
+    addMember(db, "c", "alex", now);
+
+    insertSocial(db, {
+      id: "due",
+      circleId: "c",
+      creatorId: "host",
+      note: "Dinner",
+      createdAt: now - 60_000,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+      place: "Café X",
+      startsAt: now,
+    });
+    setSocialReply(db, "due", "alex", now, "coming", 10, null);
+
+    insertSocial(db, {
+      id: "quiet",
+      circleId: "c",
+      creatorId: "host",
+      note: "No one",
+      createdAt: now - 60_000,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+      place: "Park",
+      startsAt: now - 1,
+    });
+
+    insertSocial(db, {
+      id: "later",
+      circleId: "c",
+      creatorId: "host",
+      note: "Later",
+      createdAt: now,
+      expiresAt: now + 120_000,
+      lat: null,
+      lng: null,
+      startsAt: now + 1,
+    });
+    setSocialReply(db, "later", "alex", now, "coming", null, null);
+
+    insertSocial(db, {
+      id: "closed",
+      circleId: "c",
+      creatorId: "host",
+      note: "Over",
+      createdAt: now - 120_000,
+      expiresAt: now,
+      lat: null,
+      lng: null,
+      startsAt: now - 10,
+    });
+    setSocialReply(db, "closed", "alex", now, "coming", null, null);
+
+    insertSocial(db, {
+      id: "plain",
+      circleId: "c",
+      creatorId: "host",
+      note: "Now",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+    });
+    setSocialReply(db, "plain", "alex", now, "coming", null, null);
+
+    insertSocial(db, {
+      id: "done",
+      circleId: "c",
+      creatorId: "host",
+      note: "Already",
+      createdAt: now - 60_000,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+      startsAt: now - 5,
+    });
+    db.prepare("UPDATE socials SET reminded_at = ? WHERE id = ?").run(now - 5, "done");
+    setSocialReply(db, "done", "alex", now, "coming", null, null);
+
+    const push: PushSender = { async send() {} };
+    assert.equal(await sendStartReminders(db, push, now), 2);
+
+    const reminded = db.prepare("SELECT id, reminded_at FROM socials").all() as Array<{ id: string; reminded_at: number | null }>;
+    const at = Object.fromEntries(reminded.map((row) => [row.id, row.reminded_at]));
+    assert.equal(at.due, now);
+    assert.equal(at.quiet, now);
+    assert.equal(at.later, null);
+    assert.equal(at.closed, null);
+    assert.equal(at.plain, null);
+    assert.equal(at.done, now - 5);
+
+    const notes = db.prepare("SELECT user_id, title, body, kind, ref_id FROM notifications").all() as Array<{
+      user_id: string;
+      title: string;
+      body: string;
+      kind: string;
+      ref_id: string | null;
+    }>;
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0].user_id, "alex");
+    assert.equal(notes[0].title, "Free now");
+    assert.equal(notes[0].body, "Starting now: Philipp at Café X");
+    assert.equal(notes[0].kind, "social-start");
+    assert.equal(notes[0].ref_id, "due");
+
+    assert.equal(await sendStartReminders(db, push, now), 0);
+    const again = db.prepare("SELECT reminded_at FROM socials WHERE id = ?").get("due") as { reminded_at: number };
+    assert.equal(again.reminded_at, now);
+  } finally {
+    db.close();
+  }
 });
 
 test("a start-time change notifies immediately, and a quick ETA does not send a second push", async () => {

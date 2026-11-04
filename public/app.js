@@ -1,5 +1,7 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
+import { clockText, isLaterToday, minLaterClock, nextLaterSlot, zonedParts } from "./when.js";
+import { audiencePlace, formatDistance, haversine } from "./place.js";
 
 const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
@@ -1272,10 +1274,12 @@ function collectPins() {
 
 let leafletPromise = null;
 let liveMap = null;
+let liveMapTimer = 0;
 let mapWrap = null;
 let liveMarkers = new Map();
 let openMapPin = null;
 let whereLeaflet = null;
+let whereMapTimer = 0;
 const TILE_MAX_ZOOM = 19;
 let whereTimer = 0;
 let skipWhereInput = false;
@@ -1363,66 +1367,16 @@ function whenChoice(mode, text) {
 
 const TIME_LATER_ERROR = "Pick a time later today.";
 
-function zonedParts(ms) {
-  const tz = state.meta?.tz || "Europe/Berlin";
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).formatToParts(new Date(ms));
-  const read = (type) => parts.find((part) => part.type === type)?.value ?? "";
-  let hour = Number(read("hour"));
-  if (hour === 24) hour = 0;
-  return {
-    day: `${read("year")}-${read("month")}-${read("day")}`,
-    hour,
-    minute: Number(read("minute")),
-  };
-}
-
-function clockText(hour, minute) {
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function nextLaterSlot(now = Date.now()) {
-  const earliest = now + 15 * 60 * 1000;
-  const today = zonedParts(now).day;
-  const part = zonedParts(earliest);
-  if (part.day !== today) return "";
-  let { hour, minute } = part;
-  if (minute !== 0 && minute !== 30) {
-    if (minute < 30) minute = 30;
-    else { minute = 0; hour += 1; }
-  }
-  if (hour >= 24) return "";
-  return clockText(hour, minute);
-}
-
-function minLaterClock(now = Date.now()) {
-  const part = zonedParts(now + 60 * 1000);
-  if (part.day !== zonedParts(now).day) return "";
-  return clockText(part.hour, part.minute);
-}
-
-function isLaterToday(hhmm, now = Date.now()) {
-  if (!/^\d{2}:\d{2}$/.test(hhmm)) return false;
-  const min = minLaterClock(now);
-  if (!min) return false;
-  return hhmm >= min;
-}
-
 function ensureLaterTime() {
-  if (!isLaterToday(state.startChoice)) state.startChoice = nextLaterSlot();
-  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice)) state.error = "";
+  const tz = state.meta?.tz || "Europe/Berlin";
+  if (!isLaterToday(state.startChoice, Date.now(), tz)) state.startChoice = nextLaterSlot(Date.now(), tz);
+  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice, Date.now(), tz)) state.error = "";
 }
 
 function timeBlock() {
   if (state.whenMode !== "later") return null;
-  const min = minLaterClock();
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const min = minLaterClock(Date.now(), tz);
   return el("div", { class: "sheet-group" }, [
     el("label", { class: "sheet-label", for: "later-time", text: "Time" }),
     el("input", {
@@ -1433,7 +1387,8 @@ function timeBlock() {
       value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
       oninput: (event) => {
         state.startChoice = event.target.value;
-        if (state.startChoice && !isLaterToday(state.startChoice)) state.error = TIME_LATER_ERROR;
+        const zone = state.meta?.tz || "Europe/Berlin";
+        if (state.startChoice && !isLaterToday(state.startChoice, Date.now(), zone)) state.error = TIME_LATER_ERROR;
         else if (state.error === TIME_LATER_ERROR) state.error = "";
         render();
       },
@@ -1491,7 +1446,7 @@ function sheetField(label, id, value, onValue, attrs = {}) {
 }
 
 function laterTimeChosen() {
-  return isLaterToday(state.startChoice);
+  return isLaterToday(state.startChoice, Date.now(), state.meta?.tz || "Europe/Berlin");
 }
 
 function startPayload() {
@@ -1615,7 +1570,8 @@ function revealArriveField() {
 function arriveLimits(startMs, endMs) {
   const earliest = Math.max(startMs, Date.now() + 60 * 1000);
   if (!Number.isFinite(earliest) || !Number.isFinite(endMs) || earliest > endMs) return { min: null, max: null };
-  if (zonedParts(earliest).day !== zonedParts(endMs).day) return { min: null, max: null };
+  const tz = state.meta?.tz || "Europe/Berlin";
+  if (zonedParts(earliest, tz).day !== zonedParts(endMs, tz).day) return { min: null, max: null };
   return { min: clock(earliest), max: clock(endMs) };
 }
 
@@ -1643,7 +1599,7 @@ function defaultPlanClock(plan) {
 function zonedMidnight(day) {
   const guess = Date.parse(`${day}T00:00:00Z`);
   if (!Number.isFinite(guess)) return NaN;
-  const part = zonedParts(guess);
+  const part = zonedParts(guess, state.meta?.tz || "Europe/Berlin");
   const shown = Date.parse(`${part.day}T${clockText(part.hour, part.minute)}:00Z`);
   return guess - (shown - guess);
 }
@@ -1656,7 +1612,7 @@ function nextIsoDay(day) {
 }
 
 function nextFiveClock(now = Date.now()) {
-  let { hour, minute } = zonedParts(now);
+  let { hour, minute } = zonedParts(now, state.meta?.tz || "Europe/Berlin");
   minute += 1;
   if (minute >= 60) { minute -= 60; hour += 1; }
   const rem = minute % 5;
@@ -2108,10 +2064,29 @@ function addMapTiles(L, map) {
 }
 
 function destroyLiveMap() {
+  clearTimeout(liveMapTimer);
+  liveMapTimer = 0;
   if (liveMap) liveMap.remove();
   liveMap = null;
   liveMarkers = new Map();
   openMapPin = null;
+}
+
+function destroyWhereMap() {
+  clearTimeout(whereMapTimer);
+  whereMapTimer = 0;
+  if (!whereLeaflet) return;
+  whereLeaflet.remove();
+  whereLeaflet = null;
+}
+
+function scheduleInvalidate(map, stillCurrent) {
+  return setTimeout(() => {
+    if (!stillCurrent()) return;
+    const container = map.getContainer();
+    if (!container || !container.isConnected) return;
+    map.invalidateSize();
+  }, 60);
 }
 
 function pinKey(pin) {
@@ -2176,10 +2151,7 @@ async function mountWhereMap() {
   if (!host || !state.whereMap || state.sheet !== "free") return;
   const L = await loadLeaflet();
   if (!host.isConnected || !state.whereMap || state.sheet !== "free") return;
-  if (whereLeaflet) {
-    whereLeaflet.remove();
-    whereLeaflet = null;
-  }
+  destroyWhereMap();
   const focus = pickerFocus();
   const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
   map.setView([focus.lat, focus.lng], Math.min(focus.zoom, TILE_MAX_ZOOM));
@@ -2219,7 +2191,7 @@ async function mountWhereMap() {
     apply(event.latlng);
   });
   whereLeaflet = map;
-  setTimeout(() => map.invalidateSize(), 60);
+  whereMapTimer = scheduleInvalidate(map, () => whereLeaflet === map);
 }
 
 function loadLeaflet() {
@@ -2273,7 +2245,7 @@ async function mountMap() {
   else map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
   rememberMapCenter(map);
   map.on("dragend", () => rememberMapCenter(map));
-  setTimeout(() => map.invalidateSize(), 60);
+  liveMapTimer = scheduleInvalidate(map, () => liveMap === map);
 }
 
 function watchAttribution(map) {
@@ -2468,11 +2440,6 @@ function rememberViewerLocation() {
   }).catch(() => {});
 }
 
-function audiencePlace(place) {
-  const spot = typeof place === "string" ? place.trim() : "";
-  return /^near you$/i.test(spot) ? "nearby" : spot;
-}
-
 function placeLine(location, placeName, target) {
   const named = audiencePlace(placeName);
   if (!location && !named) return null;
@@ -2538,21 +2505,6 @@ function mapsHref(lat, lng, label) {
   if (ios) return `https://maps.apple.com/?ll=${lat},${lng}&q=${name}`;
   if (/android/i.test(navigator.userAgent)) return `geo:${lat},${lng}?q=${lat},${lng}(${name})`;
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-}
-
-function haversine(a, b) {
-  const radius = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2
-    + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-function formatDistance(meters) {
-  if (meters < 950) return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
-  const km = meters / 1000;
-  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
 
 function field(label, id, value, onValue, attrs = {}) {
@@ -2636,10 +2588,7 @@ function openSheet(name) {
 function closeSheet() {
   state.sheet = null;
   state.whereMap = false;
-  if (whereLeaflet) {
-    whereLeaflet.remove();
-    whereLeaflet = null;
-  }
+  destroyWhereMap();
   render();
 }
 
@@ -2871,7 +2820,7 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
-  if (state.whenMode === "later" && !isLaterToday(state.startChoice)) {
+  if (state.whenMode === "later" && !isLaterToday(state.startChoice, Date.now(), state.meta?.tz || "Europe/Berlin")) {
     state.error = TIME_LATER_ERROR;
     render();
     return;
