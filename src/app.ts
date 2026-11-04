@@ -55,9 +55,9 @@ import {
 } from "./db.js";
 import { reverseLookup, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
-import { eventTitle, notifyUsers } from "./notify.js";
+import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
-import { addDays, isoDate, whenLabel, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { joinPlan, publishPlan, replyPlan } from "./plans.js";
 
