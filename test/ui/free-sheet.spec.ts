@@ -1254,6 +1254,47 @@ test("editing a plan that has ended says so", { timeout: 90_000 }, async () => {
   }
 });
 
+test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
+  const cases: Array<[string, { width: number; height: number }]> = [
+    [CHROME_UA, { width: 360, height: 640 }],
+    [CHROME_UA, { width: 412, height: 700 }],
+    [FIREFOX_UA, { width: 360, height: 640 }],
+    [FIREFOX_UA, { width: 412, height: 700 }],
+  ];
+  for (const [agent, size] of cases) {
+    const page = await phonePage(agent, false);
+    try {
+      await page.setViewportSize(size);
+      await signIn(page, "Alex");
+      const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+      await fetch(`${baseUrl}/api/plans`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ note: "Bouldering", place: "Gym" }),
+      });
+      await page.reload();
+      const later = page.locator(".sheet button", { hasText: "Not now" });
+      if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+      await page.locator(".card-plan .avatar").waitFor();
+      const boxes = await page.evaluate(() => {
+        const card = document.querySelector(".card-plan") as HTMLElement;
+        const tools = card.querySelector(".card-tools")!.getBoundingClientRect();
+        const avatar = card.querySelector(".avatar")!.getBoundingClientRect();
+        const separated = tools.bottom <= avatar.top + 0.5 || tools.right <= avatar.left + 0.5
+          || avatar.right <= tools.left + 0.5 || avatar.bottom <= tools.top + 0.5;
+        return {
+          separated,
+          tools: { top: tools.top, bottom: tools.bottom, left: tools.left, right: tools.right },
+          avatar: { top: avatar.top, bottom: avatar.bottom, left: avatar.left, right: avatar.right },
+        };
+      });
+      assert.equal(boxes.separated, true, JSON.stringify({ size, boxes }));
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },

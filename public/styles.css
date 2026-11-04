@@ -249,6 +249,10 @@ button:disabled { cursor: default; opacity: 0.55; }
   bottom: auto;
   padding: 16px;
 }
+.card-now:has(.card-tools) .card-copy,
+.card-plan:has(.card-tools) .card-copy {
+  padding-top: 72px;
+}
 .card-copy {
   position: absolute;
   left: 16px;
