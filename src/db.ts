@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { addDays } from "./time.js";
 
 export type UserRow = {
   id: string;
@@ -64,6 +65,7 @@ export type PlanRow = {
   lng: number | null;
   place: string;
   at_time: string | null;
+  ended_at: number | null;
 };
 
 export type PushSubRow = {
@@ -150,7 +152,9 @@ CREATE TABLE IF NOT EXISTS plans (
   created_at INTEGER NOT NULL,
   lat REAL,
   lng REAL,
-  place TEXT NOT NULL DEFAULT ''
+  place TEXT NOT NULL DEFAULT '',
+  at_time TEXT,
+  ended_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS plan_joins (
@@ -293,6 +297,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "lng", "lng REAL");
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "plans", "at_time", "at_time TEXT");
+  ensureColumn(db, "plans", "ended_at", "ended_at INTEGER");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -809,7 +814,7 @@ export function listVisiblePlans(db: DatabaseSync, circleId: string, today: stri
   clearExpiredPlanPoints(db, today);
   return all<PlanRow>(
     db,
-    `${PLAN_SELECT} WHERE p.circle_id = ? AND p.for_date >= ? AND p.for_date <= ? ORDER BY p.for_date ASC, p.created_at ASC`,
+    `${PLAN_SELECT} WHERE p.circle_id = ? AND p.ended_at IS NULL AND p.for_date >= ? AND p.for_date <= ? ORDER BY p.for_date ASC, p.created_at ASC`,
     circleId,
     today,
     through,
@@ -819,7 +824,7 @@ export function listVisiblePlans(db: DatabaseSync, circleId: string, today: stri
 export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string): number {
   const row = one<{ n: number | bigint }>(
     db,
-    "SELECT COUNT(*) AS n FROM plans WHERE circle_id = ? AND for_date >= ?",
+    "SELECT COUNT(*) AS n FROM plans WHERE circle_id = ? AND ended_at IS NULL AND for_date >= ?",
     circleId,
     today,
   );
@@ -884,6 +889,39 @@ export function deletePlan(db: DatabaseSync, id: string, creatorId: string): num
 export function deletePlanById(db: DatabaseSync, id: string): number {
   const result = db.prepare("DELETE FROM plans WHERE id = ?").run(id);
   return Number(result.changes);
+}
+
+/** Keep the row and the place name. Drop the pin and mark the hangout over. */
+export function finishSocial(db: DatabaseSync, id: string, now: number): boolean {
+  db.prepare(
+    "UPDATE socials SET expires_at = ?, lat = NULL, lng = NULL WHERE id = ? AND expires_at > ?",
+  ).run(now, id, now);
+  return Boolean(one(db, "SELECT 1 AS ok FROM socials WHERE id = ?", id));
+}
+
+export function finishPlan(db: DatabaseSync, id: string, now: number): boolean {
+  db.prepare(
+    "UPDATE plans SET ended_at = COALESCE(ended_at, ?), lat = NULL, lng = NULL WHERE id = ?",
+  ).run(now, id);
+  return Boolean(one(db, "SELECT 1 AS ok FROM plans WHERE id = ?", id));
+}
+
+export function listPastSocials(db: DatabaseSync, circleId: string, now: number): SocialRow[] {
+  return all<SocialRow>(
+    db,
+    `${SOCIAL_SELECT} WHERE s.circle_id = ? AND s.expires_at <= ? ORDER BY COALESCE(s.starts_at, s.created_at) DESC`,
+    circleId,
+    now,
+  );
+}
+
+export function listPastPlans(db: DatabaseSync, circleId: string, today: string): PlanRow[] {
+  return all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE p.circle_id = ? AND (p.for_date < ? OR p.ended_at IS NOT NULL) ORDER BY p.for_date DESC, p.created_at DESC`,
+    circleId,
+    today,
+  );
 }
 
 export function patchPlanDetails(
@@ -987,8 +1025,8 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: 
 function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
   db.prepare(
     `UPDATE socials
-     SET lat = NULL, lng = NULL, place = ''
-     WHERE expires_at <= ? AND (lat IS NOT NULL OR lng IS NOT NULL OR place != '')`,
+     SET lat = NULL, lng = NULL
+     WHERE expires_at <= ? AND (lat IS NOT NULL OR lng IS NOT NULL)`,
   ).run(now);
 }
 
@@ -1004,12 +1042,15 @@ export function clearExpiredLocations(db: DatabaseSync, now: number, today: stri
   clearExpiredPlanPoints(db, today);
 }
 
+export const HISTORY_DAYS = 90;
+
 export function sweep(db: DatabaseSync, now: number, planCutoff: string, today = ""): void {
   if (today) clearExpiredLocations(db, now, today);
-  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const socialCutoff = now - HISTORY_DAYS * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
-  db.prepare("DELETE FROM socials WHERE expires_at < ?").run(weekAgo);
-  db.prepare("DELETE FROM plans WHERE for_date < ?").run(planCutoff);
+  const planDay = today ? addDays(today, -HISTORY_DAYS) : planCutoff;
+  db.prepare("DELETE FROM socials WHERE expires_at < ?").run(socialCutoff);
+  db.prepare("DELETE FROM plans WHERE for_date < ?").run(planDay);
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
 }
 
@@ -1022,7 +1063,7 @@ const SOCIAL_SELECT = `
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place, p.at_time
+         p.lat, p.lng, p.place, p.at_time, p.ended_at
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
