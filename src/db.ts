@@ -42,6 +42,8 @@ export type DueStartReminder = {
   note: string;
   place: string;
   creator_name: string;
+  circle_id: string;
+  circle_name: string;
 };
 
 export type JoinRow = {
@@ -83,6 +85,7 @@ export type NotificationRow = {
   body: string;
   kind: string;
   ref_id: string | null;
+  circle_id: string | null;
   created_at: number;
   read_at: number | null;
 };
@@ -113,9 +116,12 @@ CREATE TABLE IF NOT EXISTS circles (
 );
 
 CREATE TABLE IF NOT EXISTS memberships (
-  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
   circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
-  joined_at INTEGER NOT NULL
+  joined_at INTEGER NOT NULL,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  chat_color INTEGER,
+  PRIMARY KEY (user_id, circle_id)
 );
 
 CREATE TABLE IF NOT EXISTS socials (
@@ -182,6 +188,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   body TEXT NOT NULL,
   kind TEXT NOT NULL,
   ref_id TEXT,
+  circle_id TEXT,
   created_at INTEGER NOT NULL,
   read_at INTEGER
 );
@@ -289,7 +296,10 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "memberships", "chat_color", "chat_color INTEGER");
+  migrateMembershipKey(db);
   backfillCircleAdmins(db);
+  ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
+  backfillNotificationCircles(db);
   db.prepare(
     "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
   ).run(14 * 24 * 60 * 60 * 1000);
@@ -321,6 +331,54 @@ function ensureColumn(db: DatabaseSync, table: string, column: string, definitio
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
   if (rows.some((row) => row.name === column)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+}
+
+/** Old databases keyed memberships on user_id alone. Rebuild to (user_id, circle_id) and keep every row. */
+function migrateMembershipKey(db: DatabaseSync): void {
+  const info = db.prepare("PRAGMA table_info(memberships)").all() as Array<{ name: string; pk: number }>;
+  const pk = info.filter((column) => column.pk > 0).sort((a, b) => a.pk - b.pk).map((column) => column.name);
+  if (pk.length === 2 && pk[0] === "user_id" && pk[1] === "circle_id") return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS memberships_next;
+      CREATE TABLE memberships_next (
+        user_id TEXT NOT NULL REFERENCES users(id),
+        circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+        joined_at INTEGER NOT NULL,
+        is_admin INTEGER NOT NULL DEFAULT 0,
+        chat_color INTEGER,
+        PRIMARY KEY (user_id, circle_id)
+      );
+      INSERT INTO memberships_next (user_id, circle_id, joined_at, is_admin, chat_color)
+      SELECT user_id, circle_id, joined_at, COALESCE(is_admin, 0), chat_color FROM memberships;
+      DROP TABLE memberships;
+      ALTER TABLE memberships_next RENAME TO memberships;
+      CREATE INDEX IF NOT EXISTS idx_membership_circle ON memberships(circle_id);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+function backfillNotificationCircles(db: DatabaseSync): void {
+  db.exec(`
+    UPDATE notifications
+    SET circle_id = (
+      SELECT m.circle_id FROM memberships m WHERE m.user_id = notifications.user_id
+    )
+    WHERE circle_id IS NULL
+      AND (SELECT COUNT(*) FROM memberships m WHERE m.user_id = notifications.user_id) = 1
+  `);
 }
 
 export function withTx(db: DatabaseSync, fn: () => void): void {
@@ -415,14 +473,32 @@ export function getCircleByCode(db: DatabaseSync, code: string): CircleRow | und
   return one<CircleRow>(db, "SELECT * FROM circles WHERE invite_code = ?", code);
 }
 
-export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | undefined {
-  return one<CircleRow>(
+export function getCircleById(db: DatabaseSync, id: string): CircleRow | undefined {
+  return one<CircleRow>(db, "SELECT * FROM circles WHERE id = ?", id);
+}
+
+export function listCirclesForUser(db: DatabaseSync, userId: string): CircleRow[] {
+  return all<CircleRow>(
     db,
     `SELECT c.* FROM circles c
      JOIN memberships m ON m.circle_id = c.id
-     WHERE m.user_id = ?`,
+     WHERE m.user_id = ?
+     ORDER BY m.joined_at ASC, c.name ASC`,
     userId,
   );
+}
+
+export function countCirclesForUser(db: DatabaseSync, userId: string): number {
+  const row = one<{ n: number | bigint }>(
+    db,
+    "SELECT COUNT(*) AS n FROM memberships WHERE user_id = ?",
+    userId,
+  );
+  return Number(row?.n ?? 0);
+}
+
+export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | undefined {
+  return listCirclesForUser(db, userId)[0];
 }
 
 export function listMembers(db: DatabaseSync, circleId: string): MemberRow[] {
@@ -598,12 +674,14 @@ export function insertSocial(
 export function getActiveSocialByCreator(
   db: DatabaseSync,
   creatorId: string,
+  circleId: string,
   now: number,
 ): SocialRow | undefined {
   return one<SocialRow>(
     db,
-    `${SOCIAL_SELECT} WHERE s.creator_id = ? AND s.expires_at > ? ORDER BY s.created_at DESC LIMIT 1`,
+    `${SOCIAL_SELECT} WHERE s.creator_id = ? AND s.circle_id = ? AND s.expires_at > ? ORDER BY s.created_at DESC LIMIT 1`,
     creatorId,
+    circleId,
     now,
   );
 }
@@ -734,9 +812,10 @@ export function listComingUserIds(db: DatabaseSync, socialId: string): string[] 
 export function listDueStartReminders(db: DatabaseSync, now: number): DueStartReminder[] {
   return all<DueStartReminder>(
     db,
-    `SELECT s.id, s.note, s.place, u.name AS creator_name
+    `SELECT s.id, s.note, s.place, s.circle_id, c.name AS circle_name, u.name AS creator_name
      FROM socials s
      JOIN users u ON u.id = s.creator_id
+     JOIN circles c ON c.id = s.circle_id
      WHERE s.starts_at IS NOT NULL AND s.starts_at <= ? AND s.reminded_at IS NULL AND s.expires_at > ?`,
     now,
     now,
@@ -1002,26 +1081,30 @@ export function insertNotification(
     body: string;
     kind: string;
     refId: string | null;
+    circleId?: string | null;
     createdAt: number;
   },
 ): void {
   db.prepare(
-    `INSERT INTO notifications (id, user_id, title, body, kind, ref_id, created_at, read_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-  ).run(note.id, note.userId, note.title, note.body, note.kind, note.refId, note.createdAt);
+    `INSERT INTO notifications (id, user_id, title, body, kind, ref_id, circle_id, created_at, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+  ).run(note.id, note.userId, note.title, note.body, note.kind, note.refId, note.circleId ?? null, note.createdAt);
 }
 
-export function listNotifications(db: DatabaseSync, userId: string, limit = 50): NotificationRow[] {
+export function listNotifications(db: DatabaseSync, userId: string, circleId: string, limit = 50): NotificationRow[] {
   return all<NotificationRow>(
     db,
-    `SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
+    `SELECT * FROM notifications WHERE user_id = ? AND circle_id = ? ORDER BY created_at DESC LIMIT ?`,
     userId,
+    circleId,
     limit,
   );
 }
 
-export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: number): void {
-  db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(readAt, userId);
+export function markNotificationsRead(db: DatabaseSync, userId: string, circleId: string, readAt: number): void {
+  db.prepare(
+    "UPDATE notifications SET read_at = ? WHERE user_id = ? AND circle_id = ? AND read_at IS NULL",
+  ).run(readAt, userId, circleId);
 }
 
 function deleteEventChats(db: DatabaseSync, kind: "social" | "plan", whereSql: string, ...params: Array<string | number>): void {
