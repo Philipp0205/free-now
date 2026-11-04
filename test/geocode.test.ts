@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseNominatim, parsePhoton, rankPlaces, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
+import { parseNominatim, parsePhoton, rankPlaces, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
 
 const STUTTGART = { lat: 48.7784, lng: 9.18 };
 
@@ -146,4 +146,31 @@ test("Ratto with a Stuttgart centre comes back as the local bar", async () => {
   assert.ok(hits[0].lat > 48.7 && hits[0].lat < 48.8);
   assert.ok((hits[0].distanceM ?? 0) > 0 && (hits[0].distanceM ?? 99999) < 5000);
   assert.deepEqual(hits.map((hit) => hit.name), ["RATTO Bistrobar"]);
+});
+
+test("reverse geocoding keeps a Photon venue and falls back to Nominatim", async () => {
+  const venueUrls: string[] = [];
+  const venue = await reversePlace(48.76741, 9.17085, async (url) => {
+    venueUrls.push(url);
+    return {
+      features: [{
+        geometry: { coordinates: [9.17085, 48.76741] },
+        properties: { name: "RATTO Bistrobar", osm_key: "amenity", osm_value: "bar" },
+      }],
+    };
+  });
+  assert.equal(venue, "RATTO Bistrobar");
+  assert.deepEqual(venueUrls, ["https://photon.komoot.io/reverse?lon=9.17085&lat=48.76741"]);
+
+  const streetUrls: string[] = [];
+  const street = await reversePlace(52.52001, 13.40495, async (url) => {
+    streetUrls.push(url);
+    if (url.includes("photon.komoot.io")) return { features: [] };
+    return { address: { road: "Schlossplatz", suburb: "Stuttgart-Mitte", city: "Stuttgart" } };
+  });
+  assert.equal(street, "Near Schlossplatz, Stuttgart-Mitte");
+  assert.deepEqual(streetUrls, [
+    "https://photon.komoot.io/reverse?lon=13.40495&lat=52.52001",
+    "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=52.52001&lon=13.40495",
+  ]);
 });
