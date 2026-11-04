@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
+import { isMapsLinkInput, looksLikeUrl, parseMapsLink, parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
+import { api, withApp } from "./http.js";
 
 const STUTTGART = { lat: 48.7784, lng: 9.18 };
 
@@ -257,6 +258,64 @@ test("maps links resolve a short link, coordinates, and reject other hosts", asy
   assert.deepEqual(await resolveMapsLink("http://www.google.com/maps/place/Cafe", fetchJson, fetchImpl), []);
   assert.deepEqual(await resolveMapsLink("https://goo.gl/not-maps", fetchJson, fetchImpl), []);
   assert.deepEqual(await resolveMapsLink("https://www.google.evil/maps/place/Cafe", fetchJson, fetchImpl), []);
+});
+
+test("maps link recognition takes google.com without www and maps.google.com", () => {
+  for (const link of [
+    "https://www.google.com/maps/place/Cafe+Ada/",
+    "https://google.com/maps/place/Cafe+Ada/@48.7674,9.1708,17z",
+    "https://google.de/maps/@52.52,13.405,15z",
+    "https://maps.google.com/maps?q=48.7674,9.1708",
+    "https://maps.google.com/?q=48.7674,9.1708",
+    "https://maps.google.de/maps/place/Cafe+Ada/",
+    "https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8",
+    "https://goo.gl/maps/abc",
+  ]) {
+    assert.equal(isMapsLinkInput(link), true, link);
+  }
+  for (const other of [
+    "https://example.com/maps/place/Cafe",
+    "https://google.com/search?q=cafe",
+    "https://www.google.com/",
+    "https://maps.google.evil/maps/place/Cafe",
+    "https://google.evil/maps/place/Cafe",
+    "https://notgoogle.com/maps/place/Cafe",
+    "http://google.com/maps/place/Cafe",
+    "https://goo.gl/not-maps",
+    "Cafe Ada",
+  ]) {
+    assert.equal(isMapsLinkInput(other), false, other);
+  }
+  assert.deepEqual(parseMapsLink("https://google.com/maps/place/Cafe+Ada/@48.7674,9.1708,17z"), { lat: 48.7674, lng: 9.1708, name: "Cafe Ada" });
+  assert.deepEqual(parseMapsLink("https://maps.google.com/?q=48.7674,9.1708"), { lat: 48.7674, lng: 9.1708, name: "" });
+  assert.equal(looksLikeUrl("https://example.com"), true);
+  assert.equal(looksLikeUrl(" HTTP://example.com "), true);
+  assert.equal(looksLikeUrl("Cafe https://x"), false);
+  assert.equal(looksLikeUrl("Cafe Ada"), false);
+});
+
+test("geocode never sends a pasted non-Maps URL upstream as search text", async () => {
+  const original = globalThis.fetch;
+  const upstream: string[] = [];
+  await withApp(async ({ port }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url instanceof Request ? url.url : url);
+      if (href.startsWith(`http://127.0.0.1:${port}`)) return original(url, init);
+      upstream.push(href);
+      return new Response("[]", { status: 200 });
+    }) as typeof fetch;
+    try {
+      for (const pasted of ["https://example.com/some/page", "http://example.com/x"]) {
+        const body = await api(port, "GET", `/api/geocode?q=${encodeURIComponent(pasted)}`, { token: alex.token, status: 200 });
+        assert.deepEqual(body.results, []);
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+  assert.deepEqual(upstream, []);
 });
 
 test("geocode logs the upstream status and not the query", async () => {

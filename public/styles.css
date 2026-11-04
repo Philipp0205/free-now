@@ -866,7 +866,7 @@ form.sheet,
   gap: 6px;
   position: relative;
   z-index: 5;
-  max-height: min(220px, 42dvh);
+  max-height: min(220px, 42dvh, calc(var(--vv-height, 100dvh) * 0.4));
   overflow-y: auto;
   overscroll-behavior: contain;
   scroll-margin: 12px;
@@ -900,6 +900,11 @@ form.sheet,
 .sheet .help { margin: 6px 0 0; }
 .sheet-form { display: flex; flex-direction: column; gap: 16px; }
 .sheet-group { display: flex; flex-direction: column; gap: 6px; }
+/* Fields keep their own height. Only .sheet-scroll gives way when the keyboard is up. */
+.sheet-form > *,
+.sheet-group > *,
+.where-picker > *,
+.where-results > * { flex-shrink: 0; }
 .sheet-label { font-size: 13px; font-weight: 650; color: var(--muted); line-height: 1.2; }
 input.sheet-control {
   width: 100%;
@@ -958,7 +963,6 @@ html.kb-open .sheet .help { margin-top: 0; }
 /* Chromium retargets a touch in a 12px gap onto the nearest button. */
 .sheet-gap { height: 32px; flex: none; }
 .sheet.dragging, .guide.dragging { transition: none; }
-.sheet:has(.where-results) .sheet-dock { display: none; }
 .time-error { margin: 0; color: var(--danger); font-size: 13px; }
 .grabber { touch-action: none; }
 .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
@@ -1054,7 +1058,8 @@ html.kb-open .sheet .help { margin-top: 0; }
   box-shadow: 0 0 0 3px rgba(255, 45, 120, 0.28), 0 0 10px rgba(255, 45, 120, 0.55);
 }
 .map-screen { min-height: calc(100dvh - var(--tab)); display: flex; flex-direction: column; }
-.map-wrap { position: relative; margin: 4px 12px 0; --attr-h: 64px; }
+/* Own stacking context, so Leaflet's 400+ z-indexes stay under the sheets and scrim. */
+.map-wrap { position: relative; isolation: isolate; margin: 4px 12px 0; --attr-h: 64px; }
 .hangry-map { height: calc(100dvh - 132px - var(--tab)); border-radius: 24px; overflow: hidden; background: #141416; }
 .map-empty { margin: 28px 22px; }
 .map-empty h2 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.04em; }
@@ -1071,6 +1076,10 @@ html.kb-open .sheet .help { margin-top: 0; }
 }
 .map-card .reply-line { margin-top: 8px; }
 .map-card strong { display: block; font-size: 16px; }
+.map-card-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.map-card-head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.map-card .card-tools { position: static; flex: none; }
+.map-card .card-tools .event-tool { background: #2c2c2e; }
 .map-card p { margin: 4px 0 0; color: #d1d1d6; }
 .map-card-time { color: var(--muted) !important; font-size: 13px; }
 .map-card-actions { display: flex; gap: 8px; margin-top: 12px; }
