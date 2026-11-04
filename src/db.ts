@@ -36,6 +36,13 @@ export type SocialRow = {
   reminded_at: number | null;
 };
 
+export type DueStartReminder = {
+  id: string;
+  note: string;
+  place: string;
+  creator_name: string;
+};
+
 export type JoinRow = {
   id: string;
   name: string;
@@ -547,6 +554,22 @@ export function listComingUserIds(db: DatabaseSync, socialId: string): string[] 
     "SELECT user_id FROM social_joins WHERE social_id = ? AND reply IN ('join', 'coming')",
     socialId,
   ).map((row) => row.user_id);
+}
+
+export function listDueStartReminders(db: DatabaseSync, now: number): DueStartReminder[] {
+  return all<DueStartReminder>(
+    db,
+    `SELECT s.id, s.note, s.place, u.name AS creator_name
+     FROM socials s
+     JOIN users u ON u.id = s.creator_id
+     WHERE s.starts_at IS NOT NULL AND s.starts_at <= ? AND s.reminded_at IS NULL AND s.expires_at > ?`,
+    now,
+    now,
+  );
+}
+
+export function markSocialReminded(db: DatabaseSync, socialId: string, remindedAt: number): void {
+  db.prepare("UPDATE socials SET reminded_at = ? WHERE id = ?").run(remindedAt, socialId);
 }
 
 export function rotateInvite(db: DatabaseSync, circleId: string, code: string, expiresAt: number): void {
