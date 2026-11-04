@@ -45,4 +45,21 @@ test("chat colors are AA on black and white, and a circle does not share one", (
   assert.equal(again.get(pair[0]), assigned.get(pair[0]));
   assert.equal(again.get(pair[1]), assigned.get(pair[1]));
   assert.notEqual(assigned.get(pair[0]), assigned.get(pair[1]));
+  const span = Math.abs((assigned.get(pair[0]) ?? 0) - (assigned.get(pair[1]) ?? 0));
+  const distance = Math.min(span, CHAT_COLORS.length - span);
+  assert.ok(distance > 1, `collision landed on adjacent hues ${assigned.get(pair[0])} and ${assigned.get(pair[1])}`);
+});
+
+test("joining people does not change colors already given out", () => {
+  const seen: string[] = [];
+  let prior = new Map<string, number>();
+  for (let n = 0; n < 12; n += 1) {
+    const id = `join-${n}`;
+    const assigned = assignChatColors([...seen, id], prior);
+    for (const old of seen) assert.equal(assigned.get(old), prior.get(old), old);
+    assert.equal(typeof assigned.get(id), "number");
+    prior = assigned;
+    seen.push(id);
+  }
+  assert.equal(new Set(prior.values()).size, seen.length);
 });

@@ -284,6 +284,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plan_joins", "removed_by", "removed_by TEXT");
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "memberships", "chat_color", "chat_color INTEGER");
   backfillCircleAdmins(db);
   db.prepare(
     "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
