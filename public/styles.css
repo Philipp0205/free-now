@@ -86,6 +86,7 @@ button:disabled { cursor: default; opacity: 0.55; }
   font-weight: 650;
   letter-spacing: -0.02em;
 }
+.circle-switch-btn { min-height: 44px; padding: 0 4px; }
 .circle-switch-name { font-weight: 600; }
 .circle-switch-btn svg { width: 16px; height: 16px; transform: rotate(90deg); }
 .circle-menu {

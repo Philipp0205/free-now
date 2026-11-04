@@ -1685,6 +1685,8 @@ test("two circles stay separate when you switch, post, join, and leave", { timeo
     await page.locator("#new-circle-name").fill("Home");
     await page.getByRole("button", { name: "Create circle" }).click();
     await page.getByRole("button", { name: "Switch circle" }).waitFor();
+    const switchHeight = await page.getByRole("button", { name: "Switch circle" }).evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(switchHeight >= 44, `switcher is ${switchHeight}px`);
     await page.getByRole("button", { name: "Now", exact: true }).click();
     await page.getByRole("button", { name: "Let friends know you're free now" }).click();
     await page.getByText("Posting to Home").waitFor();
