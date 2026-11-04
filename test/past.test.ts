@@ -124,3 +124,88 @@ test("ended hangouts stay in Past for 90 days, without a new push", async () => 
     assert.deepEqual(gone.days, []);
   });
 });
+
+test("an ended plan rejects reply, join, and a new arrival time", async () => {
+  await withApp(async ({ port, db, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: alex.token,
+      body: { endpoint: `https://push.example/${alex.user.id}`, keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const plan = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner" }, status: 201 });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, { token: fritz.token, body: { reply: "in" }, status: 200 });
+    await api(port, "DELETE", `/api/plans/${plan.plan.id}`, { token: alex.token, status: 204 });
+    const pushes = sent.length;
+    const alerts = Number((db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind = 'plan-reply'").get(alex.user.id) as { n: number | bigint }).n);
+    const before = db.prepare("SELECT reply, arrive_at FROM plan_joins WHERE plan_id = ? AND user_id = ?").get(plan.plan.id, fritz.user.id) as { reply: string; arrive_at: number | null };
+
+    const arrival = await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: fritz.token,
+      body: { reply: "in", arriveAt: "19:40" },
+      status: 410,
+    });
+    const again = await api(port, "POST", `/api/plans/${plan.plan.id}/join`, { token: fritz.token, body: {}, status: 410 });
+    const fresh = await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, { token: sam.token, body: { reply: "in" }, status: 410 });
+    const joined = await api(port, "POST", `/api/plans/${plan.plan.id}/join`, { token: sam.token, body: {}, status: 410 });
+    for (const result of [arrival, again, fresh, joined]) assert.equal(result.error, "That plan has ended.");
+
+    const after = db.prepare("SELECT reply, arrive_at FROM plan_joins WHERE plan_id = ? AND user_id = ?").get(plan.plan.id, fritz.user.id) as { reply: string; arrive_at: number | null };
+    assert.equal(after.reply, before.reply);
+    assert.equal(after.arrive_at, before.arrive_at);
+    const samRow = db.prepare("SELECT COUNT(*) AS n FROM plan_joins WHERE plan_id = ? AND user_id = ?").get(plan.plan.id, sam.user.id) as { n: number | bigint };
+    assert.equal(Number(samRow.n), 0);
+    assert.equal(sent.length, pushes);
+    const alertsAfter = Number((db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind = 'plan-reply'").get(alex.user.id) as { n: number | bigint }).n);
+    assert.equal(alertsAfter, alerts);
+  });
+});
+
+test("Past lists each day under one heading", async () => {
+  await withApp(async ({ port, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner" }, status: 201 });
+    at(Date.parse("2026-06-01T20:00:00.000Z"));
+    const late = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Late" }, status: 201 });
+    await api(port, "DELETE", `/api/socials/${late.social.id}`, { token: alex.token, status: 204 });
+    at(Date.parse("2026-06-02T10:00:00.000Z"));
+    const morning = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Morning" }, status: 201 });
+    await api(port, "DELETE", `/api/socials/${morning.social.id}`, { token: alex.token, status: 204 });
+    at(Date.parse("2026-06-03T12:00:00.000Z"));
+    const past = await api(port, "GET", "/api/past", { token: alex.token });
+    const labels = past.days.map((day: { label: string }) => day.label);
+    assert.deepEqual(labels, ["Yesterday", "1 Jun"]);
+    assert.deepEqual(past.days[0].events.map((event: { note: string }) => event.note), ["Morning", "Dinner"]);
+    assert.deepEqual(past.days[1].events.map((event: { note: string }) => event.note), ["Late"]);
+  });
+});
+
+test("cleanup removes an event chat with its messages", async () => {
+  await withApp(async ({ port, db, at, now }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const social = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Coffee" }, status: 201 });
+    const plan = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/chat`, { token: alex.token, body: { text: "See you" }, status: 201 });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/chat`, { token: alex.token, body: { text: "Tomorrow" }, status: 201 });
+    await api(port, "POST", "/api/circles/chat", { token: alex.token, body: { text: "Hello" }, status: 201 });
+    const socialChat = db.prepare("SELECT id FROM chats WHERE kind = 'social' AND ref_id = ?").get(social.social.id) as { id: string };
+    const planChat = db.prepare("SELECT id FROM chats WHERE kind = 'plan' AND ref_id = ?").get(plan.plan.id) as { id: string };
+    at(START + 100 * 24 * 60 * 60 * 1000);
+    sweep(db, now(), "2026-03-01", "2026-09-09");
+    const socialGone = await api(port, "GET", `/api/socials/${social.social.id}/chat`, { token: alex.token, status: 404 });
+    const planGone = await api(port, "GET", `/api/plans/${plan.plan.id}/chat`, { token: alex.token, status: 404 });
+    assert.equal(socialGone.error, "chat not found");
+    assert.equal(planGone.error, "chat not found");
+    const left = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE chat_id IN (?, ?)").get(socialChat.id, planChat.id) as { n: number | bigint };
+    assert.equal(Number(left.n), 0);
+    const chats = db.prepare("SELECT COUNT(*) AS n FROM chats WHERE id IN (?, ?)").get(socialChat.id, planChat.id) as { n: number | bigint };
+    assert.equal(Number(chats.n), 0);
+    const circle = await api(port, "GET", "/api/circles/chat", { token: alex.token });
+    assert.equal(circle.chat.messages.some((message: { text: string }) => message.text === "Hello"), true);
+  });
+});

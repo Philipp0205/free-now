@@ -952,7 +952,7 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
         .map((join) => ({ id: join.id, name: join.name, arriveAt: join.arrive_at })),
     });
   }
-  events.sort((a, b) => b.at - a.at || b.id.localeCompare(a.id));
+  events.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at || b.id.localeCompare(a.id));
   const days: Array<{ day: string; label: string; events: PastEvent[] }> = [];
   for (const event of events) {
     const last = days.at(-1);
