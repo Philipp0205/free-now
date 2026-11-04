@@ -302,6 +302,7 @@ function friendlyMessage(raw, status) {
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("only an admin")) return "Only an admin can do that.";
+  if (lower.includes("valid time")) return "Pick a valid time, like 19:30";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
   if (lower.includes("removed you from this circle")) return "An admin removed you from this circle.";

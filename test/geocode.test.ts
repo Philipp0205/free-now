@@ -176,24 +176,36 @@ test("reverse geocoding keeps a Photon venue and falls back to Nominatim", async
 });
 
 const BAGEL = "https://www.google.com/maps/place/jomi+Bagel+Deli,+Johannesstra%C3%9Fe+65/";
+const BAGEL_DE = "https://www.google.de/maps/place/jomi+Bagel+Deli,+Johannesstra%C3%9Fe+65/";
+const CONSENT = `https://consent.google.com/m?continue=${encodeURIComponent(BAGEL)}&gl=DE`;
 
 test("maps links resolve a short link, coordinates, and reject other hosts", async () => {
   const fetched: string[] = [];
   const searched: string[] = [];
   const fetchImpl = async (url: string) => {
     fetched.push(url);
-    if (url.startsWith("https://maps.app.goo.gl/")) {
+    if (url === "https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8") {
       return {
         status: 302,
-        headers: { get: (name: string) => (name.toLowerCase() === "location" ? BAGEL : null) },
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? BAGEL_DE : null) },
         body: { cancel: async () => {}, text: async () => { throw new Error("body was read"); } },
       };
     }
-    return {
-      status: 200,
-      headers: { get: () => null },
-      body: { cancel: async () => {} },
-    };
+    if (url === "https://maps.app.goo.gl/consent") {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? CONSENT : null) },
+        body: { cancel: async () => {} },
+      };
+    }
+    if (url.includes("consent.google.com") || url.includes("/maps")) {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? CONSENT : null) },
+        body: { cancel: async () => {} },
+      };
+    }
+    throw new Error(`unexpected fetch ${url}`);
   };
   const fetchJson = async (url: string) => {
     searched.push(url);
@@ -209,13 +221,18 @@ test("maps links resolve a short link, coordinates, and reject other hosts", asy
   const bagel = await resolveMapsLink("https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8", fetchJson, fetchImpl);
   assert.equal(bagel[0]?.name, "jomi Bagel Deli");
   assert.ok(searched.some((url) => decodeURIComponent(url).includes("jomi Bagel Deli")));
-  assert.equal(fetched.filter((url) => url.includes("evil.example")).length, 0);
+  assert.deepEqual(fetched, ["https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8"]);
+
+  const consent = await resolveMapsLink("https://maps.app.goo.gl/consent", fetchJson, fetchImpl);
+  assert.equal(consent[0]?.name, "jomi Bagel Deli");
+  assert.deepEqual(fetched.filter((url) => url.includes("consent.google")), []);
 
   searched.length = 0;
   const again = await resolveMapsLink("https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8", fetchJson, fetchImpl);
   assert.equal(again[0]?.name, "jomi Bagel Deli");
   assert.equal(searched.length, 0);
 
+  const fetchesBeforePins = fetched.length;
   const at = await resolveMapsLink("https://www.google.com/maps/@48.7784,9.18,17z", fetchJson, fetchImpl);
   assert.equal(at.length, 1);
   assert.equal(at[0].lat, 48.7784);
@@ -227,6 +244,11 @@ test("maps links resolve a short link, coordinates, and reject other hosts", asy
   assert.equal(pin[0].name, "Cafe Ada");
   assert.equal(pin[0].lat, 48.7674);
   assert.equal(pin[0].lng, 9.1708);
+  assert.equal(fetched.length, fetchesBeforePins);
+
+  const de = await resolveMapsLink("https://www.google.de/maps/@52.52,13.405,15z", fetchJson, fetchImpl);
+  assert.equal(de[0]?.lat, 52.52);
+  assert.equal(fetched.length, fetchesBeforePins);
 
   const before = fetched.length;
   const rejected = await resolveMapsLink("https://evil.example/maps/place/Secret", fetchJson, fetchImpl);
@@ -234,6 +256,7 @@ test("maps links resolve a short link, coordinates, and reject other hosts", asy
   assert.equal(fetched.length, before);
   assert.deepEqual(await resolveMapsLink("http://www.google.com/maps/place/Cafe", fetchJson, fetchImpl), []);
   assert.deepEqual(await resolveMapsLink("https://goo.gl/not-maps", fetchJson, fetchImpl), []);
+  assert.deepEqual(await resolveMapsLink("https://www.google.evil/maps/place/Cafe", fetchJson, fetchImpl), []);
 });
 
 test("geocode logs the upstream status and not the query", async () => {
