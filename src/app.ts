@@ -24,6 +24,7 @@ import {
   blockSocialGuest,
   clearRemoval,
   removalBlocksJoin,
+  deleteCircle,
   deletePushSubForUser,
   finishPlan,
   finishSocial,
@@ -31,6 +32,7 @@ import {
   listPastSocials,
   getCircleByCode,
   getCircleById,
+  getUserById,
   listCirclesForUser,
   isCircleAdmin,
   kickMember,
@@ -233,7 +235,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
-  if (pathname === "/api/admin/query" || pathname === "/api/admin/schema") {
+  if (isOperatorPath(pathname)) {
     await handleAdmin(req, res, deps, method, pathname, body);
     return;
   }
@@ -344,6 +346,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const fresh = getCircleById(deps.db, circle.id);
     if (!fresh) throw new HttpError(500, "circle missing");
     sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
+    return;
+  }
+
+  if (method === "DELETE" && pathname === "/api/circles") {
+    const circle = requireCircle(deps, me.id, requested);
+    requireAdmin(deps, circle.id, me.id);
+    const members = listMembers(deps.db, circle.id);
+    const removed = deleteCircle(deps.db, circle.id);
+    if (!removed) throw new HttpError(404, "not found");
+    await notifyCircleDeleted(deps, removed.circle, me, members);
+    sendJson(res, 200, mePayload(deps, req, me, null));
     return;
   }
 
@@ -1099,6 +1112,14 @@ async function handleAdmin(
     return;
   }
   clearAdminFailures(key);
+  if (method === "POST" && /^\/api\/admin\/circles\/[^/]+\/delete$/.test(pathname)) {
+    deleteCircleAsOperator(res, deps, pathname);
+    return;
+  }
+  if (method === "POST" && /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname)) {
+    setMemberAdminAsOperator(res, deps, pathname, body);
+    return;
+  }
   try {
     if (method === "POST" && pathname === "/api/admin/query") {
       const sql = body.sql;
@@ -1136,6 +1157,114 @@ async function handleAdmin(
   }
   console.log("admin query denied");
   sendJson(res, 404, { error: "not found" });
+}
+
+function isOperatorPath(pathname: string): boolean {
+  return pathname === "/api/admin/query"
+    || pathname === "/api/admin/schema"
+    || /^\/api\/admin\/circles\/[^/]+\/delete$/.test(pathname)
+    || /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname);
+}
+
+function deleteCircleAsOperator(res: http.ServerResponse, deps: AppDeps, pathname: string): void {
+  const match = /^\/api\/admin\/circles\/([^/]+)\/delete$/.exec(pathname);
+  let circleId = "";
+  try {
+    circleId = parseId(match?.[1] ?? "");
+  } catch {
+    console.log("admin circle delete denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  try {
+    const removed = deleteCircle(deps.db, circleId);
+    if (!removed) {
+      console.log("admin circle delete denied");
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
+    console.log(`admin circle delete ok id=${removed.circle.id}`);
+    sendJson(res, 200, { deleted: true, circle: removed.circle, counts: removed.counts });
+  } catch {
+    console.log("admin circle delete denied");
+    sendJson(res, 404, { error: "not found" });
+  }
+}
+
+function setMemberAdminAsOperator(
+  res: http.ServerResponse,
+  deps: AppDeps,
+  pathname: string,
+  body: Record<string, unknown>,
+): void {
+  const match = /^\/api\/admin\/circles\/([^/]+)\/members\/([^/]+)\/admin$/.exec(pathname);
+  let circleId = "";
+  let userId = "";
+  try {
+    circleId = parseId(match?.[1] ?? "");
+    userId = parseId(match?.[2] ?? "");
+  } catch {
+    console.log("admin member admin denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  if (typeof body.admin !== "boolean") {
+    console.log("admin member admin denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const circle = getCircleById(deps.db, circleId);
+  if (!circle) {
+    console.log("admin member admin denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  // Same path an admin uses in the app: setCircleAdmin refuses to leave zero admins.
+  const result = setCircleAdmin(deps.db, circle.id, userId, body.admin);
+  if (result === "last") {
+    console.log("admin member admin denied");
+    sendJson(res, 409, { error: "A circle needs an admin." });
+    return;
+  }
+  if (result !== "ok") {
+    console.log("admin member admin denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const user = getUserById(deps.db, userId);
+  if (!user) {
+    console.log("admin member admin denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const admin = isCircleAdmin(deps.db, circle.id, user.id);
+  console.log(`admin member admin ok circle=${circle.id} user=${user.id} admin=${admin}`);
+  sendJson(res, 200, {
+    ok: true,
+    circle: { id: circle.id, name: circle.name },
+    user: { id: user.id, name: user.name },
+    admin,
+  });
+}
+
+async function notifyCircleDeleted(
+  deps: AppDeps,
+  circle: { id: string; name: string },
+  actor: UserRow,
+  members: Array<{ id: string }>,
+): Promise<void> {
+  const notices = members
+    .filter((member) => member.id !== actor.id)
+    .map((member) => ({
+      userId: member.id,
+      title: "Circle deleted",
+      body: `${circle.name} was deleted by ${actor.name}`,
+      kind: "circle-deleted",
+      refId: null,
+      tag: `circle-deleted:${circle.id}`,
+      url: "/",
+    }));
+  await notifyUsers(deps.db, deps.push, deps.now(), notices);
 }
 
 function requireUser(user: UserRow | undefined): UserRow {

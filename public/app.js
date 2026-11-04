@@ -276,6 +276,10 @@ function scheduleOfflineRetry(delay) {
       void considerReminders();
     } catch (error) {
       if (error.status === 401) return;
+      if (error.status === 404 && state.circleId) {
+        const moved = await releaseMissingCircle();
+        if (moved) return;
+      }
       noteConnectionProblem(error);
       render();
       scheduleOfflineRetry(Math.min(delay * 2, 30000));
@@ -337,6 +341,10 @@ async function refresh({ initial = false } = {}) {
     ]);
   } catch (error) {
     if (error.status === 401) return;
+    if (error.status === 404 && state.circleId) {
+      const moved = await releaseMissingCircle();
+      if (moved) return;
+    }
     if (isNetworkFailure(error) || error.status >= 500) {
       noteConnectionProblem(error);
       render();
@@ -384,6 +392,44 @@ async function refresh({ initial = false } = {}) {
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
+}
+
+async function releaseMissingCircle() {
+  const previous = state.circleId;
+  rememberCircle("");
+  let me;
+  try {
+    me = await api("/api/me");
+  } catch (error) {
+    rememberCircle(previous);
+    if (error.status === 401) return true;
+    return false;
+  }
+  const stillThere = (me.circles || []).some((circle) => circle.id === previous);
+  if (stillThere) {
+    rememberCircle(previous);
+    return false;
+  }
+  state.me = me;
+  adoptCircle(me);
+  state.socials = [];
+  state.plans = [];
+  state.notifications = [];
+  state.chat = null;
+  state.chatThread = null;
+  state.past = false;
+  state.pastDays = null;
+  state.sheet = null;
+  state.confirm = null;
+  state.circleMenu = false;
+  state.tab = "home";
+  state.signature = "";
+  state.offline = false;
+  state.statusMessage = "";
+  if (!me.circle) useNamedCircleDefault();
+  render();
+  if (me.circle) refresh({ initial: true }).catch(() => {});
+  return true;
 }
 
 function isTyping() {
@@ -1174,6 +1220,11 @@ function circleScreen() {
       el("h2", { class: "members-title", text: "Members" }),
       ...circle.members.map((member) => memberRow(member)),
     ]),
+    youAreAdmin()
+      ? el("div", { class: "panel stack" }, [
+          el("button", { class: "btn danger", type: "button", text: "Delete circle", onclick: onDeleteCircle }),
+        ])
+      : null,
   ]);
 }
 
@@ -3853,6 +3904,36 @@ async function onRotateBuzz() {
         const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
         state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
         state.error = "New secret ready";
+      });
+    },
+  };
+  render();
+}
+
+function onDeleteCircle() {
+  const circle = state.me?.circle;
+  if (!circle || !youAreAdmin()) return;
+  state.confirm = {
+    title: `Delete ${circle.name}?`,
+    body: "This can't be undone. Members, posts, plans, and chats in this circle are removed.",
+    confirmLabel: "Delete circle",
+    action: async () => {
+      await run(async () => {
+        state.me = await api("/api/circles", { method: "DELETE" });
+        rememberCircle("");
+        adoptCircle(state.me);
+        state.tab = "home";
+        state.chat = null;
+        state.chatThread = null;
+        state.socials = [];
+        state.plans = [];
+        state.notifications = [];
+        state.past = false;
+        state.pastDays = null;
+        state.sheet = null;
+        state.signature = "";
+        if (!state.me.circle) useNamedCircleDefault();
+        if (state.me.circle) await refresh({ initial: true });
       });
     },
   };
