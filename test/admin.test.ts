@@ -13,11 +13,11 @@ import type { PushPayload, PushSender } from "../src/push.js";
 
 const START = Date.parse("2026-06-01T15:00:00.000Z");
 
-async function withApp(fn: (ctx: { port: number; sent: PushPayload[]; at: (ms: number) => void }) => Promise<void>) {
-  const sent: PushPayload[] = [];
+async function withApp(fn: (ctx: { port: number; sent: Array<PushPayload & { endpoint: string }>; at: (ms: number) => void }) => Promise<void>) {
+  const sent: Array<PushPayload & { endpoint: string }> = [];
   let now = START;
   const db = openDb(":memory:");
-  const push: PushSender = { async send(_sub, payload) { sent.push(payload); } };
+  const push: PushSender = { async send(sub, payload) { sent.push({ ...payload, endpoint: sub.endpoint }); } };
   const config = loadConfig({ PORT: "3000", APP_TZ: "UTC", DB_PATH: ":memory:" });
   const server = http.createServer(createApp({ db, push, config: { ...config, dbPath: ":memory:" }, now: () => now }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -399,6 +399,84 @@ test("removal blocks the old invite, ends posts, and names who removed you", asy
       const plans = await api(port, "GET", "/api/plans", { token: nia.token });
       assert.equal(plans.plans.find((plan: { id: string }) => plan.id === supper.plan.id).removedBy, "Bea");
     });
+  });
+});
+
+test("editing a plan tells people who are in, keeps an omitted place, and a past day is gone", async () => {
+  await withApp(async ({ port, sent, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    for (const person of [alex, fritz, sam]) {
+      await api(port, "POST", "/api/push/subscribe", {
+        token: person.token,
+        body: { endpoint: `https://push.example/${person.user.id}`, keys: { p256dh: "p", auth: "a" } },
+        status: 204,
+      });
+    }
+    const plan = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Bouldering", place: "Gym", lat: 48.1, lng: 11.5 },
+      status: 201,
+    });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, { token: fritz.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, { token: sam.token, body: { reply: "can't" }, status: 200 });
+    sent.length = 0;
+    const edited = await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
+      token: alex.token,
+      body: { note: "Bouldering at 7" },
+      status: 200,
+    });
+    assert.equal(edited.plan.note, "Bouldering at 7");
+    assert.equal(edited.plan.place, "Gym");
+    assert.deepEqual(edited.plan.location, plan.plan.location);
+    const notePushes = sent.filter((item) => item.title.startsWith("Plan changed"));
+    assert.equal(notePushes.length, 1);
+    assert.equal(notePushes[0]?.endpoint, `https://push.example/${fritz.user.id}`);
+    assert.equal(notePushes[0]?.title, "Plan changed: Bouldering at 7");
+    assert.equal(notePushes[0]?.body, "Note is now Bouldering at 7.");
+    sent.length = 0;
+    const timed = await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
+      token: alex.token,
+      body: { time: "19:40" },
+      status: 200,
+    });
+    assert.equal(timed.plan.place, "Gym");
+    assert.equal(timed.plan.time, "19:40");
+    assert.deepEqual(timed.plan.location, plan.plan.location);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.endpoint, `https://push.example/${fritz.user.id}`);
+    assert.equal(sent[0]?.body, "Time is now 19:40.");
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
+      token: alex.token,
+      body: { time: "19:40" },
+      status: 200,
+    });
+    assert.equal(sent.length, 0);
+
+    const social = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Coffee", place: "Cafe" }, status: 201 });
+    await api(port, "POST", `/api/socials/${social.social.id}/reply`, { token: fritz.token, body: { reply: "in" }, status: 200 });
+    sent.length = 0;
+    const socialEdit = await api(port, "PATCH", `/api/socials/${social.social.id}`, {
+      token: alex.token,
+      body: { note: "Tea" },
+      status: 200,
+    });
+    assert.equal(socialEdit.social.place, "Cafe");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.endpoint, `https://push.example/${fritz.user.id}`);
+    assert.equal(sent[0]?.title, "Updated: Tea");
+    assert.equal(sent[0]?.body, "Note is now Tea.");
+
+    at(START + 2 * 24 * 60 * 60 * 1000);
+    const gone = await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
+      token: alex.token,
+      body: { note: "Too late" },
+      status: 410,
+    });
+    assert.equal(gone.error, "That plan has ended.");
   });
 });
 

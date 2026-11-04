@@ -1222,6 +1222,38 @@ test("an admin sees edit, end, and remove on someone else's cards", { timeout: 9
   }
 });
 
+test("editing a plan that has ended says so", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  await page.route("**/api/plans/**", (route) => {
+    if (route.request().method() === "PATCH") {
+      return route.fulfill({
+        status: 410,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "That plan has ended." }),
+      });
+    }
+    return route.continue();
+  });
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/plans`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Bouldering" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Edit Bouldering" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByText("That plan has ended.").waitFor();
+    assert.equal(await page.getByText("This invite has expired. Ask for a new link.").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },
