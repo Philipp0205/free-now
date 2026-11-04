@@ -261,11 +261,22 @@ function friendlyMessage(raw, status) {
   if (!text || lower.includes("failed to fetch") || status === 0) return "You're offline. Retrying…";
   if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
   if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
+  if (lower.includes("plan has ended")) return "That plan has ended.";
+  if (lower.includes("post has ended")) return "That post has ended.";
   if (status === 410 || lower.includes("expired")) return "This invite has expired. Ask for a new link.";
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
+  if (lower.includes("removed you from this circle")) return "An admin removed you from this circle.";
+  if (lower.includes("removed you")) {
+    const named = text.match(/^(.+) removed you from this\.?$/i);
+    if (named && named[1].toLowerCase() !== "the host") return text.endsWith(".") ? text : `${text}.`;
+    return "The host removed you from this.";
+  }
+  if (lower.includes("only the host")) return "Only the host can do that.";
+  if (status === 403 || lower.includes("only an admin")) return "Only an admin can do that.";
+  if (lower.includes("needs an admin")) return "A circle needs an admin.";
   if (status === 401) return "Please sign in again.";
   return "Something went wrong. Try again.";
 }
@@ -875,16 +886,14 @@ function socialCard(social) {
     "data-social": social.id,
   }, [
     el("div", { class: "card-bg" }),
-    mine
-      ? el("button", { class: "pill quiet", type: "button", text: "End", onclick: () => endSocial(social) })
-      : null,
+    eventTools("social", social),
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
       el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
-      mine ? null : replyActions(social),
+      mine ? null : removedNote(social) || replyActions(social),
     ]),
   ]);
 }
@@ -894,16 +903,14 @@ function planCard(plan) {
   const people = [plan.creator, ...plan.joined];
   return el("article", { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
     el("div", { class: "card-bg" }),
-    mine
-      ? el("button", { class: "pill quiet", type: "button", text: "Delete", onclick: () => deletePlan(plan) })
-      : null,
+    eventTools("plan", plan),
     el("div", { class: "card-copy" }, [
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
-      el("p", { text: `${plan.whenLabel} · ${plan.creator.name}` }),
+      el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
-      mine ? null : planReplyButtons(plan),
+      mine ? null : removedNote(plan) || planReplyButtons(plan),
     ]),
   ]);
 }
@@ -931,15 +938,10 @@ function circleScreen() {
         }),
       ]),
     ]),
-    el("div", { class: "list" }, circle.members.map((member) =>
-      el("div", { class: "row" }, [
-        avatar(member, 40),
-        el("div", { class: "grow" }, [
-          el("h3", { text: member.name }),
-          member.id === state.me.user.id ? el("p", { text: "You" }) : null,
-        ]),
-      ]),
-    )),
+    el("div", { class: "list" }, [
+      el("h2", { class: "members-title", text: "Members" }),
+      ...circle.members.map((member) => memberRow(member)),
+    ]),
   ]);
 }
 
@@ -1113,8 +1115,176 @@ function notificationsSheet() {
   ]);
 }
 
+function youAreAdmin() {
+  return Boolean(state.me?.circle?.youAreAdmin);
+}
+
+function memberRow(member) {
+  const self = member.id === state.me.user.id;
+  return el("div", { class: "row member-row" }, [
+    avatar(member, 40),
+    el("div", { class: "grow" }, [
+      el("h3", {}, [
+        el("span", { text: member.name }),
+        member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
+      ]),
+      self ? el("p", { text: "You" }) : null,
+    ]),
+    youAreAdmin() && !self
+      ? el("button", {
+          class: "text-btn",
+          type: "button",
+          text: "Manage",
+          "aria-label": `Manage ${member.name}`,
+          onclick: () => openMemberMenu(member),
+        })
+      : null,
+  ]);
+}
+
+function openMemberMenu(member) {
+  state.memberMenu = member;
+  state.sheet = "member";
+  render();
+}
+
+function memberSheet() {
+  const member = state.memberMenu;
+  if (!member) return el("div");
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-label": member.name }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: member.name }),
+        el("p", { class: "help", text: member.admin ? "Admin" : "Member" }),
+      ]),
+      el("div", { class: "actions" }, [
+        member.admin
+          ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
+          : el("button", { class: "action", type: "button", text: "Make admin", onclick: () => setMemberAdmin(member, true) }),
+        el("button", {
+          class: "action",
+          type: "button",
+          text: "Remove from circle",
+          onclick: () => confirmRemoveMember(member),
+        }),
+      ]),
+    ]),
+  ]);
+}
+
+async function setMemberAdmin(member, admin) {
+  await run(async () => {
+    const data = await api(`/api/circles/members/${member.id}`, { method: "POST", body: { admin } });
+    state.me = { ...state.me, circle: data.circle };
+    state.sheet = null;
+  });
+}
+
+function confirmRemoveMember(member) {
+  state.sheet = null;
+  state.confirm = {
+    title: `Remove ${member.name}?`,
+    body: "They lose access right away. Their free posts and plans in this circle end.",
+    confirmLabel: "Remove",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/circles/members/${member.id}`, { method: "DELETE" });
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
+}
+
+function canManageEvent(item) {
+  return Boolean(item?.creator) && (item.creator.id === state.me.user.id || youAreAdmin());
+}
+
+function eventTools(kind, item) {
+  if (!canManageEvent(item)) return null;
+  const label = item.note || (kind === "plan" ? "plan" : "free post");
+  return el("div", { class: "card-tools" }, [
+    el("button", { class: "text-btn event-tool", type: "button", text: "Edit", "aria-label": `Edit ${label}`, onclick: () => openAdminEdit(kind, item) }),
+    el("button", { class: "text-btn event-tool", type: "button", text: "End", "aria-label": `End ${label}`, onclick: () => endManaged(kind, item) }),
+  ]);
+}
+
+function openAdminEdit(kind, item) {
+  const time = kind === "social" ? (item.startsAt ? clock(item.startsAt) : "") : (item.time || "");
+  state.adminEdit = { kind, id: item.id, note: item.note || "", place: item.place || "", time };
+  state.sheet = "admin-edit";
+  render();
+}
+
+function adminEditSheet() {
+  const edit = state.adminEdit;
+  if (!edit) return el("div");
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Edit", onsubmit: saveAdminEdit }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Edit" }),
+        el("p", { class: "help", text: "This updates it for everyone in the circle." }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
+        el("label", { class: "sheet-group" }, [
+          el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
+          el("input", {
+            id: "admin-time",
+            class: "sheet-control",
+            type: "time",
+            value: edit.time,
+          }),
+        ]),
+        sheetField("Place", "admin-place", edit.place, (value) => { edit.place = value; }, { maxlength: "80" }),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", { class: "btn", type: "submit", text: "Save" }),
+      ]),
+    ]),
+  ]);
+}
+
+async function saveAdminEdit(event) {
+  event.preventDefault();
+  const edit = state.adminEdit;
+  if (!edit) return;
+  const note = document.getElementById("admin-note")?.value ?? edit.note;
+  const place = document.getElementById("admin-place")?.value ?? edit.place;
+  const time = document.getElementById("admin-time")?.value || null;
+  await run(async () => {
+    const body = edit.kind === "social" ? { note, place, startsAt: time } : { note, place, time };
+    await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
+    state.sheet = null;
+    await refresh({ initial: true });
+  });
+}
+
+function endManaged(kind, item) {
+  const own = item.creator?.id === state.me.user.id;
+  const who = item.creator?.name || "They";
+  state.confirm = {
+    title: "End this?",
+    body: own ? "Friends will no longer see it." : `${who} will be told this ended.`,
+    confirmLabel: "End",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/${kind}s/${item.id}`, { method: "DELETE" });
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
+}
+
 function sheet() {
   if (state.sheet === "notifications") return notificationsSheet();
+  if (state.sheet === "member") return memberSheet();
+  if (state.sheet === "admin-edit") return adminEditSheet();
   if (state.sheet === "action") {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
@@ -1569,7 +1739,7 @@ function replyLine(person, social) {
 function replySummary(social) {
   const people = social.joined.filter((person) => inReply(person) || person.reply === "declined");
   if (!people.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, people.map((person) => el("p", { class: "reply-line", text: replyLine(person, social) })));
+  return el("div", {}, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
 }
 
 function replyActions(social) {
@@ -2183,8 +2353,10 @@ function mapCard(pin) {
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
     social && !pin.own ? replySummary(social) : null,
-    social && !pin.own ? replyActions(social) : null,
+    social && !pin.own ? removedNote(social) || replyActions(social) : null,
+    social?.creator ? eventTools("social", social) : null,
     plan && !pin.own ? planPinActions(plan) : null,
+    plan?.creator ? eventTools("plan", plan) : null,
     el("div", { class: "map-card-actions" }, [
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
     ]),
@@ -2202,7 +2374,42 @@ function planReplyLine(person) {
 function planReplySummary(plan) {
   const people = plan.joined.filter((person) => person.reply === "declined" || inReply(person));
   if (!people.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, people.map((person) => el("p", { class: "reply-line", text: planReplyLine(person) })));
+  return el("div", {}, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
+}
+
+function canRemoveGuest(event) {
+  return Boolean(event?.creator) && (event.creator.id === state.me.user.id || youAreAdmin());
+}
+
+function guestLine(text, person, kind, event) {
+  const line = el("p", { class: "reply-line", text });
+  if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) return line;
+  return el("div", { class: "guest-row" }, [
+    line,
+    el("button", {
+      class: "text-btn",
+      type: "button",
+      text: "Remove",
+      "aria-label": `Remove ${person.name}`,
+      onclick: () => confirmRemoveGuest(kind, event, person),
+    }),
+  ]);
+}
+
+function confirmRemoveGuest(kind, event, person) {
+  const label = (event.note || "").trim() || (kind === "plan" ? "the plan" : "Free now");
+  state.confirm = {
+    title: `Remove ${person.name}?`,
+    body: `They can't join ${label} again.`,
+    confirmLabel: "Remove",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/${kind}s/${event.id}/people/${person.id}`, { method: "DELETE" });
+        await refresh({ initial: true });
+      });
+    },
+  };
+  render();
 }
 
 function planReplyButtons(plan) {
@@ -2249,7 +2456,13 @@ function planReplyButtons(plan) {
   ]);
 }
 
+function removedNote(item) {
+  if (!item?.removedBy) return null;
+  return el("p", { class: "removed-note", text: `${item.removedBy} removed you from this.` });
+}
+
 function planPinActions(plan) {
+  if (plan.removedBy) return removedNote(plan);
   const mine = plan.joined.find((person) => person.id === state.me.user.id);
   return el("div", {}, [
     mine && (mine.reply === "declined" || inReply(mine))

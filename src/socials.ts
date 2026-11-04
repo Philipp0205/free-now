@@ -104,6 +104,11 @@ export async function publishSocial(
   return { created, social: socialPayload(deps.db, social) };
 }
 
+function removedMessage(actor: string | null | undefined): string {
+  const name = actor?.trim() || "Someone";
+  return `${name} removed you from this.`;
+}
+
 export function normalizeReply(value: unknown): "coming" | "declined" {
   if (value === "declined" || value === "cant" || value === "can't") return "declined";
   if (value === "coming" || value === "join" || value === "in") return "coming";
@@ -119,6 +124,10 @@ export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, b
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
   const reply = normalizeReply(body.reply);
+  const socialReplyBlock = getSocialReply(deps.db, social.id, user.id);
+  if (reply === "coming" && socialReplyBlock?.blocked) {
+    throw new HttpError(403, removedMessage(socialReplyBlock.removed_by));
+  }
   const live = social.starts_at == null || social.starts_at <= now;
   let eta: number | null = null;
   let arriveAt: number | null = null;

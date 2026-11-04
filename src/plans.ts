@@ -14,6 +14,11 @@ import { addDays, clockLabel, isoDate, zonedDateTime } from "./time.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "./app.js";
 import { normalizeReply, readArriveAt } from "./socials.js";
 
+function removedMessage(actor: string | null | undefined): string {
+  const name = actor?.trim() || "Someone";
+  return `${name} removed you from this.`;
+}
+
 export async function publishPlan(
   deps: AppDeps,
   user: UserRow,
@@ -70,6 +75,8 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
   const tomorrow = addDays(today, 1);
   if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
+  const planBlock = getPlanReply(deps.db, plan.id, user.id);
+  if (planBlock?.blocked) throw new HttpError(403, removedMessage(planBlock.removed_by));
   await setPlanComing(deps, user, plan, now);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
@@ -98,6 +105,10 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const reply = normalizeReply(body.reply);
+  const planReplyBlock = getPlanReply(deps.db, plan.id, user.id);
+  if (reply === "coming" && planReplyBlock?.blocked) {
+    throw new HttpError(403, removedMessage(planReplyBlock.removed_by));
+  }
   if (reply === "coming") {
     const previous = getPlanReply(deps.db, plan.id, user.id);
     let arriveAt: number | null = previous?.reply === "coming" ? (previous.arrive_at ?? null) : null;

@@ -832,7 +832,7 @@ test("a confirm sheet closes when its content is dragged at 412", { timeout: 90_
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.getByRole("button", { name: "End Coffee" }).click();
     await page.locator(".sheet-confirm .sheet-body").waitFor();
     await dragDown(page, page.locator(".sheet-confirm .sheet-body"));
     await page.locator(".sheet-confirm").waitFor({ state: "detached" });
@@ -935,7 +935,7 @@ test("a confirm sheet closes when the gap between its buttons is dragged", { tim
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.getByRole("button", { name: "End Coffee" }).click();
     await page.locator(".sheet-confirm").waitFor();
     const point = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll(".sheet-confirm button")];
@@ -1045,6 +1045,255 @@ test("a swipe on the header or the top of the sheet closes it", { timeout: 90_00
     }
   } finally {
     await page.context().close();
+  }
+});
+
+test("an admin manages members from the circle list", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("heading", { name: "Members" }).waitFor();
+    await page.locator(".admin-badge", { hasText: "Admin" }).waitFor();
+    const manage = page.getByRole("button", { name: "Manage Fritz" });
+    await manage.waitFor();
+    const height = await manage.evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(height >= 44, `manage button is ${height}px`);
+    await manage.click();
+    await page.getByRole("button", { name: "Make admin" }).waitFor();
+    const remove = page.getByRole("button", { name: "Remove from circle" });
+    await remove.waitFor();
+    const removeHeight = await remove.evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(removeHeight >= 44, `remove button is ${removeHeight}px`);
+    await remove.click();
+    await page.getByRole("button", { name: "Remove", exact: true }).waitFor();
+    await page.getByText("They lose access right away.").waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("the host can remove someone who is in", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    const remove = page.getByRole("button", { name: "Remove Fritz" });
+    await remove.waitFor();
+    const end = page.getByRole("button", { name: "End Coffee" });
+    await end.waitFor();
+    const height = await remove.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+    const endHeight = await end.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+    assert.ok(height >= 44, `remove is ${height}px`);
+    assert.ok(endHeight >= 44, `end is ${endHeight}px`);
+    await remove.click();
+    await page.getByText("They can't join Coffee again.").waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a removed guest sees a note instead of reply buttons", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const nia = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Nia", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${nia.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/people/${nia.user.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await page.evaluate((value) => localStorage.setItem("fn_token", value), nia.token);
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByText("Alex removed you from this.").waitFor();
+    assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Can't" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Pick time" }).count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("an admin sees edit, end, and remove on someone else's cards", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const join = (name: string) => fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const fritz = await join("Fritz");
+    const sam = await join("Sam");
+    const postAs = (tokenValue: string, pathname: string, body: unknown) => fetch(`${baseUrl}${pathname}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenValue}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((response) => response.json());
+    const coffee = await postAs(fritz.token, "/api/socials", { note: "Coffee" });
+    const dinner = await postAs(fritz.token, "/api/plans", { note: "Dinner" });
+    const now = new Date();
+    const ahead = new Date(now.getTime() + 90 * 60 * 1000);
+    const sameDay = ahead.getUTCDate() === now.getUTCDate();
+    const laterClock = sameDay
+      ? `${String(ahead.getUTCHours()).padStart(2, "0")}:${String(ahead.getUTCMinutes()).padStart(2, "0")}`
+      : null;
+    const walk = laterClock
+      ? await postAs(sam.token, "/api/socials", { note: "Walk", startsAt: laterClock })
+      : null;
+    const replyAs = (tokenValue: string, pathname: string) => fetch(`${baseUrl}${pathname}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenValue}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await replyAs(sam.token, `/api/socials/${coffee.social.id}/reply`);
+    await replyAs(sam.token, `/api/plans/${dinner.plan.id}/reply`);
+    if (walk?.social?.id) await replyAs(fritz.token, `/api/socials/${walk.social.id}/reply`);
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    const cards: Array<[string, string]> = [["Coffee", "Sam"], ["Dinner", "Sam"]];
+    if (walk?.social?.id) cards.splice(1, 0, ["Walk", "Fritz"]);
+    for (const [label, guest] of cards) {
+      const card = page.locator("article", { has: page.getByRole("heading", { name: label, exact: true }) });
+      await card.scrollIntoViewIfNeeded();
+      const edit = card.getByRole("button", { name: `Edit ${label}` });
+      const end = card.getByRole("button", { name: `End ${label}` });
+      const remove = card.getByRole("button", { name: `Remove ${guest}` });
+      await edit.waitFor();
+      await end.waitFor();
+      await remove.waitFor();
+      const heights = await Promise.all([edit, end, remove].map((button) => button.evaluate((node) => Math.round(node.getBoundingClientRect().height))));
+      assert.ok(heights.every((height) => height >= 44), `${label} tools are ${heights.join(", ")}px`);
+    }
+    const coffeeCard = page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) });
+    await coffeeCard.getByRole("button", { name: "Edit Coffee" }).click();
+    await page.getByRole("dialog", { name: "Edit" }).waitFor();
+    await page.getByText("Time (empty means now)").waitFor();
+    await page.screenshot({ path: shot("admin-event-tools.png") });
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("editing a plan that has ended says so", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  await page.route("**/api/plans/**", (route) => {
+    if (route.request().method() === "PATCH") {
+      return route.fulfill({
+        status: 410,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "That plan has ended." }),
+      });
+    }
+    return route.continue();
+  });
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/plans`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Bouldering" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Edit Bouldering" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByText("That plan has ended.").waitFor();
+    assert.equal(await page.getByText("This invite has expired. Ask for a new link.").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
+  const cases: Array<[string, { width: number; height: number }]> = [
+    [CHROME_UA, { width: 360, height: 640 }],
+    [CHROME_UA, { width: 412, height: 700 }],
+    [FIREFOX_UA, { width: 360, height: 640 }],
+    [FIREFOX_UA, { width: 412, height: 700 }],
+  ];
+  for (const [agent, size] of cases) {
+    const page = await phonePage(agent, false);
+    try {
+      await page.setViewportSize(size);
+      await signIn(page, "Alex");
+      const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+      await fetch(`${baseUrl}/api/plans`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ note: "Bouldering", place: "Gym" }),
+      });
+      await page.reload();
+      const later = page.locator(".sheet button", { hasText: "Not now" });
+      if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+      await page.locator(".card-plan .avatar").waitFor();
+      const boxes = await page.evaluate(() => {
+        const card = document.querySelector(".card-plan") as HTMLElement;
+        const tools = card.querySelector(".card-tools")!.getBoundingClientRect();
+        const avatar = card.querySelector(".avatar")!.getBoundingClientRect();
+        const separated = tools.bottom <= avatar.top + 0.5 || tools.right <= avatar.left + 0.5
+          || avatar.right <= tools.left + 0.5 || avatar.bottom <= tools.top + 0.5;
+        return {
+          separated,
+          tools: { top: tools.top, bottom: tools.bottom, left: tools.left, right: tools.right },
+          avatar: { top: avatar.top, bottom: avatar.bottom, left: avatar.left, right: avatar.right },
+        };
+      });
+      assert.equal(boxes.separated, true, JSON.stringify({ size, boxes }));
+    } finally {
+      await page.context().close();
+    }
   }
 });
 
