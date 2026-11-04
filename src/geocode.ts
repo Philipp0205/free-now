@@ -515,12 +515,22 @@ function listedGoogle(host: string): boolean {
   return GOOGLE_DOMAINS.has(host);
 }
 
-/** www.google.<ccTLD> or maps.google.<ccTLD> with a /maps path. Parsed locally, never fetched. */
+/**
+ * google.<ccTLD>/maps or www.google.<ccTLD>/maps, or any path on maps.google.<ccTLD>
+ * (the old host, e.g. maps.google.com/?q=48.1,9.1). Parsed locally, never fetched.
+ */
 function asMapsUrl(url: URL | null): URL | null {
-  if (!url || !mapsPath(url.pathname)) return null;
+  if (!url) return null;
   const host = hostName(url);
-  const bare = host.startsWith("www.") ? host.slice(4) : host.startsWith("maps.") ? host.slice(5) : "";
-  return bare && listedGoogle(bare) ? url : null;
+  if (host.startsWith("maps.")) return listedGoogle(host.slice(5)) ? url : null;
+  if (!mapsPath(url.pathname)) return null;
+  const bare = host.startsWith("www.") ? host.slice(4) : host;
+  return listedGoogle(bare) ? url : null;
+}
+
+/** Text that starts like a web address. It is never sent upstream as search text. */
+export function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
 }
 
 function isShortLink(url: URL): boolean {
