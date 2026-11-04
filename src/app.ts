@@ -12,9 +12,11 @@ import {
   blockSocialGuest,
   clearRemoval,
   removalBlocksJoin,
-  deletePlanById,
   deletePushSubForUser,
-  deleteSocialById,
+  finishPlan,
+  finishSocial,
+  listPastPlans,
+  listPastSocials,
   getCircleByCode,
   getCircleForUser,
   isCircleAdmin,
@@ -355,6 +357,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const fresh = getCircleForUser(deps.db, me.id);
     if (!fresh) throw new HttpError(500, "circle missing");
     sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/past") {
+    const circle = requireCircle(deps, me.id);
+    sendJson(res, 200, { days: pastDays(deps, circle.id, me.id) });
     return;
   }
 
@@ -702,7 +710,7 @@ async function endSocial(deps: AppDeps, user: UserRow, rawId: string): Promise<v
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   assertEventHost(deps, user, circle.id, social.creator_id);
   closeEventChat(deps.db, circle.id, "social", social.id, deps.now());
-  if (!deleteSocialById(deps.db, social.id)) throw new HttpError(404, "social not found");
+  if (!finishSocial(deps.db, social.id, deps.now())) throw new HttpError(404, "social not found");
   if (social.creator_id !== user.id) {
     const label = social.note.trim() || "your free post";
     await notifyUsers(deps.db, deps.push, deps.now(), [
@@ -822,7 +830,7 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string): Promise<voi
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, circle.id, plan.creator_id);
   closeEventChat(deps.db, circle.id, "plan", plan.id, deps.now());
-  if (!deletePlanById(deps.db, plan.id)) throw new HttpError(404, "plan not found");
+  if (!finishPlan(deps.db, plan.id, deps.now())) throw new HttpError(404, "plan not found");
   if (plan.creator_id !== user.id) {
     await notifyUsers(deps.db, deps.push, deps.now(), [
       {
@@ -845,7 +853,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   assertEventHost(deps, user, circle.id, plan.creator_id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  if (plan.for_date < today) throw new HttpError(410, "That plan has ended.");
+  if (plan.ended_at != null || plan.for_date < today) throw new HttpError(410, "That plan has ended.");
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, true) : plan.note;
   const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (plan.place ?? "");
   let lat = plan.lat;
@@ -891,6 +899,77 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, fresh, today, addDays(today, 1));
+}
+
+type PastEvent = {
+  kind: "social" | "plan";
+  id: string;
+  note: string;
+  day: string;
+  at: number;
+  time: string;
+  place: string;
+  host: { id: string; name: string };
+  people: Array<{ id: string; name: string; arriveAt: number | null }>;
+};
+
+function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  const events: PastEvent[] = [];
+  for (const social of listPastSocials(deps.db, circleId, now)) {
+    if (getSocialReply(deps.db, social.id, viewerId)?.blocked) continue;
+    const at = social.starts_at ?? social.created_at;
+    events.push({
+      kind: "social",
+      id: social.id,
+      note: social.note,
+      day: isoDate(at, deps.config.tz),
+      at,
+      time: clockLabel(at, deps.config.tz),
+      place: social.place ?? "",
+      host: { id: social.creator_id, name: social.creator_name },
+      people: listSocialJoins(deps.db, social.id)
+        .filter((join) => isInReply(join.reply))
+        .map((join) => ({ id: join.id, name: join.name, arriveAt: join.arrive_at })),
+    });
+  }
+  for (const plan of listPastPlans(deps.db, circleId, today)) {
+    if (getPlanReply(deps.db, plan.id, viewerId)?.blocked) continue;
+    const at = plan.ended_at ?? plan.created_at;
+    const day = plan.for_date < today ? plan.for_date : isoDate(at, deps.config.tz);
+    events.push({
+      kind: "plan",
+      id: plan.id,
+      note: plan.note,
+      day,
+      at,
+      time: plan.at_time ?? "",
+      place: plan.place ?? "",
+      host: { id: plan.creator_id, name: plan.creator_name },
+      people: listPlanJoins(deps.db, plan.id)
+        .filter((join) => isInReply(join.reply))
+        .map((join) => ({ id: join.id, name: join.name, arriveAt: join.arrive_at })),
+    });
+  }
+  events.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at || b.id.localeCompare(a.id));
+  const days: Array<{ day: string; label: string; events: PastEvent[] }> = [];
+  for (const event of events) {
+    const last = days.at(-1);
+    if (!last || last.day !== event.day) {
+      days.push({ day: event.day, label: pastDayLabel(event.day, today), events: [event] });
+    } else last.events.push(event);
+  }
+  return days;
+}
+
+function pastDayLabel(day: string, today: string): string {
+  if (day === today) return "Today";
+  if (day === addDays(today, -1)) return "Yesterday";
+  const month = Number(day.slice(5, 7));
+  const date = Number(day.slice(8, 10));
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${date} ${names[month - 1] ?? ""}`.trim();
 }
 
 function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow, viewerId: string | null = null) {
