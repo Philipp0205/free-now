@@ -715,6 +715,14 @@ input[type="time"].sheet-control { color-scheme: dark; }
   line-height: 1.35;
   text-align: center;
 }
+.sheet-head, .guide-head {
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+  background: var(--sheet);
+}
+html.kb-open .sheet .grabber { margin-bottom: 6px; }
+html.kb-open .sheet .help { margin-top: 0; }
 .sheet-head, .guide-head, .sheet-confirm .sheet-body { touch-action: none; }
 .sheet-confirm { overflow: hidden; touch-action: none; }
 .sheet-confirm button { touch-action: manipulation; }
