@@ -18,7 +18,8 @@ export function haversine(a, b) {
 }
 
 export function formatDistance(meters) {
-  if (meters < 950) return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
+  const rounded = Math.max(10, Math.round(meters / 10) * 10);
+  if (rounded < 1000) return `${rounded} m`;
   const km = meters / 1000;
   return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
