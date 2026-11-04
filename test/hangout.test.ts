@@ -8,7 +8,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { openDb } from "../src/db.js";
+import { addMember, insertCircle, insertSocial, insertUser, openDb, setSocialReply } from "../src/db.js";
 import type { PushPayload, PushSender } from "../src/push.js";
 import { sendStartReminders } from "../src/remind.js";
 
@@ -183,6 +183,134 @@ test("later today pushes once, then reminds only people who are coming", async (
       status: 400,
     });
   }, "UTC");
+});
+
+test("a start reminder is due once, and skips closed, later, and unscheduled socials", async () => {
+  const db = openDb(":memory:");
+  const now = 1_700_000_000_000;
+  try {
+    insertUser(db, { id: "host", name: "Philipp", token_hash: "h", buzz_token: "b", created_at: now });
+    insertUser(db, { id: "alex", name: "Alex", token_hash: "h2", buzz_token: "b2", created_at: now });
+    insertCircle(db, {
+      id: "c",
+      name: "friends",
+      invite_code: "ABCD2345",
+      created_by: "host",
+      created_at: now,
+    }, "host", now);
+    addMember(db, "c", "alex", now);
+
+    insertSocial(db, {
+      id: "due",
+      circleId: "c",
+      creatorId: "host",
+      note: "Dinner",
+      createdAt: now - 60_000,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+      place: "Café X",
+      startsAt: now,
+    });
+    setSocialReply(db, "due", "alex", now, "coming", 10, null);
+
+    insertSocial(db, {
+      id: "quiet",
+      circleId: "c",
+      creatorId: "host",
+      note: "No one",
+      createdAt: now - 60_000,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+      place: "Park",
+      startsAt: now - 1,
+    });
+
+    insertSocial(db, {
+      id: "later",
+      circleId: "c",
+      creatorId: "host",
+      note: "Later",
+      createdAt: now,
+      expiresAt: now + 120_000,
+      lat: null,
+      lng: null,
+      startsAt: now + 1,
+    });
+    setSocialReply(db, "later", "alex", now, "coming", null, null);
+
+    insertSocial(db, {
+      id: "closed",
+      circleId: "c",
+      creatorId: "host",
+      note: "Over",
+      createdAt: now - 120_000,
+      expiresAt: now,
+      lat: null,
+      lng: null,
+      startsAt: now - 10,
+    });
+    setSocialReply(db, "closed", "alex", now, "coming", null, null);
+
+    insertSocial(db, {
+      id: "plain",
+      circleId: "c",
+      creatorId: "host",
+      note: "Now",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+    });
+    setSocialReply(db, "plain", "alex", now, "coming", null, null);
+
+    insertSocial(db, {
+      id: "done",
+      circleId: "c",
+      creatorId: "host",
+      note: "Already",
+      createdAt: now - 60_000,
+      expiresAt: now + 60_000,
+      lat: null,
+      lng: null,
+      startsAt: now - 5,
+    });
+    db.prepare("UPDATE socials SET reminded_at = ? WHERE id = ?").run(now - 5, "done");
+    setSocialReply(db, "done", "alex", now, "coming", null, null);
+
+    const push: PushSender = { async send() {} };
+    assert.equal(await sendStartReminders(db, push, now), 2);
+
+    const reminded = db.prepare("SELECT id, reminded_at FROM socials").all() as Array<{ id: string; reminded_at: number | null }>;
+    const at = Object.fromEntries(reminded.map((row) => [row.id, row.reminded_at]));
+    assert.equal(at.due, now);
+    assert.equal(at.quiet, now);
+    assert.equal(at.later, null);
+    assert.equal(at.closed, null);
+    assert.equal(at.plain, null);
+    assert.equal(at.done, now - 5);
+
+    const notes = db.prepare("SELECT user_id, title, body, kind, ref_id FROM notifications").all() as Array<{
+      user_id: string;
+      title: string;
+      body: string;
+      kind: string;
+      ref_id: string | null;
+    }>;
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0].user_id, "alex");
+    assert.equal(notes[0].title, "Free now");
+    assert.equal(notes[0].body, "Starting now: Philipp at Café X");
+    assert.equal(notes[0].kind, "social-start");
+    assert.equal(notes[0].ref_id, "due");
+
+    assert.equal(await sendStartReminders(db, push, now), 0);
+    const again = db.prepare("SELECT reminded_at FROM socials WHERE id = ?").get("due") as { reminded_at: number };
+    assert.equal(again.reminded_at, now);
+  } finally {
+    db.close();
+  }
 });
 
 test("a start-time change notifies immediately, and a quick ETA does not send a second push", async () => {
@@ -422,4 +550,60 @@ test("the old Railway host redirects to the configured public origin", async () 
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
   }
+});
+
+test("Berlin midnight puts a plan on tomorrow and keeps a later-today start on today", async () => {
+  await withApp(async ({ port, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    // 23:50 Europe/Berlin (CEST, UTC+2). Local midnight is 22:00Z.
+    const beforeMidnight = Date.parse("2026-06-01T21:50:00.000Z");
+    at(beforeMidnight);
+
+    const plan = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Late walk" },
+      status: 201,
+    });
+    assert.equal(plan.plan.forDate, "2026-06-02");
+    assert.equal(plan.plan.whenLabel, "Tomorrow");
+    const listedPlan = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.equal(listedPlan.plans.length, 1);
+    assert.equal(listedPlan.plans[0].forDate, "2026-06-02");
+    assert.equal(listedPlan.plans[0].whenLabel, "Tomorrow");
+
+    const tonight = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Still out", startsAt: "23:55" },
+      status: 201,
+    });
+    assert.equal(tonight.social.startsAt, Date.parse("2026-06-01T21:55:00.000Z"));
+
+    const pastMidnight = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "After midnight", startsAt: "00:10" },
+      status: 400,
+    });
+    assert.equal(pastMidnight.error, "Pick a time later today.");
+    const nextDay = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { startsAt: Date.parse("2026-06-01T22:10:00.000Z") },
+      status: 400,
+    });
+    assert.equal(nextDay.error, "Pick a time later today.");
+
+    const listed = await api(port, "GET", "/api/socials", { token: alex.token });
+    assert.equal(listed.socials.length, 1);
+    assert.equal(listed.socials[0].note, "Still out");
+    assert.equal(listed.socials[0].startsAt, Date.parse("2026-06-01T21:55:00.000Z"));
+
+    at(Date.parse("2026-06-02T21:59:00.000Z"));
+    const today = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.equal(today.plans.length, 1);
+    assert.equal(today.plans[0].whenLabel, "Today");
+
+    at(Date.parse("2026-06-02T22:00:00.000Z"));
+    const gone = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.deepEqual(gone.plans, []);
+  }, "Europe/Berlin");
 });
