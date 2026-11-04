@@ -71,7 +71,7 @@ import {
   type SocialRow,
   type UserRow,
 } from "./db.js";
-import { reverseLookup, searchPlaces } from "./geocode.js";
+import { isMapsLinkInput, resolveMapsLink, reverseLookup, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
@@ -254,6 +254,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const lat = Number(url.searchParams.get("lat"));
     const lng = Number(url.searchParams.get("lng"));
     if (q) {
+      if (isMapsLinkInput(q)) {
+        if (q.length > 2000) throw new HttpError(400, "query is too long");
+        sendJson(res, 200, { results: await resolveMapsLink(q) });
+        return;
+      }
       if (q.length > 80) throw new HttpError(400, "query is too long");
       const nearLat = Number(url.searchParams.get("lat"));
       const nearLng = Number(url.searchParams.get("lng"));
@@ -460,7 +465,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (method === "POST" && pathname === "/api/plans") {
     const note = cleanNote(body.note, true);
     const place = cleanPlace(body.place);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), requested) });
+    const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested) });
     return;
   }
 
@@ -1417,10 +1423,10 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
 
 function readClock(value: unknown): string | null {
   if (value == null || value === "") return null;
-  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) throw new HttpError(400, "Pick a time later today.");
+  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) throw new HttpError(400, "Pick a valid time, like 19:30");
   const hour = Number(value.slice(0, 2));
   const minute = Number(value.slice(3, 5));
-  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a time later today.");
+  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a valid time, like 19:30");
   return value;
 }
 

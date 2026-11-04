@@ -241,13 +241,26 @@ function nominatimViewbox(lat: number, lng: number, km: number): string {
   return [lng - dLng, lat + dLat, lng + dLng, lat - dLat].map((n) => n.toFixed(4)).join(",");
 }
 
+function upstreamName(url: string): "photon" | "nominatim" {
+  return url.includes("nominatim.openstreetmap.org") ? "nominatim" : "photon";
+}
+
 async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: { "user-agent": USER_AGENT, accept: "application/json" },
-    signal: AbortSignal.timeout(4000),
-  });
-  if (!response.ok) return null;
-  return response.json();
+  const source = upstreamName(url);
+  try {
+    const response = await fetch(url, {
+      headers: { "user-agent": USER_AGENT, accept: "application/json" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) {
+      console.log(`geocode upstream ${source} status=${response.status}`);
+      return null;
+    }
+    return response.json();
+  } catch {
+    console.log(`geocode upstream ${source} status=timeout`);
+    return null;
+  }
 }
 
 export async function searchPlaces(query: string, bias: SearchBias = null, fetchJson: JsonGetter = getJson): Promise<PlaceHit[]> {
@@ -260,6 +273,8 @@ export async function searchPlaces(query: string, bias: SearchBias = null, fetch
   const local = point != null;
   const paced = fetchJson === getJson;
   if (paced) await pace();
+  // Documented Photon params only (q, limit, lat, lon, location_bias_scale, bbox).
+  // getJson sends the User-Agent. A 403 or other non-OK is logged there, without the query.
   const photonUrl = local
     ? `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&lat=${point.lat}&lon=${point.lng}&location_bias_scale=0.6&bbox=${bboxAround(point.lat, point.lng, LOCAL_KM)}`
     : `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&bbox=${GERMANY_BBOX}`;
@@ -359,4 +374,212 @@ export async function reverseLookup(lat: number, lng: number, fetchJson: JsonGet
 
 export async function reversePlace(lat: number, lng: number, fetchJson: JsonGetter = getJson): Promise<string> {
   return (await reverseLookup(lat, lng, fetchJson)).place;
+}
+
+const MAPS_LINK_MAX = 2000;
+const MAPS_REDIRECTS = 3;
+const MAPS_TIMEOUT_MS = 3000;
+/** Suffix after "google." for the public Search domains. A fixed list, not any TLD. */
+const GOOGLE_DOMAINS = new Set(
+  [
+    "com", "ad", "ae", "com.af", "com.ag", "al", "am", "co.ao", "com.ar", "as", "at", "com.au", "az",
+    "ba", "com.bd", "be", "bf", "bg", "com.bh", "bi", "bj", "com.bn", "com.bo", "com.br", "bs", "bt",
+    "co.bw", "by", "com.bz", "ca", "cd", "cf", "cg", "ch", "ci", "co.ck", "cl", "cm", "cn", "com.co",
+    "co.cr", "com.cu", "cv", "com.cy", "cz", "de", "dj", "dk", "dm", "com.do", "dz", "com.ec", "ee",
+    "com.eg", "es", "com.et", "fi", "com.fj", "fm", "fr", "ga", "ge", "gg", "com.gh", "com.gi", "gl",
+    "gm", "gr", "com.gt", "gy", "com.hk", "hn", "hr", "ht", "hu", "co.id", "ie", "co.il", "im", "co.in",
+    "iq", "is", "it", "je", "com.jm", "jo", "co.jp", "co.ke", "com.kh", "ki", "kg", "co.kr", "com.kw",
+    "kz", "la", "com.lb", "li", "lk", "co.ls", "lt", "lu", "lv", "com.ly", "co.ma", "md", "me", "mg",
+    "mk", "ml", "com.mm", "mn", "ms", "com.mt", "mu", "mv", "mw", "com.mx", "com.my", "co.mz", "com.na",
+    "com.ng", "com.ni", "ne", "nl", "no", "com.np", "nr", "nu", "co.nz", "com.om", "com.pa", "com.pe",
+    "com.pg", "com.ph", "com.pk", "pl", "pn", "com.pr", "ps", "pt", "com.py", "com.qa", "ro", "ru", "rw",
+    "com.sa", "com.sb", "sc", "se", "com.sg", "sh", "si", "sk", "com.sl", "sn", "so", "sm", "sr", "st",
+    "com.sv", "td", "tg", "co.th", "com.tj", "tl", "tm", "tn", "to", "com.tr", "tt", "com.tw", "co.tz",
+    "com.ua", "co.ug", "co.uk", "com.uy", "co.uz", "com.vc", "co.ve", "vg", "co.vi", "com.vn", "vu", "ws",
+    "rs", "co.za", "co.zm", "co.zw", "cat",
+  ].map((suffix) => `google.${suffix}`),
+);
+
+type RedirectResponse = {
+  status: number;
+  headers: { get(name: string): string | null };
+  body?: { cancel?: () => Promise<void> } | null;
+};
+
+export function isMapsLinkInput(value: string): boolean {
+  const url = parseHttpUrl(value.trim());
+  return url != null && (asMapsUrl(url) != null || isShortLink(url));
+}
+
+/** A Google Maps URL reduced to a pin, or to the place text in /maps/place/. */
+export function parseMapsLink(value: string): { lat: number; lng: number; name: string } | { query: string } | null {
+  const url = asMapsUrl(parseHttpUrl(value.trim()));
+  if (!url) return null;
+  const name = placeText(url);
+  const point = mapsPoint(url);
+  if (point) return { ...point, name: shortPlaceName(name) };
+  if (name) return { query: name.slice(0, 80) };
+  return null;
+}
+
+export async function resolveMapsLink(
+  input: string,
+  fetchJson: JsonGetter = getJson,
+  fetchImpl: (url: string, init?: RequestInit) => Promise<RedirectResponse> = fetch,
+): Promise<PlaceHit[]> {
+  const raw = input.trim();
+  if (!raw || raw.length > MAPS_LINK_MAX || !isMapsLinkInput(raw)) return [];
+  const resolved = await followMaps(raw, fetchImpl);
+  if (!resolved) return [];
+  const key = `maps:${resolved}`;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.results;
+  const parsed = parseMapsLink(resolved);
+  let results: PlaceHit[] = [];
+  if (parsed && "lat" in parsed) {
+    const name = parsed.name || (await reverseLookup(parsed.lat, parsed.lng, fetchJson)).place || `${parsed.lat}, ${parsed.lng}`;
+    results = [{ name: name.slice(0, 80), address: "", lat: parsed.lat, lng: parsed.lng, distanceM: null }];
+  } else if (parsed && parsed.query) {
+    results = await searchPlaces(parsed.query, null, fetchJson);
+  }
+  cache.set(key, { at: Date.now(), results });
+  return results;
+}
+
+function shortPlaceName(text: string): string {
+  const name = text.split(",")[0]?.trim() || "";
+  return name.slice(0, 80);
+}
+
+function placeText(url: URL): string {
+  const parts = url.pathname.split("/");
+  const idx = parts.findIndex((part) => part === "place");
+  if (idx < 0 || !parts[idx + 1]) return "";
+  try {
+    return decodeURIComponent(parts[idx + 1].replace(/\+/g, " ")).replace(/\s+/g, " ").trim();
+  } catch {
+    return parts[idx + 1].replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+  }
+}
+
+function mapsPoint(url: URL): { lat: number; lng: number } | null {
+  const pin = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(url.href);
+  if (pin) {
+    const point = coordPair(pin[1], pin[2]);
+    if (point) return point;
+  }
+  const at = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(url.href);
+  if (at) {
+    const point = coordPair(at[1], at[2]);
+    if (point) return point;
+  }
+  for (const key of ["q", "query", "ll"]) {
+    const value = url.searchParams.get(key);
+    if (!value) continue;
+    const match = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(value);
+    if (!match) continue;
+    const point = coordPair(match[1], match[2]);
+    if (point) return point;
+  }
+  return null;
+}
+
+function coordPair(latText: string, lngText: string): { lat: number; lng: number } | null {
+  const lat = Number(latText);
+  const lng = Number(lngText);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function parseHttpUrl(value: string): URL | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function hostName(url: URL): string {
+  return url.hostname.toLowerCase().replace(/\.$/, "");
+}
+
+function mapsPath(pathname: string): boolean {
+  return pathname === "/maps" || pathname.startsWith("/maps/");
+}
+
+function listedGoogle(host: string): boolean {
+  return GOOGLE_DOMAINS.has(host);
+}
+
+/** www.google.<ccTLD> or maps.google.<ccTLD> with a /maps path. Parsed locally, never fetched. */
+function asMapsUrl(url: URL | null): URL | null {
+  if (!url || !mapsPath(url.pathname)) return null;
+  const host = hostName(url);
+  const bare = host.startsWith("www.") ? host.slice(4) : host.startsWith("maps.") ? host.slice(5) : "";
+  return bare && listedGoogle(bare) ? url : null;
+}
+
+function isShortLink(url: URL): boolean {
+  const host = hostName(url);
+  if (host === "maps.app.goo.gl") return true;
+  return host === "goo.gl" && mapsPath(url.pathname);
+}
+
+function isConsentHost(host: string): boolean {
+  return host.startsWith("consent.") && listedGoogle(host.slice("consent.".length));
+}
+
+/** consent.google.* puts the original maps URL in continue=. */
+function mapsUrlFromConsent(url: URL): URL | null {
+  if (!isConsentHost(hostName(url))) return null;
+  const cont = url.searchParams.get("continue");
+  if (!cont) return null;
+  return asMapsUrl(parseHttpUrl(cont));
+}
+
+async function followMaps(
+  start: string,
+  fetchImpl: (url: string, init?: RequestInit) => Promise<RedirectResponse>,
+): Promise<string | null> {
+  const initial = parseHttpUrl(start);
+  if (!initial) return null;
+  const direct = asMapsUrl(initial);
+  if (direct) return direct.toString();
+  if (!isShortLink(initial)) return null;
+
+  let current = initial;
+  for (let hop = 0; hop < MAPS_REDIRECTS; hop += 1) {
+    if (!isShortLink(current)) return null;
+    let response: RedirectResponse;
+    try {
+      response = await fetchImpl(current.toString(), {
+        redirect: "manual",
+        signal: AbortSignal.timeout(MAPS_TIMEOUT_MS),
+      });
+    } catch {
+      return null;
+    }
+    await response.body?.cancel?.().catch(() => {});
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status >= 400 || !location) return null;
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      return null;
+    }
+    if (next.protocol !== "https:") return null;
+    const maps = asMapsUrl(next) ?? mapsUrlFromConsent(next);
+    if (maps) return maps.toString();
+    if (isShortLink(next)) {
+      current = next;
+      continue;
+    }
+    return null;
+  }
+  return null;
 }

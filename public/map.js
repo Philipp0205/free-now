@@ -6,6 +6,7 @@
 
 export function bindMap({
   state,
+  whereTarget,
   collectPins,
   mapCard,
   paintSummary,
@@ -29,9 +30,18 @@ export function bindMap({
     state.mapCenter = { lat: center.lat, lng: center.lng };
   }
 
+  function bag() {
+    return whereTarget ? whereTarget() : state;
+  }
+
+  function pickerSheet() {
+    return state.sheet === "free" || state.sheet === "plan" || state.sheet === "admin-edit";
+  }
+
   function pickerFocus() {
-    if (state.where.lat != null && state.where.lng != null) {
-      return { lat: state.where.lat, lng: state.where.lng, zoom: 15 };
+    const where = bag().where;
+    if (where?.lat != null && where?.lng != null) {
+      return { lat: where.lat, lng: where.lng, zoom: 15 };
     }
     if (state.viewerLocation) return { lat: state.viewerLocation.lat, lng: state.viewerLocation.lng, zoom: 15 };
     const recent = recentPlace();
@@ -148,9 +158,9 @@ export function bindMap({
 
   async function mountWhereMap() {
     const host = document.getElementById("where-map");
-    if (!host || !state.whereMap || state.sheet !== "free") return;
+    if (!host || !bag().whereMap || !pickerSheet()) return;
     const L = await loadLeaflet();
-    if (!host.isConnected || !state.whereMap || state.sheet !== "free") return;
+    if (!host.isConnected || !bag().whereMap || !pickerSheet()) return;
     destroyWhereMap();
     const focus = pickerFocus();
     const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
@@ -167,13 +177,14 @@ export function bindMap({
       }),
     }).addTo(map);
     const apply = (ll) => {
-      state.whereAutofill = false;
-      state.where.mode = "place";
-      state.where.lat = ll.lat;
-      state.where.lng = ll.lng;
-      state.where.precise = true;
-      state.where.place = FINDING_PLACE;
-      state.whereQuery = FINDING_PLACE;
+      const where = bag();
+      where.whereAutofill = false;
+      where.where.mode = "place";
+      where.where.lat = ll.lat;
+      where.where.lng = ll.lng;
+      where.where.precise = true;
+      where.where.place = FINDING_PLACE;
+      where.whereQuery = FINDING_PLACE;
       const label = document.querySelector(".where-v");
       if (label) {
         label.textContent = FINDING_PLACE;

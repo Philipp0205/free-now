@@ -54,6 +54,8 @@ const state = {
   advanced: false,
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
+  planTime: "",
+  planWhere: emptyWhereSession(),
   viewerLocation: null,
   mapCenter: null,
   mapCard: null,
@@ -80,7 +82,7 @@ const state = {
   chatReturn: "home",
   chatDraft: "",
   chatStick: false,
-  chatSummary: { circle: { unread: 0, muted: false }, events: [] },
+  chatSummary: { circle: { unread: 0, muted: false }, events: [], unreadByCircle: {} },
   past: false,
   pastDays: null,
   circleId: localStorage.getItem(CIRCLE_KEY) || "",
@@ -118,6 +120,7 @@ const ICONS = {
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.2 16.2 5 19.2c-.3.4.1 1 .6.8l3.2-.9A7.2 7.2 0 1 0 7.2 16.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -140,6 +143,7 @@ if ("serviceWorker" in navigator) {
 const FINDING_PLACE = "Finding address…";
 const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap } = bindMap({
   state,
+  whereTarget: () => whereBag(),
   collectPins,
   mapCard,
   paintSummary,
@@ -302,6 +306,7 @@ function friendlyMessage(raw, status) {
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("only an admin")) return "Only an admin can do that.";
+  if (lower.includes("valid time")) return "Pick a valid time, like 19:30";
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
   if (lower.includes("removed you from this circle")) return "An admin removed you from this circle.";
@@ -357,6 +362,7 @@ async function refresh({ initial = false } = {}) {
   state.notifications = notifications.notifications;
   state.me = me;
   state.chatSummary = summary;
+  if (state.chat) forgetOpenUnread(state.chat);
   if (thread?.chat) state.chatThread = thread.chat;
   const newest = state.notifications[0];
   if (!state.bootstrappedNotifs) {
@@ -511,6 +517,26 @@ function syncKeyboardInset() {
   document.documentElement.classList.toggle("kb-open", open && overlaps);
 }
 
+/** Pull a sheet down when bottom offset and a resized visual viewport both lift it. */
+function anchorOpenSheet() {
+  const sheet = document.querySelector(".sheet");
+  const vv = window.visualViewport;
+  if (!sheet || !vv) return;
+  const gap = vv.height - sheet.getBoundingClientRect().bottom;
+  if (gap <= 1) return;
+  const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--kb-offset")) || 0;
+  const next = Math.max(0, Math.round(current - gap));
+  if (Math.abs(next - current) <= 1) return;
+  document.documentElement.style.setProperty("--kb-offset", `${next}px`);
+}
+
+document.addEventListener("touchmove", (event) => {
+  if (!document.documentElement.classList.contains("sheet-open")) return;
+  const target = event.target;
+  if (target instanceof Element && target.closest(".sheet, .guide, .sheet-scroll, .where-results")) return;
+  event.preventDefault();
+}, { passive: false });
+
 function scheduleReveal(node) {
   window.clearTimeout(revealTimer);
   revealTimer = window.setTimeout(() => revealField(node), FIELD_REVEAL_MS);
@@ -606,6 +632,7 @@ function scrollParent(element) {
 
 function onViewportResize() {
   syncKeyboardInset();
+  anchorOpenSheet();
   liftSheetToast();
   const active = document.activeElement;
   if (isTextField(active)) scheduleReveal(active);
@@ -750,7 +777,9 @@ function render() {
   }
   if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
-  if (state.whereMap && state.sheet === "free") {
+  const picking = state.sheet === "free" || state.sheet === "plan" || state.sheet === "admin-edit";
+  const bag = whereBag();
+  if (bag.whereMap && picking) {
     queueMicrotask(() => {
       mountWhereMap().then(() => {
         const node = document.querySelector(".sheet-scroll");
@@ -758,7 +787,9 @@ function render() {
       }).catch((error) => console.error("where map failed", error));
     });
   }
-  if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
+  if (bag.whereResults.length && picking) queueMicrotask(() => revealWhereResults());
+  document.documentElement.classList.toggle("sheet-open", sheetIsOpen());
+  anchorOpenSheet();
   bindSheetSwipe();
   liftSheetToast();
   syncSheetHistory();
@@ -965,14 +996,17 @@ function circleSwitcher() {
     }, [
       el("span", { text: current.name }),
       icon("chevron"),
+      anyCircleUnread() ? el("span", { class: "unread-dot", "aria-hidden": "true" }) : null,
     ]),
     state.circleMenu ? el("div", { class: "circle-menu" }, [
       ...circles.map((circle) => el("button", {
         type: "button",
         class: circle.id === current.id ? "on" : "",
-        text: circle.name,
         onclick: () => { void switchCircle(circle.id); },
-      })),
+      }, [
+        el("span", { text: circle.name }),
+        circleHasUnread(circle.id) ? el("span", { class: "unread-dot", "aria-hidden": "true" }) : null,
+      ])),
       el("button", { type: "button", text: "Join with link", onclick: () => openCircleSheet("join-circle") }),
       el("button", { type: "button", text: "New circle", onclick: () => openCircleSheet("new-circle") }),
     ]) : null,
@@ -1006,7 +1040,7 @@ async function switchCircle(id) {
 
 function home() {
   const mine = mySocial();
-  const parts = [screenHeader("Now")];
+  const parts = [homeChatBanner(), screenHeader("Now")];
   parts.push(
     el("div", { class: "now-row" }, [
       el("button", {
@@ -1119,12 +1153,7 @@ function pastCard(event) {
     el("h3", { text: event.note || (event.kind === "plan" ? "Plan" : "Free now") }),
     el("p", { text: bits.join(" · ") }),
     people.length ? el("p", { text: people.join(" · ") }) : null,
-    el("button", {
-      class: "text-btn",
-      type: "button",
-      text: "Chat",
-      onclick: () => { void openChat({ kind: event.kind, id: event.id }); },
-    }),
+    chatChip(event.kind, event.id),
   ]);
 }
 
@@ -1186,13 +1215,6 @@ function circleScreen() {
         el("button", {
           class: "btn",
           type: "button",
-          text: circleUnread() ? `Circle chat · ${circleUnread()}` : "Circle chat",
-          "aria-label": circleUnread() ? `Circle chat, ${circleUnread()} new` : "Circle chat",
-          onclick: () => { void openChat({ kind: "circle" }); },
-        }),
-        el("button", {
-          class: "btn",
-          type: "button",
           text: "Share invite",
           onclick: () => shareInvite(),
         }),
@@ -1228,8 +1250,48 @@ function circleScreen() {
   ]);
 }
 
+function homeChatBanner() {
+  const n = circleUnread();
+  if (!n || state.chat) return null;
+  const name = state.me?.circle?.name || "your circle";
+  const messages = n === 1 ? "1 new message" : `${n} new messages`;
+  return el("button", {
+    class: "chat-banner",
+    type: "button",
+    text: `${messages} in ${name}`,
+    onclick: () => { void openChat({ kind: "circle" }); },
+  });
+}
+
 function circleUnread() {
   return state.chatSummary?.circle?.unread || 0;
+}
+
+function circleHasUnread(id) {
+  return (state.chatSummary?.unreadByCircle?.[id] || 0) > 0;
+}
+
+function anyCircleUnread() {
+  const totals = state.chatSummary?.unreadByCircle || {};
+  return Object.values(totals).some((count) => count > 0);
+}
+
+function forgetOpenUnread(target) {
+  const summary = state.chatSummary;
+  if (!summary || !target) return;
+  const circleId = state.me?.circle?.id;
+  let cleared = 0;
+  if (target.kind === "circle") {
+    cleared = summary.circle?.unread || 0;
+    if (summary.circle) summary.circle.unread = 0;
+  } else {
+    const row = summary.events?.find((item) => item.kind === target.kind && item.id === target.id);
+    cleared = row?.unread || 0;
+    if (row) row.unread = 0;
+  }
+  if (circleId && summary.unreadByCircle && cleared) {
+    summary.unreadByCircle[circleId] = Math.max(0, (summary.unreadByCircle[circleId] || 0) - cleared);
+  }
 }
 
 function eventUnread(kind, id) {
@@ -1245,11 +1307,7 @@ async function openChat(target) {
   state.chatReturn = state.tab;
   state.chat = target;
   state.chatStick = true;
-  if (target.kind === "circle") state.chatSummary.circle.unread = 0;
-  else {
-    const row = state.chatSummary?.events?.find((item) => item.kind === target.kind && item.id === target.id);
-    if (row) row.unread = 0;
-  }
+  forgetOpenUnread(target);
   await run(async () => {
     state.chatThread = (await api(chatTargetUrl(target))).chat;
   });
@@ -1428,15 +1486,22 @@ function confirmDeleteMessage(message) {
   render();
 }
 
-function chatEntry(kind, item) {
-  const unread = eventUnread(kind, item.id);
+function chatChip(kind, id) {
+  const unread = eventUnread(kind, id);
   return el("button", {
-    class: "text-btn chat-entry",
+    class: "chip chat-chip",
     type: "button",
-    text: unread ? `Chat · ${unread}` : "Chat",
-    "aria-label": unread ? `Chat, ${unread} new` : "Chat",
-    onclick: () => { void openChat({ kind, id: item.id }); },
-  });
+    "aria-label": unread ? `Chat, ${unread} unread` : "Chat",
+    onclick: () => { void openChat({ kind, id }); },
+  }, [
+    icon("chat"),
+    el("span", { text: "Chat" }),
+    unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+  ]);
+}
+
+function chatEntry(kind, item) {
+  return chatChip(kind, item.id);
 }
 
 function alertsScreen() {
@@ -1566,20 +1631,24 @@ function tabbar() {
   const tabs = [
     ["home", "Now", "home"],
     ["map", "Map", "map"],
+    ["chat", "Chat", "chat"],
     ["circle", "Circle", "compass"],
     ["you", "You", "person"],
   ];
+  const unread = circleUnread();
   return el("nav", { class: "tabbar" }, tabs.map(([id, label, glyph]) => {
     const current = state.tab === id;
+    const name = id === "chat" && unread ? `Chat, ${unread} unread` : label;
     return el("button", {
       class: "tab",
       type: "button",
-      "aria-label": label,
+      "aria-label": name,
       "aria-current": current ? "page" : null,
       onclick: () => onTab(id),
     }, [
       icon(glyph),
       el("span", { class: "tab-label", text: label }),
+      id === "chat" && unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
     ]);
   }));
 }
@@ -1724,7 +1793,15 @@ function eventTools(kind, item) {
 
 function openAdminEdit(kind, item) {
   const time = kind === "social" ? (item.startsAt ? clock(item.startsAt) : "") : (item.time || "");
-  state.adminEdit = { kind, id: item.id, note: item.note || "", place: item.place || "", time };
+  const session = emptyWhereSession();
+  const place = item.place || "";
+  const lat = item.location?.lat ?? null;
+  const lng = item.location?.lng ?? null;
+  if (place || lat != null || lng != null) {
+    session.where = { mode: "place", place, lat, lng, precise: lat != null && lng != null };
+    session.whereQuery = place;
+  }
+  state.adminEdit = { kind, id: item.id, note: item.note || "", time, ...session };
   state.sheet = "admin-edit";
   render();
 }
@@ -1751,7 +1828,7 @@ function adminEditSheet() {
             value: edit.time,
           }),
         ]),
-        sheetField("Place", "admin-place", edit.place, (value) => { edit.place = value; }, { maxlength: "80" }),
+        whereBlock(edit),
       ]),
       el("div", { class: "sheet-dock" }, [
         el("button", { class: "btn", type: "submit", text: "Save" }),
@@ -1765,10 +1842,13 @@ async function saveAdminEdit(event) {
   const edit = state.adminEdit;
   if (!edit) return;
   const note = document.getElementById("admin-note")?.value ?? edit.note;
-  const place = document.getElementById("admin-place")?.value ?? edit.place;
+  const picked = wherePayload(edit);
   const time = document.getElementById("admin-time")?.value || null;
   await run(async () => {
-    const body = edit.kind === "social" ? { note, place, startsAt: time } : { note, place, time };
+    const body = edit.kind === "social"
+      ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
+      : { note, place: picked.place, time, lat: picked.lat, lng: picked.lng };
+    if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
     await refresh({ initial: true });
@@ -1846,11 +1926,17 @@ function sheet() {
             placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
             maxlength: "80",
           }),
-          planning
-            ? sheetField("Place (optional)", "sheet-place", state.placeDraft, (value) => {
-                state.placeDraft = value;
-              }, { placeholder: "A park, a cafe, a street", maxlength: "80" })
-            : whereBlock(),
+          planning ? el("label", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", text: "Time (optional)" }),
+            el("input", {
+              id: "plan-time",
+              class: "sheet-control",
+              type: "time",
+              value: state.planTime,
+              oninput: (event) => { state.planTime = event.target.value; },
+            }),
+          ]) : null,
+          whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
         ]),
       ]),
@@ -2057,6 +2143,26 @@ function emptyWhere() {
   return { mode: "none", place: "", lat: null, lng: null, precise: false };
 }
 
+function emptyWhereSession() {
+  return {
+    where: emptyWhere(),
+    whereOpen: false,
+    whereQuery: "",
+    whereAutofill: false,
+    whereResults: [],
+    whereSearching: false,
+    whereMap: false,
+    whereArea: "",
+    whereFallback: "",
+  };
+}
+
+function whereBag() {
+  if (state.sheet === "plan" && state.planWhere) return state.planWhere;
+  if (state.sheet === "admin-edit" && state.adminEdit?.where) return state.adminEdit;
+  return state;
+}
+
 function whereFromSocial(social) {
   if (!social || (!social.place && !social.location)) return emptyWhere();
   if (social.location && !social.place) {
@@ -2073,19 +2179,20 @@ function whereFromSocial(social) {
 
 function namedPlace(value) {
   const text = String(value || "").trim();
-  return !text || text === FINDING_PLACE ? "" : text;
+  if (!text || text === FINDING_PLACE || /^https:\/\//i.test(text)) return "";
+  return text;
 }
 
-function whereLabel() {
-  if (state.where.mode === "here" && /^near you$/i.test(state.where.place || "")) return "Current location";
-  if (state.where.place) return state.where.place;
-  if (state.where.mode === "here") return "Current location";
-  if (state.where.lat != null) return FINDING_PLACE;
+function whereLabel(bag = state) {
+  if (bag.where.mode === "here" && /^near you$/i.test(bag.where.place || "")) return "Current location";
+  if (bag.where.place) return bag.where.place;
+  if (bag.where.mode === "here") return "Current location";
+  if (bag.where.lat != null) return FINDING_PLACE;
   return "Pick a place";
 }
 
-function whereIsEmpty() {
-  return whereLabel() === "Pick a place";
+function whereIsEmpty(bag = state) {
+  return whereLabel(bag) === "Pick a place";
 }
 
 function isLiveSocial(social) {
@@ -2408,10 +2515,10 @@ function droppedPinName(area, lat, lng) {
   return pinnedSpot(lat, lng);
 }
 
-function wherePayload() {
-  const where = state.where;
-  const typed = namedPlace(state.whereQuery || where.place || "");
-  const named = typed || (where.lat != null && where.lng != null ? droppedPinName(state.whereArea, where.lat, where.lng) : "");
+function wherePayload(bag = state) {
+  const where = bag.where;
+  const typed = namedPlace(bag.whereQuery || where.place || "");
+  const named = typed || (where.lat != null && where.lng != null ? droppedPinName(bag.whereArea, where.lat, where.lng) : "");
   if (where.mode === "here" && where.lat != null && where.lng != null) {
     return { place: namedPlace(where.place) || "near you", lat: where.lat, lng: where.lng, precise: false };
   }
@@ -2423,12 +2530,12 @@ function wherePayload() {
       precise: Boolean(where.precise && where.lat != null && where.lng != null),
     };
   }
-  return { place: "", lat: null, lng: null };
+  return { place: "", lat: null, lng: null, precise: false };
 }
 
-function whereBlock() {
-  const value = whereLabel();
-  const empty = whereIsEmpty();
+function whereBlock(bag = state) {
+  const value = whereLabel(bag);
+  const empty = whereIsEmpty(bag);
   return el("div", { class: "where sheet-group" }, [
     el("span", { class: "sheet-label", id: "where-label", text: "Where" }),
     el("div", { class: empty ? "where-field" : "where-field has-value" }, [
@@ -2436,12 +2543,12 @@ function whereBlock() {
         class: "where-row",
         type: "button",
         "aria-labelledby": "where-label",
-        "aria-expanded": state.whereOpen ? "true" : "false",
+        "aria-expanded": bag.whereOpen ? "true" : "false",
         onclick: () => {
-          state.whereOpen = !state.whereOpen;
-          if (!state.whereOpen) state.whereMap = false;
+          bag.whereOpen = !bag.whereOpen;
+          if (!bag.whereOpen) bag.whereMap = false;
           render();
-          if (state.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
+          if (bag.whereOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
         },
       }, [
         el("span", { class: empty ? "where-v is-placeholder" : "where-v", text: value }),
@@ -2456,34 +2563,34 @@ function whereBlock() {
             onclick: (event) => {
               event.preventDefault();
               event.stopPropagation();
-              clearWhereSelection(state.whereOpen);
+              clearWhereSelection(bag, bag.whereOpen);
             },
           }),
     ]),
-    state.whereOpen ? wherePicker() : null,
+    bag.whereOpen ? wherePicker(bag) : null,
   ]);
 }
 
-function wherePicker() {
+function wherePicker(bag = state) {
   return el("div", { class: "where-picker" }, [
     el("input", {
       id: "where-query",
       class: "sheet-control",
       type: "text",
-      value: state.whereQuery,
-      placeholder: "Search for a place",
-      maxlength: "80",
+      value: bag.whereQuery,
+      placeholder: "Search for a place or paste a Maps link",
+      maxlength: "2000",
       autocomplete: "off",
       enterkeyhint: "search",
-      onbeforeinput: onWhereBeforeInput,
-      oninput: onWhereInput,
+      onbeforeinput: (event) => onWhereBeforeInput(bag, event),
+      oninput: (event) => onWhereInput(bag, event),
     }),
-    state.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
-    state.whereResults.length
-      ? el("div", { class: "where-results" }, state.whereResults.map((hit) => el("button", {
+    bag.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
+    bag.whereResults.length
+      ? el("div", { class: "where-results" }, bag.whereResults.map((hit) => el("button", {
           class: "where-hit",
           type: "button",
-          onclick: () => chooseWhereHit(hit),
+          onclick: () => chooseWhereHit(bag, hit),
         }, [
           el("span", { class: "where-hit-name", text: hit.name }),
           hitMeta(hit) ? el("span", { class: "where-hit-meta", text: hitMeta(hit) }) : null,
@@ -2493,18 +2600,18 @@ function wherePicker() {
       class: "where-action",
       type: "button",
       text: "Use my current location",
-      onclick: () => { void useCurrentWhere(); },
+      onclick: () => { void useCurrentWhere(bag); },
     }),
     el("button", {
       class: "where-action",
       type: "button",
-      text: state.whereMap ? "Hide map" : "Pick on map",
+      text: bag.whereMap ? "Hide map" : "Pick on map",
       onclick: () => {
-        state.whereMap = !state.whereMap;
+        bag.whereMap = !bag.whereMap;
         render();
       },
     }),
-    state.whereMap ? el("div", { id: "where-map", class: "where-map", "data-no-sheet-drag": "1" }) : null,
+    bag.whereMap ? el("div", { id: "where-map", class: "where-map", "data-no-sheet-drag": "1" }) : null,
   ]);
 }
 
@@ -2529,23 +2636,27 @@ function recentPlace() {
   return null;
 }
 
-function chooseWhereHit(hit) {
-  state.whereAutofill = false;
-  state.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
-  state.whereQuery = hit.name;
-  state.whereResults = [];
-  state.whereSearching = false;
+function chooseWhereHit(bag, hit) {
+  bag.whereAutofill = false;
+  bag.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
+  bag.whereQuery = hit.name;
+  bag.whereResults = [];
+  bag.whereSearching = false;
   render();
 }
 
-function clearWhereSelection(keepOpen) {
-  state.whereAutofill = false;
-  state.where = emptyWhere();
-  state.whereQuery = "";
-  state.whereResults = [];
-  state.whereSearching = false;
-  state.whereMap = false;
-  state.whereOpen = Boolean(keepOpen);
+function clearWhereSelection(bag, keepOpen) {
+  if (typeof bag === "boolean") {
+    keepOpen = bag;
+    bag = state;
+  }
+  bag.whereAutofill = false;
+  bag.where = emptyWhere();
+  bag.whereQuery = "";
+  bag.whereResults = [];
+  bag.whereSearching = false;
+  bag.whereMap = false;
+  bag.whereOpen = Boolean(keepOpen);
   clearTimeout(whereTimer);
   render();
   paintSummary();
@@ -2557,59 +2668,59 @@ function swallowNextWhereInput() {
   queueMicrotask(() => { skipWhereInput = false; });
 }
 
-function onWhereBeforeInput(event) {
-  if (!state.whereAutofill) return;
+function onWhereBeforeInput(bag, event) {
+  if (!bag.whereAutofill) return;
   const type = event.inputType || "";
   if (type.startsWith("delete")) {
     event.preventDefault();
     swallowNextWhereInput();
-    clearWhereSelection(true);
+    clearWhereSelection(bag, true);
     return;
   }
   if (type.startsWith("insert") && typeof event.data === "string") {
     event.preventDefault();
     swallowNextWhereInput();
-    commitTypedWhere(event.data);
+    commitTypedWhere(bag, event.data);
   }
 }
 
-function onWhereInput(event) {
+function onWhereInput(bag, event) {
   if (skipWhereInput) {
     skipWhereInput = false;
-    event.target.value = state.whereQuery;
-    const end = state.whereQuery.length;
+    event.target.value = bag.whereQuery;
+    const end = bag.whereQuery.length;
     try { event.target.setSelectionRange(end, end); } catch { /* the caret can stay */ }
     return;
   }
-  if (state.whereAutofill) {
+  if (bag.whereAutofill) {
     const next = event.target.value;
-    const previous = state.whereQuery;
+    const previous = bag.whereQuery;
     if (next.length < previous.length) {
-      clearWhereSelection(true);
+      clearWhereSelection(bag, true);
       return;
     }
     if (next !== previous && next.startsWith(previous)) {
-      commitTypedWhere(next.slice(previous.length));
+      commitTypedWhere(bag, next.slice(previous.length));
       return;
     }
     if (next !== previous) {
-      commitTypedWhere(next);
+      commitTypedWhere(bag, next);
       return;
     }
   }
-  applyWhereQuery(event.target.value);
+  applyWhereQuery(bag, event.target.value);
 }
 
-function commitTypedWhere(text) {
-  state.whereAutofill = false;
-  state.where = {
+function commitTypedWhere(bag, text) {
+  bag.whereAutofill = false;
+  bag.where = {
     mode: text.trim() ? "place" : "none",
     place: text,
     lat: null,
     lng: null,
     precise: false,
   };
-  state.whereQuery = text;
+  bag.whereQuery = text;
   const input = document.getElementById("where-query");
   if (input) {
     input.value = text;
@@ -2622,25 +2733,28 @@ function commitTypedWhere(text) {
     label.classList.toggle("is-placeholder", !text.trim());
   }
   paintSummary();
-  scheduleWhereSearch();
+  scheduleWhereSearch(bag);
 }
 
-function applyWhereQuery(value) {
-  state.whereAutofill = false;
-  state.whereQuery = value;
-  const typed = value.trim();
-  state.where.mode = typed ? "place" : "none";
-  state.where.place = typed;
-  state.where.lat = null;
-  state.where.lng = null;
-  state.where.precise = false;
+function applyWhereQuery(bag, value) {
+  const limited = limitWhereQuery(value);
+  const input = document.getElementById("where-query");
+  if (input && input.value !== limited) input.value = limited;
+  bag.whereAutofill = false;
+  bag.whereQuery = limited;
+  const typed = limited.trim();
+  bag.where.mode = typed ? "place" : "none";
+  bag.where.place = typed;
+  bag.where.lat = null;
+  bag.where.lng = null;
+  bag.where.precise = false;
   const label = document.querySelector(".where-v");
   if (label) {
     label.textContent = typed || "Pick a place";
     label.classList.toggle("is-placeholder", !typed);
   }
   paintSummary();
-  scheduleWhereSearch();
+  scheduleWhereSearch(bag);
 }
 
 function rerenderWhere() {
@@ -2658,30 +2772,41 @@ function rerenderWhere() {
   });
 }
 
-function scheduleWhereSearch() {
+function limitWhereQuery(value) {
+  const text = String(value ?? "");
+  const trimmed = text.trim();
+  if (/^https:\/\//i.test(trimmed)) return trimmed.slice(0, 2000);
+  return text.slice(0, 80);
+}
+
+function searchQuery(value) {
+  return limitWhereQuery(value).trim();
+}
+
+function scheduleWhereSearch(bag = state) {
   clearTimeout(whereTimer);
-  const query = state.whereQuery.trim();
-  if (query.length < 2) {
-    state.whereResults = [];
-    state.whereSearching = false;
+  const query = searchQuery(bag.whereQuery);
+  if (!/^https:\/\//i.test(query) && query.length < 2) {
+    bag.whereResults = [];
+    bag.whereSearching = false;
     return;
   }
   whereTimer = setTimeout(() => {
-    state.whereSearching = true;
+    bag.whereSearching = true;
     const label = document.querySelector(".where-picker");
     if (label && !document.querySelector(".where-hint")) {
       /* render once the results arrive */
     }
     const origin = searchOrigin();
-    const near = origin ? `&lat=${encodeURIComponent(origin.lat)}&lng=${encodeURIComponent(origin.lng)}` : "";
+    const near = origin && !/^https:\/\//i.test(query) ? `&lat=${encodeURIComponent(origin.lat)}&lng=${encodeURIComponent(origin.lng)}` : "";
     api(`/api/geocode?q=${encodeURIComponent(query)}${near}`).then((data) => {
-      if (state.whereQuery.trim() !== query) return;
-      state.whereResults = data.results || [];
-      state.whereSearching = false;
+      if (searchQuery(bag.whereQuery) !== query) return;
+      bag.whereResults = data.results || [];
+      bag.whereSearching = false;
       rerenderWhere();
     }).catch(() => {
-      state.whereSearching = false;
-      state.whereResults = [];
+      bag.whereSearching = false;
+      bag.whereResults = [];
       rerenderWhere();
     });
   }, 400);
@@ -2695,10 +2820,10 @@ async function defaultCurrentWhere() {
   } catch {
     return;
   }
-  if (state.sheet === "free" && state.where.mode === "none") await useCurrentWhere();
+  if (state.sheet === "free" && state.where.mode === "none") await useCurrentWhere(state);
 }
 
-async function useCurrentWhere() {
+async function useCurrentWhere(bag = state) {
   if (!navigator.geolocation) {
     state.error = "This browser can't share location. The rest still works.";
     render();
@@ -2714,19 +2839,19 @@ async function useCurrentWhere() {
       });
     });
     state.viewerLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    state.whereAutofill = true;
-    state.where = { mode: "here", place: "near you", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
-    state.whereQuery = "Current location";
-    state.whereResults = [];
+    bag.whereAutofill = true;
+    bag.where = { mode: "here", place: "near you", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
+    bag.whereQuery = "Current location";
+    bag.whereResults = [];
     state.error = "";
     const keepFocus = document.activeElement?.id === "where-query";
     render();
     if (keepFocus) queueMicrotask(() => document.getElementById("where-query")?.focus());
     const named = await api(`/api/geocode?lat=${encodeURIComponent(pos.coords.latitude)}&lng=${encodeURIComponent(pos.coords.longitude)}`).catch(() => null);
-    if (state.where.mode === "here" && state.where.lat === pos.coords.latitude && state.whereAutofill) {
+    if (bag.where.mode === "here" && bag.where.lat === pos.coords.latitude && bag.whereAutofill) {
       const place = named?.place && !/^near you$/i.test(named.place) ? named.place : "near you";
-      state.where.place = place;
-      state.whereQuery = place === "near you" ? "Current location" : place;
+      bag.where.place = place;
+      bag.whereQuery = place === "near you" ? "Current location" : place;
       const stillFocused = document.activeElement?.id === "where-query";
       render();
       if (stillFocused) queueMicrotask(() => document.getElementById("where-query")?.focus());
@@ -2739,10 +2864,11 @@ async function useCurrentWhere() {
 }
 
 function paintChosenPlace(name) {
-  state.where.place = name;
-  state.whereQuery = name;
-  state.where.mode = "place";
-  state.whereAutofill = false;
+  const bag = whereBag();
+  bag.where.place = name;
+  bag.whereQuery = name;
+  bag.where.mode = "place";
+  bag.whereAutofill = false;
   const label = document.querySelector(".where-v");
   const query = document.getElementById("where-query");
   if (label) {
@@ -2759,18 +2885,19 @@ function scheduleReverse(lat, lng, replace = false) {
   const stamp = {};
   reverseTimer = stamp;
   let finished = false;
-  const still = () => reverseTimer === stamp && state.where.lat === lat && state.where.lng === lng;
+  const bag = whereBag();
+  const still = () => reverseTimer === stamp && bag.where.lat === lat && bag.where.lng === lng;
   const accept = (name, area) => {
     if (!still()) return;
-    const current = state.where.place;
-    const open = !current || current === FINDING_PLACE || current === state.whereFallback;
+    const current = bag.where.place;
+    const open = !current || current === FINDING_PLACE || current === bag.whereFallback;
     if (!open) return;
-    if (!replace && state.whereQuery.trim() && state.whereQuery !== FINDING_PLACE && current !== state.whereFallback) return;
-    if (area) state.whereArea = area;
-    state.whereFallback = name.startsWith("Pinned spot (") || name.startsWith("Dropped pin near ") ? name : "";
+    if (!replace && bag.whereQuery.trim() && bag.whereQuery !== FINDING_PLACE && current !== bag.whereFallback) return;
+    if (area) bag.whereArea = area;
+    bag.whereFallback = name.startsWith("Pinned spot (") || name.startsWith("Dropped pin near ") ? name : "";
     paintChosenPlace(name);
   };
-  const giveUp = () => accept(droppedPinName(state.whereArea, lat, lng), state.whereArea);
+  const giveUp = () => accept(droppedPinName(bag.whereArea, lat, lng), bag.whereArea);
   setTimeout(() => {
     if (!finished) giveUp();
   }, 4000);
@@ -3124,6 +3251,8 @@ function openSheet(name) {
   if (name === "plan") {
     state.noteDraft = "";
     state.placeDraft = "";
+    state.planTime = "";
+    state.planWhere = emptyWhereSession();
   }
   state.focusSheet = false;
   render();
@@ -3133,6 +3262,8 @@ function openSheet(name) {
 function closeSheet() {
   state.sheet = null;
   state.whereMap = false;
+  if (state.planWhere) state.planWhere.whereMap = false;
+  if (state.adminEdit) state.adminEdit.whereMap = false;
   destroyWhereMap();
   render();
 }
@@ -3301,6 +3432,11 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function onTab(id) {
+  if (id === "chat") {
+    state.sheet = null;
+    await openChat({ kind: "circle" });
+    return;
+  }
   state.tab = id;
   state.sheet = null;
   if (id === "alerts") {
@@ -3465,13 +3601,28 @@ async function onFree(event) {
 
 async function onCreatePlan(event) {
   event.preventDefault();
-  const where = await sharedPoint();
+  const picked = wherePayload(state.planWhere);
+  const nothing = !picked.place && picked.lat == null && picked.lng == null;
+  let place = picked.place;
+  let lat = picked.lat;
+  let lng = picked.lng;
+  let precise = picked.precise;
+  if (nothing && state.shareLocation) {
+    const shared = await sharedPoint();
+    lat = shared.lat ?? null;
+    lng = shared.lng ?? null;
+    precise = false;
+    place = "";
+  }
+  const time = document.getElementById("plan-time")?.value || state.planTime || null;
   const locationNote = state.error;
   if (locationNote) render();
   await run(async () => {
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place: state.placeDraft, ...where } });
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time } });
     state.sheet = null;
     state.placeDraft = "";
+    state.planTime = "";
+    state.planWhere = emptyWhereSession();
     state.error = locationNote;
     await refresh({ initial: true });
   }, locationNote);

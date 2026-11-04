@@ -135,7 +135,21 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
       id: row.ref_id,
       unread: unreadCount(deps.db, row.id, userId),
     })),
+    unreadByCircle: unreadTotals(deps, userId),
   };
+}
+
+/** Circle chat plus every event chat, for each circle this person belongs to. */
+function unreadTotals(deps: ChatDeps, userId: string): Record<string, number> {
+  const circles = all<{ circle_id: string }>(deps.db, "SELECT circle_id FROM memberships WHERE user_id = ?", userId);
+  const totals: Record<string, number> = {};
+  for (const circle of circles) {
+    const chats = all<{ id: string }>(deps.db, "SELECT id FROM chats WHERE circle_id = ?", circle.circle_id);
+    let total = 0;
+    for (const chat of chats) total += unreadCount(deps.db, chat.id, userId);
+    totals[circle.circle_id] = total;
+  }
+  return totals;
 }
 
 export function readThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, requestedCircle: string | null = null) {

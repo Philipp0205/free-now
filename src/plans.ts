@@ -27,6 +27,7 @@ export async function publishPlan(
   note: string,
   place: string,
   point?: { lat: number; lng: number } | null,
+  time: string | null = null,
   requested: string | null = null,
 ) {
   const circle = requireCircle(deps, user.id, requested);
@@ -47,8 +48,10 @@ export async function publishPlan(
     lat: point?.lat ?? null,
     lng: point?.lng ?? null,
     place,
+    atTime: time,
   });
   const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
+  const when = time ? ` · ${time}` : "";
   await notifyUsers(
     deps.db,
     deps.push,
@@ -56,7 +59,7 @@ export async function publishPlan(
     recipients.map((member) => ({
       userId: member.id,
       title: "Tomorrow",
-      body: place ? `${user.name}: ${note} · ${audiencePlace(place)}` : `${user.name}: ${note}`,
+      body: place ? `${user.name}: ${note}${when} · ${audiencePlace(place)}` : `${user.name}: ${note}${when}`,
       kind: "plan",
       refId: id,
       tag: `plan:${id}`,
