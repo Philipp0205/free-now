@@ -58,6 +58,7 @@ import { reverseLookup, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
+import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { joinPlan, publishPlan, replyPlan } from "./plans.js";
@@ -96,7 +97,7 @@ export class HttpError extends Error {
 export function createApp(deps: AppDeps): http.RequestListener {
   return (req, res) => {
     void handle(req, res, deps).catch((error: unknown) => {
-      if (error instanceof HttpError) {
+      if (error instanceof HttpError || error instanceof ChatError) {
         sendJson(res, error.status, { error: error.message });
         return;
       }
@@ -217,6 +218,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const me = requireUser(user);
+
+  const chat = await routeChat(deps, me, method, pathname, body);
+  if (chat) {
+    if (chat.body == null) sendEmpty(res, chat.status);
+    else sendJson(res, chat.status, chat.body);
+    return;
+  }
 
   if (method === "GET" && pathname === "/api/geocode") {
     const q = url.searchParams.get("q")?.trim() ?? "";
@@ -617,6 +625,16 @@ async function removeSocialGuest(deps: AppDeps, user: UserRow, rawSocialId: stri
   if (!guest) throw new HttpError(404, "member not found");
   blockSocialGuest(deps.db, social.id, guestId, deps.now(), user.name);
   const eventName = social.note.trim() || "Free now";
+  recordEventLine(deps.db, {
+    circleId: circle.id,
+    kind: "social",
+    refId: social.id,
+    hostId: social.creator_id,
+    title: eventName,
+    actorId: user.id,
+    text: `${user.name} removed ${guest.name}`,
+    now: deps.now(),
+  });
   await notifyUsers(deps.db, deps.push, deps.now(), [
     {
       userId: guestId,
@@ -640,6 +658,16 @@ async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, 
   const guest = listMembers(deps.db, circle.id).find((member) => member.id === guestId);
   if (!guest) throw new HttpError(404, "member not found");
   blockPlanGuest(deps.db, plan.id, guestId, deps.now(), user.name);
+  recordEventLine(deps.db, {
+    circleId: circle.id,
+    kind: "plan",
+    refId: plan.id,
+    hostId: plan.creator_id,
+    title: plan.note,
+    actorId: user.id,
+    text: `${user.name} removed ${guest.name}`,
+    now: deps.now(),
+  });
   await notifyUsers(deps.db, deps.push, deps.now(), [
     {
       userId: guestId,
@@ -673,6 +701,7 @@ async function endSocial(deps: AppDeps, user: UserRow, rawId: string): Promise<v
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   assertEventHost(deps, user, circle.id, social.creator_id);
+  closeEventChat(deps.db, circle.id, "social", social.id, deps.now());
   if (!deleteSocialById(deps.db, social.id)) throw new HttpError(404, "social not found");
   if (social.creator_id !== user.id) {
     const label = social.note.trim() || "your free post";
@@ -792,6 +821,7 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string): Promise<voi
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, circle.id, plan.creator_id);
+  closeEventChat(deps.db, circle.id, "plan", plan.id, deps.now());
   if (!deletePlanById(deps.db, plan.id)) throw new HttpError(404, "plan not found");
   if (plan.creator_id !== user.id) {
     await notifyUsers(deps.db, deps.push, deps.now(), [

@@ -11,6 +11,7 @@ import {
 } from "./db.js";
 import { audiencePlace, eventTitle, notifyUsers, planReplyBody, replyPushBody } from "./notify.js";
 import { addDays, clockLabel, isoDate, zonedDateTime } from "./time.js";
+import { recordEventLine, replyLogText } from "./chat.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "./app.js";
 import { normalizeReply, readArriveAt } from "./socials.js";
 
@@ -92,6 +93,16 @@ async function setPlanComing(
   const previous = getPlanReply(deps.db, plan.id, user.id);
   if (previous?.reply === "coming") return;
   setPlanReply(deps.db, plan.id, user.id, now, "coming", null);
+  recordEventLine(deps.db, {
+    circleId: plan.circle_id,
+    kind: "plan",
+    refId: plan.id,
+    hostId: plan.creator_id,
+    title: plan.note,
+    actorId: user.id,
+    text: replyLogText(user.name, "coming", null, "", false),
+    now,
+  });
   await notifyPlanReply(deps, user, plan, now, "coming");
 }
 
@@ -117,6 +128,17 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
     const arriveChanged = (previous?.arrive_at ?? null) !== arriveAt && arriveAt != null;
     setPlanReply(deps.db, plan.id, user.id, now, "coming", arriveAt);
     if (became || arriveChanged) {
+      const arriveLabel = arriveAt ? clockLabel(arriveAt, deps.config.tz) : "";
+      recordEventLine(deps.db, {
+        circleId: circle.id,
+        kind: "plan",
+        refId: plan.id,
+        hostId: plan.creator_id,
+        title: plan.note,
+        actorId: user.id,
+        text: replyLogText(user.name, "coming", null, arriveLabel, !became && Boolean(arriveAt)),
+        now,
+      });
       await notifyUsers(deps.db, deps.push, now, [
         {
           userId: plan.creator_id,
@@ -135,6 +157,16 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
     const previous = getPlanReply(deps.db, plan.id, user.id);
     if (previous?.reply !== "declined") {
       setPlanReply(deps.db, plan.id, user.id, now, "declined", null);
+      recordEventLine(deps.db, {
+        circleId: circle.id,
+        kind: "plan",
+        refId: plan.id,
+        hostId: plan.creator_id,
+        title: plan.note,
+        actorId: user.id,
+        text: replyLogText(user.name, "declined", null, "", false),
+        now,
+      });
       await notifyPlanReply(deps, user, plan, now, "declined");
     }
   }

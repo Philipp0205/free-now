@@ -1395,6 +1395,78 @@ test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
   }
 });
 
+test("a failed chat send goes out again when the connection returns", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  let fail = true;
+  await page.route("**/api/**/chat", (route) => {
+    if (fail && route.request().method() === "POST") {
+      fail = false;
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal error" }) });
+    }
+    return route.continue();
+  });
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator("#chat-input").fill("Held");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByText("Something went wrong. Retrying…").waitFor();
+    await page.getByText("Held", { exact: true }).waitFor({ timeout: 8000 });
+    assert.equal(await page.getByText("Something went wrong. Retrying…").count(), 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("text typed while a chat message retries stays in the composer", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  let failed = false;
+  let releaseRetry = () => {};
+  const retryGate = new Promise<void>((resolve) => { releaseRetry = resolve; });
+  await page.route("**/api/**/chat", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    if (!failed) {
+      failed = true;
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal error" }) });
+    }
+    await retryGate;
+    return route.continue();
+  });
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator("#chat-input").fill("Want");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByText("Something went wrong. Retrying…").waitFor();
+    await page.locator("#chat-input").fill("Want dinner");
+    releaseRetry();
+    await page.locator(".chat-msg", { hasText: "Want" }).waitFor({ timeout: 8000 });
+    assert.equal(await page.locator("#chat-input").inputValue(), "dinner");
+    assert.equal(await page.locator(".chat-msg", { hasText: "Want dinner" }).count(), 0);
+  } finally {
+    releaseRetry();
+    await page.context().close();
+  }
+});
+
 test("you can edit your name, and an admin can edit the circle name", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {
@@ -1413,6 +1485,147 @@ test("you can edit your name, and an admin can edit the circle name", { timeout:
     assert.ok(height >= 44, `save circle is ${height}px`);
   } finally {
     await page.context().close();
+  }
+});
+
+test("each person keeps a distinct chat color", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const join = (name: string) => fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const fritz = await join("Fritz");
+    const nia = await join("Nia");
+    const post = (who: { token: string }, text: string) => fetch(`${baseUrl}/api/circles/chat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    await post({ token }, "From Alex");
+    await post(fritz, "From Fritz");
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await page.evaluate((value) => localStorage.setItem("fn_token", value), nia.token);
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("button", { name: "Circle chat" }).click();
+    await page.getByText("From Fritz").waitFor();
+    const read = () => page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll(".chat-msg")];
+      const screen = getComputedStyle(document.querySelector(".chat-screen")).backgroundColor;
+      return rows.map((row) => {
+        const name = row.querySelector("strong");
+        const bubble = name ? getComputedStyle(name).color : "";
+        const parts = (color) => (color.match(/\\d+/g) || ["0", "0", "0"]).slice(0, 3).map(Number);
+        const lum = (color) => {
+          const rgb = parts(color).map((value) => {
+            const channel = value / 255;
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        };
+        const a = bubble ? lum(bubble) : 0;
+        const b = lum(screen);
+        return {
+          text: row.querySelector("p")?.textContent || "",
+          color: bubble,
+          data: row.getAttribute("data-color"),
+          contrast: bubble ? (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) : 0,
+        };
+      });
+    })()`);
+    const first = await read();
+    const alex = first.find((row) => row.text === "From Alex");
+    const fritzMsg = first.find((row) => row.text === "From Fritz");
+    assert.ok(alex && fritzMsg);
+    assert.ok(alex.data != null && fritzMsg.data != null);
+    assert.notEqual(alex.data, fritzMsg.data);
+    assert.ok(alex.contrast >= 4.5, JSON.stringify(alex));
+    assert.ok(fritzMsg.contrast >= 4.5, JSON.stringify(fritzMsg));
+    await page.reload();
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("button", { name: "Circle chat" }).click();
+    await page.getByText("From Fritz").waitFor();
+    const second = await read();
+    assert.equal(second.find((row) => row.text === "From Alex")?.color, alex.color);
+    assert.equal(second.find((row) => row.text === "From Fritz")?.color, fritzMsg.color);
+    await page.locator("#chat-input").fill("From Nia");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.locator(".chat-msg.mine").waitFor();
+    assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), null);
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Now", exact: true }).click();
+    await page.getByRole("button", { name: /^Chat/ }).click();
+    await page.locator(".chat-system").waitFor();
+    assert.equal(await page.locator(".chat-system").getAttribute("data-color"), null);
+    const accented = await page.locator(".chat-msg[data-color]").count();
+    assert.equal(accented, 0);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => {
+  for (const agent of [CHROME_UA, FIREFOX_UA]) {
+    const page = await phonePage(agent, false);
+    try {
+      await signIn(page, "Alex");
+      const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+      await fetch(`${baseUrl}/api/socials`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ note: "Coffee" }),
+      });
+      await page.reload();
+      const later = page.locator(".sheet button", { hasText: "Not now" });
+      if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+      const chat = page.getByRole("button", { name: "Chat", exact: true }).first();
+      await chat.waitFor();
+      const height = await chat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+      assert.ok(height >= 44, `chat is ${height}px`);
+      await chat.click();
+      await page.getByRole("heading", { name: "Coffee" }).waitFor();
+      await page.locator("#chat-input").fill("See you there");
+      await page.getByRole("button", { name: "Send" }).click();
+      await page.getByText("See you there").waitFor();
+      if (agent === CHROME_UA) await page.screenshot({ path: shot("chat-thread.png") });
+      await page.evaluate(() => {
+        window.__setVisualViewport({ height: 360, offsetTop: 0 });
+      });
+      await page.locator("#chat-input").focus();
+      await page.waitForTimeout(500);
+      const box = await page.locator(".chat-compose").boundingBox();
+      const message = await page.locator(".chat-msg").last().boundingBox();
+      assert.ok(box);
+      assert.ok(message);
+      assert.ok(box.y + box.height <= 364, JSON.stringify(box));
+      assert.ok(box.height >= 44, JSON.stringify(box));
+      assert.ok(message.y + message.height <= box.y + 1, JSON.stringify({ message, box }));
+      await page.getByRole("button", { name: "Back" }).click();
+      await page.getByRole("button", { name: "Circle", exact: true }).click();
+      const circleChat = page.getByRole("button", { name: "Circle chat" });
+      await circleChat.waitFor();
+      const circleHeight = await circleChat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
+      assert.ok(circleHeight >= 44, `circle chat is ${circleHeight}px`);
+    } finally {
+      await page.context().close();
+    }
   }
 });
 
