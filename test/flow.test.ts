@@ -1,86 +1,17 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import type { DatabaseSync } from "node:sqlite";
-import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { openDb } from "../src/db.js";
-import type { PushPayload, PushSender, PushSubscription } from "../src/push.js";
+import { api, withApp, type AppCtx, type SentPush } from "./http.js";
 
-type Sent = { endpoint: string; payload: PushPayload };
-
-const START = Date.parse("2026-06-01T15:00:00.000Z");
 const TTL = 2 * 60 * 60 * 1000;
 
-type Ctx = {
-  port: number;
-  server: http.Server;
-  db: DatabaseSync;
-  sent: Sent[];
-  advance: (ms: number) => void;
-  at: (ms: number) => void;
+// The old flow harness always set SOCIAL_TTL_MS and stored { endpoint, payload }.
+const flowOptions = {
+  sent: "envelope" as const,
+  env: { SOCIAL_TTL_MS: String(TTL) },
 };
 
-async function withApp(fn: (ctx: Ctx) => Promise<void>, ttl = TTL, pushOverride?: PushSender): Promise<void> {
-  const sent: Sent[] = [];
-  let now = START;
-  const db = openDb(":memory:");
-  const push: PushSender = pushOverride ?? {
-    async send(subscription: PushSubscription, payload: PushPayload) {
-      sent.push({ endpoint: subscription.endpoint, payload });
-    },
-  };
-  const config = loadConfig({
-    PORT: "3000",
-    DB_PATH: ":memory:",
-    APP_TZ: "UTC",
-    SOCIAL_TTL_MS: String(ttl),
-  });
-  const server = http.createServer(createApp({ db, push, config: { ...config, dbPath: ":memory:" }, now: () => now }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const port = (server.address() as AddressInfo).port;
-  try {
-    await fn({
-      port,
-      server,
-      db,
-      sent,
-      advance(ms: number) {
-        now += ms;
-      },
-      at(ms: number) {
-        now = ms;
-      },
-    });
-  } finally {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  }
-}
-
-async function api(
-  ctx: Ctx,
-  method: string,
-  path: string,
-  options: { token?: string; body?: unknown; status?: number } = {},
-): Promise<{ status: number; json: any }> {
-  const response = await fetch(`http://127.0.0.1:${ctx.port}${path}`, {
-    method,
-    headers: {
-      ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
-  const text = await response.text();
-  const json = text ? JSON.parse(text) : null;
-  if (options.status !== undefined && response.status !== options.status) {
-    throw new Error(`${method} ${path} -> ${response.status} ${text}`);
-  }
-  return { status: response.status, json };
-}
+type Ctx = AppCtx<SentPush>;
 
 async function signUp(ctx: Ctx, name: string) {
   const { json } = await api(ctx, "POST", "/api/auth/start", { body: { name }, status: 201 });
@@ -195,7 +126,7 @@ test("two friends can invite, start a social, push, join, and expire", async () 
     const expired = await api(ctx, "GET", "/api/socials", { token: veit.token });
     assert.deepEqual(expired.json.socials, []);
     await api(ctx, "POST", `/api/socials/${socialId}/join`, { token: veit.token, body: {}, status: 410 });
-  });
+  }, flowOptions);
 });
 
 test("buzz token starts a social and notifies the circle", async () => {
@@ -228,7 +159,7 @@ test("buzz token starts a social and notifies the circle", async () => {
     const bareJson = (await bare.json()) as { social: { note: string; createdAt: number; expiresAt: number } };
     assert.equal(bareJson.social.note, "Rooftop coffee??");
     assert.equal(bareJson.social.createdAt, buzzed.json.social.createdAt);
-  });
+  }, flowOptions);
 });
 
 test("a bare buzz keeps the note and extends expiry without moving the start", async () => {
@@ -251,7 +182,7 @@ test("a bare buzz keeps the note and extends expiry without moving the start", a
     });
     assert.equal(replaced.json.social.note, "Park");
     assert.equal(replaced.json.social.createdAt, started.json.social.createdAt);
-  }, 60_000);
+  }, { sent: "envelope", env: { SOCIAL_TTL_MS: String(60_000) } });
 });
 
 test("tomorrow plans can be joined and disappear after that day", async () => {
@@ -315,7 +246,7 @@ test("tomorrow plans can be joined and disappear after that day", async () => {
     ctx.at(Date.parse("2026-06-03T00:00:00.000Z"));
     const gone = await api(ctx, "GET", "/api/plans", { token: veit.token });
     assert.deepEqual(gone.json.plans, []);
-  });
+  }, flowOptions);
 });
 
 test("logout ends that device and recovery starts another", async () => {
@@ -332,7 +263,7 @@ test("logout ends that device and recovery starts another", async () => {
     assert.equal(me.json.user.name, "Alex");
     assert.equal(me.json.user.buzzToken, alex.buzzToken);
     await api(ctx, "GET", "/api/me", { token: alex.token, status: 401 });
-  });
+  }, flowOptions);
 });
 
 test("config rejects a half-set VAPID pair and reads the public settings", () => {
@@ -395,7 +326,7 @@ test("serves the installable shell", async () => {
 
     const health = await api(ctx, "GET", "/api/health");
     assert.equal(health.json.ok, true);
-  });
+  }, flowOptions);
 });
 
 test("push logs name the user and status, and a test reports the device count", async () => {
@@ -425,16 +356,19 @@ test("push logs name the user and status, and a test reports the device count", 
       assert.equal(other.json.known, false);
       const sent = await api(ctx, "POST", "/api/push/test", { token: alex.token, body: {}, status: 200 });
       assert.equal(sent.json.subscriptions, 1);
-    });
+    }, flowOptions);
     await withApp(async (ctx) => {
       const alex = await signUp(ctx, "Alex");
       await subscribe(ctx, alex.token, endpoint);
       await api(ctx, "POST", "/api/push/test", { token: alex.token, body: {}, status: 200 });
-    }, TTL, {
-      async send() {
-        const error = new Error(`gone ${endpoint} p256dh-key`);
-        (error as { statusCode?: number }).statusCode = 410;
-        throw error;
+    }, {
+      ...flowOptions,
+      push: {
+        async send() {
+          const error = new Error(`gone ${endpoint} p256dh-key`);
+          (error as { statusCode?: number }).statusCode = 410;
+          throw error;
+        },
       },
     });
   } finally {
@@ -462,5 +396,5 @@ test("a second sign-in keeps the first device signed in", async () => {
     await api(ctx, "POST", "/api/auth/logout", { token: again.json.token, body: {}, status: 204 });
     await api(ctx, "GET", "/api/me", { token: again.json.token, status: 401 });
     await api(ctx, "GET", "/api/me", { token: alex.token, status: 200 });
-  });
+  }, flowOptions);
 });
