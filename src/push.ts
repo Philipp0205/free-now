@@ -26,6 +26,8 @@ export type PushPayload = {
   body: string;
   url: string;
   tag: string;
+  /** Delivery row id. The service worker acks with this and nothing else. */
+  id?: string;
 };
 
 export interface PushSender {
@@ -46,6 +48,7 @@ export function createWebPushSender(vapid: VapidConfig): PushSender {
           body: payload.body,
           url: payload.url,
           tag: payload.tag,
+          ...(payload.id ? { id: payload.id } : {}),
         }),
         { TTL: 2 * 60 * 60, urgency: "high" },
       );

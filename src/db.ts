@@ -97,13 +97,31 @@ export type MemberRow = {
   is_admin: number;
 };
 
+function pushDeliveriesTable(name: string): string {
+  return `CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sub_id TEXT NOT NULL,
+  circle_id TEXT REFERENCES circles(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  http_status INTEGER,
+  created_at INTEGER NOT NULL
+);`;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
   buzz_token TEXT NOT NULL UNIQUE,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  display_at INTEGER,
+  standalone_at INTEGER,
+  push_seen_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS circles (
@@ -198,6 +216,9 @@ CREATE INDEX IF NOT EXISTS idx_socials_circle ON socials(circle_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_plans_circle ON plans(circle_id, for_date);
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subs(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, created_at DESC);
+
+${pushDeliveriesTable("push_deliveries")}
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_ref ON push_deliveries(circle_id, kind, ref_id, created_at);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -297,7 +318,11 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "memberships", "chat_color", "chat_color INTEGER");
   migrateMembershipKey(db);
+  migratePushDeliveryCascade(db);
   backfillCircleAdmins(db);
+  ensureColumn(db, "users", "display_at", "display_at INTEGER");
+  ensureColumn(db, "users", "standalone_at", "standalone_at INTEGER");
+  ensureColumn(db, "users", "push_seen_at", "push_seen_at INTEGER");
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
   db.prepare(
@@ -356,6 +381,37 @@ function migrateMembershipKey(db: DatabaseSync): void {
       DROP TABLE memberships;
       ALTER TABLE memberships_next RENAME TO memberships;
       CREATE INDEX IF NOT EXISTS idx_membership_circle ON memberships(circle_id);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+/** The first push_deliveries kept rows after their user was deleted. Rebuild with ON DELETE CASCADE and keep every row. */
+function migratePushDeliveryCascade(db: DatabaseSync): void {
+  const keys = db.prepare("PRAGMA foreign_key_list(push_deliveries)").all() as Array<{ table: string; from: string; on_delete: string }>;
+  const user = keys.find((key) => key.table === "users" && key.from === "user_id");
+  if (user?.on_delete === "CASCADE") return;
+  // foreign_keys cannot change inside a transaction, so switch it off first and back on after.
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS push_deliveries_new;
+      ${pushDeliveriesTable("push_deliveries_new")}
+      INSERT INTO push_deliveries_new (id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at)
+      SELECT id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at FROM push_deliveries;
+      DROP TABLE push_deliveries;
+      ALTER TABLE push_deliveries_new RENAME TO push_deliveries;
+      CREATE INDEX IF NOT EXISTS idx_push_deliveries_ref ON push_deliveries(circle_id, kind, ref_id, created_at);
     `);
     db.exec("COMMIT");
   } catch (error) {
@@ -650,6 +706,7 @@ export type CircleDeleteCounts = {
   memberships: number;
   circle_removals: number;
   notifications: number;
+  push_deliveries: number;
   circles: number;
 };
 
@@ -662,7 +719,7 @@ export type CircleDeleteResult = {
  * Removes one circle and everything that belongs to it. One transaction.
  *
  * Tables that reference circle_id:
- * memberships, socials, plans, notifications, circle_removals, chats.
+ * memberships, socials, plans, notifications, circle_removals, chats, push_deliveries.
  *
  * Also removed in that same transaction (no circle_id column of their own;
  * they hang off the rows above): social_joins, plan_joins, messages,
@@ -690,6 +747,7 @@ export function deleteCircle(db: DatabaseSync, circleId: string): CircleDeleteRe
       memberships: removed(db, "DELETE FROM memberships WHERE circle_id = ?", circleId),
       circle_removals: removed(db, "DELETE FROM circle_removals WHERE circle_id = ?", circleId),
       notifications: removed(db, "DELETE FROM notifications WHERE circle_id = ?", circleId),
+      push_deliveries: removed(db, "DELETE FROM push_deliveries WHERE circle_id = ?", circleId),
       circles: removed(db, "DELETE FROM circles WHERE id = ?", circleId),
     };
     if (counts.circles !== 1) throw new Error("circle missing");
@@ -1130,6 +1188,109 @@ export function listPushSubs(db: DatabaseSync, userId: string): PushSubRow[] {
   return all<PushSubRow>(db, "SELECT * FROM push_subs WHERE user_id = ?", userId);
 }
 
+/** The first time this person subscribes. A later 404/410 still counts as notifications off, not "never subscribed". */
+export function markPushSeen(db: DatabaseSync, userId: string, at: number): void {
+  db.prepare("UPDATE users SET push_seen_at = COALESCE(push_seen_at, ?) WHERE id = ?").run(at, userId);
+}
+
+/** `standalone` is display-mode standalone (or iOS navigator.standalone). A browser report never clears a previous install. */
+export function recordDisplay(db: DatabaseSync, userId: string, standalone: boolean, at: number): void {
+  if (standalone) {
+    db.prepare("UPDATE users SET display_at = ?, standalone_at = COALESCE(standalone_at, ?) WHERE id = ?").run(at, at, userId);
+    return;
+  }
+  db.prepare("UPDATE users SET display_at = ? WHERE id = ?").run(at, userId);
+}
+
+export type ReachFlags = {
+  subs: number;
+  displayAt: number | null;
+  standaloneAt: number | null;
+  pushSeenAt: number | null;
+};
+
+export function listReachFlags(db: DatabaseSync, circleId: string): Array<{ id: string } & ReachFlags> {
+  return all<{
+    id: string;
+    subs: number | bigint;
+    display_at: number | null;
+    standalone_at: number | null;
+    push_seen_at: number | null;
+  }>(
+    db,
+    `SELECT u.id,
+            (SELECT COUNT(*) FROM push_subs p WHERE p.user_id = u.id) AS subs,
+            u.display_at, u.standalone_at, u.push_seen_at
+     FROM users u
+     JOIN memberships m ON m.user_id = u.id
+     WHERE m.circle_id = ?`,
+    circleId,
+  ).map((row) => ({
+    id: row.id,
+    subs: Number(row.subs),
+    displayAt: row.display_at,
+    standaloneAt: row.standalone_at,
+    pushSeenAt: row.push_seen_at,
+  }));
+}
+
+export function insertPushDelivery(
+  db: DatabaseSync,
+  row: {
+    id: string;
+    userId: string;
+    subId: string;
+    circleId: string;
+    kind: string;
+    refId: string;
+    batchId: string;
+    createdAt: number;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO push_deliveries (id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', NULL, ?)`,
+  ).run(row.id, row.userId, row.subId, row.circleId, row.kind, row.refId, row.batchId, row.createdAt);
+}
+
+export function markPushDelivered(db: DatabaseSync, id: string): void {
+  db.prepare("UPDATE push_deliveries SET status = 'delivered' WHERE id = ? AND status = 'sent'").run(id);
+}
+
+export function markPushFailed(db: DatabaseSync, id: string, httpStatus: number | null): void {
+  db.prepare(
+    "UPDATE push_deliveries SET status = 'failed', http_status = ? WHERE id = ? AND status = 'sent'",
+  ).run(httpStatus, id);
+}
+
+export function latestPushBatch(db: DatabaseSync, circleId: string, kind: string, refId: string): string | undefined {
+  const row = one<{ batch_id: string }>(
+    db,
+    `SELECT batch_id FROM push_deliveries
+     WHERE circle_id = ? AND kind = ? AND ref_id = ?
+     ORDER BY created_at DESC, rowid DESC
+     LIMIT 1`,
+    circleId,
+    kind,
+    refId,
+  );
+  return row?.batch_id;
+}
+
+export type PushBatchRow = {
+  user_id: string;
+  status: string;
+  http_status: number | null;
+};
+
+export function listPushBatch(db: DatabaseSync, batchId: string): PushBatchRow[] {
+  return all<PushBatchRow>(
+    db,
+    "SELECT user_id, status, http_status FROM push_deliveries WHERE batch_id = ?",
+    batchId,
+  );
+}
+
 export function deletePushSub(db: DatabaseSync, endpoint: string): void {
   db.prepare("DELETE FROM push_subs WHERE endpoint = ?").run(endpoint);
 }
@@ -1210,6 +1371,7 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   deleteEventChats(db, "plan", "for_date < ?", planDay);
   db.prepare("DELETE FROM plans WHERE for_date < ?").run(planDay);
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
+  db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
 }
 
 const SOCIAL_SELECT = `

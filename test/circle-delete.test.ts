@@ -7,7 +7,7 @@ import { flushChatNotices } from "../src/chat.js";
 import { api, START, withApp } from "./http.js";
 
 const ADMIN = "a".repeat(32);
-const CIRCLE_ID_TABLES = ["chats", "circle_removals", "memberships", "notifications", "plans", "socials"];
+const CIRCLE_ID_TABLES = ["chats", "circle_removals", "memberships", "notifications", "plans", "push_deliveries", "socials"];
 
 test("deleting a circle leaves no orphan rows", async () => {
   const logs: string[] = [];
@@ -391,6 +391,11 @@ async function seedCircle(port: number, db: DatabaseSync) {
     body: { name: "Bea", code: friends.circle.inviteCode },
     status: 201,
   });
+  await api(port, "POST", "/api/push/subscribe", {
+    token: bea.token,
+    body: { endpoint: "https://push.example/bea", keys: { p256dh: "p", auth: "a" } },
+    status: 204,
+  });
   const cam = await api(port, "POST", "/api/auth/start", {
     body: { name: "Cam", code: friends.circle.inviteCode },
     status: 201,
@@ -437,11 +442,6 @@ async function seedCircle(port: number, db: DatabaseSync) {
   await api(port, "POST", `/api/socials/${coffee.social.id}/chat`, { token: bea.token, body: { text: "downstairs" }, status: 201 });
   await api(port, "POST", `/api/plans/${dinner.plan.id}/chat`, { token: alex.token, body: { text: "tomorrow" }, status: 201 });
   await api(port, "DELETE", `/api/circles/members/${nia.user.id}`, { token: alex.token, status: 204 });
-  await api(port, "POST", "/api/push/subscribe", {
-    token: bea.token,
-    body: { endpoint: "https://push.example/bea", keys: { p256dh: "p", auth: "a" } },
-    status: 204,
-  });
 
   const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
   const sam = await api(port, "POST", "/api/auth/start", {
@@ -468,6 +468,7 @@ function belong(db: DatabaseSync, circleId: string): Record<string, number> {
     memberships: count(db, "SELECT COUNT(*) AS n FROM memberships WHERE circle_id = ?", circleId),
     circle_removals: count(db, "SELECT COUNT(*) AS n FROM circle_removals WHERE circle_id = ?", circleId),
     notifications: count(db, "SELECT COUNT(*) AS n FROM notifications WHERE circle_id = ?", circleId),
+    push_deliveries: count(db, "SELECT COUNT(*) AS n FROM push_deliveries WHERE circle_id = ?", circleId),
     circles: count(db, "SELECT COUNT(*) AS n FROM circles WHERE id = ?", circleId),
   };
 }
