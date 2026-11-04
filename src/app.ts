@@ -42,7 +42,7 @@ import {
   type SocialRow,
   type UserRow,
 } from "./db.js";
-import { reversePlace, searchPlaces } from "./geocode.js";
+import { reverseLookup, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
@@ -222,7 +222,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       return;
     }
     if (url.searchParams.has("lat") || url.searchParams.has("lng")) {
-      sendJson(res, 200, { place: await reversePlace(lat, lng) });
+      sendJson(res, 200, await reverseLookup(lat, lng));
       return;
     }
     throw new HttpError(400, "query is required");
