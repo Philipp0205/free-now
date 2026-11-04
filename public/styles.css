@@ -18,6 +18,12 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 html { touch-action: manipulation; }
+html.sheet-open,
+html.sheet-open body {
+  overflow: hidden;
+  height: 100%;
+  overscroll-behavior: none;
+}
 body {
   min-height: 100svh;
   min-height: 100dvh;
@@ -86,7 +92,9 @@ button:disabled { cursor: default; opacity: 0.55; }
   font-weight: 650;
   letter-spacing: -0.02em;
 }
-.circle-switch-btn { min-height: 44px; padding: 0 4px; }
+.circle-switch-btn { min-height: 44px; padding: 0 4px; position: relative; }
+.circle-switch-btn .unread-dot { margin-left: 4px; }
+.unread-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff375f; flex: none; }
 .circle-switch-name { font-weight: 600; }
 .circle-switch-btn svg { width: 16px; height: 16px; transform: rotate(90deg); }
 .circle-menu {
@@ -112,6 +120,11 @@ button:disabled { cursor: default; opacity: 0.55; }
   font-size: 16px;
   padding: 12px;
   border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
 }
 .circle-menu button.on { background: rgba(255, 255, 255, 0.08); }
 .posting-to { margin: 8px 0 0; color: var(--faint); font-size: 13px; }
@@ -614,6 +627,43 @@ input[type="text"], input[type="url"], input[type="time"] {
 .chat-compose input { flex: 1; min-width: 0; min-height: 44px; }
 .chat-compose .chat-send { width: auto; min-width: 64px; min-height: 44px; padding: 0 16px; }
 .chat-entry { min-height: 44px; min-width: 44px; padding: 0 4px; }
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  align-self: flex-start;
+  margin-top: 8px;
+}
+.chat-chip .icon, .chat-chip .icon svg { width: 18px; height: 18px; }
+.chat-chip .badge {
+  position: static;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: #9f1239;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.chat-banner {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 8px 16px 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: #9f1239;
+  color: #fff;
+  font-weight: 650;
+  font-size: 15px;
+  text-align: left;
+  padding: 12px 14px;
+}
 .past-screen { min-height: 100dvh; background: #000; }
 .past-entry { padding: 8px 20px 28px; }
 .past-entry .text-btn { min-height: 44px; }
@@ -667,8 +717,11 @@ html.kb-open .tabbar {
 
 .scrim {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  left: 0;
+  width: 100%;
+  top: var(--vv-top, 0px);
+  height: var(--vv-height, 100dvh);
+  background: rgba(0, 0, 0, 0.72);
   z-index: 30;
   border: 0;
   padding: 0;
@@ -791,7 +844,21 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
   padding: 0 8px;
 }
 .where-picker { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.where-results { display: flex; flex-direction: column; gap: 6px; scroll-margin: 12px; }
+.where-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  z-index: 5;
+  max-height: min(280px, 46dvh);
+  overflow-y: auto;
+  scroll-margin: 12px;
+  background: var(--sheet);
+}
+.sheet:has(.where-results),
+.sheet:has(.where-results) .sheet-scroll {
+  overflow: visible;
+}
 .where-hit, .where-action {
   width: 100%;
   text-align: left;

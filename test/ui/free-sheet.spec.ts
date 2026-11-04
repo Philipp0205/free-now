@@ -1416,7 +1416,7 @@ test("a failed chat send goes out again when the connection returns", { timeout:
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator("article .chat-chip").click();
     await page.locator("#chat-input").fill("Held");
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByText("Something went wrong. Retrying…").waitFor();
@@ -1452,7 +1452,7 @@ test("text typed while a chat message retries stays in the composer", { timeout:
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator("article .chat-chip").click();
     await page.locator("#chat-input").fill("Want");
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByText("Something went wrong. Retrying…").waitFor();
@@ -1522,8 +1522,7 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "Circle", exact: true }).click();
-    await page.getByRole("button", { name: "Circle chat" }).click();
+    await page.locator(".tabbar").getByRole("button", { name: /^Chat/ }).click();
     await page.getByText("From Fritz").waitFor();
     const read = () => page.evaluate(`(() => {
       const rows = [...document.querySelectorAll(".chat-msg")];
@@ -1559,8 +1558,7 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     assert.ok(fritzMsg.contrast >= 4.5, JSON.stringify(fritzMsg));
     await page.reload();
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "Circle", exact: true }).click();
-    await page.getByRole("button", { name: "Circle chat" }).click();
+    await page.locator(".tabbar").getByRole("button", { name: /^Chat/ }).click();
     await page.getByText("From Fritz").waitFor();
     const second = await read();
     assert.equal(second.find((row) => row.text === "From Alex")?.color, alex.color);
@@ -1571,7 +1569,7 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), null);
     await page.getByRole("button", { name: "Back" }).click();
     await page.getByRole("button", { name: "Now", exact: true }).click();
-    await page.getByRole("button", { name: /^Chat/ }).click();
+    await page.locator("article .chat-chip").click();
     await page.locator(".chat-system").waitFor();
     assert.equal(await page.locator(".chat-system").getAttribute("data-color"), null);
     const accented = await page.locator(".chat-msg[data-color]").count();
@@ -1618,8 +1616,7 @@ test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => 
       assert.ok(box.height >= 44, JSON.stringify(box));
       assert.ok(message.y + message.height <= box.y + 1, JSON.stringify({ message, box }));
       await page.getByRole("button", { name: "Back" }).click();
-      await page.getByRole("button", { name: "Circle", exact: true }).click();
-      const circleChat = page.getByRole("button", { name: "Circle chat" });
+      const circleChat = page.locator(".tabbar").getByRole("button", { name: "Chat", exact: true });
       await circleChat.waitFor();
       const circleHeight = await circleChat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
       assert.ok(circleHeight >= 44, `circle chat is ${circleHeight}px`);
@@ -1664,7 +1661,7 @@ test("Past events lists an ended hangout without reply buttons", { timeout: 90_0
     await page.getByText("Fritz", { exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "Edit Coffee" }).count(), 0);
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator(".past-card .chat-chip").click();
     await page.getByText("This chat is closed.").waitFor();
     assert.equal(await page.locator("#chat-input").count(), 0);
     await page.getByRole("button", { name: "Back" }).click();

@@ -241,13 +241,26 @@ function nominatimViewbox(lat: number, lng: number, km: number): string {
   return [lng - dLng, lat + dLat, lng + dLng, lat - dLat].map((n) => n.toFixed(4)).join(",");
 }
 
+function upstreamName(url: string): "photon" | "nominatim" {
+  return url.includes("nominatim.openstreetmap.org") ? "nominatim" : "photon";
+}
+
 async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: { "user-agent": USER_AGENT, accept: "application/json" },
-    signal: AbortSignal.timeout(4000),
-  });
-  if (!response.ok) return null;
-  return response.json();
+  const source = upstreamName(url);
+  try {
+    const response = await fetch(url, {
+      headers: { "user-agent": USER_AGENT, accept: "application/json" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) {
+      console.log(`geocode upstream ${source} status=${response.status}`);
+      return null;
+    }
+    return response.json();
+  } catch {
+    console.log(`geocode upstream ${source} status=timeout`);
+    return null;
+  }
 }
 
 export async function searchPlaces(query: string, bias: SearchBias = null, fetchJson: JsonGetter = getJson): Promise<PlaceHit[]> {
@@ -359,4 +372,151 @@ export async function reverseLookup(lat: number, lng: number, fetchJson: JsonGet
 
 export async function reversePlace(lat: number, lng: number, fetchJson: JsonGetter = getJson): Promise<string> {
   return (await reverseLookup(lat, lng, fetchJson)).place;
+}
+
+const MAPS_LINK_MAX = 2000;
+const MAPS_REDIRECTS = 3;
+const MAPS_TIMEOUT_MS = 3000;
+const GOOGLE_SUFFIX = "(?:[a-z]{2,3}|(?:com|co|org|net|ac|gov|ne)\\.[a-z]{2})";
+
+type RedirectResponse = {
+  status: number;
+  headers: { get(name: string): string | null };
+  body?: { cancel?: () => Promise<void> } | null;
+};
+
+export function isMapsLinkInput(value: string): boolean {
+  return allowedMapsUrl(value.trim()) != null;
+}
+
+/** A Google Maps URL reduced to a pin, or to the place text in /maps/place/. */
+export function parseMapsLink(value: string): { lat: number; lng: number; name: string } | { query: string } | null {
+  const url = allowedMapsUrl(value.trim());
+  if (!url) return null;
+  const name = placeText(url);
+  const point = mapsPoint(url);
+  if (point) return { ...point, name: shortPlaceName(name) };
+  if (name) return { query: name.slice(0, 80) };
+  return null;
+}
+
+export async function resolveMapsLink(
+  input: string,
+  fetchJson: JsonGetter = getJson,
+  fetchImpl: (url: string, init?: RequestInit) => Promise<RedirectResponse> = fetch,
+): Promise<PlaceHit[]> {
+  const raw = input.trim();
+  if (!raw || raw.length > MAPS_LINK_MAX || !isMapsLinkInput(raw)) return [];
+  const resolved = await followMaps(raw, fetchImpl);
+  if (!resolved) return [];
+  const key = `maps:${resolved}`;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.results;
+  const parsed = parseMapsLink(resolved);
+  let results: PlaceHit[] = [];
+  if (parsed && "lat" in parsed) {
+    const name = parsed.name || (await reverseLookup(parsed.lat, parsed.lng, fetchJson)).place || `${parsed.lat}, ${parsed.lng}`;
+    results = [{ name: name.slice(0, 80), address: "", lat: parsed.lat, lng: parsed.lng, distanceM: null }];
+  } else if (parsed && parsed.query) {
+    results = await searchPlaces(parsed.query, null, fetchJson);
+  }
+  cache.set(key, { at: Date.now(), results });
+  return results;
+}
+
+function shortPlaceName(text: string): string {
+  const name = text.split(",")[0]?.trim() || "";
+  return name.slice(0, 80);
+}
+
+function placeText(url: URL): string {
+  const parts = url.pathname.split("/");
+  const idx = parts.findIndex((part) => part === "place");
+  if (idx < 0 || !parts[idx + 1]) return "";
+  try {
+    return decodeURIComponent(parts[idx + 1].replace(/\+/g, " ")).replace(/\s+/g, " ").trim();
+  } catch {
+    return parts[idx + 1].replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+  }
+}
+
+function mapsPoint(url: URL): { lat: number; lng: number } | null {
+  const pin = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(url.href);
+  if (pin) {
+    const point = coordPair(pin[1], pin[2]);
+    if (point) return point;
+  }
+  const at = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(url.href);
+  if (at) {
+    const point = coordPair(at[1], at[2]);
+    if (point) return point;
+  }
+  for (const key of ["q", "query", "ll"]) {
+    const value = url.searchParams.get(key);
+    if (!value) continue;
+    const match = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(value);
+    if (!match) continue;
+    const point = coordPair(match[1], match[2]);
+    if (point) return point;
+  }
+  return null;
+}
+
+function coordPair(latText: string, lngText: string): { lat: number; lng: number } | null {
+  const lat = Number(latText);
+  const lng = Number(lngText);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function allowedMapsUrl(value: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const path = url.pathname;
+  if (host === "maps.app.goo.gl") return url;
+  const mapsPath = path === "/maps" || path.startsWith("/maps/");
+  if (!mapsPath) return null;
+  if (host === "goo.gl") return url;
+  if (new RegExp(`^www\\.google\\.${GOOGLE_SUFFIX}$`).test(host)) return url;
+  if (new RegExp(`^maps\\.google\\.${GOOGLE_SUFFIX}$`).test(host)) return url;
+  return null;
+}
+
+async function followMaps(
+  start: string,
+  fetchImpl: (url: string, init?: RequestInit) => Promise<RedirectResponse>,
+): Promise<string | null> {
+  let current = start;
+  for (let followed = 0; followed <= MAPS_REDIRECTS; followed += 1) {
+    if (!allowedMapsUrl(current)) return null;
+    if (followed === MAPS_REDIRECTS) return current;
+    let response: RedirectResponse;
+    try {
+      response = await fetchImpl(current, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(MAPS_TIMEOUT_MS),
+      });
+    } catch {
+      return null;
+    }
+    await response.body?.cancel?.().catch(() => {});
+    const location = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && location) {
+      try {
+        current = new URL(location, current).toString();
+      } catch {
+        return null;
+      }
+      continue;
+    }
+    return current;
+  }
+  return allowedMapsUrl(current) ? current : null;
 }
