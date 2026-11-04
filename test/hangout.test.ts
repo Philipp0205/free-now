@@ -569,3 +569,58 @@ test("Berlin midnight puts a plan on tomorrow and keeps a later-today start on t
     assert.deepEqual(gone.plans, []);
   }, { tz: "Europe/Berlin" });
 });
+
+test("Berlin late night still accepts only a later clock on the same day", async () => {
+  await withApp(async ({ port, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+
+    // 23:15 CET. The half-hour default is still today.
+    at(Date.parse("2026-11-04T22:15:00.000Z"));
+    const half = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Half", startsAt: "23:30" },
+      status: 201,
+    });
+    assert.equal(half.social.startsAt, Date.parse("2026-11-04T22:30:00.000Z"));
+
+    // 23:16 CET. 23:59 is still today. The next-day clock the picker falls back to is not.
+    at(Date.parse("2026-11-04T22:16:00.000Z"));
+    const capped = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Capped", startsAt: "23:59" },
+      status: 200,
+    });
+    assert.equal(capped.social.startsAt, Date.parse("2026-11-04T22:59:00.000Z"));
+    const earlyTomorrow = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { startsAt: "00:30" },
+      status: 400,
+    });
+    assert.equal(earlyTomorrow.error, "Pick a time later today.");
+
+    // 23:59 CET. 23:59 is no longer later, and 00:30 is tomorrow.
+    at(Date.parse("2026-11-04T22:59:00.000Z"));
+    const tooLate = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { startsAt: "23:59" },
+      status: 400,
+    });
+    assert.equal(tooLate.error, "Pick a time later today.");
+    const namedTomorrow = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { startsAt: "00:30" },
+      status: 400,
+    });
+    assert.equal(namedTomorrow.error, "Pick a time later today.");
+
+    // 00:00 CET is a new day, so 00:30 is later today again.
+    at(Date.parse("2026-11-04T23:00:00.000Z"));
+    const midnight = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Midnight", startsAt: "00:30" },
+      status: 200,
+    });
+    assert.equal(midnight.social.startsAt, Date.parse("2026-11-04T23:30:00.000Z"));
+  }, { tz: "Europe/Berlin" });
+});

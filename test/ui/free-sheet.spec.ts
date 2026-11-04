@@ -119,7 +119,7 @@ test("the free sheet reads as separate fields", { timeout: 90_000 }, async () =>
     assert.ok(rhythm.groupGap >= 12 && rhythm.groupGap <= 24, JSON.stringify(rhythm));
     assert.ok(rhythm.labelGap >= 4 && rhythm.labelGap <= 12, JSON.stringify(rhythm));
 
-    await page.getByRole("button", { name: "Later today" }).click();
+    await page.locator(".segment").getByRole("button", { name: /^(Later today|Tomorrow)$/ }).click();
     await page.locator("#later-time").waitFor();
     await page.getByText("Time", { exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: "In 1 hour" }).count(), 0);
@@ -218,10 +218,12 @@ test("later today defaults to the next half hour", { timeout: 90_000 }, async ()
   const page = await phonePage(CHROME_UA, false);
   try {
     await openFreeSheet(page, "Philipp");
-    await page.getByRole("button", { name: "Later today" }).click();
+    const choice = page.locator(".segment").getByRole("button", { name: /^(Later today|Tomorrow)$/ });
+    await choice.click();
     const value = await page.locator("#later-time").inputValue();
-    assert.match(value, /^\d{2}:(00|30)$/);
-    assert.equal(await page.getByRole("button", { name: "I'm free later" }).isDisabled(), false);
+    assert.match(value, /^\d{2}:(00|30|59)$/);
+    const tomorrow = (await choice.innerText()).trim() === "Tomorrow";
+    assert.equal(await page.getByRole("button", { name: "I'm free later" }).isDisabled(), tomorrow);
     await page.locator("#later-time").evaluate((input) => {
       const field = input as HTMLInputElement;
       field.value = "00:00";
