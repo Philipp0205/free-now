@@ -891,7 +891,7 @@ function socialCard(social) {
       el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
-      mine ? null : replyActions(social),
+      mine ? null : removedNote(social) || replyActions(social),
     ]),
   ]);
 }
@@ -908,7 +908,7 @@ function planCard(plan) {
       el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
-      mine ? null : planReplyButtons(plan),
+      mine ? null : removedNote(plan) || planReplyButtons(plan),
     ]),
   ]);
 }
@@ -2339,7 +2339,7 @@ function mapCard(pin) {
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
     social && !pin.own ? replySummary(social) : null,
-    social && !pin.own ? replyActions(social) : null,
+    social && !pin.own ? removedNote(social) || replyActions(social) : null,
     social?.creator ? eventTools("social", social) : null,
     plan && !pin.own ? planPinActions(plan) : null,
     plan?.creator ? eventTools("plan", plan) : null,
@@ -2442,7 +2442,13 @@ function planReplyButtons(plan) {
   ]);
 }
 
+function removedNote(item) {
+  if (!item?.removedBy) return null;
+  return el("p", { class: "removed-note", text: `${item.removedBy} removed you from this.` });
+}
+
 function planPinActions(plan) {
+  if (plan.removedBy) return removedNote(plan);
   const mine = plan.joined.find((person) => person.id === state.me.user.id);
   return el("div", {}, [
     mine && (mine.reply === "declined" || inReply(mine))

@@ -20,6 +20,7 @@ import {
   isCircleAdmin,
   kickMember,
   getPlan,
+  getPlanReply,
   getSocial,
   getSocialReply,
   getUserByBuzzToken,
@@ -339,7 +340,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "GET" && pathname === "/api/socials") {
     const circle = requireCircle(deps, me.id);
-    const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row));
+    const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id));
     sendJson(res, 200, { socials });
     return;
   }
@@ -393,7 +394,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const today = isoDate(now, deps.config.tz);
     const tomorrow = addDays(today, 1);
     const plans = listVisiblePlans(deps.db, circle.id, today, tomorrow).map((row) =>
-      planPayload(deps.db, row, today, tomorrow),
+      planPayload(deps.db, row, today, tomorrow, me.id),
     );
     sendJson(res, 200, { plans });
     return;
@@ -767,7 +768,12 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
   };
 }
 
-export function socialPayload(db: DatabaseSync, social: SocialRow) {
+function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {
+  if (!reply?.blocked) return null;
+  return reply.removed_by?.trim() || "Someone";
+}
+
+export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: string | null = null) {
   return {
     id: social.id,
     note: social.note,
@@ -777,6 +783,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow) {
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
     creator: { id: social.creator_id, name: social.creator_name },
+    removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
       name: join.name,
@@ -788,7 +795,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow) {
   };
 }
 
-export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: string) {
+export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: string, viewerId: string | null = null) {
   return {
     id: plan.id,
     note: plan.note,
@@ -799,6 +806,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomo
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
     creator: { id: plan.creator_id, name: plan.creator_name },
+    removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
     joined: listPlanJoins(db, plan.id).map((join) => ({
       id: join.id,
       name: join.name,

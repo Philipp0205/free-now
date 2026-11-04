@@ -614,6 +614,7 @@ form.sheet { display: flex; flex-direction: column; overflow: hidden; }
 }
 .chip.on { background: #fff; color: #000; }
 .reply-line { margin: 4px 0 0; color: #d1d1d6; font-size: 14px; }
+.removed-note { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .guest-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .guest-row .reply-line { margin: 0; flex: 1; min-width: 0; }
 .guest-row .text-btn { min-height: 44px; padding-left: 12px; padding-right: 12px; }

@@ -390,6 +390,14 @@ test("removal blocks the old invite, ends posts, and names who removed you", asy
       const seen = await api(port, "GET", "/api/socials", { token: nia.token });
       const row = seen.socials.find((social: { id: string }) => social.id === again.social.id);
       assert.equal(row.joined.some((person: { id: string }) => person.id === nia.user.id), false);
+      assert.equal(row.removedBy, "Bea");
+      const hostView = await api(port, "GET", "/api/socials", { token: alex.token });
+      assert.equal(hostView.socials.find((social: { id: string }) => social.id === again.social.id).removedBy, null);
+      const supper = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Supper" }, status: 201 });
+      await api(port, "POST", `/api/plans/${supper.plan.id}/reply`, { token: nia.token, body: { reply: "in" }, status: 200 });
+      await api(port, "DELETE", `/api/plans/${supper.plan.id}/people/${nia.user.id}`, { token: bea.token, status: 204 });
+      const plans = await api(port, "GET", "/api/plans", { token: nia.token });
+      assert.equal(plans.plans.find((plan: { id: string }) => plan.id === supper.plan.id).removedBy, "Bea");
     });
   });
 });
