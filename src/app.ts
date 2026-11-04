@@ -71,7 +71,7 @@ import {
   type SocialRow,
   type UserRow,
 } from "./db.js";
-import { isMapsLinkInput, resolveMapsLink, reverseLookup, searchPlaces } from "./geocode.js";
+import { isMapsLinkInput, looksLikeUrl, resolveMapsLink, reverseLookup, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
@@ -257,6 +257,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       if (isMapsLinkInput(q)) {
         if (q.length > 2000) throw new HttpError(400, "query is too long");
         sendJson(res, 200, { results: await resolveMapsLink(q) });
+        return;
+      }
+      if (looksLikeUrl(q)) {
+        sendJson(res, 200, { results: [] });
         return;
       }
       if (q.length > 80) throw new HttpError(400, "query is too long");
