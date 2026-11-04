@@ -933,7 +933,7 @@ test("a confirm sheet closes when the gap between its buttons is dragged", { tim
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.getByRole("button", { name: "End Coffee" }).click();
     await page.locator(".sheet-confirm").waitFor();
     const point = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll(".sheet-confirm button")];
@@ -1115,6 +1115,44 @@ test("the host can remove someone who is in", { timeout: 90_000 }, async () => {
     assert.ok(endHeight >= 44, `end is ${endHeight}px`);
     await remove.click();
     await page.getByText("They can't join Coffee again.").waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a removed guest sees a note instead of reply buttons", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const nia = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Nia", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${nia.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/people/${nia.user.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await page.evaluate((value) => localStorage.setItem("fn_token", value), nia.token);
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByText("Alex removed you from this.").waitFor();
+    assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Can't" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Pick time" }).count(), 0);
   } finally {
     await page.context().close();
   }
