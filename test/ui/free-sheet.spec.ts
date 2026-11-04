@@ -932,6 +932,47 @@ test("a confirm sheet closes when the gap between its buttons is dragged", { tim
   }
 });
 
+test("a confirm sheet closes when the gap is touch-dragged in Chromium", { timeout: 90_000 }, async () => {
+  for (const size of [{ width: 360, height: 640 }, { width: 412, height: 700 }]) {
+    const page = await phonePage(CHROME_UA, false);
+    try {
+      await page.setViewportSize(size);
+      await signIn(page, "Alex");
+      const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+      await fetch(`${baseUrl}/api/socials`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ note: "Coffee" }),
+      });
+      await page.reload();
+      const later = page.locator(".sheet button", { hasText: "Not now" });
+      if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+      await page.getByRole("button", { name: /^End/ }).click();
+      await page.locator(".sheet-gap").waitFor();
+      const touch = await page.locator(".sheet-gap").evaluate((node) => getComputedStyle(node).touchAction);
+      assert.equal(touch, "none", JSON.stringify(size));
+      const point = await page.locator(".sheet-gap").evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      });
+      const session = await page.context().newCDPSession(page);
+      const finger = (y: number) => [{ x: point.x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }];
+      await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: finger(point.y) });
+      for (let step = 1; step <= 8; step += 1) {
+        await session.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: finger(point.y + step * 24),
+        });
+      }
+      await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await session.detach();
+      await page.locator(".sheet-confirm").waitFor({ state: "detached" });
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
 test("a swipe on the header or the top of the sheet closes it", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {

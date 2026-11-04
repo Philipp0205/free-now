@@ -718,8 +718,11 @@ input[type="time"].sheet-control { color-scheme: dark; }
 .sheet-head, .guide-head, .sheet-confirm .sheet-body { touch-action: none; }
 .sheet-confirm { overflow: hidden; touch-action: none; }
 .sheet-confirm button { touch-action: manipulation; }
+.sheet-confirm .stack,
+.sheet-gap { touch-action: none; }
 .sheet-confirm .stack { gap: 0; }
-.sheet-gap { height: 12px; flex: none; }
+/* Chromium retargets a touch in a 12px gap onto the nearest button. */
+.sheet-gap { height: 32px; flex: none; }
 .sheet.dragging, .guide.dragging { transition: none; }
 .sheet:has(.where-results) .sheet-dock { display: none; }
 .time-error { margin: 0; color: var(--danger); font-size: 13px; }
