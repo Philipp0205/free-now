@@ -1629,6 +1629,51 @@ test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => 
   }
 });
 
+test("Past events lists an ended hangout without reply buttons", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const social = await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee", place: "Cafe" }),
+    }).then((response) => response.json());
+    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ reply: "in" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "End Coffee" }).click();
+    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.getByRole("heading", { name: "Coffee" }).waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Past events" }).click();
+    await page.getByRole("heading", { name: "Past events" }).waitFor();
+    await page.getByRole("heading", { name: "Coffee" }).waitFor();
+    await page.getByText(/Alex/).waitFor();
+    await page.getByText("Cafe").waitFor();
+    await page.getByText("Fritz", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Edit Coffee" }).count(), 0);
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByText("This chat is closed.").waitFor();
+    assert.equal(await page.locator("#chat-input").count(), 0);
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("heading", { name: "Past events" }).waitFor();
+  } finally {
+    await page.context().close();
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },

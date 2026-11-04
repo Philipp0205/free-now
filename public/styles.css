@@ -569,6 +569,16 @@ input[type="text"], input[type="url"], input[type="time"] {
 .chat-compose input { flex: 1; min-width: 0; min-height: 44px; }
 .chat-compose .chat-send { width: auto; min-width: 64px; min-height: 44px; padding: 0 16px; }
 .chat-entry { min-height: 44px; min-width: 44px; padding: 0 4px; }
+.past-screen { min-height: 100dvh; background: #000; }
+.past-entry { padding: 8px 20px 28px; }
+.past-entry .text-btn { min-height: 44px; }
+.past-empty { padding: 8px 20px; }
+.past-day { padding: 0 20px; }
+.past-day h2 { margin: 18px 0 0; color: var(--muted); font-size: 13px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.past-card { padding: 14px 0; border-bottom: 1px solid var(--hairline); }
+.past-card h3 { margin: 0; font-size: 17px; }
+.past-card p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.past-card .text-btn { min-height: 44px; padding-left: 0; }
 
 html.kb-open .tabbar {
   visibility: hidden;

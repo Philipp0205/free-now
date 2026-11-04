@@ -74,7 +74,7 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   const tomorrow = addDays(today, 1);
-  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  assertPlanOpen(plan, today);
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const planBlock = getPlanReply(deps.db, plan.id, user.id);
   if (planBlock?.blocked) throw new HttpError(403, removedMessage(planBlock.removed_by));
@@ -113,7 +113,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
+  assertPlanOpen(plan, today);
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const reply = normalizeReply(body.reply);
   const planReplyBlock = getPlanReply(deps.db, plan.id, user.id);
@@ -193,6 +193,10 @@ async function notifyPlanReply(
       url: `/?plan=${plan.id}`,
     },
   ]);
+}
+
+function assertPlanOpen(plan: PlanRow, today: string): void {
+  if (plan.ended_at != null || plan.for_date < today) throw new HttpError(410, "That plan has ended.");
 }
 
 function readPlanArrive(value: unknown, day: string, now: number, tz: string): number {
