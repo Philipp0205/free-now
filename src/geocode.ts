@@ -318,11 +318,31 @@ function labelFromNominatim(body: unknown): string {
   return name ? `Near ${name}`.slice(0, 80) : "";
 }
 
-export async function reversePlace(lat: number, lng: number, fetchJson: JsonGetter = getJson): Promise<string> {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return "";
+function areaFromPhoton(payload: unknown): string {
+  const record = payload && typeof payload === "object" ? payload as { features?: unknown } : null;
+  const feature = Array.isArray(record?.features) ? record.features[0] : null;
+  const props = feature && typeof feature === "object"
+    ? (feature as { properties?: Record<string, unknown> }).properties ?? {}
+    : {};
+  return text(props.district) || text(props.locality) || text(props.city) || text(props.county) || "";
+}
+
+function areaFromNominatim(body: unknown): string {
+  const row = body && typeof body === "object" ? body as { address?: Record<string, unknown> } : null;
+  const address = row?.address ?? {};
+  return text(address.suburb) || text(address.city_district) || text(address.city) || text(address.town) || text(address.county) || "";
+}
+
+export async function reverseLookup(lat: number, lng: number, fetchJson: JsonGetter = getJson): Promise<{ place: string; area: string }> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return { place: "", area: "" };
+  }
   const key = `rev:${lat.toFixed(5)},${lng.toFixed(5)}`;
   const cached = cache.get(key);
-  if (cached && Date.now() - cached.at < CACHE_MS) return cached.results[0]?.name ?? "";
+  if (cached && Date.now() - cached.at < CACHE_MS) {
+    const hit = cached.results[0];
+    return { place: hit?.name ?? "", area: hit?.address ?? "" };
+  }
   const paced = fetchJson === getJson;
   if (paced) await pace();
   const photon = await fetchJson(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(String(lng))}&lat=${encodeURIComponent(String(lat))}`).catch(() => null);
@@ -331,7 +351,12 @@ export async function reversePlace(lat: number, lng: number, fetchJson: JsonGett
     if (paced) await pace();
     nominatim = await fetchJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`).catch(() => null);
   }
-  const name = describeNearby(lat, lng, photon, nominatim);
-  cache.set(key, { at: Date.now(), results: name ? [{ name, address: "", lat, lng, distanceM: null }] : [] });
-  return name;
+  const place = describeNearby(lat, lng, photon, nominatim);
+  const area = areaFromPhoton(photon) || areaFromNominatim(nominatim);
+  cache.set(key, { at: Date.now(), results: [{ name: place, address: area, lat, lng, distanceM: null }] });
+  return { place, area };
+}
+
+export async function reversePlace(lat: number, lng: number, fetchJson: JsonGetter = getJson): Promise<string> {
+  return (await reverseLookup(lat, lng, fetchJson)).place;
 }
