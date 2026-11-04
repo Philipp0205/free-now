@@ -1,5 +1,5 @@
-const CACHE = "hangry-v5";
-const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE = "hangry-v6";
+const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/map.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
