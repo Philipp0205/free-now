@@ -9,47 +9,9 @@ import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { addMember, insertCircle, insertSocial, insertUser, openDb, setSocialReply } from "../src/db.js";
-import type { PushPayload, PushSender } from "../src/push.js";
+import type { PushSender } from "../src/push.js";
 import { sendStartReminders } from "../src/remind.js";
-
-const START = Date.parse("2026-06-01T15:00:00.000Z");
-
-type Ctx = { port: number; db: DatabaseSync; sent: PushPayload[]; at: (ms: number) => void };
-
-async function withApp(fn: (ctx: Ctx) => Promise<void>, tz = "UTC") {
-  const sent: PushPayload[] = [];
-  let now = START;
-  const db = openDb(":memory:");
-  const push: PushSender = { async send(_sub, payload) { sent.push(payload); } };
-  const config = loadConfig({ PORT: "3000", APP_TZ: tz, DB_PATH: ":memory:" });
-  const server = http.createServer(createApp({ db, push, config: { ...config, dbPath: ":memory:" }, now: () => now }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const port = (server.address() as AddressInfo).port;
-  try {
-    await fn({ port, db, sent, at(ms) { now = ms; } });
-  } finally {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  }
-}
-
-async function api(port: number, method: string, pathname: string, options: { token?: string; body?: unknown; status?: number } = {}) {
-  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
-    method,
-    headers: {
-      ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
-  const text = await response.text();
-  const json = text ? JSON.parse(text) : null;
-  if (options.status !== undefined && response.status !== options.status) {
-    throw new Error(`${method} ${pathname} -> ${response.status} ${text}`);
-  }
-  return json;
-}
+import { START, api, withApp } from "./http.js";
 
 test("an invite link names the circle, joins in one step, and can be revoked", async () => {
   await withApp(async ({ port, db }) => {
@@ -182,7 +144,7 @@ test("later today pushes once, then reminds only people who are coming", async (
       body: { later: true, startsAt: null },
       status: 400,
     });
-  }, "UTC");
+  }, { tz: "UTC" });
 });
 
 test("a start reminder is due once, and skips closed, later, and unscheduled socials", async () => {
@@ -367,7 +329,7 @@ test("a start-time change notifies immediately, and a quick ETA does not send a 
       status: 200,
     });
     assert.equal(sent.length, quiet + 1);
-  }, "UTC");
+  }, { tz: "UTC" });
 });
 
 test("a circle with no invite expiry needs a new link", async () => {
@@ -605,5 +567,5 @@ test("Berlin midnight puts a plan on tomorrow and keeps a later-today start on t
     at(Date.parse("2026-06-02T22:00:00.000Z"));
     const gone = await api(port, "GET", "/api/plans", { token: alex.token });
     assert.deepEqual(gone.plans, []);
-  }, "Europe/Berlin");
+  }, { tz: "Europe/Berlin" });
 });
