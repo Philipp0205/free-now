@@ -553,7 +553,7 @@ html.kb-open .tabbar {
   padding: 0;
 }
 form.sheet { display: flex; flex-direction: column; overflow: hidden; }
-.sheet-scroll { overflow-x: hidden; overflow-y: auto; min-height: 0; flex: 1; }
+.sheet-scroll { overflow-x: hidden; overflow-y: auto; min-height: 0; flex: 1; padding-top: 16px; }
 .sheet-dock {
   position: sticky;
   bottom: 0;
@@ -716,7 +716,10 @@ input[type="time"].sheet-control { color-scheme: dark; }
   text-align: center;
 }
 .sheet-head, .guide-head, .sheet-confirm .sheet-body { touch-action: none; }
-.sheet-confirm { overflow: hidden; }
+.sheet-confirm { overflow: hidden; touch-action: none; }
+.sheet-confirm button { touch-action: manipulation; }
+.sheet-confirm .stack { gap: 0; }
+.sheet-gap { height: 12px; flex: none; }
 .sheet.dragging, .guide.dragging { transition: none; }
 .sheet:has(.where-results) .sheet-dock { display: none; }
 .time-error { margin: 0; color: var(--danger); font-size: 13px; }
