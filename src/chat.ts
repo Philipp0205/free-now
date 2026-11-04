@@ -86,15 +86,15 @@ export async function routeChat(
   method: string,
   pathname: string,
   body: Record<string, unknown>,
+  requestedCircle: string | null = null,
 ): Promise<{ status: number; body: unknown } | null> {
   if (method === "GET" && pathname === "/api/chats") {
-    const circleId = memberCircle(deps, user.id);
-    if (!circleId) throw new ChatError(409, "join a circle first");
+    const circleId = pickCircle(deps, user.id, requestedCircle, null);
     return { status: 200, body: chatSummary(deps, user.id, circleId) };
   }
   if (pathname === "/api/circles/chat") {
-    if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "") } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text) } };
+    if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "", requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle) } };
   }
   const mute = /^\/api\/chats\/([^/]+)\/mute$/.exec(pathname);
   if (mute && method === "POST") {
@@ -109,14 +109,14 @@ export async function routeChat(
   const social = /^\/api\/socials\/([^/]+)\/chat$/.exec(pathname);
   if (social) {
     const id = decodeURIComponent(social[1]);
-    if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text) } };
+    if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle) } };
   }
   const plan = /^\/api\/plans\/([^/]+)\/chat$/.exec(pathname);
   if (plan) {
     const id = decodeURIComponent(plan[1]);
-    if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text) } };
+    if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle) } };
   }
   return null;
 }
@@ -138,8 +138,8 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
   };
 }
 
-export function readThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string) {
-  const access = accessThread(deps, userId, kind, refId, false);
+export function readThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, requestedCircle: string | null = null) {
+  const access = accessThread(deps, userId, kind, refId, false, requestedCircle);
   markRead(deps.db, access.chat.id, userId, deps.now());
   return threadPayload(deps, access, userId);
 }
@@ -151,9 +151,10 @@ export async function postThread(
   kind: "circle" | "social" | "plan",
   refId: string,
   raw: unknown,
+  requestedCircle: string | null = null,
 ): Promise<ReturnType<typeof threadPayload>> {
   const text = cleanText(raw);
-  const access = accessThread(deps, userId, kind, refId, true);
+  const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
   const now = deps.now();
   const id = crypto.randomUUID();
   deps.db.prepare(
@@ -173,9 +174,7 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
   if (row.kind !== "text") throw new ChatError(403, "You can't delete that.");
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
-  if (!chat) throw new ChatError(404, "message not found");
-  const circle = memberCircle(deps, userId);
-  if (circle !== chat.circle_id) throw new ChatError(404, "message not found");
+  if (!chat || !inCircle(deps, userId, chat.circle_id)) throw new ChatError(404, "message not found");
   const host = chat.kind !== "circle" && chat.host_id === userId;
   const admin = isCircleAdmin(deps.db, chat.circle_id, userId);
   const ownText = row.kind === "text" && row.user_id === userId;
@@ -185,7 +184,7 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
 
 export function setMuted(deps: ChatDeps, userId: string, chatId: string, muted: boolean): void {
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
-  if (!chat || memberCircle(deps, userId) !== chat.circle_id) throw new ChatError(404, "chat not found");
+  if (!chat || !inCircle(deps, userId, chat.circle_id)) throw new ChatError(404, "chat not found");
   if (muted) {
     deps.db.prepare("INSERT INTO chat_mutes (user_id, chat_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(userId, chatId);
   } else {
@@ -299,6 +298,7 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[],
   const title = chat.kind === "circle" ? (chat.title || "Circle chat") : (chat.title || "Chat");
   const ref = chat.kind === "circle" ? "circle" : `${chat.kind}:${chat.ref_id}`;
   deps.db.prepare("UPDATE chats SET last_push_at = ? WHERE id = ?").run(deps.now(), chat.id);
+  const named = one<{ name: string }>(deps.db, "SELECT name FROM circles WHERE id = ?", chat.circle_id);
   await notifyUsers(deps.db, deps.push, deps.now(), recipients.map((userId) => ({
     userId,
     title,
@@ -308,7 +308,7 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[],
     tag: `chat:${chat.id}`,
     url: `/?chat=${encodeURIComponent(ref)}`,
     skipAlert: true,
-  })));
+  })), named ? { id: chat.circle_id, name: named.name } : null);
 }
 
 function noticeRecipients(db: DatabaseSync, chat: ChatRow, senderId: string): Array<{ id: string }> {
@@ -419,9 +419,13 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
 
 type Access = { chat: ChatRow; title: string; closed: boolean; blocked: boolean };
 
-function accessThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, writing: boolean): Access {
-  const circleId = memberCircle(deps, userId);
-  if (!circleId) throw new ChatError(409, "join a circle first");
+function accessThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, writing: boolean, requestedCircle: string | null): Access {
+  const resourceCircle = kind === "social"
+    ? getSocial(deps.db, refId)?.circle_id ?? null
+    : kind === "plan"
+      ? getPlan(deps.db, refId)?.circle_id ?? null
+      : null;
+  const circleId = pickCircle(deps, userId, requestedCircle, resourceCircle);
   const now = deps.now();
   const looked = lookEvent(deps, circleId, userId, kind, refId, now);
   if (looked.missing) throw new ChatError(404, "chat not found");
@@ -477,9 +481,28 @@ function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: strin
   };
 }
 
-function memberCircle(deps: ChatDeps, userId: string): string | null {
-  const row = one<{ circle_id: string }>(deps.db, "SELECT circle_id FROM memberships WHERE user_id = ?", userId);
-  return row?.circle_id ?? null;
+function inCircle(deps: ChatDeps, userId: string, circleId: string): boolean {
+  return Boolean(one(deps.db, "SELECT 1 AS ok FROM memberships WHERE user_id = ? AND circle_id = ?", userId, circleId));
+}
+
+function pickCircle(deps: ChatDeps, userId: string, requested: string | null, resourceCircle: string | null): string {
+  const count = Number(one<{ n: number }>(deps.db, "SELECT COUNT(*) AS n FROM memberships WHERE user_id = ?", userId)?.n ?? 0);
+  if (count === 0) throw new ChatError(409, "join a circle first");
+  if (requested) {
+    if (!inCircle(deps, userId, requested)) throw new ChatError(404, "chat not found");
+    if (resourceCircle && resourceCircle !== requested) throw new ChatError(404, "chat not found");
+    return requested;
+  }
+  if (resourceCircle) {
+    if (!inCircle(deps, userId, resourceCircle)) throw new ChatError(404, "chat not found");
+    return resourceCircle;
+  }
+  if (count === 1) {
+    const only = one<{ circle_id: string }>(deps.db, "SELECT circle_id FROM memberships WHERE user_id = ?", userId);
+    if (!only) throw new ChatError(409, "join a circle first");
+    return only.circle_id;
+  }
+  throw new ChatError(400, "circle is required");
 }
 
 function ensureChat(db: DatabaseSync, circleId: string, kind: string, refId: string, hostId: string | null, title: string, now: number): ChatRow {

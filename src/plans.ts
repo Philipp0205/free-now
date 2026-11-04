@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {
   countUpcomingPlans,
+  getCircleById,
   getPlan,
   getPlanReply,
   insertPlan,
@@ -26,8 +27,9 @@ export async function publishPlan(
   note: string,
   place: string,
   point?: { lat: number; lng: number } | null,
+  requested: string | null = null,
 ) {
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   const tomorrow = addDays(today, 1);
@@ -60,15 +62,16 @@ export async function publishPlan(
       tag: `plan:${id}`,
       url: `/?plan=${id}`,
     })),
+    circle,
   );
   const plan = getPlan(deps.db, id);
   if (!plan) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, plan, today, tomorrow);
 }
 
-export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
+export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   const now = deps.now();
@@ -106,9 +109,9 @@ async function setPlanComing(
   await notifyPlanReply(deps, user, plan, now, "coming");
 }
 
-export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   const now = deps.now();
@@ -151,7 +154,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
           tag: `plan-reply:${plan.id}:${user.id}`,
           url: `/?plan=${plan.id}`,
         },
-      ]);
+      ], circle);
     }
   } else {
     const previous = getPlanReply(deps.db, plan.id, user.id);
@@ -192,7 +195,7 @@ async function notifyPlanReply(
       tag: `plan-reply:${plan.id}:${user.id}`,
       url: `/?plan=${plan.id}`,
     },
-  ]);
+  ], getCircleById(deps.db, plan.circle_id));
 }
 
 function assertPlanOpen(plan: PlanRow, today: string): void {

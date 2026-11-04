@@ -22,6 +22,7 @@ export async function sendStartReminders(db: DatabaseSync, push: PushSender, now
           refId: social.id,
           tag: `social-start:${social.id}`,
         })),
+        { id: social.circle_id, name: social.circle_name },
       );
     }
     markSocialReminded(db, social.id, now);

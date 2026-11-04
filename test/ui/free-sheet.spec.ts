@@ -1674,6 +1674,61 @@ test("Past events lists an ended hangout without reply buttons", { timeout: 90_0
   }
 });
 
+test("two circles stay separate when you switch, post, join, and leave", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await signIn(page, "Alex");
+    const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Circle", exact: true }).click();
+    await page.getByRole("button", { name: "New circle", exact: true }).click();
+    await page.locator("#new-circle-name").fill("Home");
+    await page.getByRole("button", { name: "Create circle" }).click();
+    await page.getByRole("button", { name: "Switch circle" }).waitFor();
+    const switchHeight = await page.getByRole("button", { name: "Switch circle" }).evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(switchHeight >= 44, `switcher is ${switchHeight}px`);
+    await page.getByRole("button", { name: "Now", exact: true }).click();
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.getByText("Posting to Home").waitFor();
+    await page.locator("#sheet-note").fill("Soup");
+    await page.getByRole("button", { name: "I'm free" }).click();
+    await page.getByRole("heading", { name: "Soup" }).waitFor();
+
+    await page.getByRole("button", { name: "Switch circle" }).click();
+    await page.getByRole("button", { name: "friends", exact: true }).click();
+    await page.getByRole("heading", { name: "Soup" }).waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Switch circle" }).click();
+    await page.getByRole("button", { name: "Home", exact: true }).click();
+    await page.getByRole("heading", { name: "Soup" }).waitFor();
+
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const bea = await fetch(`${baseUrl}/api/auth/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
+    }).then((response) => response.json());
+    const beaContext = await browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
+    await beaContext.addInitScript(vvMock);
+    const beaPage = await beaContext.newPage();
+    await beaPage.addInitScript((value) => localStorage.setItem("fn_token", value), bea.token);
+    await beaPage.goto(baseUrl);
+    const beaLater = beaPage.locator(".sheet button.btn.ghost", { hasText: "Not now" });
+    if (await beaLater.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await beaLater.click();
+    await beaPage.getByRole("button", { name: "Now", exact: true }).waitFor();
+    assert.equal(await beaPage.getByRole("heading", { name: "Soup" }).count(), 0);
+
+    await page.getByRole("button", { name: "You", exact: true }).click();
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByRole("button", { name: "Leave circle" }).click();
+    await page.getByRole("button", { name: "Now", exact: true }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Soup" }).count(), 0);
+    await beaContext.close();
+  } finally {
+    await page.context().close();
+  }
+});
+
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
   const context = await browser.newContext({
     viewport: { width: 360, height: 640 },

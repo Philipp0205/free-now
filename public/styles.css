@@ -70,6 +70,51 @@ button:disabled { cursor: default; opacity: 0.55; }
   padding: 14px 20px 6px;
   gap: 12px;
 }
+.head-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.circle-switch { position: relative; margin-bottom: 2px; }
+.circle-switch-btn, .circle-switch-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.circle-switch-btn { min-height: 44px; padding: 0 4px; }
+.circle-switch-name { font-weight: 600; }
+.circle-switch-btn svg { width: 16px; height: 16px; transform: rotate(90deg); }
+.circle-menu {
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  top: calc(100% + 6px);
+  min-width: 220px;
+  background: #1c1c1e;
+  border-radius: 14px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.circle-menu button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  font: inherit;
+  font-size: 16px;
+  padding: 12px;
+  border-radius: 10px;
+}
+.circle-menu button.on { background: rgba(255, 255, 255, 0.08); }
+.posting-to { margin: 8px 0 0; color: var(--faint); font-size: 13px; }
 .screen-title {
   margin: 0;
   font-size: clamp(32px, 9vw, 40px);

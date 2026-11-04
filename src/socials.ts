@@ -22,10 +22,11 @@ export async function publishSocial(
   point?: { lat: number; lng: number } | null,
   place?: string,
   start?: number | null,
+  requested: string | null = null,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const now = deps.now();
-  const existing = getActiveSocialByCreator(deps.db, user.id, now);
+  const existing = getActiveSocialByCreator(deps.db, user.id, circle.id, now);
   let created = false;
   let socialId: string;
   let shouldNotify = true;
@@ -98,6 +99,7 @@ export async function publishSocial(
         refId: socialId,
         tag: `social:${socialId}`,
       })),
+      circle,
     );
   }
   const social = getSocial(deps.db, socialId);
@@ -116,9 +118,9 @@ export function normalizeReply(value: unknown): "coming" | "declined" {
   throw new HttpError(400, "reply must be in or can't");
 }
 
-export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   const now = deps.now();
@@ -171,7 +173,7 @@ export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, b
       tag: `reply:${social.id}:${user.id}`,
       url: `/?social=${social.id}`,
     },
-  ]);
+  ], circle);
   if (held || (becameComing && (eta != null || arriveAt != null))) {
     await notice();
   } else if (becameComing) {

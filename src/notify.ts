@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { deletePushSub, insertNotification, listPushSubs, withTx } from "./db.js";
+import { countCirclesForUser, deletePushSub, insertNotification, listPushSubs, withTx } from "./db.js";
 import type { PushPayload, PushSender } from "./push.js";
 
 export type Notice = {
@@ -82,19 +82,22 @@ export async function notifyUsers(
   push: PushSender,
   now: number,
   notices: Notice[],
+  circle?: { id: string; name: string } | null,
 ): Promise<void> {
   if (notices.length === 0) return;
   const deliveries: Array<{ userId: string; endpoint: string; p256dh: string; auth: string; payload: PushPayload }> = [];
   withTx(db, () => {
     for (const notice of notices) {
+      const scoped = scopeNotice(db, notice, circle);
       if (!notice.skipAlert) {
         insertNotification(db, {
           id: crypto.randomUUID(),
           userId: notice.userId,
           title: notice.title,
-          body: notice.body,
+          body: scoped.body,
           kind: notice.kind,
           refId: notice.refId,
+          circleId: circle?.id ?? null,
           createdAt: now,
         });
       }
@@ -106,8 +109,8 @@ export async function notifyUsers(
           auth: sub.auth,
           payload: {
             title: notice.title,
-            body: notice.body,
-            url: notice.url ?? "/",
+            body: scoped.body,
+            url: scoped.url,
             tag: notice.tag,
           },
         });
@@ -127,6 +130,20 @@ export async function notifyUsers(
       if (status === 404 || status === 410) deletePushSub(db, delivery.endpoint);
     }
   }
+}
+
+function scopeNotice(
+  db: DatabaseSync,
+  notice: Notice,
+  circle?: { id: string; name: string } | null,
+): { body: string; url: string } {
+  const url = notice.url ?? "/";
+  if (!circle || countCirclesForUser(db, notice.userId) <= 1) return { body: notice.body, url };
+  const join = url.includes("?") ? "&" : "?";
+  return {
+    body: `${notice.body} · ${circle.name}`,
+    url: `${url}${join}circle=${encodeURIComponent(circle.id)}`,
+  };
 }
 
 function statusOf(error: unknown): number | undefined {

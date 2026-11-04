@@ -58,7 +58,9 @@ curl -X POST http://localhost:3000/api/buzz/YOUR_TOKEN \
   -d '{"note":"Rooftop coffee??"}'
 ```
 
-A POST with an empty body is also fine — the note is optional. The token is on the You tab, inside the same curl snippet. Pressing it again refreshes the two-hour timer. The same note will not push more than once every 30 seconds, so a bouncy button does not spam the circle. Changing the note can notify again after 15 seconds.
+A POST with an empty body is also fine — the note is optional. The token is on the You tab. Pressing it again refreshes the two-hour timer. The same note will not push more than once every 30 seconds, so a bouncy button does not spam the circle. Changing the note can notify again after 15 seconds.
+
+One circle needs no extra argument. With more than one circle, a buzz that does not name a circle posts to the circle you joined last. The You tab shows a link for the circle you are looking at: `/api/buzz/<token>?circle=<id>`.
 
 The token is a bearer secret. Anyone with it can start a social as that user. It is stored in SQLite so the You tab can show it again; keep the database file private.
 
