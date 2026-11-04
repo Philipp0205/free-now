@@ -80,6 +80,8 @@ const state = {
   chatDraft: "",
   chatStick: false,
   chatSummary: { circle: { unread: 0, muted: false }, events: [] },
+  past: false,
+  pastDays: null,
 };
 
 const deepLinkParams = new URLSearchParams(location.search);
@@ -278,7 +280,7 @@ function friendlyMessage(raw, status) {
   if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
   if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
   if (lower.includes("plan has ended")) return "That plan has ended.";
-  if (lower.includes("post has ended")) return "That post has ended.";
+  if (lower.includes("post has ended") || lower.includes("hangout has ended")) return "That post has ended.";
   if (status === 410 || lower.includes("expired")) return "This invite has expired. Ask for a new link.";
   if (lower.includes("invite")) return "This invite isn't valid. Ask for a new link.";
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
@@ -631,6 +633,8 @@ function clearSession() {
   state.plans = [];
   state.notifications = [];
   state.bootstrappedNotifs = false;
+  state.past = false;
+  state.pastDays = null;
 }
 
 function render() {
@@ -830,6 +834,10 @@ function shell() {
     phone.append(chatScreen());
     return phone;
   }
+  if (state.past) {
+    phone.append(pastScreen());
+    return phone;
+  }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
   if (state.tab === "home") phone.append(home());
   if (state.tab === "map") phone.append(mapScreen());
@@ -917,7 +925,68 @@ function home() {
         ]),
   ]);
   parts.push(tomorrow);
+  parts.push(el("div", { class: "past-entry" }, [
+    el("button", { class: "text-btn", type: "button", text: "Past events", onclick: () => { void openPast(); } }),
+  ]));
   return el("div", {}, parts);
+}
+
+async function openPast() {
+  state.past = true;
+  state.sheet = null;
+  state.pastDays = null;
+  render();
+  await run(async () => {
+    state.pastDays = (await api("/api/past")).days;
+  });
+}
+
+function closePast() {
+  state.past = false;
+  state.pastDays = null;
+  render();
+}
+
+function pastScreen() {
+  const days = state.pastDays;
+  return el("section", { class: "past-screen", "aria-label": "Past events" }, [
+    el("header", { class: "chat-head" }, [
+      el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closePast }),
+      el("h1", { text: "Past events" }),
+    ]),
+    days == null
+      ? el("p", { class: "help past-empty", text: "Loading…" })
+      : days.length
+        ? el("div", { class: "past-list" }, days.map(pastDay))
+        : el("p", { class: "help past-empty", text: "Nothing here yet. Ended hangouts stay for 90 days." }),
+  ]);
+}
+
+function pastDay(day) {
+  return el("section", { class: "past-day" }, [
+    el("h2", { text: day.label }),
+    ...day.events.map(pastCard),
+  ]);
+}
+
+function pastCard(event) {
+  const bits = [event.host.name];
+  if (event.time) bits.push(event.time);
+  if (event.place) bits.push(event.place);
+  const people = event.people.map((person) => (
+    person.arriveAt ? `${person.name}, arriving ${clock(person.arriveAt)}` : person.name
+  ));
+  return el("article", { class: "past-card" }, [
+    el("h3", { text: event.note || (event.kind === "plan" ? "Plan" : "Free now") }),
+    el("p", { text: bits.join(" · ") }),
+    people.length ? el("p", { text: people.join(" · ") }) : null,
+    el("button", {
+      class: "text-btn",
+      type: "button",
+      text: "Chat",
+      onclick: () => { void openChat({ kind: event.kind, id: event.id }); },
+    }),
+  ]);
 }
 
 function socialCard(social) {

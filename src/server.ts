@@ -1,6 +1,6 @@
 import http from "node:http";
 import { loadConfig } from "./config.js";
-import { clearExpiredLocations, openDb, sweep } from "./db.js";
+import { clearExpiredLocations, HISTORY_DAYS, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
 import { createNoopPushSender, createWebPushSender } from "./push.js";
 import { sendStartReminders } from "./remind.js";
@@ -13,7 +13,7 @@ const push = config.vapid ? createWebPushSender(config.vapid) : createNoopPushSe
 function sweepNow(): void {
   const now = Date.now();
   const today = isoDate(now, config.tz);
-  sweep(db, now, addDays(today, -2), today);
+  sweep(db, now, addDays(today, -HISTORY_DAYS), today);
 }
 
 function clearLocationsNow(): void {

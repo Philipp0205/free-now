@@ -173,7 +173,7 @@ test("an expired social row has NULL coordinates while the row remains", () => {
   assert.equal(row.lat, null);
   assert.equal(row.lng, null);
   assert.equal(row.note, "hi");
-  assert.equal(row.place, "");
+  assert.equal(row.place, "Café X");
   const live = db.prepare("SELECT lat, lng FROM socials WHERE id = ?").get("live") as { lat: number; lng: number };
   assert.equal(live.lat, 52.52);
   assert.equal(live.lng, 13.405);
@@ -199,7 +199,7 @@ test("an expired social row has NULL coordinates while the row remains", () => {
   };
   assert.equal(stripped.lat, null);
   assert.equal(stripped.lng, null);
-  assert.equal(stripped.place, "");
+  assert.equal(stripped.place, "Marienplatz");
   db.close();
 });
 
@@ -262,7 +262,7 @@ test("an older database gains location columns", () => {
   const socialCols = db.prepare("PRAGMA table_info(socials)").all().map((row) => (row as { name: string }).name);
   const planCols = db.prepare("PRAGMA table_info(plans)").all().map((row) => (row as { name: string }).name);
   assert.ok(socialCols.includes("lat") && socialCols.includes("lng") && socialCols.includes("place"));
-  assert.ok(planCols.includes("lat") && planCols.includes("lng") && planCols.includes("place"));
+  assert.ok(planCols.includes("lat") && planCols.includes("lng") && planCols.includes("place") && planCols.includes("ended_at"));
   db.close();
   fs.unlinkSync(file);
 });
