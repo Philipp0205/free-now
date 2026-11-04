@@ -46,6 +46,7 @@ import {
   rotateInvite,
   deleteSessionByHash,
   insertSession,
+  updateCircleName,
   updateUserName,
   upsertPushSub,
   type CircleRow,
@@ -305,6 +306,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     requireAdmin(deps, circle.id, me.id);
     clearRemoval(deps.db, circle.id, parseId(removal[1]));
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "PATCH" && pathname === "/api/circles") {
+    const circle = requireCircle(deps, me.id);
+    if (!isCircleAdmin(deps.db, circle.id, me.id)) throw new HttpError(403, "Only an admin can do that.");
+    const name = cleanLabel(body.name, "circle name", 32);
+    updateCircleName(deps.db, circle.id, name);
+    const fresh = getCircleForUser(deps.db, me.id);
+    if (!fresh) throw new HttpError(500, "circle missing");
+    sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
   }
 

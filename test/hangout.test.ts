@@ -480,6 +480,146 @@ test("a picked arrival time is stored and each change pushes once", async () => 
   });
 });
 
+test("any minute from the start through the window is a valid arrival, including 19:06", async () => {
+  await withApp(async ({ port }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Sam", code: created.circle.inviteCode },
+      status: 201,
+    });
+    const later = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Dinner", startsAt: "19:06" },
+      status: 201,
+    });
+    assert.equal(later.social.creator.name, "Alex");
+    assert.equal(later.social.startsAt, Date.parse("2026-06-01T19:06:00.000Z"));
+    const atStart = await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "19:06" },
+      status: 200,
+    });
+    assert.equal(atStart.social.joined[0].arriveAt, Date.parse("2026-06-01T19:06:00.000Z"));
+    const nextMinute = await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "19:07" },
+      status: 200,
+    });
+    assert.equal(nextMinute.social.joined[0].arriveAt, Date.parse("2026-06-01T19:07:00.000Z"));
+    await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "19:05" },
+      status: 400,
+    });
+    const atEnd = await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "21:06" },
+      status: 200,
+    });
+    assert.equal(atEnd.social.joined[0].arriveAt, Date.parse("2026-06-01T21:06:00.000Z"));
+    await api(port, "POST", `/api/socials/${later.social.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "21:07" },
+      status: 400,
+    });
+
+    const live = await api(port, "POST", "/api/socials", {
+      token: sam.token,
+      body: { note: "Coffee" },
+      status: 201,
+    });
+    const nowMinute = await api(port, "POST", `/api/socials/${live.social.id}/reply`, {
+      token: alex.token,
+      body: { reply: "in", arriveAt: "15:00" },
+      status: 200,
+    });
+    assert.equal(nowMinute.social.joined[0].arriveAt, Date.parse("2026-06-01T15:00:00.000Z"));
+
+    const plan = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Tomorrow dinner" },
+      status: 201,
+    });
+    const planMinute = await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "19:06" },
+      status: 200,
+    });
+    assert.equal(planMinute.plan.joined[0].arriveAt, Date.parse("2026-06-02T19:06:00.000Z"));
+    await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, {
+      token: sam.token,
+      body: { reply: "in", arriveAt: "23:59" },
+      status: 200,
+    });
+  });
+});
+
+test("a member cannot rename the circle or the name others see", async () => {
+  await withApp(async ({ port, db }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Amanda" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    assert.equal(created.circle.youAreAdmin, true);
+    const sam = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Sam", code: created.circle.inviteCode },
+      status: 201,
+    });
+    assert.equal(sam.circle.youAreAdmin, false);
+    const posted = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Dinner", startsAt: "19:06" },
+      status: 201,
+    });
+    const renamedSelf = await api(port, "PATCH", "/api/me", {
+      token: sam.token,
+      body: { name: "Sam" },
+      status: 200,
+    });
+    assert.equal(renamedSelf.user.name, "Sam");
+    const circleDenied = await api(port, "PATCH", "/api/circles", {
+      token: sam.token,
+      body: { name: "Amanda's +1" },
+      status: 403,
+    });
+    assert.equal(circleDenied.error, "Only an admin can do that.");
+    const seen = await api(port, "GET", "/api/socials", { token: sam.token });
+    assert.equal(seen.socials[0].creator.name, "Amanda");
+    assert.equal(seen.socials[0].id, posted.social.id);
+    const still = await api(port, "GET", "/api/me", { token: sam.token });
+    assert.equal(still.user.name, "Sam");
+    assert.equal(still.circle.name, "friends");
+
+    const renamed = await api(port, "PATCH", "/api/me", {
+      token: alex.token,
+      body: { name: "Amanda" },
+      status: 200,
+    });
+    assert.equal(renamed.user.name, "Amanda");
+    const circle = await api(port, "PATCH", "/api/circles", {
+      token: alex.token,
+      body: { name: "Roof" },
+      status: 200,
+    });
+    assert.equal(circle.circle.name, "Roof");
+
+    db.prepare("UPDATE memberships SET is_admin = 1 WHERE user_id = ?").run(sam.user.id);
+    db.prepare("UPDATE memberships SET is_admin = 0 WHERE user_id = ?").run(alex.user.id);
+    const adminCircle = await api(port, "PATCH", "/api/circles", {
+      token: sam.token,
+      body: { name: "Yard" },
+      status: 200,
+    });
+    assert.equal(adminCircle.circle.name, "Yard");
+    await api(port, "PATCH", "/api/circles", {
+      token: alex.token,
+      body: { name: "Nope" },
+      status: 403,
+    });
+    const cards = await api(port, "GET", "/api/socials", { token: sam.token });
+    assert.equal(cards.socials[0].creator.name, "Amanda");
+  });
+});
+
 test("the old Railway host redirects to the configured public origin", async () => {
   const db = openDb(":memory:");
   const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", PUBLIC_BASE_URL: "https://hangry.example" });

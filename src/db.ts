@@ -334,6 +334,10 @@ export function updateUserName(db: DatabaseSync, id: string, name: string): void
   db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, id);
 }
 
+export function updateCircleName(db: DatabaseSync, id: string, name: string): void {
+  db.prepare("UPDATE circles SET name = ? WHERE id = ?").run(name, id);
+}
+
 export function rotateBuzzToken(db: DatabaseSync, id: string, buzzToken: string): void {
   db.prepare("UPDATE users SET buzz_token = ? WHERE id = ?").run(buzzToken, id);
 }
