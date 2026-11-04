@@ -1,6 +1,7 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 import { clockText, isLaterToday, minLaterClock, nextLaterSlot, zonedParts } from "./when.js";
+import { audiencePlace, formatDistance, haversine } from "./place.js";
 
 const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
@@ -2421,11 +2422,6 @@ function rememberViewerLocation() {
   }).catch(() => {});
 }
 
-function audiencePlace(place) {
-  const spot = typeof place === "string" ? place.trim() : "";
-  return /^near you$/i.test(spot) ? "nearby" : spot;
-}
-
 function placeLine(location, placeName, target) {
   const named = audiencePlace(placeName);
   if (!location && !named) return null;
@@ -2491,21 +2487,6 @@ function mapsHref(lat, lng, label) {
   if (ios) return `https://maps.apple.com/?ll=${lat},${lng}&q=${name}`;
   if (/android/i.test(navigator.userAgent)) return `geo:${lat},${lng}?q=${lat},${lng}(${name})`;
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-}
-
-function haversine(a, b) {
-  const radius = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2
-    + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-function formatDistance(meters) {
-  if (meters < 950) return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
-  const km = meters / 1000;
-  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
 
 function field(label, id, value, onValue, attrs = {}) {
