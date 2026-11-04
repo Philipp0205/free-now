@@ -216,7 +216,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!buzzer) throw new HttpError(404, "unknown token");
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
-    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested);
+    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
@@ -501,6 +501,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/push/test") {
+    const circles = listCirclesForUser(deps.db, me.id);
+    const circle = circles.length === 0 ? null : requireCircle(deps, me.id, requested);
     const subs = listPushSubs(deps.db, me.id);
     await notifyUsers(deps.db, deps.push, deps.now(), [
       {
@@ -511,7 +513,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
         refId: null,
         tag: `test:${me.id}`,
       },
-    ]);
+    ], circle);
     sendJson(res, 200, {
       inApp: true,
       subscriptions: subs.length,
@@ -831,6 +833,7 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
         changeBody(changes),
         social.id,
         `/?social=${social.id}`,
+        circle,
       );
     }
   }
@@ -910,6 +913,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
         changeBody(changes),
         plan.id,
         `/?plan=${plan.id}`,
+        circle,
       );
     }
   }
@@ -1061,6 +1065,13 @@ function readRequestedCircle(req: http.IncomingMessage, url: URL, body: Record<s
   const raw = (header || url.searchParams.get("circle") || fromBody).trim();
   if (!raw) return null;
   return parseId(raw);
+}
+
+/** A buzz with no circle posts to the circle joined last, so the bare link still works. */
+function buzzCircle(deps: AppDeps, userId: string): string | null {
+  const circles = listCirclesForUser(deps.db, userId);
+  if (circles.length <= 1) return null;
+  return circles[circles.length - 1].id;
 }
 
 export function requireCircle(deps: AppDeps, userId: string, requested: string | null = null): CircleRow {

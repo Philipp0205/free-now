@@ -1421,6 +1421,21 @@ function alertsScreen() {
   ]);
 }
 
+function buzzNote(code) {
+  const circles = state.me?.circles || [];
+  const current = state.me?.circle;
+  if (circles.length < 2 || !current) return null;
+  const last = circles[circles.length - 1];
+  const link = `${location.origin}/api/buzz/${encodeURIComponent(code)}?circle=${encodeURIComponent(current.id)}`;
+  return el("div", {}, [
+    el("p", {
+      class: "help",
+      text: `This link posts to ${current.name}. A buzz with only the code posts to ${last.name}.`,
+    }),
+    el("p", { class: "code-block", text: link }),
+  ]);
+}
+
 function youScreen() {
   const code = state.me.user.buzzToken;
   return el("div", {}, [
@@ -1471,6 +1486,7 @@ function youScreen() {
         ? el("div", {}, [
             el("p", { class: "code-block", text: code }),
             el("p", { class: "help", text: "Save this. It is how you sign back in on another phone." }),
+            buzzNote(code),
             el("div", { class: "stack" }, [
               el("button", {
                 class: "btn secondary",

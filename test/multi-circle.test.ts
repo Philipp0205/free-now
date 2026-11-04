@@ -218,3 +218,85 @@ test("one account can keep two circles apart", async () => {
     assert.equal(alexCircles.circle, null);
   });
 });
+
+test("an admin edit and a test push show in that circle's alerts", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: home.circle.inviteCode }, status: 201 });
+    await api(port, "POST", `/api/circles/members/${bea.user.id}?circle=${home.circle.id}`, {
+      token: alex.token,
+      body: { admin: true },
+      status: 200,
+    });
+    const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: alex.token,
+      body: { endpoint: "https://push.example/alex", keys: { p256dh: "p256dh-key", auth: "auth-key" } },
+      status: 204,
+    });
+    const plan = await api(port, "POST", `/api/plans?circle=${home.circle.id}`, {
+      token: alex.token,
+      body: { note: "Dinner" },
+      status: 201,
+    });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${plan.plan.id}?circle=${home.circle.id}`, {
+      token: bea.token,
+      body: { note: "Dinner at 8" },
+      status: 200,
+    });
+    const homeNotes = await api(port, "GET", `/api/notifications?circle=${home.circle.id}`, { token: alex.token });
+    const edited = homeNotes.notifications.find((note: { title: string }) => note.title === "Bea edited your plan: Dinner at 8");
+    assert.ok(edited);
+    assert.match(edited.body, /Note is now Dinner at 8/);
+    assert.match(edited.body, /· Home/);
+    const uniNotes = await api(port, "GET", `/api/notifications?circle=${uni.circle.id}`, { token: alex.token });
+    assert.equal(uniNotes.notifications.some((note: { title: string }) => note.title.includes("edited your")), false);
+    const push = sent.find((item) => item.title === "Bea edited your plan: Dinner at 8");
+    assert.equal(push?.url, `/?plan=${plan.plan.id}&circle=${home.circle.id}`);
+
+    const social = await api(port, "POST", `/api/socials?circle=${home.circle.id}`, {
+      token: alex.token,
+      body: { note: "Coffee" },
+      status: 201,
+    });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/socials/${social.social.id}?circle=${home.circle.id}`, {
+      token: bea.token,
+      body: { note: "Tea" },
+      status: 200,
+    });
+    const freeNotes = await api(port, "GET", `/api/notifications?circle=${home.circle.id}`, { token: alex.token });
+    const freeEdit = freeNotes.notifications.find((note: { title: string }) => note.title === "Bea edited your free post: Tea");
+    assert.ok(freeEdit);
+    assert.match(freeEdit.body, /· Home/);
+
+    await api(port, "POST", `/api/push/test?circle=${home.circle.id}`, { token: alex.token, body: {}, status: 200 });
+    const tested = await api(port, "GET", `/api/notifications?circle=${home.circle.id}`, { token: alex.token });
+    assert.equal(tested.notifications.some((note: { kind: string; body: string }) => note.kind === "test" && note.body.startsWith("Push works")), true);
+    const testedUni = await api(port, "GET", `/api/notifications?circle=${uni.circle.id}`, { token: alex.token });
+    assert.equal(testedUni.notifications.some((note: { kind: string }) => note.kind === "test"), false);
+  });
+});
+
+test("a buzz with no circle posts to the circle joined last", async () => {
+  await withApp(async ({ port, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
+    at(START + 1000);
+    const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
+    const bare = await api(port, "POST", `/api/buzz/${alex.buzzToken}`, { body: { note: "Bare" }, status: 201 });
+    assert.equal(bare.social.note, "Bare");
+    const uniList = await api(port, "GET", `/api/socials?circle=${uni.circle.id}`, { token: alex.token });
+    assert.equal(uniList.socials.some((social: { note: string }) => social.note === "Bare"), true);
+    const homeList = await api(port, "GET", `/api/socials?circle=${home.circle.id}`, { token: alex.token });
+    assert.equal(homeList.socials.length, 0);
+    await api(port, "POST", `/api/buzz/${alex.buzzToken}?circle=${home.circle.id}`, {
+      body: { note: "At home" },
+      status: 201,
+    });
+    const aimed = await api(port, "GET", `/api/socials?circle=${home.circle.id}`, { token: alex.token });
+    assert.equal(aimed.socials.some((social: { note: string }) => social.note === "At home"), true);
+  });
+});
