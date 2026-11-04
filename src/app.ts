@@ -54,6 +54,9 @@ import {
   listPlanJoins,
   listPushSubs,
   listSocialJoins,
+  markPushDelivered,
+  markPushSeen,
+  recordDisplay,
   listVisiblePlans,
   markNotificationsRead,
   removeMember,
@@ -75,6 +78,9 @@ import { isMapsLinkInput, looksLikeUrl, resolveMapsLink, reverseLookup, searchPl
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
+import { pushSummaryForViewer, reachForCircle } from "./push-status.js";
+import { clientKey } from "./client-key.js";
+import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
@@ -111,9 +117,15 @@ export class HttpError extends Error {
   }
 }
 
+/** Service worker acks per client (see clientKey). A phone back online can flush a burst at once. */
+export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
+
+type Limits = { ack: RateLimiter };
+
 export function createApp(deps: AppDeps): http.RequestListener {
+  const limits: Limits = { ack: createRateLimiter(ACK_LIMIT) };
   return (req, res) => {
-    void handle(req, res, deps).catch((error: unknown) => {
+    void handle(req, res, deps, limits).catch((error: unknown) => {
       if (error instanceof HttpError || error instanceof ChatError) {
         sendJson(res, error.status, { error: error.message });
         return;
@@ -126,7 +138,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
 
 const LEGACY_HOST = "hangry-production-64c4.up.railway.app";
 
-async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps): Promise<void> {
+async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, limits: Limits): Promise<void> {
   const host = String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase();
   if (host === LEGACY_HOST && deps.config.publicBaseUrl) {
     const dest = new URL(req.url ?? "/", deps.config.publicBaseUrl);
@@ -240,6 +252,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  if (method === "POST" && pathname === "/api/push/ack") {
+    if (!limits.ack.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!UUID_RE.test(id)) throw new HttpError(400, "invalid id");
+    try {
+      markPushDelivered(deps.db, id);
+    } catch {
+      /* The push already went out. The service worker can retry the ack. */
+    }
+    console.log("push ack status=ok");
+    sendEmpty(res, 204);
+    return;
+  }
+
   const me = requireUser(user);
 
   const chat = await routeChat(deps, me, method, pathname, body, requested);
@@ -298,6 +324,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     updateUserName(deps.db, me.id, name);
     const updated = { ...me, name };
     sendJson(res, 200, mePayload(deps, req, updated, requested));
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/me/display") {
+    if (typeof body.standalone !== "boolean") throw new HttpError(400, "standalone is required");
+    recordDisplay(deps.db, me.id, body.standalone, deps.now());
+    sendEmpty(res, 204);
     return;
   }
 
@@ -520,6 +553,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       auth: sub.auth,
       createdAt: deps.now(),
     });
+    markPushSeen(deps.db, me.id, deps.now());
     console.log(`push subscribe user=${me.id} status=ok`);
     sendEmpty(res, 204);
     return;
@@ -613,7 +647,7 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
-  return socialPayload(deps.db, fresh);
+  return socialPayload(deps.db, fresh, user.id);
 }
 
 function leaveSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -623,7 +657,7 @@ function leaveSocial(deps: AppDeps, user: UserRow, rawId: string, requested: str
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "that social has ended");
   removeSocialJoin(deps.db, social.id, user.id);
-  return socialPayload(deps.db, social);
+  return socialPayload(deps.db, social, user.id);
 }
 
 function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -634,7 +668,7 @@ function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: strin
   removePlanJoin(deps.db, plan.id, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  return planPayload(deps.db, plan, today, addDays(today, 1));
+  return planPayload(deps.db, plan, today, addDays(today, 1), user.id);
 }
 
 function createCircle(deps: AppDeps, userId: string, name: string, now: number): CircleRow {
@@ -879,7 +913,7 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
-  return socialPayload(deps.db, fresh);
+  return socialPayload(deps.db, fresh, user.id);
 }
 
 async function endPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null): Promise<void> {
@@ -959,7 +993,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, addDays(today, 1));
+  return planPayload(deps.db, fresh, today, addDays(today, 1), user.id);
 }
 
 type PastEvent = {
@@ -1035,13 +1069,19 @@ function pastDayLabel(day: string, today: string): string {
 
 function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow, viewerId: string | null = null) {
   const members = listMembers(deps.db, circle.id);
+  const reach = reachForCircle(deps.db, circle.id);
   return {
     id: circle.id,
     name: circle.name,
     inviteCode: circle.invite_code,
     inviteUrl: `${requestOrigin(req, deps.config)}/join/${circle.invite_code}`,
     youAreAdmin: Boolean(viewerId && members.some((member) => member.id === viewerId && member.is_admin)),
-    members: members.map((member) => ({ id: member.id, name: member.name, admin: Boolean(member.is_admin) })),
+    members: members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      admin: Boolean(member.is_admin),
+      reach: reach.get(member.id) ?? "off",
+    })),
   };
 }
 
@@ -1069,6 +1109,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
       etaMin: join.eta_min ?? null,
       arriveAt: join.arrive_at ?? null,
     })),
+    ...pushField(db, social.circle_id, "social", social.id, social.creator_id, viewerId),
   };
 }
 
@@ -1091,7 +1132,20 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomo
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,
     })),
+    ...pushField(db, plan.circle_id, "plan", plan.id, plan.creator_id, viewerId),
   };
+}
+
+function pushField(
+  db: DatabaseSync,
+  circleId: string,
+  kind: "social" | "plan",
+  refId: string,
+  hostId: string,
+  viewerId: string | null,
+): { push: ReturnType<typeof pushSummaryForViewer> } | Record<string, never> {
+  const push = pushSummaryForViewer(db, circleId, kind, refId, hostId, viewerId);
+  return push ? { push } : {};
 }
 
 async function handleAdmin(

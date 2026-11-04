@@ -69,7 +69,7 @@ export async function publishPlan(
   );
   const plan = getPlan(deps.db, id);
   if (!plan) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, plan, today, tomorrow);
+  return planPayload(deps.db, plan, today, tomorrow, user.id);
 }
 
 export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -87,7 +87,7 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requ
   await setPlanComing(deps, user, plan, now);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, tomorrow);
+  return planPayload(deps.db, fresh, today, tomorrow, user.id);
 }
 
 async function setPlanComing(
@@ -178,7 +178,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, addDays(today, 1));
+  return planPayload(deps.db, fresh, today, addDays(today, 1), user.id);
 }
 
 async function notifyPlanReply(

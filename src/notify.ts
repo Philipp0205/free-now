@@ -1,7 +1,17 @@
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { countCirclesForUser, deletePushSub, insertNotification, listPushSubs, withTx } from "./db.js";
+import {
+  countCirclesForUser,
+  deletePushSub,
+  insertNotification,
+  insertPushDelivery,
+  listPushSubs,
+  markPushFailed,
+  withTx,
+} from "./db.js";
 import type { PushPayload, PushSender } from "./push.js";
+
+const TRACKED_KINDS = new Set(["social", "plan", "chat"]);
 
 export type Notice = {
   userId: string;
@@ -85,7 +95,15 @@ export async function notifyUsers(
   circle?: { id: string; name: string } | null,
 ): Promise<void> {
   if (notices.length === 0) return;
-  const deliveries: Array<{ userId: string; endpoint: string; p256dh: string; auth: string; payload: PushPayload }> = [];
+  const batchId = crypto.randomUUID();
+  const deliveries: Array<{
+    userId: string;
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+    payload: PushPayload;
+    deliveryId: string | null;
+  }> = [];
   withTx(db, () => {
     for (const notice of notices) {
       const scoped = scopeNotice(db, notice, circle);
@@ -101,17 +119,39 @@ export async function notifyUsers(
           createdAt: now,
         });
       }
+      const track = Boolean(circle && notice.refId && TRACKED_KINDS.has(notice.kind));
       for (const sub of listPushSubs(db, notice.userId)) {
+        const deliveryId = crypto.randomUUID();
+        let tracked = false;
+        if (track && circle && notice.refId) {
+          try {
+            insertPushDelivery(db, {
+              id: deliveryId,
+              userId: notice.userId,
+              subId: sub.id,
+              circleId: circle.id,
+              kind: notice.kind,
+              refId: notice.refId,
+              batchId,
+              createdAt: now,
+            });
+            tracked = true;
+          } catch {
+            console.log(`push delivery user=${notice.userId} status=error`);
+          }
+        }
         deliveries.push({
           userId: notice.userId,
           endpoint: sub.endpoint,
           p256dh: sub.p256dh,
           auth: sub.auth,
+          deliveryId: tracked ? deliveryId : null,
           payload: {
             title: notice.title,
             body: scoped.body,
             url: scoped.url,
             tag: notice.tag,
+            ...(tracked ? { id: deliveryId } : {}),
           },
         });
       }
@@ -127,6 +167,13 @@ export async function notifyUsers(
     } catch (error) {
       const status = statusOf(error);
       console.log(`push send user=${delivery.userId} status=${status ?? "error"}`);
+      if (delivery.deliveryId) {
+        try {
+          markPushFailed(db, delivery.deliveryId, status ?? null);
+        } catch {
+          console.log(`push delivery user=${delivery.userId} status=error`);
+        }
+      }
       if (status === 404 || status === 410) deletePushSub(db, delivery.endpoint);
     }
   }
