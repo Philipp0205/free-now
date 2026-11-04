@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHAT_COLORS, assignChatColors, chooseColor, longestOccupiedRun, preferredColor } from "../src/chat-color.js";
+import { CHAT_COLORS, assignChatColors, longestOccupiedRun, preferredColor } from "../src/chat-color.js";
 
 function channel(hex: string, index: number): number {
   const value = parseInt(hex.slice(1 + index * 2, 3 + index * 2), 16) / 255;
@@ -50,81 +50,45 @@ test("chat colors are AA on black and white, and a circle does not share one", (
   assert.ok(distance > 1, `collision landed on adjacent hues ${assigned.get(pair[0])} and ${assigned.get(pair[1])}`);
 });
 
-/** Shortest longest-run any placement of `count` hues can have on this palette. */
-function minimumAchievableRun(count: number): number {
-  const slots = CHAT_COLORS.length;
-  if (count <= 0) return 0;
-  if (count >= slots) return slots;
-  const gaps = slots - count;
-  return gaps >= count ? 1 : Math.ceil(count / gaps);
-}
+/**
+ * One growing circle. Members 1–6 stay isolated, then three triples keep
+ * 7–9 at a run of 3. The tenth member has to join two triples (run 7).
+ * Shorter runs at 7–10 cannot all happen in the same order.
+ */
+const RUN_BY_COUNT = [1, 1, 1, 1, 1, 1, 3, 3, 3, 7, 11, 12];
 
-/** Shortest longest-run still available without moving colors already stored. */
-function bestFreeSlotRun(used: ReadonlySet<number>): number {
-  let best = CHAT_COLORS.length;
-  for (let slot = 0; slot < CHAT_COLORS.length; slot += 1) {
-    if (used.has(slot)) continue;
-    const next = new Set(used);
-    next.add(slot);
-    best = Math.min(best, longestOccupiedRun(next));
+function idAnchoredAt(slot: number): string {
+  for (let n = 0; n < 4000; n += 1) {
+    const id = `anchor-${slot}-${n}`;
+    if (preferredColor(id) === slot) return id;
   }
-  return best;
+  throw new Error(`no id for slot ${slot}`);
 }
 
-test("sequential joins keep the longest adjacent run at the minimum still achievable", () => {
-  assert.equal(minimumAchievableRun(7), 2);
+function grow(firstId: string, restPrefix: string): number[] {
   const seen: string[] = [];
   let prior = new Map<string, number>();
   const runs: number[] = [];
   for (let n = 0; n < CHAT_COLORS.length; n += 1) {
-    const id = `join-${n}`;
-    const before = new Set(prior.values());
+    const id = n === 0 ? firstId : `${restPrefix}-${n}`;
     const assigned = assignChatColors([...seen, id], prior);
-    for (const old of seen) assert.equal(assigned.get(old), prior.get(old), old);
+    for (const old of seen) assert.equal(assigned.get(old), prior.get(old), `${firstId} moved ${old}`);
     const color = assigned.get(id);
     assert.equal(typeof color, "number");
-    const after = new Set<number>(assigned.values());
-    const run = longestOccupiedRun(after);
-    assert.equal(run, bestFreeSlotRun(before), `member ${n + 1} run ${run} slots ${[...after].sort((a, b) => a - b).join(",")}`);
-    runs.push(run);
+    const colors = new Set(assigned.values());
+    assert.equal(colors.size, n + 1, `${firstId} repeated a hue at ${n + 1}`);
+    runs.push(longestOccupiedRun(colors));
     prior = assigned;
     seen.push(id);
   }
-  assert.equal(runs[6], minimumAchievableRun(7));
-  assert.ok(runs[6] < 3, `7 members formed a run of ${runs[6]}`);
-  assert.equal(new Set(prior.values()).size, CHAT_COLORS.length);
-});
+  return runs;
+}
 
-test("a new member skips a slot that would make three neighbouring hues", () => {
-  const used = new Set([4, 10, 1, 7, 0, 5]);
-  for (let n = 0; n < 24; n += 1) {
-    const chosen = chooseColor(`seventh-${n}`, used);
-    const next = new Set(used);
-    next.add(chosen);
-    assert.equal(longestOccupiedRun(next), 2, `chose ${chosen}`);
-    assert.ok(chosen === 8 || chosen === 9, `chose ${chosen}`);
-  }
-  const prior = new Map<string, number>([
-    ["a", 4], ["b", 10], ["c", 1], ["d", 7], ["e", 0], ["f", 5],
-  ]);
-  const assigned = assignChatColors([...prior.keys(), "g"], prior);
-  for (const [id, color] of prior) assert.equal(assigned.get(id), color);
-});
-
-test("every fresh circle of seven stays off a run of three", () => {
-  for (let trial = 0; trial < 36; trial += 1) {
-    const seen: string[] = [];
-    let prior = new Map<string, number>();
-    for (let n = 0; n < 8; n += 1) {
-      const id = `cohort-${trial}-member-${n}`;
-      const assigned = assignChatColors([...seen, id], prior);
-      for (const old of seen) assert.equal(assigned.get(old), prior.get(old), old);
-      const run = longestOccupiedRun(new Set(assigned.values()));
-      if (n + 1 <= 8) assert.ok(run < 3, `trial ${trial} at ${n + 1} run ${run}`);
-      if (n + 1 === 7) assert.equal(run, minimumAchievableRun(7));
-      prior = assigned;
-      seen.push(id);
-    }
+test("sequential joins cap nine members at a run of three", () => {
+  for (let slot = 0; slot < CHAT_COLORS.length; slot += 1) {
+    const runs = grow(idAnchoredAt(slot), `after-${slot}`);
+    assert.deepEqual(runs, RUN_BY_COUNT, `anchor ${slot}: ${runs.join(",")}`);
+    assert.ok(runs[8] <= 3);
   }
 });
 
