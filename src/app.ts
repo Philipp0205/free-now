@@ -4,6 +4,18 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  AdminQueryFailed,
+  AdminQueryTimeout,
+  adminFailureKey,
+  adminFailuresOpen,
+  adminTokensMatch,
+  bearerToken,
+  clearAdminFailures,
+  noteAdminFailure,
+  readSchema,
+  runReadQuery,
+} from "./admin-query.js";
 import type { Config } from "./config.js";
 import {
   addMember,
@@ -218,6 +230,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
     const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
+    return;
+  }
+
+  if (pathname === "/api/admin/query" || pathname === "/api/admin/schema") {
+    await handleAdmin(req, res, deps, method, pathname, body);
     return;
   }
 
@@ -1052,6 +1069,73 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomo
       arriveAt: join.arrive_at ?? null,
     })),
   };
+}
+
+async function handleAdmin(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  deps: AppDeps,
+  method: string,
+  pathname: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const expected = deps.config.adminToken;
+  if (!expected) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const key = adminFailureKey(req);
+  const now = deps.now();
+  const given = bearerToken(req.headers.authorization);
+  if (!given || !adminTokensMatch(given, expected)) {
+    if (!adminFailuresOpen(key, now)) {
+      console.log("admin query denied");
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
+    noteAdminFailure(key, now);
+    console.log("admin query denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  clearAdminFailures(key);
+  try {
+    if (method === "POST" && pathname === "/api/admin/query") {
+      const sql = body.sql;
+      const params = body.params === undefined ? [] : body.params;
+      if (typeof sql !== "string" || !Array.isArray(params)) {
+        console.log("admin query denied");
+        sendJson(res, 400, { error: "query is not allowed" });
+        return;
+      }
+      const result = await runReadQuery(deps.config.dbPath, sql, params);
+      console.log(`admin query ok rows=${result.rows.length}`);
+      sendJson(res, 200, { columns: result.columns, rows: result.rows, truncated: result.truncated });
+      return;
+    }
+    if (method === "GET" && pathname === "/api/admin/schema") {
+      const tables = await readSchema(deps.config.dbPath);
+      console.log(`admin query ok rows=${tables.length}`);
+      sendJson(res, 200, { tables });
+      return;
+    }
+  } catch (error) {
+    if (error instanceof AdminQueryTimeout) {
+      console.log("admin query timeout");
+      sendJson(res, 408, { error: "timeout" });
+      return;
+    }
+    if (error instanceof AdminQueryFailed) {
+      console.log("admin query error");
+      sendJson(res, 400, { error: "query is not allowed" });
+      return;
+    }
+    console.log("admin query denied");
+    sendJson(res, 400, { error: "query is not allowed" });
+    return;
+  }
+  console.log("admin query denied");
+  sendJson(res, 404, { error: "not found" });
 }
 
 function requireUser(user: UserRow | undefined): UserRow {
