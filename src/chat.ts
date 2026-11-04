@@ -64,8 +64,7 @@ export function nextChatPushDelay(lastPushAt: number, now: number): number {
 type Slot = {
   windowStart: number;
   firstBody: string;
-  pending: number;
-  prompted: boolean;
+  count: number;
   busy: boolean;
   timer: ReturnType<typeof setTimeout>;
 };
@@ -228,15 +227,14 @@ export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderId: str
       const created: Slot = {
         windowStart: now,
         firstBody: body,
-        pending: 0,
-        prompted: false,
+        count: 1,
         busy: false,
-        timer: armSlot(chatId, member.id, 0),
+        timer: armSlot(chatId, member.id, CHAT_BATCH_MS),
       };
       job.slots.set(member.id, created);
       continue;
     }
-    slot.pending += 1;
+    slot.count += 1;
   }
   if (job.slots.size === 0) jobs.delete(chatId);
 }
@@ -274,6 +272,12 @@ async function fireSlot(chatId: string, userId: string, force: boolean): Promise
   const job = jobs.get(chatId);
   const slot = job?.slots.get(userId);
   if (!job || !slot || slot.busy) return;
+  const remain = chatWindowRemaining(slot.windowStart, job.deps.now());
+  if (!force && remain > 0) {
+    clearTimeout(slot.timer);
+    slot.timer = armSlot(chatId, userId, remain);
+    return;
+  }
   clearTimeout(slot.timer);
   slot.busy = true;
   const chat = one<ChatRow>(job.deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
@@ -282,29 +286,10 @@ async function fireSlot(chatId: string, userId: string, force: boolean): Promise
     dropSlot(chatId, userId);
     return;
   }
-  if (!slot.prompted) {
-    slot.prompted = true;
-    await deliverChatPush(job.deps, chat, [userId], slot.firstBody);
-    slot.busy = false;
-    if (!jobs.get(chatId)?.slots.get(userId)) return;
-    const remain = force ? 0 : chatWindowRemaining(slot.windowStart, job.deps.now());
-    if (slot.pending === 0 && remain === 0) {
-      dropSlot(chatId, userId);
-      return;
-    }
-    slot.timer = armSlot(chatId, userId, remain);
-    return;
-  }
-  if (slot.pending === 0) {
-    slot.busy = false;
-    dropSlot(chatId, userId);
-    return;
-  }
-  const count = slot.pending;
-  slot.pending = 0;
-  slot.busy = false;
+  const count = slot.count;
+  const body = count <= 1 ? slot.firstBody : `${count} new messages`;
   dropSlot(chatId, userId);
-  await deliverChatPush(job.deps, chat, [userId], `${count} new message${count === 1 ? "" : "s"}`);
+  await deliverChatPush(job.deps, chat, [userId], body);
 }
 
 async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[], body: string): Promise<void> {
