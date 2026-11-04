@@ -18,7 +18,8 @@ import {
   listPastPlans,
   listPastSocials,
   getCircleByCode,
-  getCircleForUser,
+  getCircleById,
+  listCirclesForUser,
   isCircleAdmin,
   kickMember,
   getPlan,
@@ -137,6 +138,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE"
       ? await readJson(req)
       : {};
+  const requested = readRequestedCircle(req, url, body);
 
   if (method === "GET" && pathname === "/api/health") {
     sendJson(res, 200, { ok: true });
@@ -214,14 +216,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!buzzer) throw new HttpError(404, "unknown token");
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
-    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz));
+    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested);
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
 
   const me = requireUser(user);
 
-  const chat = await routeChat(deps, me, method, pathname, body);
+  const chat = await routeChat(deps, me, method, pathname, body, requested);
   if (chat) {
     if (chat.body == null) sendEmpty(res, chat.status);
     else sendJson(res, chat.status, chat.body);
@@ -259,7 +261,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "GET" && pathname === "/api/me") {
-    sendJson(res, 200, mePayload(deps, req, me));
+    sendJson(res, 200, mePayload(deps, req, me, requested));
     return;
   }
 
@@ -267,7 +269,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const name = cleanLabel(body.name, "name", 24);
     updateUserName(deps.db, me.id, name);
     const updated = { ...me, name };
-    sendJson(res, 200, mePayload(deps, req, updated));
+    sendJson(res, 200, mePayload(deps, req, updated, requested));
     return;
   }
 
@@ -279,7 +281,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/circles") {
-    if (getCircleForUser(deps.db, me.id)) throw new HttpError(409, "you are already in a circle");
     const name = body.name == null || body.name === "" ? "friends" : cleanLabel(body.name, "circle name", 32);
     const now = deps.now();
     const circle = createCircle(deps, me.id, name, now);
@@ -290,21 +291,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (method === "POST" && pathname === "/api/circles/join") {
     const code = cleanCode(body.code);
     const circle = requireLiveInvite(deps.db, code, deps.now());
-    const current = getCircleForUser(deps.db, me.id);
-    if (current && current.id !== circle.id) throw new HttpError(409, "you are already in a circle");
-    if (!current && removalBlocksJoin(deps.db, circle.id, me.id, circle.invite_code)) {
+    const already = listCirclesForUser(deps.db, me.id).some((item) => item.id === circle.id);
+    if (!already && removalBlocksJoin(deps.db, circle.id, me.id, circle.invite_code)) {
       throw new HttpError(403, "An admin removed you from this circle.");
     }
-    if (!current) addMember(deps.db, circle.id, me.id, deps.now());
+    if (!already) addMember(deps.db, circle.id, me.id, deps.now());
     sendJson(res, 200, { circle: circlePayload(deps, req, circle, me.id) });
     return;
   }
 
   if (method === "POST" && pathname === "/api/circles/invite") {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     const now = deps.now();
     rotateInvite(deps.db, circle.id, inviteCode(), now + INVITE_TTL_MS);
-    const fresh = getCircleForUser(deps.db, me.id);
+    const fresh = getCircleById(deps.db, circle.id);
     if (!fresh) throw new HttpError(500, "circle missing");
     sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
@@ -312,7 +312,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   const removal = matchPath(pathname, /^\/api\/circles\/removals\/([^/]+)$/);
   if (removal && method === "DELETE") {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     requireAdmin(deps, circle.id, me.id);
     clearRemoval(deps.db, circle.id, parseId(removal[1]));
     sendEmpty(res, 204);
@@ -320,27 +320,26 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "PATCH" && pathname === "/api/circles") {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     if (!isCircleAdmin(deps.db, circle.id, me.id)) throw new HttpError(403, "Only an admin can do that.");
     const name = cleanLabel(body.name, "circle name", 32);
     updateCircleName(deps.db, circle.id, name);
-    const fresh = getCircleForUser(deps.db, me.id);
+    const fresh = getCircleById(deps.db, circle.id);
     if (!fresh) throw new HttpError(500, "circle missing");
     sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
   }
 
   if (method === "POST" && pathname === "/api/circles/leave") {
-    const circle = getCircleForUser(deps.db, me.id);
-    if (!circle) throw new HttpError(409, "join a circle first");
+    const circle = requireCircle(deps, me.id, requested);
     removeMember(deps.db, circle.id, me.id);
-    sendJson(res, 200, mePayload(deps, req, me));
+    sendJson(res, 200, mePayload(deps, req, me, null));
     return;
   }
 
   const circleMember = matchPath(pathname, /^\/api\/circles\/members\/([^/]+)$/);
   if (circleMember && (method === "POST" || method === "DELETE")) {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     requireAdmin(deps, circle.id, me.id);
     const memberId = parseId(circleMember[1]);
     if (method === "DELETE") {
@@ -354,20 +353,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const result = setCircleAdmin(deps.db, circle.id, memberId, body.admin);
     if (result === "missing") throw new HttpError(404, "member not found");
     if (result === "last") throw new HttpError(409, "A circle needs an admin.");
-    const fresh = getCircleForUser(deps.db, me.id);
+    const fresh = getCircleById(deps.db, circle.id);
     if (!fresh) throw new HttpError(500, "circle missing");
     sendJson(res, 200, { circle: circlePayload(deps, req, fresh, me.id) });
     return;
   }
 
   if (method === "GET" && pathname === "/api/past") {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     sendJson(res, 200, { days: pastDays(deps, circle.id, me.id) });
     return;
   }
 
   if (method === "GET" && pathname === "/api/socials") {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id));
     sendJson(res, 200, { socials });
     return;
@@ -375,49 +374,49 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz));
+    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested);
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return;
   }
 
   const socialPerson = matchPath(pathname, /^\/api\/socials\/([^/]+)\/people\/([^/]+)$/);
   if (socialPerson && method === "DELETE") {
-    await removeSocialGuest(deps, me, socialPerson[1], socialPerson[2]);
+    await removeSocialGuest(deps, me, socialPerson[1], socialPerson[2], requested);
     sendEmpty(res, 204);
     return;
   }
 
   const socialReply = matchPath(pathname, /^\/api\/socials\/([^/]+)\/reply$/);
   if (socialReply && method === "POST") {
-    sendJson(res, 200, { social: await replySocial(deps, me, socialReply[1], body) });
+    sendJson(res, 200, { social: await replySocial(deps, me, socialReply[1], body, requested) });
     return;
   }
 
   const socialJoin = matchPath(pathname, /^\/api\/socials\/([^/]+)\/join$/);
   if (socialJoin && method === "POST") {
-    sendJson(res, 200, { social: await joinSocial(deps, me, socialJoin[1]) });
+    sendJson(res, 200, { social: await joinSocial(deps, me, socialJoin[1], requested) });
     return;
   }
 
   const socialLeave = matchPath(pathname, /^\/api\/socials\/([^/]+)\/leave$/);
   if (socialLeave && method === "POST") {
-    sendJson(res, 200, { social: leaveSocial(deps, me, socialLeave[1]) });
+    sendJson(res, 200, { social: leaveSocial(deps, me, socialLeave[1], requested) });
     return;
   }
 
   const socialId = matchPath(pathname, /^\/api\/socials\/([^/]+)$/);
   if (socialId && method === "PATCH") {
-    sendJson(res, 200, { social: await editSocial(deps, me, socialId[1], body) });
+    sendJson(res, 200, { social: await editSocial(deps, me, socialId[1], body, requested) });
     return;
   }
   if (socialId && method === "DELETE") {
-    await endSocial(deps, me, socialId[1]);
+    await endSocial(deps, me, socialId[1], requested);
     sendEmpty(res, 204);
     return;
   }
 
   if (method === "GET" && pathname === "/api/plans") {
-    const circle = requireCircle(deps, me.id);
+    const circle = requireCircle(deps, me.id, requested);
     const now = deps.now();
     const today = isoDate(now, deps.config.tz);
     const tomorrow = addDays(today, 1);
@@ -431,42 +430,42 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (method === "POST" && pathname === "/api/plans") {
     const note = cleanNote(body.note, true);
     const place = cleanPlace(body.place);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body)) });
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), requested) });
     return;
   }
 
   const planPerson = matchPath(pathname, /^\/api\/plans\/([^/]+)\/people\/([^/]+)$/);
   if (planPerson && method === "DELETE") {
-    await removePlanGuest(deps, me, planPerson[1], planPerson[2]);
+    await removePlanGuest(deps, me, planPerson[1], planPerson[2], requested);
     sendEmpty(res, 204);
     return;
   }
 
   const planReply = matchPath(pathname, /^\/api\/plans\/([^/]+)\/reply$/);
   if (planReply && method === "POST") {
-    sendJson(res, 200, { plan: await replyPlan(deps, me, planReply[1], body) });
+    sendJson(res, 200, { plan: await replyPlan(deps, me, planReply[1], body, requested) });
     return;
   }
 
   const planJoin = matchPath(pathname, /^\/api\/plans\/([^/]+)\/join$/);
   if (planJoin && method === "POST") {
-    sendJson(res, 200, { plan: await joinPlan(deps, me, planJoin[1]) });
+    sendJson(res, 200, { plan: await joinPlan(deps, me, planJoin[1], requested) });
     return;
   }
 
   const planLeave = matchPath(pathname, /^\/api\/plans\/([^/]+)\/leave$/);
   if (planLeave && method === "POST") {
-    sendJson(res, 200, { plan: leavePlan(deps, me, planLeave[1]) });
+    sendJson(res, 200, { plan: leavePlan(deps, me, planLeave[1], requested) });
     return;
   }
 
   const planId = matchPath(pathname, /^\/api\/plans\/([^/]+)$/);
   if (planId && method === "PATCH") {
-    sendJson(res, 200, { plan: await editPlan(deps, me, planId[1], body) });
+    sendJson(res, 200, { plan: await editPlan(deps, me, planId[1], body, requested) });
     return;
   }
   if (planId && method === "DELETE") {
-    await endPlan(deps, me, planId[1]);
+    await endPlan(deps, me, planId[1], requested);
     sendEmpty(res, 204);
     return;
   }
@@ -522,12 +521,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "GET" && pathname === "/api/notifications") {
-    const notifications = listNotifications(deps.db, me.id).map((row) => ({
+    const circle = requireCircle(deps, me.id, requested);
+    const notifications = listNotifications(deps.db, me.id, circle.id).map((row) => ({
       id: row.id,
       title: row.title,
       body: row.body,
       kind: row.kind,
       refId: row.ref_id,
+      circleId: row.circle_id,
       createdAt: row.created_at,
       readAt: row.read_at,
     }));
@@ -536,7 +537,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/notifications/read") {
-    markNotificationsRead(deps.db, me.id, deps.now());
+    const circle = requireCircle(deps, me.id, requested);
+    markNotificationsRead(deps.db, me.id, circle.id, deps.now());
     sendEmpty(res, 204);
     return;
   }
@@ -544,9 +546,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   sendJson(res, 404, { error: "not found" });
 }
 
-async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
+async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   const now = deps.now();
@@ -565,16 +567,16 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
         refId: social.id,
         tag: `join:${social.id}:${user.id}`,
       },
-    ]);
+    ], circle);
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
   return socialPayload(deps.db, fresh);
 }
 
-function leaveSocial(deps: AppDeps, user: UserRow, rawId: string) {
+function leaveSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "that social has ended");
@@ -582,9 +584,9 @@ function leaveSocial(deps: AppDeps, user: UserRow, rawId: string) {
   return socialPayload(deps.db, social);
 }
 
-function leavePlan(deps: AppDeps, user: UserRow, rawId: string) {
+function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   removePlanJoin(deps.db, plan.id, user.id);
@@ -613,18 +615,30 @@ function createCircle(deps: AppDeps, userId: string, name: string, now: number):
   throw new HttpError(500, "could not create a circle");
 }
 
-function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow) {
-  const circle = getCircleForUser(deps.db, user.id);
+function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requested: string | null = null) {
+  const circles = listCirclesForUser(deps.db, user.id);
+  let active: CircleRow | undefined;
+  if (requested) {
+    active = circles.find((circle) => circle.id === requested);
+    if (!active) throw new HttpError(404, "not found");
+  } else {
+    active = circles[0];
+  }
   return {
     user: { id: user.id, name: user.name, buzzToken: user.buzz_token },
-    circle: circle ? circlePayload(deps, req, circle, user.id) : null,
+    circles: circles.map((circle) => ({
+      id: circle.id,
+      name: circle.name,
+      admin: isCircleAdmin(deps.db, circle.id, user.id),
+    })),
+    circle: active ? circlePayload(deps, req, active, user.id) : null,
   };
 }
 
-async function removeSocialGuest(deps: AppDeps, user: UserRow, rawSocialId: string, rawUserId: string): Promise<void> {
+async function removeSocialGuest(deps: AppDeps, user: UserRow, rawSocialId: string, rawUserId: string, requested: string | null = null): Promise<void> {
   const socialId = parseId(rawSocialId);
   const guestId = parseId(rawUserId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, socialId);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   if (guestId === social.creator_id) throw new HttpError(400, "you started this one");
@@ -652,13 +666,13 @@ async function removeSocialGuest(deps: AppDeps, user: UserRow, rawSocialId: stri
       refId: social.id,
       tag: `removed:social:${social.id}:${guestId}`,
     },
-  ]);
+  ], circle);
 }
 
-async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, rawUserId: string): Promise<void> {
+async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, rawUserId: string, requested: string | null = null): Promise<void> {
   const planId = parseId(rawPlanId);
   const guestId = parseId(rawUserId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, planId);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   if (guestId === plan.creator_id) throw new HttpError(400, "you made this plan");
@@ -685,7 +699,7 @@ async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, 
       refId: plan.id,
       tag: `removed:plan:${plan.id}:${guestId}`,
     },
-  ]);
+  ], circle);
 }
 
 function removedMessage(actor: string | null | undefined): string {
@@ -703,9 +717,9 @@ function assertEventHost(deps: AppDeps, user: UserRow, circleId: string, hostId:
   throw new HttpError(403, "Only the host can do that.");
 }
 
-async function endSocial(deps: AppDeps, user: UserRow, rawId: string): Promise<void> {
+async function endSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null): Promise<void> {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   assertEventHost(deps, user, circle.id, social.creator_id);
@@ -722,7 +736,7 @@ async function endSocial(deps: AppDeps, user: UserRow, rawId: string): Promise<v
         refId: social.id,
         tag: `ended:social:${social.id}`,
       },
-    ]);
+    ], circle);
   }
 }
 
@@ -744,6 +758,7 @@ async function pushEdit(
   body: string,
   refId: string,
   url: string,
+  circle: CircleRow,
 ): Promise<void> {
   const ids = [...new Set(userIds)];
   if (!ids.length || !body) return;
@@ -755,12 +770,12 @@ async function pushEdit(
     refId,
     tag: `plan-change:${refId}`,
     url,
-  })));
+  })), circle);
 }
 
-async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "That post has ended.");
@@ -805,6 +820,7 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
       changeBody(changes),
       social.id,
       `/?social=${social.id}`,
+      circle,
     );
     if (user.id !== social.creator_id) {
       await pushEdit(
@@ -823,9 +839,9 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
   return socialPayload(deps.db, fresh);
 }
 
-async function endPlan(deps: AppDeps, user: UserRow, rawId: string): Promise<void> {
+async function endPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null): Promise<void> {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, circle.id, plan.creator_id);
@@ -841,13 +857,13 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string): Promise<voi
         refId: plan.id,
         tag: `ended:plan:${plan.id}`,
       },
-    ]);
+    ], circle);
   }
 }
 
-async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
   const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
+  const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, circle.id, plan.creator_id);
@@ -883,6 +899,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
       changeBody(changes),
       plan.id,
       `/?plan=${plan.id}`,
+      circle,
     );
     if (user.id !== plan.creator_id) {
       await pushEdit(
@@ -1038,10 +1055,24 @@ function requireUser(user: UserRow | undefined): UserRow {
   return user;
 }
 
-export function requireCircle(deps: AppDeps, userId: string): CircleRow {
-  const circle = getCircleForUser(deps.db, userId);
-  if (!circle) throw new HttpError(409, "join a circle first");
-  return circle;
+function readRequestedCircle(req: http.IncomingMessage, url: URL, body: Record<string, unknown>): string | null {
+  const header = firstHeader(req.headers["x-circle"]);
+  const fromBody = typeof body.circleId === "string" ? body.circleId : "";
+  const raw = (header || url.searchParams.get("circle") || fromBody).trim();
+  if (!raw) return null;
+  return parseId(raw);
+}
+
+export function requireCircle(deps: AppDeps, userId: string, requested: string | null = null): CircleRow {
+  const circles = listCirclesForUser(deps.db, userId);
+  if (requested) {
+    const circle = circles.find((item) => item.id === requested);
+    if (!circle) throw new HttpError(404, "not found");
+    return circle;
+  }
+  if (circles.length === 1) return circles[0];
+  if (circles.length === 0) throw new HttpError(409, "join a circle first");
+  throw new HttpError(400, "circle is required");
 }
 
 function userFromRequest(req: http.IncomingMessage, db: DatabaseSync): UserRow | undefined {

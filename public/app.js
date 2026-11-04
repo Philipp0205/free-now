@@ -5,6 +5,7 @@ import { audiencePlace, formatDistance, haversine } from "./place.js";
 import { bindMap } from "./map.js";
 
 const TOKEN_KEY = "fn_token";
+const CIRCLE_KEY = "fn_circle";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
@@ -82,19 +83,26 @@ const state = {
   chatSummary: { circle: { unread: 0, muted: false }, events: [] },
   past: false,
   pastDays: null,
+  circleId: localStorage.getItem(CIRCLE_KEY) || "",
+  circleMenu: false,
+  newCircleName: "",
 };
 
 const deepLinkParams = new URLSearchParams(location.search);
 const planFocus = deepLinkParams.get("plan");
 const socialFocus = deepLinkParams.get("social");
 const chatFocus = deepLinkParams.get("chat");
+const circleFocus = deepLinkParams.get("circle");
+if (circleFocus) rememberCircle(circleFocus);
 if (chatFocus) state.deepLink = { kind: "chat", id: chatFocus };
 else if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
 else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
-if (state.deepLink) {
+if (state.deepLink || circleFocus) {
   const url = new URL(location.href);
   url.searchParams.delete("social");
   url.searchParams.delete("plan");
+  url.searchParams.delete("chat");
+  url.searchParams.delete("circle");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}` || "/");
 }
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
@@ -170,13 +178,18 @@ async function boot() {
       try {
         state.me = await api("/api/me");
       } catch (error) {
-        if (error.status !== 401) throw error;
-        clearSession();
+        if (error.status === 404 && state.circleId) {
+          rememberCircle("");
+          state.me = await api("/api/me");
+        } else if (error.status !== 401) throw error;
+        else clearSession();
       }
     }
-    if (state.token && state.me && state.pendingCode && !state.inviteError && !state.me.circle) {
+    if (state.me) adoptCircle(state.me);
+    if (state.token && state.me && state.pendingCode && !state.inviteError) {
       try {
-        await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
+        const joined = await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
+        rememberCircle(joined.circle.id);
         state.me = await api("/api/me");
         history.replaceState(null, "", "/");
         state.pendingCode = "";
@@ -581,6 +594,24 @@ function bindKeyboard() {
 
 bindKeyboard();
 
+function rememberCircle(id) {
+  state.circleId = id || "";
+  if (state.circleId) localStorage.setItem(CIRCLE_KEY, state.circleId);
+  else localStorage.removeItem(CIRCLE_KEY);
+}
+
+function adoptCircle(me) {
+  const ids = (me?.circles || []).map((circle) => circle.id);
+  if (state.circleId && ids.includes(state.circleId)) return;
+  rememberCircle(me?.circle?.id || ids[0] || "");
+}
+
+function circleHeader(path, options) {
+  if (!state.circleId || options.circle === null || options.token === null) return {};
+  if (/^\/api\/(meta|auth\/|invites\/|buzz\/)/.test(path)) return {};
+  return { "x-circle": state.circleId };
+}
+
 async function api(path, options = {}) {
   const token = options.token === undefined ? state.token : options.token;
   let response;
@@ -590,6 +621,7 @@ async function api(path, options = {}) {
     headers: {
       ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...circleHeader(path, options),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
@@ -627,6 +659,7 @@ async function api(path, options = {}) {
 
 function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
+  rememberCircle("");
   state.token = null;
   state.me = null;
   state.socials = [];
@@ -851,9 +884,8 @@ function shell() {
 
 function screenHeader(title) {
   const unread = state.notifications.filter((note) => !note.readAt).length;
-  return el("header", { class: "screen-head" }, [
-    el("h1", { class: "screen-title", text: title }),
-    el("button", {
+  const titleEl = el("h1", { class: "screen-title", text: title });
+  const bell = el("button", {
       class: state.tab === "alerts" ? "icon-btn on" : "icon-btn",
       type: "button",
       "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
@@ -861,8 +893,69 @@ function screenHeader(title) {
     }, [
       icon("bell"),
       unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
-    ]),
+    ]);
+  const switcher = circleSwitcher();
+  if (!switcher) return el("header", { class: "screen-head" }, [titleEl, bell]);
+  return el("header", { class: "screen-head" }, [
+    el("div", { class: "head-copy" }, [switcher, titleEl]),
+    bell,
   ]);
+}
+
+function circleSwitcher() {
+  const circles = state.me?.circles || [];
+  const current = state.me?.circle;
+  if (!current || circles.length < 2) return null;
+  return el("div", { class: "circle-switch" }, [
+    el("button", {
+      class: "circle-switch-btn",
+      type: "button",
+      "aria-label": "Switch circle",
+      "aria-expanded": state.circleMenu ? "true" : "false",
+      onclick: () => {
+        state.circleMenu = !state.circleMenu;
+        render();
+      },
+    }, [
+      el("span", { text: current.name }),
+      icon("chevron"),
+    ]),
+    state.circleMenu ? el("div", { class: "circle-menu" }, [
+      ...circles.map((circle) => el("button", {
+        type: "button",
+        class: circle.id === current.id ? "on" : "",
+        text: circle.name,
+        onclick: () => { void switchCircle(circle.id); },
+      })),
+      el("button", { type: "button", text: "Join with link", onclick: () => openCircleSheet("join-circle") }),
+      el("button", { type: "button", text: "New circle", onclick: () => openCircleSheet("new-circle") }),
+    ]) : null,
+  ]);
+}
+
+function openCircleSheet(kind) {
+  state.circleMenu = false;
+  state.newCircleName = "";
+  state.codeDraft = "";
+  state.sheet = kind;
+  render();
+}
+
+async function switchCircle(id) {
+  if (!id || id === state.circleId) {
+    state.circleMenu = false;
+    render();
+    return;
+  }
+  state.circleMenu = false;
+  state.sheet = null;
+  state.chat = null;
+  state.past = false;
+  state.pastDays = null;
+  rememberCircle(id);
+  await run(async () => {
+    await refresh({ initial: true });
+  });
 }
 
 function home() {
@@ -1062,6 +1155,18 @@ function circleScreen() {
           type: "button",
           text: "New link",
           onclick: () => rotateInvite(),
+        }),
+        el("button", {
+          class: "text-btn",
+          type: "button",
+          text: "New circle",
+          onclick: () => openCircleSheet("new-circle"),
+        }),
+        el("button", {
+          class: "text-btn",
+          type: "button",
+          text: "Join with link",
+          onclick: () => openCircleSheet("join-circle"),
         }),
       ]),
     ]),
@@ -1621,6 +1726,8 @@ function endManaged(kind, item) {
 }
 
 function sheet() {
+  if (state.sheet === "new-circle") return circleNameSheet();
+  if (state.sheet === "join-circle") return joinLinkSheet();
   if (state.sheet === "notifications") return notificationsSheet();
   if (state.sheet === "member") return memberSheet();
   if (state.sheet === "admin-edit") return adminEditSheet();
@@ -1656,6 +1763,9 @@ function sheet() {
                 ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
                 : `Friends in your circle get a push. This lasts ${ttl}.`,
           }),
+          !planning && (state.me?.circles || []).length > 1
+            ? el("p", { class: "posting-to", text: `Posting to ${state.me.circle?.name || "this circle"}` })
+            : null,
         ]),
       ]),
       el("div", { class: "sheet-scroll" }, [
@@ -3139,6 +3249,57 @@ async function onTab(id) {
   render();
 }
 
+function circleNameSheet() {
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", { class: "sheet", role: "dialog", "aria-label": "New circle", onsubmit: onCreateAnother }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "New circle" }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        field("Circle name", "new-circle-name", state.newCircleName, (value) => {
+          state.newCircleName = value;
+        }, { maxlength: "32" }),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", { class: "btn", type: "submit", text: "Create circle" }),
+      ]),
+    ]),
+  ]);
+}
+
+function joinLinkSheet() {
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Join with link", onsubmit: onJoinCircle }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Join with link" }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        field("Invite code", "invite-code", state.codeDraft, (value) => {
+          state.codeDraft = value.toUpperCase();
+        }, { maxlength: "12", autocapitalize: "characters", spellcheck: "false" }),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", { class: "btn", type: "submit", text: "Join circle" }),
+      ]),
+    ]),
+  ]);
+}
+
+async function onCreateAnother(event) {
+  event.preventDefault();
+  await run(async () => {
+    const created = await api("/api/circles", { method: "POST", body: { name: state.newCircleName || "friends" } });
+    rememberCircle(created.circle.id);
+    state.sheet = null;
+    state.me = await api("/api/me");
+    await refresh({ initial: true });
+  });
+}
+
 async function onStart(event) {
   event.preventDefault();
   state.error = "";
@@ -3150,13 +3311,15 @@ async function onStart(event) {
     });
     localStorage.setItem(TOKEN_KEY, data.token);
     state.token = data.token;
+    if (data.circle) rememberCircle(data.circle.id);
     state.me = await api("/api/me");
     if (data.circle) {
       history.replaceState(null, "", "/");
       state.pendingCode = "";
     } else if (state.pendingCode) {
       try {
-        await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
+        const joined = await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
+        rememberCircle(joined.circle.id);
         state.me = await api("/api/me");
         history.replaceState(null, "", "/");
         state.pendingCode = "";
@@ -3198,7 +3361,8 @@ async function onRecover(event) {
 async function onCreateCircle(event) {
   event.preventDefault();
   await run(async () => {
-    await api("/api/circles", { method: "POST", body: { name: state.circleDraft || "friends" } });
+    const created = await api("/api/circles", { method: "POST", body: { name: state.circleDraft || "friends" } });
+    rememberCircle(created.circle.id);
     state.me = await api("/api/me");
   });
   void considerReminders();
@@ -3207,9 +3371,12 @@ async function onCreateCircle(event) {
 async function onJoinCircle(event) {
   event.preventDefault();
   await run(async () => {
-    await api("/api/circles/join", { method: "POST", body: { code: state.codeDraft } });
+    const joined = await api("/api/circles/join", { method: "POST", body: { code: state.codeDraft } });
+    rememberCircle(joined.circle.id);
+    state.sheet = null;
     state.me = await api("/api/me");
     if (state.pendingCode) history.replaceState(null, "", "/");
+    await refresh({ initial: true });
   });
   void considerReminders();
 }
@@ -3680,9 +3847,12 @@ async function onLeave() {
   if (!window.confirm("Leave this circle?")) return;
   await run(async () => {
     state.me = await api("/api/circles/leave", { method: "POST", body: {} });
+    rememberCircle(state.me.circle?.id || "");
     state.tab = "home";
     state.socials = [];
     state.plans = [];
+    state.notifications = [];
+    if (state.me.circle) await refresh({ initial: true });
   });
 }
 
