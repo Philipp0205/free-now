@@ -150,7 +150,13 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 360, height: 640 }
     const { host, names } = await crowd(16, note);
     const page = await openAs(host.token, viewport);
     try {
-      await page.getByRole("button", { name: "Delivered to 0 of 16" }).click();
+      const line = page.getByRole("button", { name: "Delivered to 0 of 16" });
+      const card = page.locator("article", { has: line });
+      const lineBox = await line.boundingBox();
+      const chipBox = await card.getByRole("button", { name: "Chat" }).boundingBox();
+      assert.ok(lineBox && chipBox);
+      assert.ok(lineBox.y + lineBox.height <= chipBox.y + 0.5, "the delivery line sits above the Chat chip, not beside it");
+      await line.click();
       const sheet = page.getByRole("dialog", { name: "Push delivery" });
       const list = sheet.locator(".sheet-scroll");
       const last = sheet.locator(".row", { hasText: names[names.length - 1] });

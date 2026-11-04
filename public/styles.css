@@ -479,6 +479,8 @@ button:disabled { cursor: default; opacity: 0.55; }
 }
 
 .list { display: flex; flex-direction: column; padding: 0 8px calc(var(--tab) + 16px); }
+/* No tab bar inside a sheet, so no room kept for it. */
+.sheet-scroll > .list { padding-bottom: 0; }
 .arrive-field { margin-top: 8px; }
 .row {
   display: flex;
@@ -512,8 +514,12 @@ button.row {
   font-size: 12px;
   font-weight: 700;
 }
+/* Its own row, so it never runs into the Chat chip beside it. */
 .push-line {
+  display: flex;
+  align-items: center;
   padding: 4px 0;
+  margin-top: 4px;
   font-size: 13px;
   color: rgba(255, 255, 255, 0.78);
 }
