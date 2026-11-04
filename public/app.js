@@ -485,6 +485,7 @@ function scrollParent(element) {
 
 function onViewportResize() {
   syncKeyboardInset();
+  liftSheetToast();
   const active = document.activeElement;
   if (isTextField(active)) scheduleReveal(active);
 }
@@ -609,6 +610,7 @@ function render() {
   }
   if (state.whereResults.length && state.sheet === "free") queueMicrotask(() => revealWhereResults());
   bindSheetSwipe();
+  liftSheetToast();
   syncSheetHistory();
   if (state.focusSocial) {
     const id = state.focusSocial;
@@ -2741,6 +2743,29 @@ async function endSocial(social) {
   render();
 }
 
+function confirmActions(nodes) {
+  const kids = [];
+  for (const node of nodes) {
+    if (!node) continue;
+    if (kids.length) kids.push(el("div", { class: "sheet-gap" }));
+    kids.push(node);
+  }
+  return el("div", { class: "stack" }, kids);
+}
+
+function liftSheetToast() {
+  const toast = document.querySelector(".toast");
+  if (!(toast instanceof HTMLElement)) return;
+  const action = document.querySelector(".sheet-dock .btn");
+  if (!(action instanceof HTMLElement)) {
+    toast.style.bottom = "";
+    return;
+  }
+  const origin = window.visualViewport?.offsetTop ?? 0;
+  const top = action.getBoundingClientRect().top + origin;
+  toast.style.bottom = `${Math.ceil(window.innerHeight - top + 12)}px`;
+}
+
 function confirmSheet() {
   const pending = state.confirm;
   if (!pending) return el("div");
@@ -2761,7 +2786,7 @@ function confirmSheet() {
       ]),
       el("p", { class: "help sheet-body", text: pending.body }),
       pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
-      el("div", { class: "stack" }, [
+      confirmActions([
         pending.copy
           ? el("button", {
               class: "btn secondary",

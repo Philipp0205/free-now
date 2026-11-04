@@ -839,6 +839,99 @@ test("a confirm sheet closes when its content is dragged at 412", { timeout: 90_
   }
 });
 
+test("the When label sits clear of the free sheet intro", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Alex");
+    const gap = await page.evaluate(() => {
+      const help = document.querySelector("form.sheet .sheet-intro .help");
+      const label = document.getElementById("when-label");
+      if (!help || !label) return null;
+      return label.getBoundingClientRect().top - help.getBoundingClientRect().bottom;
+    });
+    assert.ok(gap != null && gap >= 12, `When label gap is ${gap}px`);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a sheet error toast stays above the action button", { timeout: 90_000 }, async () => {
+  const cases: Array<[string, { width: number; height: number }]> = [
+    [CHROME_UA, { width: 412, height: 700 }],
+    [FIREFOX_UA, { width: 412, height: 700 }],
+    [FIREFOX_UA, { width: 360, height: 640 }],
+  ];
+  for (const [agent, size] of cases) {
+    const page = await phonePage(agent, false);
+    try {
+      await page.setViewportSize(size);
+      await openFreeSheet(page, "Alex");
+      await page.route("**/api/socials", (route) => {
+        if (route.request().method() === "POST") {
+          return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal error" }) });
+        }
+        return route.continue();
+      });
+      await page.getByRole("button", { name: "I'm free" }).click();
+      await page.getByText("Something went wrong. Try again.").waitFor();
+      const boxes = await page.evaluate(() => {
+        const toast = document.querySelector(".toast")?.getBoundingClientRect();
+        const button = document.querySelector(".sheet-dock .btn")?.getBoundingClientRect();
+        return { toastBottom: toast?.bottom ?? null, buttonTop: button?.top ?? null };
+      });
+      assert.ok(boxes.toastBottom != null && boxes.buttonTop != null && boxes.toastBottom <= boxes.buttonTop + 0.5, JSON.stringify({ size, boxes }));
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
+test("a confirm sheet closes when the gap between its buttons is dragged", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await page.setViewportSize({ width: 412, height: 700 });
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "End", exact: true }).click();
+    await page.locator(".sheet-confirm").waitFor();
+    const point = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll(".sheet-confirm button")];
+      const end = buttons.find((node) => node.textContent === "End");
+      const cancel = buttons.find((node) => node.textContent === "Cancel");
+      if (!end || !cancel) return null;
+      const above = end.getBoundingClientRect();
+      const below = cancel.getBoundingClientRect();
+      const x = above.left + above.width / 2;
+      const y = (above.bottom + below.top) / 2;
+      const hit = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        inSheet: Boolean(hit?.closest(".sheet-confirm")),
+        button: Boolean(hit?.closest("button")),
+      };
+    });
+    assert.ok(point);
+    assert.equal(point.button, false);
+    assert.equal(point.inSheet, true);
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.mouse.move(point.x, point.y + 180, { steps: 12 });
+    await page.mouse.up();
+    await page.locator(".sheet-confirm").waitFor({ state: "detached" });
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("a swipe on the header or the top of the sheet closes it", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {
