@@ -532,7 +532,9 @@ export function kickMember(db: DatabaseSync, circleId: string, userId: string): 
 }
 
 function endMemberEvents(db: DatabaseSync, circleId: string, userId: string): void {
+  deleteEventChats(db, "social", "circle_id = ? AND creator_id = ?", circleId, userId);
   db.prepare("DELETE FROM socials WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+  deleteEventChats(db, "plan", "circle_id = ? AND creator_id = ?", circleId, userId);
   db.prepare("DELETE FROM plans WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
   db.prepare(
     "DELETE FROM social_joins WHERE user_id = ? AND social_id IN (SELECT id FROM socials WHERE circle_id = ?)",
@@ -1022,6 +1024,11 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, readAt: 
   db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(readAt, userId);
 }
 
+function deleteEventChats(db: DatabaseSync, kind: "social" | "plan", whereSql: string, ...params: Array<string | number>): void {
+  const table = kind === "social" ? "socials" : "plans";
+  db.prepare(`DELETE FROM chats WHERE kind = ? AND ref_id IN (SELECT id FROM ${table} WHERE ${whereSql})`).run(kind, ...params);
+}
+
 function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
   db.prepare(
     `UPDATE socials
@@ -1049,7 +1056,9 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   const socialCutoff = now - HISTORY_DAYS * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
   const planDay = today ? addDays(today, -HISTORY_DAYS) : planCutoff;
+  deleteEventChats(db, "social", "expires_at < ?", socialCutoff);
   db.prepare("DELETE FROM socials WHERE expires_at < ?").run(socialCutoff);
+  deleteEventChats(db, "plan", "for_date < ?", planDay);
   db.prepare("DELETE FROM plans WHERE for_date < ?").run(planDay);
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
 }
