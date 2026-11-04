@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { api as sharedApi, withApp as sharedApp } from "./http.js";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
@@ -522,4 +523,39 @@ test("opening an older database makes the creator the admin", () => {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("editing an ended free post stays ended and does not push", async () => {
+  await sharedApp(async ({ port, db, sent, at }) => {
+    const alex = await sharedApi(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await sharedApi(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const created = await sharedApi(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Coffee" },
+      status: 201,
+    });
+    const id = created.social.id as string;
+    const before = db.prepare("SELECT note, expires_at, starts_at FROM socials WHERE id = ?").get(id) as {
+      note: string;
+      expires_at: number;
+      starts_at: number | null;
+    };
+    at(before.expires_at + 60_000);
+    const beforePushes = sent.length;
+    const denied = await sharedApi(port, "PATCH", `/api/socials/${id}`, {
+      token: alex.token,
+      body: { startsAt: null },
+      status: 410,
+    });
+    assert.equal(denied.error, "That post has ended.");
+    const after = db.prepare("SELECT note, expires_at, starts_at FROM socials WHERE id = ?").get(id) as {
+      note: string;
+      expires_at: number;
+      starts_at: number | null;
+    };
+    assert.deepEqual(after, before);
+    assert.equal(sent.length, beforePushes);
+    const listed = await sharedApi(port, "GET", "/api/socials", { token: alex.token });
+    assert.equal(listed.socials.length, 0);
+  });
 });
