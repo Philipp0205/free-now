@@ -1,4 +1,4 @@
-const CACHE = "hangry-v7";
+const CACHE = "hangry-v8";
 const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/map.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {

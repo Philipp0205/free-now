@@ -1,6 +1,6 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
-import { clockText, isLaterToday, minLaterClock, nextLaterSlot, zonedParts } from "./when.js";
+import { clockText, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine } from "./place.js";
 import { bindMap } from "./map.js";
 
@@ -1060,7 +1060,7 @@ function sheet() {
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("div", { class: "sheet-intro" }, [
-          el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? "Free later today" : "Free now" }),
+          el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? (offeringTomorrow() ? "Free tomorrow" : "Free later today") : "Free now" }),
           el("p", {
             class: "help",
             text: planning
@@ -1343,7 +1343,7 @@ function whenBlock() {
     el("span", { class: "sheet-label", id: "when-label", text: "When" }),
     el("div", { class: "segment", role: "group", "aria-labelledby": "when-label" }, [
       whenChoice("now", "Now"),
-      whenChoice("later", "Later today"),
+      whenChoice("later", offeringTomorrow() ? "Tomorrow" : "Later today"),
     ]),
   ]);
 }
@@ -1368,10 +1368,15 @@ function whenChoice(mode, text) {
 
 const TIME_LATER_ERROR = "Pick a time later today.";
 
+function offeringTomorrow(now = Date.now()) {
+  return nextLaterDay(now, state.meta?.tz || "Europe/Berlin") === "tomorrow";
+}
+
 function ensureLaterTime() {
   const tz = state.meta?.tz || "Europe/Berlin";
-  if (!isLaterToday(state.startChoice, Date.now(), tz)) state.startChoice = nextLaterSlot(Date.now(), tz);
-  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice, Date.now(), tz)) state.error = "";
+  const now = Date.now();
+  if (!isLaterToday(state.startChoice, now, tz)) state.startChoice = nextLaterSlot(now, tz);
+  if (state.error === TIME_LATER_ERROR && (isLaterToday(state.startChoice, now, tz) || offeringTomorrow(now))) state.error = "";
 }
 
 function timeBlock() {
@@ -1389,7 +1394,9 @@ function timeBlock() {
       oninput: (event) => {
         state.startChoice = event.target.value;
         const zone = state.meta?.tz || "Europe/Berlin";
-        if (state.startChoice && !isLaterToday(state.startChoice, Date.now(), zone)) state.error = TIME_LATER_ERROR;
+        const now = Date.now();
+        const tomorrowDefault = offeringTomorrow(now) && state.startChoice === nextLaterSlot(now, zone);
+        if (state.startChoice && !isLaterToday(state.startChoice, now, zone) && !tomorrowDefault) state.error = TIME_LATER_ERROR;
         else if (state.error === TIME_LATER_ERROR) state.error = "";
         render();
       },
@@ -1418,9 +1425,14 @@ function friendsSummary() {
   const place = (wherePayload().place || "").trim();
   const note = state.noteDraft.trim();
   const later = state.whenMode === "later";
-  const time = later && /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "";
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const now = Date.now();
+  const clock = later && /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "";
+  const tomorrow = Boolean(clock) && offeringTomorrow(now) && state.startChoice === nextLaterSlot(now, tz);
+  const time = tomorrow ? `${clock} tomorrow` : clock;
   if (later && !time) {
-    const line = note ? `${name} is free later today – ${note}` : `${name} is free later today`;
+    const when = offeringTomorrow(now) ? "tomorrow" : "later today";
+    const line = note ? `${name} is free ${when} – ${note}` : `${name} is free ${when}`;
     return `Friends get: ${line}`;
   }
   return `Friends get: ${pushLine(name, place, time, note)}`;

@@ -31,14 +31,21 @@ export function nextLaterSlot(now = Date.now(), tz = "Europe/Berlin") {
   const earliest = now + 15 * 60 * 1000;
   const today = zonedParts(now, tz).day;
   const part = zonedParts(earliest, tz);
-  if (part.day !== today) return "";
   let { hour, minute } = part;
   if (minute !== 0 && minute !== 30) {
     if (minute < 30) minute = 30;
     else { minute = 0; hour += 1; }
   }
-  if (hour >= 24) return "";
+  if (part.day === today && hour < 24) return clockText(hour, minute);
+  // The next :00/:30 is past midnight. 23:59 is the last clock still later today.
+  if (minLaterClock(now, tz)) return "23:59";
+  if (hour >= 24) hour -= 24;
   return clockText(hour, minute);
+}
+
+/** "tomorrow" once now+1min has crossed midnight, so the default slot is not today. */
+export function nextLaterDay(now = Date.now(), tz = "Europe/Berlin") {
+  return minLaterClock(now, tz) ? "today" : "tomorrow";
 }
 
 export function minLaterClock(now = Date.now(), tz = "Europe/Berlin") {
