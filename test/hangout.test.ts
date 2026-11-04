@@ -423,3 +423,59 @@ test("the old Railway host redirects to the configured public origin", async () 
     db.close();
   }
 });
+
+test("Berlin midnight puts a plan on tomorrow and keeps a later-today start on today", async () => {
+  await withApp(async ({ port, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    // 23:50 Europe/Berlin (CEST, UTC+2). Local midnight is 22:00Z.
+    const beforeMidnight = Date.parse("2026-06-01T21:50:00.000Z");
+    at(beforeMidnight);
+
+    const plan = await api(port, "POST", "/api/plans", {
+      token: alex.token,
+      body: { note: "Late walk" },
+      status: 201,
+    });
+    assert.equal(plan.plan.forDate, "2026-06-02");
+    assert.equal(plan.plan.whenLabel, "Tomorrow");
+    const listedPlan = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.equal(listedPlan.plans.length, 1);
+    assert.equal(listedPlan.plans[0].forDate, "2026-06-02");
+    assert.equal(listedPlan.plans[0].whenLabel, "Tomorrow");
+
+    const tonight = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "Still out", startsAt: "23:55" },
+      status: 201,
+    });
+    assert.equal(tonight.social.startsAt, Date.parse("2026-06-01T21:55:00.000Z"));
+
+    const pastMidnight = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { note: "After midnight", startsAt: "00:10" },
+      status: 400,
+    });
+    assert.equal(pastMidnight.error, "Pick a time later today.");
+    const nextDay = await api(port, "POST", "/api/socials", {
+      token: alex.token,
+      body: { startsAt: Date.parse("2026-06-01T22:10:00.000Z") },
+      status: 400,
+    });
+    assert.equal(nextDay.error, "Pick a time later today.");
+
+    const listed = await api(port, "GET", "/api/socials", { token: alex.token });
+    assert.equal(listed.socials.length, 1);
+    assert.equal(listed.socials[0].note, "Still out");
+    assert.equal(listed.socials[0].startsAt, Date.parse("2026-06-01T21:55:00.000Z"));
+
+    at(Date.parse("2026-06-02T21:59:00.000Z"));
+    const today = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.equal(today.plans.length, 1);
+    assert.equal(today.plans[0].whenLabel, "Today");
+
+    at(Date.parse("2026-06-02T22:00:00.000Z"));
+    const gone = await api(port, "GET", "/api/plans", { token: alex.token });
+    assert.deepEqual(gone.plans, []);
+  }, "Europe/Berlin");
+});
