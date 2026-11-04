@@ -2,6 +2,7 @@ import { installGuide, installPrompt, installReminderDue, needsInstallForPush, p
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 import { clockText, isLaterToday, minLaterClock, nextLaterSlot, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine } from "./place.js";
+import { bindMap } from "./map.js";
 
 const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
@@ -107,6 +108,17 @@ window.addEventListener("appinstalled", () => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+const FINDING_PLACE = "Finding address…";
+const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap } = bindMap({
+  state,
+  collectPins,
+  mapCard,
+  paintSummary,
+  scheduleReverse,
+  recentPlace,
+  FINDING_PLACE,
+});
 
 boot();
 setInterval(() => {
@@ -1272,19 +1284,10 @@ function collectPins() {
   return pins;
 }
 
-let leafletPromise = null;
-let liveMap = null;
-let liveMapTimer = 0;
 let mapWrap = null;
-let liveMarkers = new Map();
-let openMapPin = null;
-let whereLeaflet = null;
-let whereMapTimer = 0;
-const TILE_MAX_ZOOM = 19;
 let whereTimer = 0;
 let skipWhereInput = false;
 let reverseTimer = 0;
-const PIN_PX = 36;
 
 function emptyWhere() {
   return { mode: "none", place: "", lat: null, lng: null, precise: false };
@@ -1303,8 +1306,6 @@ function whereFromSocial(social) {
     precise: Boolean(social.location),
   };
 }
-
-const FINDING_PLACE = "Finding address…";
 
 function namedPlace(value) {
   const text = String(value || "").trim();
@@ -1765,22 +1766,6 @@ function recentPlace() {
   return null;
 }
 
-function rememberMapCenter(map) {
-  const center = map.getCenter();
-  if (!center) return;
-  state.mapCenter = { lat: center.lat, lng: center.lng };
-}
-
-function pickerFocus() {
-  if (state.where.lat != null && state.where.lng != null) {
-    return { lat: state.where.lat, lng: state.where.lng, zoom: 15 };
-  }
-  if (state.viewerLocation) return { lat: state.viewerLocation.lat, lng: state.viewerLocation.lng, zoom: 15 };
-  const recent = recentPlace();
-  if (recent) return { lat: recent.lat, lng: recent.lng, zoom: 15 };
-  return { lat: 51.1657, lng: 10.4515, zoom: 6 };
-}
-
 function chooseWhereHit(hit) {
   state.whereAutofill = false;
   state.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
@@ -2049,251 +2034,6 @@ function consumeDeepLink() {
   return false;
 }
 
-function addMapTiles(L, map) {
-  const tileUrl = state.meta?.mapTileUrl
-    || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-  const tileAttribution = state.meta?.mapTileAttribution
-    || "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
-  L.tileLayer(tileUrl, {
-    attribution: tileAttribution,
-    subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
-    detectRetina: tileUrl.includes("{r}"),
-    maxZoom: TILE_MAX_ZOOM,
-    maxNativeZoom: TILE_MAX_ZOOM,
-  }).addTo(map);
-}
-
-function destroyLiveMap() {
-  clearTimeout(liveMapTimer);
-  liveMapTimer = 0;
-  if (liveMap) liveMap.remove();
-  liveMap = null;
-  liveMarkers = new Map();
-  openMapPin = null;
-}
-
-function destroyWhereMap() {
-  clearTimeout(whereMapTimer);
-  whereMapTimer = 0;
-  if (!whereLeaflet) return;
-  whereLeaflet.remove();
-  whereLeaflet = null;
-}
-
-function scheduleInvalidate(map, stillCurrent) {
-  return setTimeout(() => {
-    if (!stillCurrent()) return;
-    const container = map.getContainer();
-    if (!container || !container.isConnected) return;
-    map.invalidateSize();
-  }, 60);
-}
-
-function pinKey(pin) {
-  return `${pin.kind}:${pin.id}`;
-}
-
-function pinIcon(L, pin) {
-  return L.divIcon({
-    className: `pin pin-${pin.kind}`,
-    html: `<span class="pin-letter">${escapeHtml(pin.initial || "")}</span>`,
-    iconSize: [PIN_PX, PIN_PX],
-    iconAnchor: [PIN_PX / 2, PIN_PX / 2],
-  });
-}
-
-function syncMapMarkers(L, pins) {
-  const next = new Set();
-  for (const pin of pins) {
-    const key = pinKey(pin);
-    next.add(key);
-    const sig = `${pin.lat},${pin.lng},${pin.initial},${pin.kind}`;
-    const existing = liveMarkers.get(key);
-    if (existing) {
-      if (existing.sig !== sig) {
-        existing.marker.setLatLng([pin.lat, pin.lng]);
-        existing.marker.setIcon(pinIcon(L, pin));
-        existing.sig = sig;
-      }
-      existing.marker.off("click");
-      existing.marker.on("click", () => showMapCard(pin));
-      continue;
-    }
-    const marker = L.marker([pin.lat, pin.lng], { icon: pinIcon(L, pin) });
-    marker.on("click", () => showMapCard(pin));
-    marker.addTo(liveMap);
-    liveMarkers.set(key, { marker, sig });
-  }
-  for (const [key, entry] of liveMarkers) {
-    if (next.has(key)) continue;
-    entry.marker.remove();
-    liveMarkers.delete(key);
-    if (openMapPin === key) {
-      openMapPin = null;
-      document.getElementById("map-card-host")?.replaceChildren();
-    }
-  }
-}
-
-function refreshOpenCard(pins) {
-  if (!openMapPin) return;
-  const pin = pins.find((item) => pinKey(item) === openMapPin);
-  if (!pin) {
-    openMapPin = null;
-    document.getElementById("map-card-host")?.replaceChildren();
-    return;
-  }
-  showMapCard(pin);
-}
-
-async function mountWhereMap() {
-  const host = document.getElementById("where-map");
-  if (!host || !state.whereMap || state.sheet !== "free") return;
-  const L = await loadLeaflet();
-  if (!host.isConnected || !state.whereMap || state.sheet !== "free") return;
-  destroyWhereMap();
-  const focus = pickerFocus();
-  const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
-  map.setView([focus.lat, focus.lng], Math.min(focus.zoom, TILE_MAX_ZOOM));
-  addMapTiles(L, map);
-  map.on("dragend", () => rememberMapCenter(map));
-  const marker = L.marker([focus.lat, focus.lng], {
-    draggable: true,
-    icon: L.divIcon({
-      className: "pin pin-social",
-      html: `<span class="pin-letter"></span>`,
-      iconSize: [PIN_PX, PIN_PX],
-      iconAnchor: [PIN_PX / 2, PIN_PX / 2],
-    }),
-  }).addTo(map);
-  const apply = (ll) => {
-    state.whereAutofill = false;
-    state.where.mode = "place";
-    state.where.lat = ll.lat;
-    state.where.lng = ll.lng;
-    state.where.precise = true;
-    state.where.place = FINDING_PLACE;
-    state.whereQuery = FINDING_PLACE;
-    const label = document.querySelector(".where-v");
-    if (label) {
-      label.textContent = FINDING_PLACE;
-      label.classList.remove("is-placeholder");
-    }
-    document.querySelector(".where-field")?.classList.add("has-value");
-    const query = document.getElementById("where-query");
-    if (query) query.value = FINDING_PLACE;
-    paintSummary();
-    scheduleReverse(ll.lat, ll.lng, true);
-  };
-  marker.on("dragend", () => apply(marker.getLatLng()));
-  map.on("click", (event) => {
-    marker.setLatLng(event.latlng);
-    apply(event.latlng);
-  });
-  whereLeaflet = map;
-  whereMapTimer = scheduleInvalidate(map, () => whereLeaflet === map);
-}
-
-function loadLeaflet() {
-  if (window.L) return Promise.resolve(window.L);
-  if (leafletPromise) return leafletPromise;
-  leafletPromise = new Promise((resolve, reject) => {
-    if (!document.querySelector("link[data-leaflet]")) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "/vendor/leaflet/leaflet.css";
-      link.dataset.leaflet = "1";
-      document.head.append(link);
-    }
-    const script = document.createElement("script");
-    script.src = "/vendor/leaflet/leaflet.js";
-    script.onload = () => resolve(window.L);
-    script.onerror = () => reject(new Error("map failed to load"));
-    document.body.append(script);
-  });
-  return leafletPromise;
-}
-
-async function mountMap() {
-  const host = document.getElementById("hangry-map");
-  if (!host || state.tab !== "map") return;
-  const L = await loadLeaflet();
-  if (!host.isConnected || state.tab !== "map") return;
-  const pins = collectPins();
-  if (!pins.length) {
-    destroyLiveMap();
-    return;
-  }
-  if (liveMap && liveMap.getContainer() === host) {
-    syncMapMarkers(L, pins);
-    liveMap.invalidateSize();
-    const focus = takeFocusPin(pins);
-    if (focus) focusMapPin(liveMap, focus);
-    else refreshOpenCard(pins);
-    reserveAttribution();
-    return;
-  }
-  if (liveMap) destroyLiveMap();
-  const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
-  L.control.zoom({ position: "topright" }).addTo(map);
-  addMapTiles(L, map);
-  liveMap = map;
-  watchAttribution(map);
-  syncMapMarkers(L, pins);
-  const focus = takeFocusPin(pins);
-  if (focus) focusMapPin(map, focus);
-  else map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
-  rememberMapCenter(map);
-  map.on("dragend", () => rememberMapCenter(map));
-  liveMapTimer = scheduleInvalidate(map, () => liveMap === map);
-}
-
-function watchAttribution(map) {
-  const attr = map.getContainer()?.querySelector(".leaflet-control-attribution");
-  if (!attr || attr.dataset.watched) {
-    reserveAttribution();
-    return;
-  }
-  attr.dataset.watched = "1";
-  if (window.ResizeObserver) new ResizeObserver(() => reserveAttribution()).observe(attr);
-  reserveAttribution();
-}
-
-/** Keep the pin card above the attribution plate, which wraps on a narrow phone. */
-function reserveAttribution() {
-  const mapEl = document.getElementById("hangry-map");
-  const attr = mapEl?.querySelector(".leaflet-control-attribution");
-  const wrap = document.querySelector(".map-wrap");
-  if (!mapEl || !attr || !wrap) return;
-  const gap = Math.ceil(mapEl.getBoundingClientRect().bottom - attr.getBoundingClientRect().top) + 8;
-  if (gap < 16) return;
-  wrap.style.setProperty("--attr-h", `${gap}px`);
-}
-
-function takeFocusPin(pins) {
-  if (!state.focusPin) return null;
-  const focus = pins.find((pin) => pinKey(pin) === state.focusPin);
-  if (focus) state.focusPin = "";
-  return focus || null;
-}
-
-function focusMapPin(map, pin) {
-  map.invalidateSize();
-  map.setView([pin.lat, pin.lng], 16, { animate: false });
-  showMapCard(pin);
-  const card = document.querySelector(".map-card");
-  const lift = Math.round((card?.getBoundingClientRect().height ?? 180) / 2 + 16);
-  map.panBy([0, lift], { animate: false });
-}
-
-function showMapCard(pin) {
-  openMapPin = pinKey(pin);
-  const host = document.getElementById("map-card-host");
-  if (!host) return;
-  host.replaceChildren(mapCard(pin));
-  reserveAttribution();
-}
-
 function mapCard(pin) {
   const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, pin)) : "";
   const social = pin.kind === "social"
@@ -2472,16 +2212,6 @@ function showOnMap(kind, id) {
   state.tab = "map";
   state.sheet = null;
   render();
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[char]);
 }
 
 function mapsLink(lat, lng, label, text) {
