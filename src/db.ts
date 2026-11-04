@@ -311,10 +311,6 @@ export function updateUserName(db: DatabaseSync, id: string, name: string): void
   db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, id);
 }
 
-export function rotateSession(db: DatabaseSync, id: string, tokenHash: string): void {
-  db.prepare("UPDATE users SET token_hash = ? WHERE id = ?").run(tokenHash, id);
-}
-
 export function rotateBuzzToken(db: DatabaseSync, id: string, buzzToken: string): void {
   db.prepare("UPDATE users SET buzz_token = ? WHERE id = ?").run(buzzToken, id);
 }
