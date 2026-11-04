@@ -1,5 +1,6 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
+import { clockText, isLaterToday, minLaterClock, nextLaterSlot, zonedParts } from "./when.js";
 
 const TOKEN_KEY = "fn_token";
 const SHARE_KEY = "fn_share_location";
@@ -1363,66 +1364,16 @@ function whenChoice(mode, text) {
 
 const TIME_LATER_ERROR = "Pick a time later today.";
 
-function zonedParts(ms) {
-  const tz = state.meta?.tz || "Europe/Berlin";
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).formatToParts(new Date(ms));
-  const read = (type) => parts.find((part) => part.type === type)?.value ?? "";
-  let hour = Number(read("hour"));
-  if (hour === 24) hour = 0;
-  return {
-    day: `${read("year")}-${read("month")}-${read("day")}`,
-    hour,
-    minute: Number(read("minute")),
-  };
-}
-
-function clockText(hour, minute) {
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function nextLaterSlot(now = Date.now()) {
-  const earliest = now + 15 * 60 * 1000;
-  const today = zonedParts(now).day;
-  const part = zonedParts(earliest);
-  if (part.day !== today) return "";
-  let { hour, minute } = part;
-  if (minute !== 0 && minute !== 30) {
-    if (minute < 30) minute = 30;
-    else { minute = 0; hour += 1; }
-  }
-  if (hour >= 24) return "";
-  return clockText(hour, minute);
-}
-
-function minLaterClock(now = Date.now()) {
-  const part = zonedParts(now + 60 * 1000);
-  if (part.day !== zonedParts(now).day) return "";
-  return clockText(part.hour, part.minute);
-}
-
-function isLaterToday(hhmm, now = Date.now()) {
-  if (!/^\d{2}:\d{2}$/.test(hhmm)) return false;
-  const min = minLaterClock(now);
-  if (!min) return false;
-  return hhmm >= min;
-}
-
 function ensureLaterTime() {
-  if (!isLaterToday(state.startChoice)) state.startChoice = nextLaterSlot();
-  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice)) state.error = "";
+  const tz = state.meta?.tz || "Europe/Berlin";
+  if (!isLaterToday(state.startChoice, Date.now(), tz)) state.startChoice = nextLaterSlot(Date.now(), tz);
+  if (state.error === TIME_LATER_ERROR && isLaterToday(state.startChoice, Date.now(), tz)) state.error = "";
 }
 
 function timeBlock() {
   if (state.whenMode !== "later") return null;
-  const min = minLaterClock();
+  const tz = state.meta?.tz || "Europe/Berlin";
+  const min = minLaterClock(Date.now(), tz);
   return el("div", { class: "sheet-group" }, [
     el("label", { class: "sheet-label", for: "later-time", text: "Time" }),
     el("input", {
@@ -1433,7 +1384,8 @@ function timeBlock() {
       value: /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "",
       oninput: (event) => {
         state.startChoice = event.target.value;
-        if (state.startChoice && !isLaterToday(state.startChoice)) state.error = TIME_LATER_ERROR;
+        const zone = state.meta?.tz || "Europe/Berlin";
+        if (state.startChoice && !isLaterToday(state.startChoice, Date.now(), zone)) state.error = TIME_LATER_ERROR;
         else if (state.error === TIME_LATER_ERROR) state.error = "";
         render();
       },
@@ -1491,7 +1443,7 @@ function sheetField(label, id, value, onValue, attrs = {}) {
 }
 
 function laterTimeChosen() {
-  return isLaterToday(state.startChoice);
+  return isLaterToday(state.startChoice, Date.now(), state.meta?.tz || "Europe/Berlin");
 }
 
 function startPayload() {
@@ -1615,7 +1567,8 @@ function revealArriveField() {
 function arriveLimits(startMs, endMs) {
   const earliest = Math.max(startMs, Date.now() + 60 * 1000);
   if (!Number.isFinite(earliest) || !Number.isFinite(endMs) || earliest > endMs) return { min: null, max: null };
-  if (zonedParts(earliest).day !== zonedParts(endMs).day) return { min: null, max: null };
+  const tz = state.meta?.tz || "Europe/Berlin";
+  if (zonedParts(earliest, tz).day !== zonedParts(endMs, tz).day) return { min: null, max: null };
   return { min: clock(earliest), max: clock(endMs) };
 }
 
@@ -1643,7 +1596,7 @@ function defaultPlanClock(plan) {
 function zonedMidnight(day) {
   const guess = Date.parse(`${day}T00:00:00Z`);
   if (!Number.isFinite(guess)) return NaN;
-  const part = zonedParts(guess);
+  const part = zonedParts(guess, state.meta?.tz || "Europe/Berlin");
   const shown = Date.parse(`${part.day}T${clockText(part.hour, part.minute)}:00Z`);
   return guess - (shown - guess);
 }
@@ -1656,7 +1609,7 @@ function nextIsoDay(day) {
 }
 
 function nextFiveClock(now = Date.now()) {
-  let { hour, minute } = zonedParts(now);
+  let { hour, minute } = zonedParts(now, state.meta?.tz || "Europe/Berlin");
   minute += 1;
   if (minute >= 60) { minute -= 60; hour += 1; }
   const rem = minute % 5;
@@ -2871,7 +2824,7 @@ async function onJoinCircle(event) {
 
 async function onFree(event) {
   event.preventDefault();
-  if (state.whenMode === "later" && !isLaterToday(state.startChoice)) {
+  if (state.whenMode === "later" && !isLaterToday(state.startChoice, Date.now(), state.meta?.tz || "Europe/Berlin")) {
     state.error = TIME_LATER_ERROR;
     render();
     return;
