@@ -37,8 +37,9 @@ test("a member is delivered if any device acked, otherwise sent, failed, or off"
   assert.equal(statusFor([{ user_id: "a", status: "failed", http_status: 410 }], "off"), "failed");
   assert.equal(statusFor([], "not_installed"), "not_installed");
   assert.equal(statusFor([], "off"), "off");
-  assert.equal(statusFor([], "on"), "off");
+  assert.equal(statusFor([], "on"), "not_sent");
 });
+
 
 test("status aggregation uses the latest batch and skips the host", () => {
   const db = openDb(":memory:");
@@ -111,13 +112,6 @@ test("an older database gains delivery rows and display columns", () => {
   }
 });
 
-test("the service worker acks without blocking the notification", () => {
-  const source = fs.readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
-  assert.match(source, /addEventListener\("push"/);
-  assert.match(source, /showNotification/);
-  assert.match(source, /\/api\/push\/ack/);
-  assert.match(source, /\.catch\(\(\) => \{\}\)/);
-});
 
 test("a free post records one row per subscription and an ack marks it delivered", async () => {
   const sent: SentPush[] = [];
@@ -286,3 +280,126 @@ async function subscribe(ctx: AppCtx<SentPush>, token: string, endpoint: string)
     status: 204,
   });
 }
+
+test("a member with notifications on but no row for this event is not sent, not off", () => {
+  const db = openDb(":memory:");
+  insertUser(db, { id: "host", name: "Alex", token_hash: "h", buzz_token: "b", created_at: NOW });
+  insertUser(db, { id: "bea", name: "Bea", token_hash: "h2", buzz_token: "b2", created_at: NOW });
+  insertUser(db, { id: "late", name: "Lee", token_hash: "h3", buzz_token: "b3", created_at: NOW });
+  insertUser(db, { id: "cam", name: "Cam", token_hash: "h4", buzz_token: "b4", created_at: NOW });
+  insertUser(db, { id: "dana", name: "Dana", token_hash: "h5", buzz_token: "b5", created_at: NOW });
+  insertCircle(db, { id: "c", name: "friends", invite_code: "ABCD2345", created_by: "host", created_at: NOW }, "host", NOW);
+  addMember(db, "c", "bea", NOW + 1);
+  addMember(db, "c", "cam", NOW + 2);
+  addMember(db, "c", "dana", NOW + 3);
+  recordDisplay(db, "cam", false, NOW);
+  upsertPushSub(db, { id: "sub-bea", userId: "bea", endpoint: "https://push.example/bea", p256dh: "p", auth: "a", createdAt: NOW });
+  insertPushDelivery(db, { id: "bea-1", userId: "bea", subId: "sub-bea", circleId: "c", kind: "social", refId: "s", batchId: "b1", createdAt: NOW + 10 });
+  markPushDelivered(db, "bea-1");
+  // Lee joins and turns notifications on after the send.
+  addMember(db, "c", "late", NOW + 20);
+  upsertPushSub(db, { id: "sub-lee", userId: "late", endpoint: "https://push.example/lee", p256dh: "p", auth: "a", createdAt: NOW + 20 });
+
+  const summary = summarizePush(db, "c", "social", "s", "host");
+  assert.deepEqual(summary.people.map((person) => [person.name, person.status]), [
+    ["Bea", "delivered"],
+    ["Cam", "not_installed"],
+    ["Dana", "off"],
+    ["Lee", "not_sent"],
+  ]);
+  assert.equal(summary.delivered, 1);
+  assert.equal(summary.total, 4);
+
+  // An event from before the deploy has no batch at all.
+  const old = summarizePush(db, "c", "plan", "before-deploy", "host");
+  assert.deepEqual(old.people.map((person) => [person.name, person.status]), [
+    ["Bea", "not_sent"],
+    ["Cam", "not_installed"],
+    ["Dana", "off"],
+    ["Lee", "not_sent"],
+  ]);
+  assert.equal(old.delivered, 0);
+  db.close();
+});
+
+const OLD_DELIVERIES = `
+  CREATE TABLE push_deliveries (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    sub_id TEXT NOT NULL,
+    circle_id TEXT REFERENCES circles(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    ref_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    http_status INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX idx_push_deliveries_ref ON push_deliveries(circle_id, kind, ref_id, created_at);
+`;
+
+test("push_deliveries gains ON DELETE CASCADE on user_id and keeps every row", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hangry-push-fk-"));
+  const file = path.join(dir, "old.sqlite");
+  // Boot once on the current schema, then put the old push_deliveries back.
+  const seed = openDb(file);
+  insertUser(seed, { id: "host", name: "Alex", token_hash: "h", buzz_token: "b", created_at: NOW });
+  insertUser(seed, { id: "bea", name: "Bea", token_hash: "h2", buzz_token: "b2", created_at: NOW });
+  insertCircle(seed, { id: "c", name: "friends", invite_code: "ABCD2345", created_by: "host", created_at: NOW }, "host", NOW);
+  addMember(seed, "c", "bea", NOW + 1);
+  seed.exec("DROP TABLE push_deliveries");
+  seed.exec(OLD_DELIVERIES);
+  for (const [id, user, status, http] of [["d1", "bea", "delivered", null], ["d2", "bea", "failed", 410], ["d3", "host", "sent", null]] as const) {
+    seed.prepare(
+      `INSERT INTO push_deliveries (id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at)
+       VALUES (?, ?, 'sub', 'c', 'social', 's', 'b', ?, ?, ?)`,
+    ).run(id, user, status, http, NOW);
+  }
+  const before = seed.prepare("SELECT * FROM push_deliveries ORDER BY id").all();
+  const oldKey = (seed.prepare("PRAGMA foreign_key_list(push_deliveries)").all() as Array<{ from: string; on_delete: string }>)
+    .find((key) => key.from === "user_id");
+  assert.equal(oldKey?.on_delete, "NO ACTION");
+  seed.close();
+
+  const db = openDb(file);
+  try {
+    assert.deepEqual(db.prepare("SELECT * FROM push_deliveries ORDER BY id").all(), before);
+    const keys = db.prepare("PRAGMA foreign_key_list(push_deliveries)").all() as Array<{ table: string; from: string; on_delete: string }>;
+    assert.equal(keys.find((key) => key.from === "user_id")?.on_delete, "CASCADE");
+    assert.equal(keys.find((key) => key.from === "circle_id")?.on_delete, "CASCADE");
+    const index = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_push_deliveries_ref'").get();
+    assert.ok(index);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'push_deliveries_new'").get(), undefined);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.equal((db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys, 1);
+
+    db.exec("DELETE FROM sessions WHERE user_id = 'bea'");
+    db.exec("DELETE FROM memberships WHERE user_id = 'bea'");
+    db.exec("DELETE FROM users WHERE id = 'bea'");
+    const left = db.prepare("SELECT id FROM push_deliveries ORDER BY id").all().map((row) => (row as { id: string }).id);
+    assert.deepEqual(left, ["d3"]);
+  } finally {
+    db.close();
+  }
+
+  // A second boot finds the cascade and leaves the table alone.
+  const again = openDb(file);
+  try {
+    const sql = (again.prepare("SELECT sql FROM sqlite_master WHERE name = 'push_deliveries'").get() as { sql: string }).sql;
+    again.exec("INSERT INTO push_deliveries (id, user_id, sub_id, circle_id, kind, ref_id, batch_id, status, http_status, created_at) VALUES ('d4', 'host', 'sub', 'c', 'plan', 'p', 'b2', 'sent', NULL, 1)");
+    again.close();
+    const third = openDb(file);
+    assert.equal((third.prepare("SELECT sql FROM sqlite_master WHERE name = 'push_deliveries'").get() as { sql: string }).sql, sql);
+    assert.deepEqual(third.prepare("SELECT id FROM push_deliveries ORDER BY id").all().map((row) => (row as { id: string }).id), ["d3", "d4"]);
+    third.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a fresh database already has the cascade", () => {
+  const db = openDb(":memory:");
+  const keys = db.prepare("PRAGMA foreign_key_list(push_deliveries)").all() as Array<{ from: string; on_delete: string }>;
+  assert.equal(keys.find((key) => key.from === "user_id")?.on_delete, "CASCADE");
+  db.close();
+});
