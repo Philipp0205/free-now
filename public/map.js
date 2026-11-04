@@ -15,9 +15,11 @@ export function bindMap({
 }) {
   let leafletPromise = null;
   let liveMap = null;
+  let liveMapTimer = 0;
   let liveMarkers = new Map();
   let openMapPin = null;
   let whereLeaflet = null;
+  let whereMapTimer = 0;
   const TILE_MAX_ZOOM = 19;
   const PIN_PX = 36;
 
@@ -52,6 +54,8 @@ export function bindMap({
   }
 
   function destroyLiveMap() {
+    clearTimeout(liveMapTimer);
+    liveMapTimer = 0;
     if (liveMap) liveMap.remove();
     liveMap = null;
     liveMarkers = new Map();
@@ -59,10 +63,20 @@ export function bindMap({
   }
 
   function destroyWhereMap() {
-    if (whereLeaflet) {
-      whereLeaflet.remove();
-      whereLeaflet = null;
-    }
+    clearTimeout(whereMapTimer);
+    whereMapTimer = 0;
+    if (!whereLeaflet) return;
+    whereLeaflet.remove();
+    whereLeaflet = null;
+  }
+
+  function scheduleInvalidate(map, stillCurrent) {
+    return setTimeout(() => {
+      if (!stillCurrent()) return;
+      const container = map.getContainer();
+      if (!container || !container.isConnected) return;
+      map.invalidateSize();
+    }, 60);
   }
 
   function pinKey(pin) {
@@ -137,10 +151,7 @@ export function bindMap({
     if (!host || !state.whereMap || state.sheet !== "free") return;
     const L = await loadLeaflet();
     if (!host.isConnected || !state.whereMap || state.sheet !== "free") return;
-    if (whereLeaflet) {
-      whereLeaflet.remove();
-      whereLeaflet = null;
-    }
+    destroyWhereMap();
     const focus = pickerFocus();
     const map = L.map(host, { zoomControl: false, maxZoom: TILE_MAX_ZOOM });
     map.setView([focus.lat, focus.lng], Math.min(focus.zoom, TILE_MAX_ZOOM));
@@ -180,7 +191,7 @@ export function bindMap({
       apply(event.latlng);
     });
     whereLeaflet = map;
-    setTimeout(() => map.invalidateSize(), 60);
+    whereMapTimer = scheduleInvalidate(map, () => whereLeaflet === map);
   }
 
   function loadLeaflet() {
@@ -234,7 +245,7 @@ export function bindMap({
     else map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
     rememberMapCenter(map);
     map.on("dragend", () => rememberMapCenter(map));
-    setTimeout(() => map.invalidateSize(), 60);
+    liveMapTimer = scheduleInvalidate(map, () => liveMap === map);
   }
 
   function watchAttribution(map) {
