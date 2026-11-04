@@ -23,3 +23,28 @@ export function formatDistance(meters) {
   const km = meters / 1000;
   return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
+
+/** Anything typed that starts like a web address. It is never sent as search text. */
+export function looksLikeUrl(value) {
+  return /^https?:\/\//i.test(String(value ?? "").trim());
+}
+
+/**
+ * A Google Maps link the server can resolve: google.<tld>/maps (with or without www.),
+ * maps.google.<tld>, maps.app.goo.gl, or goo.gl/maps. The server checks the exact domain list.
+ */
+export function isMapsLink(value) {
+  let url;
+  try {
+    url = new URL(String(value ?? "").trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const mapsPath = url.pathname === "/maps" || url.pathname.startsWith("/maps/");
+  if (host === "maps.app.goo.gl") return true;
+  if (host === "goo.gl") return mapsPath;
+  if (/^maps\.google\.(?:[a-z]{2,3}\.)?[a-z]{2,3}$/.test(host)) return true;
+  return mapsPath && /^(?:www\.)?google\.(?:[a-z]{2,3}\.)?[a-z]{2,3}$/.test(host);
+}
