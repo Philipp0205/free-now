@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseNominatim, parsePhoton, rankPlaces, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
+import { parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
 
 const STUTTGART = { lat: 48.7784, lng: 9.18 };
 
@@ -173,4 +173,110 @@ test("reverse geocoding keeps a Photon venue and falls back to Nominatim", async
     "https://photon.komoot.io/reverse?lon=13.40495&lat=52.52001",
     "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=52.52001&lon=13.40495",
   ]);
+});
+
+const BAGEL = "https://www.google.com/maps/place/jomi+Bagel+Deli,+Johannesstra%C3%9Fe+65/";
+const BAGEL_DE = "https://www.google.de/maps/place/jomi+Bagel+Deli,+Johannesstra%C3%9Fe+65/";
+const CONSENT = `https://consent.google.com/m?continue=${encodeURIComponent(BAGEL)}&gl=DE`;
+
+test("maps links resolve a short link, coordinates, and reject other hosts", async () => {
+  const fetched: string[] = [];
+  const searched: string[] = [];
+  const fetchImpl = async (url: string) => {
+    fetched.push(url);
+    if (url === "https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8") {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? BAGEL_DE : null) },
+        body: { cancel: async () => {}, text: async () => { throw new Error("body was read"); } },
+      };
+    }
+    if (url === "https://maps.app.goo.gl/consent") {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? CONSENT : null) },
+        body: { cancel: async () => {} },
+      };
+    }
+    if (url.includes("consent.google.com") || url.includes("/maps")) {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? CONSENT : null) },
+        body: { cancel: async () => {} },
+      };
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  const fetchJson = async (url: string) => {
+    searched.push(url);
+    if (url.includes("photon.komoot.io/reverse")) {
+      return { features: [{ geometry: { coordinates: [9.18, 48.7784] }, properties: { name: "Schlossplatz", osm_key: "amenity", osm_value: "cafe" } }] };
+    }
+    if (url.includes("photon.komoot.io")) {
+      return { features: [{ geometry: { coordinates: [9.183, 48.775] }, properties: { name: "jomi Bagel Deli", city: "Stuttgart", osm_key: "amenity", osm_value: "cafe" } }] };
+    }
+    return [];
+  };
+
+  const bagel = await resolveMapsLink("https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8", fetchJson, fetchImpl);
+  assert.equal(bagel[0]?.name, "jomi Bagel Deli");
+  assert.ok(searched.some((url) => decodeURIComponent(url).includes("jomi Bagel Deli")));
+  assert.deepEqual(fetched, ["https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8"]);
+
+  const consent = await resolveMapsLink("https://maps.app.goo.gl/consent", fetchJson, fetchImpl);
+  assert.equal(consent[0]?.name, "jomi Bagel Deli");
+  assert.deepEqual(fetched.filter((url) => url.includes("consent.google")), []);
+
+  searched.length = 0;
+  const again = await resolveMapsLink("https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8", fetchJson, fetchImpl);
+  assert.equal(again[0]?.name, "jomi Bagel Deli");
+  assert.equal(searched.length, 0);
+
+  const fetchesBeforePins = fetched.length;
+  const at = await resolveMapsLink("https://www.google.com/maps/@48.7784,9.18,17z", fetchJson, fetchImpl);
+  assert.equal(at.length, 1);
+  assert.equal(at[0].lat, 48.7784);
+  assert.equal(at[0].lng, 9.18);
+  assert.equal(at[0].name, "Schlossplatz");
+
+  const pin = await resolveMapsLink("https://www.google.com/maps/place/Cafe+Ada/@48.1,9.1,17z/data=!3d48.7674!4d9.1708", fetchJson, fetchImpl);
+  assert.equal(pin.length, 1);
+  assert.equal(pin[0].name, "Cafe Ada");
+  assert.equal(pin[0].lat, 48.7674);
+  assert.equal(pin[0].lng, 9.1708);
+  assert.equal(fetched.length, fetchesBeforePins);
+
+  const de = await resolveMapsLink("https://www.google.de/maps/@52.52,13.405,15z", fetchJson, fetchImpl);
+  assert.equal(de[0]?.lat, 52.52);
+  assert.equal(fetched.length, fetchesBeforePins);
+
+  const before = fetched.length;
+  const rejected = await resolveMapsLink("https://evil.example/maps/place/Secret", fetchJson, fetchImpl);
+  assert.deepEqual(rejected, []);
+  assert.equal(fetched.length, before);
+  assert.deepEqual(await resolveMapsLink("http://www.google.com/maps/place/Cafe", fetchJson, fetchImpl), []);
+  assert.deepEqual(await resolveMapsLink("https://goo.gl/not-maps", fetchJson, fetchImpl), []);
+  assert.deepEqual(await resolveMapsLink("https://www.google.evil/maps/place/Cafe", fetchJson, fetchImpl), []);
+});
+
+test("geocode logs the upstream status and not the query", async () => {
+  const logs: string[] = [];
+  const previous = console.log;
+  const original = globalThis.fetch;
+  console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+  globalThis.fetch = (async (url: string) => {
+    if (String(url).includes("photon")) return new Response("nope", { status: 503 });
+    const error = new Error("timed out");
+    error.name = "TimeoutError";
+    throw error;
+  }) as typeof fetch;
+  try {
+    await searchPlaces("Cafe Secret Name", null);
+  } finally {
+    console.log = previous;
+    globalThis.fetch = original;
+  }
+  assert.ok(logs.includes("geocode upstream photon status=503"));
+  assert.ok(logs.includes("geocode upstream nominatim status=timeout"));
+  assert.ok(logs.every((line) => !line.includes("Secret") && !line.includes("Cafe")));
 });
