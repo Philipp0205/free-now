@@ -318,17 +318,18 @@ function labelFromNominatim(body: unknown): string {
   return name ? `Near ${name}`.slice(0, 80) : "";
 }
 
-export async function reversePlace(lat: number, lng: number): Promise<string> {
+export async function reversePlace(lat: number, lng: number, fetchJson: JsonGetter = getJson): Promise<string> {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return "";
   const key = `rev:${lat.toFixed(5)},${lng.toFixed(5)}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.results[0]?.name ?? "";
-  await pace();
-  const photon = await getJson(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(String(lng))}&lat=${encodeURIComponent(String(lat))}`).catch(() => null);
+  const paced = fetchJson === getJson;
+  if (paced) await pace();
+  const photon = await fetchJson(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(String(lng))}&lat=${encodeURIComponent(String(lat))}`).catch(() => null);
   let nominatim: unknown = null;
   if (!labelNear(lat, lng, photon)) {
-    await pace();
-    nominatim = await getJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`).catch(() => null);
+    if (paced) await pace();
+    nominatim = await fetchJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`).catch(() => null);
   }
   const name = describeNearby(lat, lng, photon, nominatim);
   cache.set(key, { at: Date.now(), results: name ? [{ name, address: "", lat, lng, distanceM: null }] : [] });
