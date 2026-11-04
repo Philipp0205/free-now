@@ -379,7 +379,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   const socialId = matchPath(pathname, /^\/api\/socials\/([^/]+)$/);
   if (socialId && method === "PATCH") {
-    sendJson(res, 200, { social: editSocial(deps, me, socialId[1], body) });
+    sendJson(res, 200, { social: await editSocial(deps, me, socialId[1], body) });
     return;
   }
   if (socialId && method === "DELETE") {
@@ -434,7 +434,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   const planId = matchPath(pathname, /^\/api\/plans\/([^/]+)$/);
   if (planId && method === "PATCH") {
-    sendJson(res, 200, { plan: editPlan(deps, me, planId[1], body) });
+    sendJson(res, 200, { plan: await editPlan(deps, me, planId[1], body) });
     return;
   }
   if (planId && method === "DELETE") {
@@ -677,14 +677,46 @@ async function endSocial(deps: AppDeps, user: UserRow, rawId: string): Promise<v
   }
 }
 
-function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+function isInReply(reply: string | null | undefined): boolean {
+  return reply === "coming" || reply === "join" || reply === "in";
+}
+
+function changeBody(changes: Array<{ name: string; next: string }>): string {
+  return changes
+    .map((change) => (change.next ? `${change.name} is now ${change.next}.` : `The ${change.name.toLowerCase()} was cleared.`))
+    .join(" ");
+}
+
+async function pushEdit(
+  deps: AppDeps,
+  now: number,
+  userIds: string[],
+  title: string,
+  body: string,
+  refId: string,
+  url: string,
+): Promise<void> {
+  const ids = [...new Set(userIds)];
+  if (!ids.length || !body) return;
+  await notifyUsers(deps.db, deps.push, now, ids.map((userId) => ({
+    userId,
+    title,
+    body,
+    kind: "plan-change",
+    refId,
+    tag: `plan-change:${refId}`,
+    url,
+  })));
+}
+
+async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
   const social = getSocial(deps.db, id);
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   assertEventHost(deps, user, circle.id, social.creator_id);
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
-  const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : social.place;
+  const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (social.place ?? "");
   let lat = social.lat;
   let lng = social.lng;
   if (Object.prototype.hasOwnProperty.call(body, "lat") || Object.prototype.hasOwnProperty.call(body, "lng")) {
@@ -704,7 +736,27 @@ function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<st
     expiresAt = anchor + deps.config.socialTtlMs;
     remindedAt = startsAt != null && startsAt > now ? null : now;
   }
+  const noteChanged = note !== social.note;
+  const placeChanged = place !== (social.place ?? "") || lat !== social.lat || lng !== social.lng;
+  const timeChanged = startsAt !== social.starts_at;
   patchSocialDetails(deps.db, social.id, note, place, lat, lng, startsAt, remindedAt, expiresAt);
+  const changes = [];
+  if (noteChanged) changes.push({ name: "Note", next: note });
+  if (timeChanged) changes.push({ name: "Time", next: startsAt == null ? "" : clockLabel(startsAt, deps.config.tz) });
+  if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
+  if (changes.length) {
+    const coming = listSocialJoins(deps.db, social.id).filter((join) => isInReply(join.reply) && join.id !== user.id);
+    const label = note.trim() || "Free now";
+    await pushEdit(
+      deps,
+      deps.now(),
+      coming.map((join) => join.id),
+      `Updated: ${label}`,
+      changeBody(changes),
+      social.id,
+      `/?social=${social.id}`,
+    );
+  }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
   return socialPayload(deps.db, fresh);
@@ -731,14 +783,17 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string): Promise<voi
   }
 }
 
-function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
+async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
   const plan = getPlan(deps.db, id);
   if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, circle.id, plan.creator_id);
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  if (plan.for_date < today) throw new HttpError(410, "That plan has ended.");
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, true) : plan.note;
-  const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : plan.place;
+  const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (plan.place ?? "");
   let lat = plan.lat;
   let lng = plan.lng;
   if (Object.prototype.hasOwnProperty.call(body, "lat") || Object.prototype.hasOwnProperty.call(body, "lng")) {
@@ -748,11 +803,28 @@ function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<stri
   }
   let atTime = plan.at_time;
   if (Object.prototype.hasOwnProperty.call(body, "time")) atTime = readClock(body.time);
+  const noteChanged = note !== plan.note;
+  const placeChanged = place !== (plan.place ?? "") || lat !== plan.lat || lng !== plan.lng;
+  const timeChanged = atTime !== plan.at_time;
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime);
+  const changes = [];
+  if (noteChanged) changes.push({ name: "Note", next: note });
+  if (timeChanged) changes.push({ name: "Time", next: atTime ?? "" });
+  if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
+  if (changes.length) {
+    const coming = listPlanJoins(deps.db, plan.id).filter((join) => isInReply(join.reply) && join.id !== user.id);
+    await pushEdit(
+      deps,
+      now,
+      coming.map((join) => join.id),
+      `Plan changed: ${note}`,
+      changeBody(changes),
+      plan.id,
+      `/?plan=${plan.id}`,
+    );
+  }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  const now = deps.now();
-  const today = isoDate(now, deps.config.tz);
   return planPayload(deps.db, fresh, today, addDays(today, 1));
 }
 
