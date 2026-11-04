@@ -464,6 +464,103 @@ test("a server error retries without saying you're offline", { timeout: 90_000 }
   }
 });
 
+test("leaving the map removes it and closing the picker returns focus", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Show Schlossplatz on the map" }).click();
+    await page.locator(".map-card").getByText("Coffee").waitFor({ timeout: 8000 });
+    await page.locator(".leaflet-control-attribution").waitFor();
+    assert.match(await page.locator(".leaflet-control-attribution").innerText(), /Esri/);
+    const zoom = await page.locator(".leaflet-control-zoom-in").evaluate((node) => node.getAttribute("aria-label") || node.getAttribute("title") || "");
+    assert.equal(zoom, "Zoom in");
+    const before = await page.evaluate(() => {
+      const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
+      return { top: pin?.top ?? null, left: pin?.left ?? null };
+    });
+    await page.locator("#hangry-map").dragTo(page.locator("#hangry-map"), {
+      sourcePosition: { x: 180, y: 200 },
+      targetPosition: { x: 40, y: 80 },
+    });
+    const panned = await page.evaluate(() => {
+      const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
+      return {
+        top: pin?.top ?? null,
+        left: pin?.left ?? null,
+        focus: document.activeElement?.id ?? "",
+        tabIndex: document.getElementById("hangry-map")?.getAttribute("tabindex"),
+      };
+    });
+    assert.ok(before.top != null && panned.top != null && Math.abs(panned.top - before.top) > 20, JSON.stringify({ before, panned }));
+    assert.equal(panned.focus, "hangry-map");
+    assert.equal(panned.tabIndex, "0");
+    assert.deepEqual(errors, [], "after pan");
+    await page.getByRole("button", { name: "Now", exact: true }).click();
+    await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
+    const left = await page.evaluate(() => ({
+      containers: document.querySelectorAll(".leaflet-container").length,
+      hangry: Boolean(document.getElementById("hangry-map")),
+      cards: document.querySelectorAll(".map-card").length,
+      focus: document.activeElement?.tagName ?? "",
+      inLeaflet: Boolean(document.activeElement?.closest(".leaflet-container")),
+    }));
+    assert.deepEqual(left, { containers: 0, hangry: false, cards: 0, focus: "BODY", inLeaflet: false });
+    assert.deepEqual(errors, [], "after leave");
+    await page.getByRole("button", { name: "Map", exact: true }).click();
+    await page.locator(".map-card").getByText("Coffee").waitFor({ timeout: 8000 });
+    const returned = await page.evaluate(() => {
+      const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
+      return {
+        top: pin?.top ?? null,
+        left: pin?.left ?? null,
+        attr: document.querySelector(".leaflet-control-attribution")?.textContent ?? "",
+      };
+    });
+    assert.ok(returned.top != null && Math.abs(returned.top - (panned.top ?? 0)) <= 2, JSON.stringify({ panned, returned }));
+    assert.ok(returned.left != null && Math.abs(returned.left - (panned.left ?? 0)) <= 2, JSON.stringify({ panned, returned }));
+    assert.match(returned.attr, /Esri/);
+    assert.deepEqual(errors, [], "after return");
+
+    await page.getByRole("button", { name: "Now", exact: true }).click();
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator("#sheet-note").waitFor();
+    await page.locator("button.where-row").click();
+    await page.getByRole("button", { name: "Pick on map" }).click();
+    await page.locator("#where-map .leaflet-marker-icon").waitFor({ timeout: 8000 });
+    await page.waitForTimeout(150);
+    await page.locator("#where-map").click({ position: { x: 40, y: 40 } });
+    await page.waitForFunction(() => document.activeElement?.id === "where-map");
+    await page.keyboard.press("Escape");
+    await page.locator("form.sheet").waitFor({ state: "detached" });
+    const closed = await page.evaluate(() => ({
+      containers: document.querySelectorAll(".leaflet-container").length,
+      where: Boolean(document.getElementById("where-map")),
+      focus: document.activeElement?.tagName ?? "",
+      inLeaflet: Boolean(document.activeElement?.closest(".leaflet-container")),
+    }));
+    assert.deepEqual(closed, { containers: 0, where: false, focus: "BODY", inLeaflet: false });
+    assert.deepEqual(errors, [], "after close");
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    await page.locator("button.where-row").click();
+    await page.getByRole("button", { name: "Pick on map" }).click();
+    await page.locator("#where-map .leaflet-marker-icon").waitFor({ timeout: 8000 });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("picking on the map drops a pin and names the place", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   const errors: string[] = [];
