@@ -76,7 +76,7 @@ test("each recipient hears messages they did not write, and a removed writer is 
       .map((item) => item.payload.body);
     assert.deepEqual(bodies(nia.user.id), []);
     assert.deepEqual(bodies(alex.user.id), ["Ada: yes!"]);
-    assert.deepEqual(bodies(ada.user.id), ["Alex: dinner?", "1 new message"]);
+    assert.deepEqual(bodies(ada.user.id), ["2 new messages"]);
 
     await api(port, "POST", "/api/circles/chat", { token: nia.token, body: { text: "before I go" }, status: 201 });
     await flushChatNotices(true);
@@ -152,8 +152,8 @@ test("circle members can chat on an event, and a removed person cannot post", as
     const circlePushes = sent.filter((item) => item.payload.title === "Circle chat");
     assert.equal(circlePushes.some((item) => item.endpoint.includes(sam.user.id)), false);
     assert.equal(circlePushes.some((item) => item.endpoint.includes(nia.user.id)), false);
-    assert.equal(circlePushes.some((item) => item.endpoint.includes(alex.user.id) && item.payload.body === "Sam: Hello"), true);
-    assert.equal(circlePushes.some((item) => item.endpoint.includes(alex.user.id) && item.payload.body === "1 new message"), true);
+    const hostBurst = circlePushes.filter((item) => item.endpoint.includes(alex.user.id));
+    assert.deepEqual(hostBurst.map((item) => item.payload.body), ["2 new messages"]);
     const alerts = db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'chat'").get() as { n: number | bigint };
     assert.equal(Number(alerts.n), 0);
     const circleMsg = hello.chat.messages.find((message: { text: string }) => message.text === "Hello");
