@@ -28,52 +28,55 @@ function circularDistance(a: number, b: number): number {
   return Math.min(delta, CHAT_COLORS.length - delta);
 }
 
-function freeNeighbours(index: number, used: ReadonlySet<number>): number {
+/** Longest block of occupied neighbours on the circular palette. */
+export function longestOccupiedRun(used: ReadonlySet<number>): number {
   const size = CHAT_COLORS.length;
-  const left = (index - 1 + size) % size;
-  const right = (index + 1) % size;
-  return (used.has(left) ? 0 : 1) + (used.has(right) ? 0 : 1);
+  if (used.size === 0) return 0;
+  if (used.size >= size) return size;
+  let start = 0;
+  while (used.has(start)) start += 1;
+  let longest = 0;
+  let run = 0;
+  for (let step = 0; step < size; step += 1) {
+    const index = (start + step) % size;
+    if (used.has(index)) {
+      run += 1;
+      if (run > longest) longest = run;
+    } else run = 0;
+  }
+  return longest;
 }
 
 /**
- * Unused palette entry farthest from colors already taken.
- * Ties prefer a free slot whose neighbours are also free, so a burst of
- * joins does not land on adjacent hues. A remaining tie keeps the person's hash.
+ * Free slot that keeps the longest run of occupied neighbours as short as possible.
+ * Distance breaks a tie: sit as far as possible from a hue already taken.
+ * A remaining tie takes the lowest index, so stored colors and join order stay stable.
  */
 export function chooseColor(userId: string, used: ReadonlySet<number>): number {
-  const prefer = preferredColor(userId);
-  const free: number[] = [];
-  for (let index = 0; index < CHAT_COLORS.length; index += 1) {
-    if (!used.has(index)) free.push(index);
-  }
-  if (free.length === 0 || used.size === 0) return prefer;
+  if (used.size === 0 || used.size >= CHAT_COLORS.length) return preferredColor(userId);
+  let bestRun = CHAT_COLORS.length + 1;
   let bestDistance = -1;
   const best: number[] = [];
-  for (const candidate of free) {
+  for (let candidate = 0; candidate < CHAT_COLORS.length; candidate += 1) {
+    if (used.has(candidate)) continue;
+    const next = new Set(used);
+    next.add(candidate);
+    const run = longestOccupiedRun(next);
     let nearest: number = CHAT_COLORS.length;
     for (const taken of used) nearest = Math.min(nearest, circularDistance(candidate, taken));
-    if (nearest > bestDistance) {
+    if (run < bestRun || (run === bestRun && nearest > bestDistance)) {
+      bestRun = run;
       bestDistance = nearest;
       best.length = 0;
       best.push(candidate);
-    } else if (nearest === bestDistance) best.push(candidate);
+    } else if (run === bestRun && nearest === bestDistance) best.push(candidate);
   }
-  let roomiest = -1;
-  const roomy: number[] = [];
-  for (const candidate of best) {
-    const room = freeNeighbours(candidate, used);
-    if (room > roomiest) {
-      roomiest = room;
-      roomy.length = 0;
-      roomy.push(candidate);
-    } else if (room === roomiest) roomy.push(candidate);
-  }
-  return roomy.includes(prefer) ? prefer : roomy[0];
+  return best[0] ?? preferredColor(userId);
 }
 
 /**
- * Colors already stored in `prior` stay put. New people take the most distinct
- * free hue, so a join never repaints anyone who already has a color.
+ * Colors already stored in `prior` stay put. New people take a free hue that
+ * keeps occupied neighbours from forming a longer run.
  */
 export function assignChatColors(userIds: string[], prior: ReadonlyMap<string, number> = new Map()): Map<string, number> {
   const ids = [...new Set(userIds)];
