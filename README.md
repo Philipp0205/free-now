@@ -78,6 +78,7 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `APP_TZ` | `Europe/Berlin` | Timezone that decides what "tomorrow" means. Override it if the circle lives elsewhere. |
 | `MAP_TILE_URL` | Esri World Street Map | HTTPS tile template with `{z}`, `{x}`, and `{y}`. `{s}` is a subdomain and `{r}` is retina when the template contains them. |
 | `MAP_TILE_ATTRIBUTION` | `Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
+| `ADMIN_TOKEN` | unset | Bearer secret for the read-only endpoints `POST /api/admin/query` and `GET /api/admin/schema`. Unset, or shorter than 32 characters, those paths stay hidden and answer 404. Send `Authorization: Bearer <token>`. It is not shown in the app. Do not commit it. |
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 
