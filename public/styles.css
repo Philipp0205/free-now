@@ -512,6 +512,11 @@ button.row {
   font-size: 12px;
   font-weight: 700;
 }
+.push-line {
+  padding: 4px 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.78);
+}
 .time { color: var(--faint); font-size: 13px; white-space: nowrap; }
 .unread { width: 8px; height: 8px; border-radius: 50%; background: #ff375f; flex: none; }
 

@@ -29,6 +29,7 @@ const state = {
   notifications: [],
   tab: "home",
   sheet: null,
+  pushDetail: null,
   noteDraft: "",
   nameDraft: "",
   circleDraft: "friends",
@@ -216,6 +217,7 @@ async function boot() {
     }
     render();
     if (!state.offline) {
+      reportDisplay();
       refresh({ initial: true }).catch(() => {});
       rememberViewerLocation();
       void considerReminders();
@@ -734,6 +736,7 @@ function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   rememberCircle("");
   state.token = null;
+  state.displayReported = false;
   state.me = null;
   state.socials = [];
   state.plans = [];
@@ -1174,6 +1177,7 @@ function socialCard(social) {
       placeLine(social.location, social.place, { kind: "social", id: social.id }),
       replySummary(social),
       mine ? null : removedNote(social) || replyActions(social),
+      deliveryLine(social),
       chatEntry("social", social),
     ]),
   ]);
@@ -1192,6 +1196,7 @@ function planCard(plan) {
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : removedNote(plan) || planReplyButtons(plan),
+      deliveryLine(plan),
       chatEntry("plan", plan),
     ]),
   ]);
@@ -1699,8 +1704,17 @@ function youAreAdmin() {
   return Boolean(state.me?.circle?.youAreAdmin);
 }
 
+function reachText(reach) {
+  if (reach === "on") return "Notifications on";
+  if (reach === "off") return "Notifications off";
+  if (reach === "not_installed") return "Not installed";
+  return "";
+}
+
 function memberRow(member) {
   const self = member.id === state.me.user.id;
+  const reach = reachText(member.reach);
+  const line = [self ? "You" : "", reach].filter(Boolean).join(" · ");
   return el("div", { class: "row member-row" }, [
     avatar(member, 40),
     el("div", { class: "grow" }, [
@@ -1708,7 +1722,7 @@ function memberRow(member) {
         el("span", { text: member.name }),
         member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
       ]),
-      self ? el("p", { text: "You" }) : null,
+      line ? el("p", { text: line }) : null,
     ]),
     youAreAdmin() && !self
       ? el("button", {
@@ -1737,7 +1751,7 @@ function memberSheet() {
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: member.name }),
-        el("p", { class: "help", text: member.admin ? "Admin" : "Member" }),
+        el("p", { class: "help", text: [member.admin ? "Admin" : "Member", reachText(member.reach)].filter(Boolean).join(" · ") }),
       ]),
       el("div", { class: "actions" }, [
         member.admin
@@ -1872,12 +1886,68 @@ function endManaged(kind, item) {
   render();
 }
 
+function deliveryLine(item) {
+  const push = item.push;
+  if (!push || !push.total) return null;
+  return el("button", {
+    class: "text-btn push-line",
+    type: "button",
+    text: `Delivered to ${push.delivered} of ${push.total}`,
+    onclick: () => openPushSheet(item),
+  });
+}
+
+function openPushSheet(item) {
+  state.pushDetail = {
+    title: item.note || (item.forDate ? "Plan" : "Free now"),
+    push: item.push,
+  };
+  state.sheet = "push";
+  render();
+}
+
+function pushStatusText(person) {
+  if (person.status === "delivered") return "Delivered";
+  if (person.status === "sent") return "Sent, not confirmed";
+  if (person.status === "failed") return person.httpStatus ? `Failed · ${person.httpStatus}` : "Failed";
+  if (person.status === "not_installed") return "Not installed";
+  return "Notifications off";
+}
+
+function pushSheet() {
+  const detail = state.pushDetail;
+  if (!detail?.push) return el("div");
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-label": "Push delivery" }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Push" }),
+        el("p", {
+          class: "help",
+          text: `${detail.title} · Delivered to ${detail.push.delivered} of ${detail.push.total}`,
+        }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        el("div", { class: "list" }, detail.push.people.map((person) => el("div", { class: "row" }, [
+          avatar(person, 40),
+          el("div", { class: "grow" }, [
+            el("h3", { text: person.name }),
+            el("p", { text: pushStatusText(person) }),
+          ]),
+        ]))),
+      ]),
+    ]),
+  ]);
+}
+
 function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
   if (state.sheet === "join-circle") return joinLinkSheet();
   if (state.sheet === "notifications") return notificationsSheet();
   if (state.sheet === "member") return memberSheet();
   if (state.sheet === "admin-edit") return adminEditSheet();
+  if (state.sheet === "push") return pushSheet();
   if (state.sheet === "action") {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
@@ -3534,6 +3604,7 @@ async function onStart(event) {
     state.pushSnooze = false;
     if (!state.me.circle) useNamedCircleDefault();
     render();
+    reportDisplay();
     refresh({ initial: true }).catch(() => {});
     void considerReminders();
   } catch (error) {
@@ -3553,6 +3624,7 @@ async function onRecover(event) {
     state.me = await api("/api/me");
     state.pushSnooze = false;
     render();
+    reportDisplay();
     refresh({ initial: true }).catch(() => {});
     void considerReminders();
   } catch (error) {
@@ -3795,6 +3867,18 @@ async function onTestPush() {
     const result = await api("/api/push/test", { method: "POST", body: {} });
     await refresh({ initial: true });
     state.error = pushTestMessage(result?.subscriptions);
+  });
+}
+
+function openedInstalledApp() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function reportDisplay() {
+  if (!state.token || state.displayReported) return;
+  state.displayReported = true;
+  api("/api/me/display", { method: "POST", body: { standalone: openedInstalledApp() } }).catch(() => {
+    state.displayReported = false;
   });
 }
 
