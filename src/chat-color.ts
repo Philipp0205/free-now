@@ -28,7 +28,18 @@ function circularDistance(a: number, b: number): number {
   return Math.min(delta, CHAT_COLORS.length - delta);
 }
 
-/** Unused palette entry farthest from colors already taken. Ties keep the person's own hash. */
+function freeNeighbours(index: number, used: ReadonlySet<number>): number {
+  const size = CHAT_COLORS.length;
+  const left = (index - 1 + size) % size;
+  const right = (index + 1) % size;
+  return (used.has(left) ? 0 : 1) + (used.has(right) ? 0 : 1);
+}
+
+/**
+ * Unused palette entry farthest from colors already taken.
+ * Ties prefer a free slot whose neighbours are also free, so a burst of
+ * joins does not land on adjacent hues. A remaining tie keeps the person's hash.
+ */
 export function chooseColor(userId: string, used: ReadonlySet<number>): number {
   const prefer = preferredColor(userId);
   const free: number[] = [];
@@ -47,7 +58,17 @@ export function chooseColor(userId: string, used: ReadonlySet<number>): number {
       best.push(candidate);
     } else if (nearest === bestDistance) best.push(candidate);
   }
-  return best.includes(prefer) ? prefer : best[0];
+  let roomiest = -1;
+  const roomy: number[] = [];
+  for (const candidate of best) {
+    const room = freeNeighbours(candidate, used);
+    if (room > roomiest) {
+      roomiest = room;
+      roomy.length = 0;
+      roomy.push(candidate);
+    } else if (room === roomiest) roomy.push(candidate);
+  }
+  return roomy.includes(prefer) ? prefer : roomy[0];
 }
 
 /**

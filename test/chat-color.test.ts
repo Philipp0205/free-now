@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHAT_COLORS, assignChatColors, preferredColor } from "../src/chat-color.js";
+import { CHAT_COLORS, assignChatColors, chooseColor, preferredColor } from "../src/chat-color.js";
 
 function channel(hex: string, index: number): number {
   const value = parseInt(hex.slice(1 + index * 2, 3 + index * 2), 16) / 255;
@@ -48,6 +48,49 @@ test("chat colors are AA on black and white, and a circle does not share one", (
   const span = Math.abs((assigned.get(pair[0]) ?? 0) - (assigned.get(pair[1]) ?? 0));
   const distance = Math.min(span, CHAT_COLORS.length - span);
   assert.ok(distance > 1, `collision landed on adjacent hues ${assigned.get(pair[0])} and ${assigned.get(pair[1])}`);
+});
+
+test("a tied hue prefers a free slot with free neighbours", () => {
+  function nearest(candidate: number, used: Set<number>): number {
+    let best = CHAT_COLORS.length;
+    for (const taken of used) {
+      const delta = Math.abs(candidate - taken);
+      best = Math.min(best, delta, CHAT_COLORS.length - delta);
+    }
+    return best;
+  }
+  function freeNeighbours(index: number, used: Set<number>): number {
+    const size = CHAT_COLORS.length;
+    return (used.has((index - 1 + size) % size) ? 0 : 1) + (used.has((index + 1) % size) ? 0 : 1);
+  }
+  let found = false;
+  for (let mask = 1; mask < 2 ** CHAT_COLORS.length && !found; mask += 1) {
+    const used = new Set<number>();
+    for (let index = 0; index < CHAT_COLORS.length; index += 1) {
+      if (mask & (1 << index)) used.add(index);
+    }
+    if (used.size === 0 || used.size >= CHAT_COLORS.length - 1) continue;
+    const farthest = Math.max(...[...Array(CHAT_COLORS.length).keys()].filter((index) => !used.has(index)).map((index) => nearest(index, used)));
+    const best = [...Array(CHAT_COLORS.length).keys()].filter((index) => !used.has(index) && nearest(index, used) === farthest);
+    if (best.length < 2) continue;
+    const roomiest = Math.max(...best.map((index) => freeNeighbours(index, used)));
+    const lowest = best[0];
+    if (freeNeighbours(lowest, used) === roomiest) continue;
+    for (let n = 0; n < 400; n += 1) {
+      const id = `tie-${mask}-${n}`;
+      if (best.includes(preferredColor(id))) continue;
+      const chosen = chooseColor(id, used);
+      assert.ok(best.includes(chosen), `${id} left the farthest set`);
+      assert.equal(freeNeighbours(chosen, used), roomiest);
+      assert.ok(freeNeighbours(chosen, used) > freeNeighbours(lowest, used));
+      const prior = new Map<string, number>([["kept", lowest]]);
+      const assigned = assignChatColors(["kept", id], prior);
+      assert.equal(assigned.get("kept"), lowest);
+      found = true;
+      break;
+    }
+  }
+  assert.equal(found, true);
 });
 
 test("joining people does not change colors already given out", () => {
