@@ -1085,8 +1085,18 @@ function systemLine(message) {
   ]);
 }
 
+function personAccent(message) {
+  if (message.mine || message.system || message.color == null) return "";
+  return state.chatThread?.palette?.[message.color] || "";
+}
+
 function messageRow(message) {
-  return el("article", { class: message.mine ? "chat-msg mine" : "chat-msg" }, [
+  const accent = personAccent(message);
+  return el("article", {
+    class: message.mine ? "chat-msg mine" : "chat-msg",
+    "data-color": accent ? String(message.color) : null,
+    style: accent ? `--person:${accent}` : null,
+  }, [
     el("header", {}, [
       el("strong", { text: message.mine ? "You" : message.name }),
       el("time", { text: messageWhen(message.at) }),
