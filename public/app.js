@@ -432,22 +432,39 @@ function revealField(node) {
   node.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-/** Keep a focused sheet field above the pinned action bar and the keyboard. */
+/** The caption sitting on this field, not a label further up the same group. */
+function captionLabel(node) {
+  const label = node.closest(".sheet-group")?.querySelector(".sheet-label");
+  if (!label) return null;
+  const gap = node.getBoundingClientRect().top - label.getBoundingClientRect().bottom;
+  if (gap < 0 || gap > 36) return null;
+  return label;
+}
+
+/** Keep a focused sheet field above the pinned action bar and the keyboard.
+ * The field's own label stays below the sheet intro, so help text does not cover it. */
 function scrollFieldAboveDock(node) {
   const sheet = node.closest(".sheet");
   const dock = sheet?.querySelector(".sheet-dock");
+  const head = sheet?.querySelector(".sheet-head");
   const scroller = sheet?.querySelector(".sheet-scroll") || scrollParent(node);
   const view = window.visualViewport;
   const viewTop = view?.offsetTop ?? 0;
   const viewBottom = viewTop + (view?.height ?? window.innerHeight);
   const margin = 12;
+  const label = captionLabel(node);
   for (let pass = 0; pass < 2; pass += 1) {
     const dockTop = dock?.getBoundingClientRect().top ?? viewBottom;
-    const limit = Math.min(dockTop, viewBottom);
+    const headBottom = head?.getBoundingClientRect().bottom ?? viewTop;
+    const limit = Math.min(dockTop, viewBottom) - margin;
+    const floor = Math.max(viewTop + margin, headBottom + 12);
     const rect = node.getBoundingClientRect();
-    if (rect.bottom > limit - margin) scroller.scrollBy({ top: rect.bottom - (limit - margin), left: 0 });
-    else if (rect.top < viewTop + margin) scroller.scrollBy({ top: rect.top - (viewTop + margin), left: 0 });
-    else break;
+    const anchorTop = (label || node).getBoundingClientRect().top;
+    let delta = 0;
+    if (rect.bottom > limit) delta += rect.bottom - limit;
+    if (anchorTop - delta < floor) delta -= floor - (anchorTop - delta);
+    if (Math.abs(delta) <= 1) break;
+    scroller.scrollBy({ top: delta, left: 0 });
   }
 }
 

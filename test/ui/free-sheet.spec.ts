@@ -855,6 +855,39 @@ test("the When label sits clear of the free sheet intro", { timeout: 90_000 }, a
   }
 });
 
+test("the note label stays clear of the help text with the keyboard up", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  try {
+    await openFreeSheet(page, "Alex");
+    await page.locator("#sheet-note").focus();
+    for (const viewport of [
+      { height: 340, offsetTop: 0 },
+      { height: 280, offsetTop: 40 },
+    ]) {
+      await page.evaluate(`window.__setVisualViewport(${JSON.stringify(viewport)})`);
+      await page.waitForTimeout(FIELD_REVEAL_MS + 300);
+      const placed = await page.evaluate(() => {
+        const help = document.querySelector("form.sheet .sheet-intro .help");
+        const label = [...document.querySelectorAll(".sheet-label")].find((node) => node.textContent === "Note (optional)");
+        if (!help || !label) return null;
+        const helpBox = help.getBoundingClientRect();
+        const labelBox = label.getBoundingClientRect();
+        const x = labelBox.left + labelBox.width / 2;
+        const y = labelBox.top + labelBox.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          gap: labelBox.top - helpBox.bottom,
+          hitLabel: Boolean(hit && (hit === label || label.contains(hit))),
+        };
+      });
+      assert.ok(placed && placed.gap >= 8, JSON.stringify({ viewport, placed }));
+      assert.equal(placed.hitLabel, true, JSON.stringify({ viewport, placed }));
+    }
+  } finally {
+    await page.context().close();
+  }
+});
+
 test("a sheet error toast stays above the action button", { timeout: 90_000 }, async () => {
   const cases: Array<[string, { width: number; height: number }]> = [
     [CHROME_UA, { width: 412, height: 700 }],
