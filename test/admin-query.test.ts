@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import {
+  adminFailureSlots,
   adminTokensMatch,
   closeAdminReaders,
   configuredAdminToken,
@@ -136,7 +137,7 @@ test.describe("admin database endpoint", { concurrency: 1 }, () => {
         body: { sql: "SELECT name, ';' AS semi FROM users WHERE name = ?", params: ["Ada"] },
       });
       assert.equal(response.status, 200);
-      assert.deepEqual(response.json, { columns: ["name", "semi"], rows: [["Ada", ";"]] });
+      assert.deepEqual(response.json, { columns: ["name", "semi"], rows: [["Ada", ";"]], truncated: false });
       assert.equal(response.headers.get("cache-control"), "no-store");
       assert.equal(response.headers.get("access-control-allow-origin"), null);
       assert.deepEqual(logs, ["admin query ok rows=1"]);
@@ -150,7 +151,7 @@ test.describe("admin database endpoint", { concurrency: 1 }, () => {
         token: TOKEN,
         body: { sql: "SELECT name FROM users ORDER BY name" },
       });
-      assert.deepEqual(again.json, { columns: ["name"], rows: [["Ada"], ["Bea"]] });
+      assert.deepEqual(again.json, { columns: ["name"], rows: [["Ada"], ["Bea"]], truncated: false });
 
       const info = await hit(port, "POST", "/api/admin/query", {
         token: TOKEN,
@@ -178,6 +179,7 @@ test.describe("admin database endpoint", { concurrency: 1 }, () => {
       const body = response.json as { columns: string[]; rows: unknown[][] };
       assert.deepEqual(body.columns, ["n"]);
       assert.equal(body.rows.length, 500);
+      assert.equal((response.json as { truncated: boolean }).truncated, true);
       assert.deepEqual(body.rows[0], [1]);
       assert.deepEqual(body.rows[499], [500]);
       assert.ok(logs.includes("admin query ok rows=500"));
@@ -212,23 +214,125 @@ test.describe("admin database endpoint", { concurrency: 1 }, () => {
         });
         assert.equal(denied.status, 404);
       }
-      const locked = await hit(port, "POST", "/api/admin/query", {
-        token: TOKEN,
-        body: { sql: "SELECT 1 AS ok" },
+      const stillWrong = await hit(port, "POST", "/api/admin/query", {
+        token: "b".repeat(32),
+        body: { sql: "SELECT 1" },
       });
-      assert.equal(locked.status, 404);
-      assert.deepEqual(locked.json, { error: "not found" });
-      assert.equal(logs.every((line) => line === "admin query denied"), true);
-      assert.equal(logs.some((line) => line.includes(TOKEN)), false);
-
-      at(START + 60_000);
+      assert.equal(stillWrong.status, 404);
       const open = await hit(port, "POST", "/api/admin/query", {
         token: TOKEN,
         body: { sql: "SELECT 1 AS ok" },
       });
       assert.equal(open.status, 200);
-      assert.deepEqual(open.json, { columns: ["ok"], rows: [[1]] });
+      assert.deepEqual(open.json, { columns: ["ok"], rows: [[1]], truncated: false });
+      assert.equal(logs.every((line) => line === "admin query denied" || line === "admin query ok rows=1"), true);
       assert.equal(logs.at(-1), "admin query ok rows=1");
+      assert.equal(logs.some((line) => line.includes(TOKEN)), false);
+
+      at(START + 60_000);
+      const again = await hit(port, "POST", "/api/admin/query", {
+        token: "b".repeat(32),
+        body: { sql: "SELECT 1" },
+      });
+      assert.equal(again.status, 404);
+      assert.equal(adminFailureSlots(), 1);
+    });
+  });
+
+  test("the failure limit follows the rightmost forwarded address", async () => {
+    await withFileApp({ ADMIN_TOKEN: TOKEN }, async ({ port }) => {
+      for (let i = 0; i < 8; i += 1) {
+        const denied = await hit(port, "POST", "/api/admin/query", {
+          token: "b".repeat(32),
+          body: { sql: "SELECT 1" },
+          headers: { "x-forwarded-for": "203.0.113.9, 198.51.100.10" },
+        });
+        assert.equal(denied.status, 404);
+      }
+      assert.equal(adminFailureSlots(), 1);
+      const locked = await hit(port, "POST", "/api/admin/query", {
+        token: "b".repeat(32),
+        body: { sql: "SELECT 1" },
+        headers: { "x-forwarded-for": "198.51.100.10" },
+      });
+      assert.equal(locked.status, 404);
+      assert.equal(adminFailureSlots(), 1);
+      const other = await hit(port, "POST", "/api/admin/query", {
+        token: "b".repeat(32),
+        body: { sql: "SELECT 1" },
+        headers: { "x-forwarded-for": "203.0.113.20" },
+      });
+      assert.equal(other.status, 404);
+      assert.equal(adminFailureSlots(), 2);
+      const allowed = await hit(port, "POST", "/api/admin/query", {
+        token: TOKEN,
+        body: { sql: "SELECT 1 AS ok" },
+        headers: { "x-forwarded-for": "198.51.100.10" },
+      });
+      assert.equal(allowed.status, 200);
+      const otherStillOpen = await hit(port, "POST", "/api/admin/query", {
+        token: TOKEN,
+        body: { sql: "SELECT 1 AS ok" },
+        headers: { "x-forwarded-for": "203.0.113.20" },
+      });
+      assert.equal(otherStillOpen.status, 200);
+    });
+  });
+
+  test("expired failure records are dropped", async () => {
+    await withFileApp({ ADMIN_TOKEN: TOKEN }, async ({ port, at }) => {
+      for (const address of ["198.51.100.1", "198.51.100.2"]) {
+        const denied = await hit(port, "POST", "/api/admin/query", {
+          token: "b".repeat(32),
+          body: { sql: "SELECT 1" },
+          headers: { "x-forwarded-for": address },
+        });
+        assert.equal(denied.status, 404);
+      }
+      assert.equal(adminFailureSlots(), 2);
+      at(START + 60_000);
+      const later = await hit(port, "POST", "/api/admin/query", {
+        token: "b".repeat(32),
+        body: { sql: "SELECT 1" },
+        headers: { "x-forwarded-for": "198.51.100.3" },
+      });
+      assert.equal(later.status, 404);
+      assert.equal(adminFailureSlots(), 1);
+    });
+  });
+
+  test("a sql failure is logged apart from a denied token", async () => {
+    await withFileApp({ ADMIN_TOKEN: TOKEN }, async ({ port, logs }) => {
+      const response = await hit(port, "POST", "/api/admin/query", {
+        token: TOKEN,
+        body: { sql: "SELECT * FROM not_a_table" },
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(response.json, { error: "query is not allowed" });
+      assert.ok(logs.includes("admin query error"));
+      assert.equal(logs.some((line) => line.includes("not_a_table") || line.includes(TOKEN) || line.includes("SELECT")), false);
+    });
+  });
+
+  test("a heavy query times out and health stays responsive", async () => {
+    await withFileApp({ ADMIN_TOKEN: TOKEN }, async ({ port, logs }) => {
+      const query = hit(port, "POST", "/api/admin/query", {
+        token: TOKEN,
+        body: {
+          sql: "WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n < 40000000) SELECT COUNT(*) AS n FROM c",
+        },
+      });
+      const started = Date.now();
+      const health = await hit(port, "GET", "/api/health");
+      const waited = Date.now() - started;
+      assert.equal(health.status, 200);
+      assert.ok(waited < 400, `health took ${waited}ms`);
+      const response = await query;
+      assert.equal(response.status, 408);
+      assert.deepEqual(response.json, { error: "timeout" });
+      assert.equal("rows" in (response.json as object), false);
+      assert.ok(logs.includes("admin query timeout"));
+      assert.equal(logs.some((line) => line.includes("RECURSIVE") || line.includes(TOKEN)), false);
     });
   });
 });
@@ -273,11 +377,12 @@ async function hit(
   port: number,
   method: string,
   pathname: string,
-  options: { token?: string; body?: unknown } = {},
+  options: { token?: string; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<Hit> {
   const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
     method,
     headers: {
+      ...(options.headers ?? {}),
       ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
     },

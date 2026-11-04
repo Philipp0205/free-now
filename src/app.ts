@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  AdminQueryFailed,
+  AdminQueryTimeout,
   adminFailureKey,
   adminFailuresOpen,
   adminTokensMatch,
@@ -232,7 +234,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (pathname === "/api/admin/query" || pathname === "/api/admin/schema") {
-    handleAdmin(req, res, deps, method, pathname, body);
+    await handleAdmin(req, res, deps, method, pathname, body);
     return;
   }
 
@@ -1069,14 +1071,14 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomo
   };
 }
 
-function handleAdmin(
+async function handleAdmin(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   deps: AppDeps,
   method: string,
   pathname: string,
   body: Record<string, unknown>,
-): void {
+): Promise<void> {
   const expected = deps.config.adminToken;
   if (!expected) {
     sendJson(res, 404, { error: "not found" });
@@ -1084,13 +1086,13 @@ function handleAdmin(
   }
   const key = adminFailureKey(req);
   const now = deps.now();
-  if (!adminFailuresOpen(key, now)) {
-    console.log("admin query denied");
-    sendJson(res, 404, { error: "not found" });
-    return;
-  }
   const given = bearerToken(req.headers.authorization);
   if (!given || !adminTokensMatch(given, expected)) {
+    if (!adminFailuresOpen(key, now)) {
+      console.log("admin query denied");
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
     noteAdminFailure(key, now);
     console.log("admin query denied");
     sendJson(res, 404, { error: "not found" });
@@ -1106,18 +1108,28 @@ function handleAdmin(
         sendJson(res, 400, { error: "query is not allowed" });
         return;
       }
-      const result = runReadQuery(deps.config.dbPath, sql, params);
+      const result = await runReadQuery(deps.config.dbPath, sql, params);
       console.log(`admin query ok rows=${result.rows.length}`);
-      sendJson(res, 200, { columns: result.columns, rows: result.rows });
+      sendJson(res, 200, { columns: result.columns, rows: result.rows, truncated: result.truncated });
       return;
     }
     if (method === "GET" && pathname === "/api/admin/schema") {
-      const tables = readSchema(deps.config.dbPath);
+      const tables = await readSchema(deps.config.dbPath);
       console.log(`admin query ok rows=${tables.length}`);
       sendJson(res, 200, { tables });
       return;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof AdminQueryTimeout) {
+      console.log("admin query timeout");
+      sendJson(res, 408, { error: "timeout" });
+      return;
+    }
+    if (error instanceof AdminQueryFailed) {
+      console.log("admin query error");
+      sendJson(res, 400, { error: "query is not allowed" });
+      return;
+    }
     console.log("admin query denied");
     sendJson(res, 400, { error: "query is not allowed" });
     return;
