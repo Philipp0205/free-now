@@ -8,23 +8,17 @@ import type { Config } from "./config.js";
 import {
   addMember,
   addSocialJoin,
-  countUpcomingPlans,
   deletePlan,
   deletePushSubForUser,
   deleteSocial,
-  getActiveSocialByCreator,
   getCircleByCode,
   getCircleForUser,
   getPlan,
-  getPlanReply,
   getSocial,
-  getSocialReply,
   getUserByBuzzToken,
   getUserByTokenHash,
   hasSocialJoin,
   insertCircle,
-  insertPlan,
-  insertSocial,
   insertUser,
   listActiveSocials,
   listMembers,
@@ -37,13 +31,10 @@ import {
   removeMember,
   removePlanJoin,
   removeSocialJoin,
-  setPlanReply,
-  setSocialReply,
   rotateBuzzToken,
   rotateInvite,
   deleteSessionByHash,
   insertSession,
-  updateSocial,
   updateUserName,
   upsertPushSub,
   type CircleRow,
@@ -53,10 +44,11 @@ import {
 } from "./db.js";
 import { reversePlace, searchPlaces } from "./geocode.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
-import { audiencePlace, eventTitle, freePushBody, notifyUsers, planReplyBody, replyPushBody, socialTitle } from "./notify.js";
-import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
+import { eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
-import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
+import { addDays, isoDate, whenLabel, zonedDateTime } from "./time.js";
+import { publishSocial, replySocial } from "./socials.js";
+import { joinPlan, publishPlan, replyPlan } from "./plans.js";
 
 export type AppDeps = {
   db: DatabaseSync;
@@ -461,96 +453,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   sendJson(res, 404, { error: "not found" });
 }
 
-async function publishSocial(
-  deps: AppDeps,
-  user: UserRow,
-  note: string | undefined,
-  point?: { lat: number; lng: number } | null,
-  place?: string,
-  start?: number | null,
-): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
-  const circle = requireCircle(deps, user.id);
-  const now = deps.now();
-  const existing = getActiveSocialByCreator(deps.db, user.id, now);
-  let created = false;
-  let socialId: string;
-  let shouldNotify = true;
-  let shifted = false;
-  // A missing note on a live social keeps the current text. The original
-  // createdAt stays put; expiry moves to now + TTL so the window is a full
-  // TTL from this buzz and the two timestamps still describe one social.
-  // A missing place and missing coordinates keep the saved meetup.
-  // A missing start keeps a scheduled time. A later-today social lasts TTL from that time.
-  const nextNote = note === undefined ? (existing?.note ?? "") : note;
-  const keepWhere = place === undefined && point === undefined;
-  const nextPlace = place === undefined ? (existing?.place ?? "") : place;
-  const nextPoint = point === undefined
-    ? (existing?.lat == null || existing?.lng == null ? null : { lat: existing.lat, lng: existing.lng })
-    : point;
-  const nextStart = start === undefined ? (existing?.starts_at ?? null) : start;
-  const anchor = nextStart != null && nextStart > now ? nextStart : now;
-  const expiresAt = anchor + deps.config.socialTtlMs;
-  const fromTime = nextStart != null && nextStart > now ? clockLabel(nextStart, deps.config.tz) : "";
-  const schedule = {
-    startsAt: nextStart,
-    remindedAt: nextStart != null && nextStart > now ? null : now,
-  };
-  if (!existing) {
-    created = true;
-    socialId = crypto.randomUUID();
-    insertSocial(deps.db, {
-      id: socialId,
-      circleId: circle.id,
-      creatorId: user.id,
-      note: nextNote,
-      createdAt: now,
-      expiresAt,
-      lat: nextPoint?.lat ?? null,
-      lng: nextPoint?.lng ?? null,
-      place: nextPlace,
-      startsAt: nextStart,
-    });
-  } else {
-    socialId = existing.id;
-    const gap = now - existing.last_notified_at;
-    const noteChanged = existing.note !== nextNote;
-    const whereChanged = !keepWhere && (existing.place !== nextPlace || existing.lat !== (nextPoint?.lat ?? null) || existing.lng !== (nextPoint?.lng ?? null));
-    const startChanged = (existing.starts_at ?? null) !== nextStart;
-    shifted = startChanged;
-    shouldNotify = startChanged || (noteChanged || whereChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs);
-    updateSocial(
-      deps.db,
-      existing.id,
-      nextNote,
-      expiresAt,
-      shouldNotify ? now : existing.last_notified_at,
-      keepWhere ? undefined : { point: nextPoint, place: nextPlace },
-      start === undefined && !startChanged ? undefined : schedule,
-    );
-  }
-  if (shouldNotify) {
-    const title = shifted ? eventTitle("time") : fromTime ? eventTitle("later") : eventTitle("now");
-    const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
-    await notifyUsers(
-      deps.db,
-      deps.push,
-      now,
-      recipients.map((member) => ({
-        userId: member.id,
-        title,
-        body: freePushBody(user.name, nextPlace, fromTime, shifted, nextNote),
-        url: `/?social=${socialId}`,
-        kind: "social",
-        refId: socialId,
-        tag: `social:${socialId}`,
-      })),
-    );
-  }
-  const social = getSocial(deps.db, socialId);
-  if (!social) throw new HttpError(500, "social missing");
-  return { created, social: socialPayload(deps.db, social) };
-}
-
 async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
@@ -577,68 +479,6 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string) {
   return socialPayload(deps.db, fresh);
 }
 
-function normalizeReply(value: unknown): "coming" | "declined" {
-  if (value === "declined" || value === "cant" || value === "can't") return "declined";
-  if (value === "coming" || value === "join" || value === "in") return "coming";
-  throw new HttpError(400, "reply must be in or can't");
-}
-
-async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
-  const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
-  const social = getSocial(deps.db, id);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
-  const now = deps.now();
-  if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
-  if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
-  const reply = normalizeReply(body.reply);
-  const live = social.starts_at == null || social.starts_at <= now;
-  let eta: number | null = null;
-  let arriveAt: number | null = null;
-  if (reply === "coming" && body.arriveAt != null && body.arriveAt !== "") {
-    const windowStart = live ? now : (social.starts_at ?? now);
-    arriveAt = readArriveAt(body.arriveAt, now, deps.config.tz, windowStart, social.expires_at);
-  } else if (reply === "coming" && live && body.eta != null) {
-    const minutes = Number(body.eta);
-    if (![5, 10, 20].includes(minutes)) throw new HttpError(400, "eta must be 5, 10, or 20");
-    eta = minutes;
-  }
-  const previous = getSocialReply(deps.db, social.id, user.id);
-  const changed = !previous || previous.reply !== reply || (previous.eta_min ?? null) !== eta || (previous.arrive_at ?? null) !== arriveAt;
-  setSocialReply(deps.db, social.id, user.id, now, reply, eta, arriveAt);
-  const key = `${social.id}:${user.id}`;
-  const becameComing = reply === "coming" && previous?.reply !== "coming";
-  const arriveChanged = reply === "coming" && (previous?.arrive_at ?? null) !== arriveAt && arriveAt != null;
-  const etaOnly = previous?.reply === "coming" && reply === "coming" && !arriveChanged;
-  const held = cancelReplyPush(key);
-  const arriveLabel = arriveAt ? clockLabel(arriveAt, deps.config.tz) : "";
-  const notice = () => notifyUsers(deps.db, deps.push, now, [
-    {
-      userId: social.creator_id,
-      title: eventTitle("reply"),
-      body: replyPushBody(user.name, reply, eta, arriveLabel),
-      kind: "reply",
-      refId: social.id,
-      tag: `reply:${social.id}:${user.id}`,
-      url: `/?social=${social.id}`,
-    },
-  ]);
-  if (held || (becameComing && (eta != null || arriveAt != null))) {
-    await notice();
-  } else if (becameComing) {
-    scheduleReplyPush(key, notice);
-  } else if (arriveChanged) {
-    await notice();
-  } else if (etaOnly) {
-    /* The host already got the coming push. A 5/10/20 chip a moment later stays on the card. */
-  } else if (changed) {
-    await notice();
-  }
-  const fresh = getSocial(deps.db, social.id);
-  if (!fresh) throw new HttpError(500, "social missing");
-  return socialPayload(deps.db, fresh);
-}
-
 function leaveSocial(deps: AppDeps, user: UserRow, rawId: string) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id);
@@ -647,144 +487,6 @@ function leaveSocial(deps: AppDeps, user: UserRow, rawId: string) {
   if (social.expires_at <= deps.now()) throw new HttpError(410, "that social has ended");
   removeSocialJoin(deps.db, social.id, user.id);
   return socialPayload(deps.db, social);
-}
-
-async function publishPlan(
-  deps: AppDeps,
-  user: UserRow,
-  note: string,
-  place: string,
-  point?: { lat: number; lng: number } | null,
-) {
-  const circle = requireCircle(deps, user.id);
-  const now = deps.now();
-  const today = isoDate(now, deps.config.tz);
-  const tomorrow = addDays(today, 1);
-  if (countUpcomingPlans(deps.db, circle.id, today) >= 30) {
-    throw new HttpError(409, "too many plans");
-  }
-  const id = crypto.randomUUID();
-  insertPlan(deps.db, {
-    id,
-    circleId: circle.id,
-    creatorId: user.id,
-    note,
-    forDate: tomorrow,
-    createdAt: now,
-    lat: point?.lat ?? null,
-    lng: point?.lng ?? null,
-    place,
-  });
-  const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
-  await notifyUsers(
-    deps.db,
-    deps.push,
-    now,
-    recipients.map((member) => ({
-      userId: member.id,
-      title: "Tomorrow",
-      body: place ? `${user.name}: ${note} · ${audiencePlace(place)}` : `${user.name}: ${note}`,
-      kind: "plan",
-      refId: id,
-      tag: `plan:${id}`,
-      url: `/?plan=${id}`,
-    })),
-  );
-  const plan = getPlan(deps.db, id);
-  if (!plan) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, plan, today, tomorrow);
-}
-
-async function joinPlan(deps: AppDeps, user: UserRow, rawId: string) {
-  const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
-  const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
-  const now = deps.now();
-  const today = isoDate(now, deps.config.tz);
-  const tomorrow = addDays(today, 1);
-  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
-  if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
-  await setPlanComing(deps, user, plan, now);
-  const fresh = getPlan(deps.db, plan.id);
-  if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, tomorrow);
-}
-
-async function setPlanComing(
-  deps: AppDeps,
-  user: UserRow,
-  plan: PlanRow,
-  now: number,
-): Promise<void> {
-  const previous = getPlanReply(deps.db, plan.id, user.id);
-  if (previous?.reply === "coming") return;
-  setPlanReply(deps.db, plan.id, user.id, now, "coming", null);
-  await notifyPlanReply(deps, user, plan, now, "coming");
-}
-
-async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>) {
-  const id = parseId(rawId);
-  const circle = requireCircle(deps, user.id);
-  const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
-  const now = deps.now();
-  const today = isoDate(now, deps.config.tz);
-  if (plan.for_date < today) throw new HttpError(410, "that plan has ended");
-  if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
-  const reply = normalizeReply(body.reply);
-  if (reply === "coming") {
-    const previous = getPlanReply(deps.db, plan.id, user.id);
-    let arriveAt: number | null = previous?.reply === "coming" ? (previous.arrive_at ?? null) : null;
-    if (body.arriveAt) arriveAt = readPlanArrive(body.arriveAt, plan.for_date, now, deps.config.tz);
-    const became = previous?.reply !== "coming";
-    const arriveChanged = (previous?.arrive_at ?? null) !== arriveAt && arriveAt != null;
-    setPlanReply(deps.db, plan.id, user.id, now, "coming", arriveAt);
-    if (became || arriveChanged) {
-      await notifyUsers(deps.db, deps.push, now, [
-        {
-          userId: plan.creator_id,
-          title: eventTitle("reply"),
-          body: arriveAt
-            ? replyPushBody(user.name, "coming", null, clockLabel(arriveAt, deps.config.tz))
-            : planReplyBody(user.name, plan.note, "coming"),
-          kind: "plan-reply",
-          refId: plan.id,
-          tag: `plan-reply:${plan.id}:${user.id}`,
-          url: `/?plan=${plan.id}`,
-        },
-      ]);
-    }
-  } else {
-    const previous = getPlanReply(deps.db, plan.id, user.id);
-    if (previous?.reply !== "declined") {
-      setPlanReply(deps.db, plan.id, user.id, now, "declined", null);
-      await notifyPlanReply(deps, user, plan, now, "declined");
-    }
-  }
-  const fresh = getPlan(deps.db, plan.id);
-  if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, addDays(today, 1));
-}
-
-async function notifyPlanReply(
-  deps: AppDeps,
-  user: UserRow,
-  plan: PlanRow,
-  now: number,
-  reply: "coming" | "declined",
-): Promise<void> {
-  await notifyUsers(deps.db, deps.push, now, [
-    {
-      userId: plan.creator_id,
-      title: eventTitle("reply"),
-      body: planReplyBody(user.name, plan.note, reply),
-      kind: "plan-reply",
-      refId: plan.id,
-      tag: `plan-reply:${plan.id}:${user.id}`,
-      url: `/?plan=${plan.id}`,
-    },
-  ]);
 }
 
 function leavePlan(deps: AppDeps, user: UserRow, rawId: string) {
@@ -836,7 +538,7 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
   };
 }
 
-function socialPayload(db: DatabaseSync, social: SocialRow) {
+export function socialPayload(db: DatabaseSync, social: SocialRow) {
   return {
     id: social.id,
     note: social.note,
@@ -857,7 +559,7 @@ function socialPayload(db: DatabaseSync, social: SocialRow) {
   };
 }
 
-function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: string) {
+export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: string) {
   return {
     id: plan.id,
     note: plan.note,
@@ -882,7 +584,7 @@ function requireUser(user: UserRow | undefined): UserRow {
   return user;
 }
 
-function requireCircle(deps: AppDeps, userId: string): CircleRow {
+export function requireCircle(deps: AppDeps, userId: string): CircleRow {
   const circle = getCircleForUser(deps.db, userId);
   if (!circle) throw new HttpError(409, "join a circle first");
   return circle;
@@ -918,7 +620,7 @@ function safeHost(host: string): string {
   return "localhost";
 }
 
-function parseId(value: string): string {
+export function parseId(value: string): string {
   const id = decodeURIComponent(value).toLowerCase();
   if (!UUID_RE.test(id)) throw new HttpError(404, "not found");
   return id;
@@ -1002,34 +704,6 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
   const instant = Number(body.startsAt);
   if (!Number.isFinite(instant)) throw new HttpError(400, "Pick a time later today.");
   return assertLaterToday(instant, now, tz);
-}
-
-function readArriveAt(value: unknown, now: number, tz: string, start: number, end: number): number {
-  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) {
-    throw new HttpError(400, "Pick a time you can arrive.");
-  }
-  const hour = Number(value.slice(0, 2));
-  const minute = Number(value.slice(3, 5));
-  if (hour > 23 || minute > 59) throw new HttpError(400, "Pick a time you can arrive.");
-  const day = isoDate(Math.max(start, now), tz);
-  let at: number;
-  try {
-    at = zonedDateTime(day, value, tz);
-    if (at < start) {
-      const next = zonedDateTime(addDays(day, 1), value, tz);
-      if (next <= end) at = next;
-    }
-  } catch {
-    throw new HttpError(400, "Pick a time you can arrive.");
-  }
-  if (at <= now || at < start || at > end) throw new HttpError(400, "Pick a time you can arrive.");
-  return at;
-}
-
-function readPlanArrive(value: unknown, day: string, now: number, tz: string): number {
-  const start = zonedDateTime(day, "06:00", tz);
-  const end = zonedDateTime(day, "23:59", tz);
-  return readArriveAt(value, now, tz, start, end);
 }
 
 function assertLaterToday(instant: number, now: number, tz: string): number {
