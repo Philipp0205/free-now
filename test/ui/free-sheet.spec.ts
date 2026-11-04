@@ -1425,6 +1425,46 @@ test("a failed chat send goes out again when the connection returns", { timeout:
   }
 });
 
+test("text typed while a chat message retries stays in the composer", { timeout: 90_000 }, async () => {
+  const page = await phonePage(CHROME_UA, false);
+  let failed = false;
+  let releaseRetry = () => {};
+  const retryGate = new Promise<void>((resolve) => { releaseRetry = resolve; });
+  await page.route("**/api/**/chat", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    if (!failed) {
+      failed = true;
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal error" }) });
+    }
+    await retryGate;
+    return route.continue();
+  });
+  try {
+    await signIn(page, "Alex");
+    const token = await page.evaluate(() => localStorage.getItem("fn_token"));
+    await fetch(`${baseUrl}/api/socials`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ note: "Coffee" }),
+    });
+    await page.reload();
+    const later = page.locator(".sheet button", { hasText: "Not now" });
+    if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.locator("#chat-input").fill("Want");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByText("Something went wrong. Retrying…").waitFor();
+    await page.locator("#chat-input").fill("Want dinner");
+    releaseRetry();
+    await page.locator(".chat-msg", { hasText: "Want" }).waitFor({ timeout: 8000 });
+    assert.equal(await page.locator("#chat-input").inputValue(), "dinner");
+    assert.equal(await page.locator(".chat-msg", { hasText: "Want dinner" }).count(), 0);
+  } finally {
+    releaseRetry();
+    await page.context().close();
+  }
+});
+
 test("you can edit your name, and an admin can edit the circle name", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {
