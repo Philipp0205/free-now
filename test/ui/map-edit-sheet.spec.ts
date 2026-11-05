@@ -94,33 +94,20 @@ test("map card Edit and End sit clear of the host name and title", { timeout: 12
       await page.getByRole("button", { name: "Add plan" }).click();
       await page.getByRole("heading", { name: "Bagels for lunch with everyone??" }).waitFor();
       await openMapCard(page);
+      await page.locator(".map-card").getByRole("button", { name: /^More for / }).click();
+      const menu = page.getByRole("menu");
+      await menu.getByRole("menuitem", { name: "Edit" }).waitFor();
+      await menu.getByRole("menuitem", { name: "End plan" }).waitFor();
       const boxes = await page.evaluate(() => {
-        const card = document.querySelector(".map-card")!;
-        const nodes = [card, card.querySelector("strong")!, ...card.querySelectorAll(":scope > p"), ...card.querySelectorAll("button")];
-        const all = nodes.map((node) => {
-          const r = node.getBoundingClientRect();
-          return { text: node.textContent || "", tag: node.tagName, top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height };
-        });
-        return {
-          card: all[0],
-          texts: all.filter((item) => item.tag === "STRONG" || item.tag === "P"),
-          buttons: all.filter((item) => item.tag === "BUTTON" && /^(Edit|End)$/.test(item.text)),
-        };
+        const [card, more, menu] = [".map-card", ".map-card .card-more", ".map-card .card-menu"]
+          .map((sel) => document.querySelector(sel)!.getBoundingClientRect().toJSON());
+        return { card, more, menu, vw: window.innerWidth, vh: window.innerHeight };
       });
       const size = { width, height };
-      assert.equal(boxes.buttons.length, 2, JSON.stringify({ size, boxes }));
-      assert.ok(boxes.texts.length >= 3, JSON.stringify({ size, boxes }));
-      for (const button of boxes.buttons) {
-        assert.ok(button.height >= 44 - 0.5, JSON.stringify({ size, button }));
-        assert.ok(
-          button.top >= boxes.card.top - 0.5 && button.bottom <= boxes.card.bottom + 0.5
-            && button.left >= boxes.card.left - 0.5 && button.right <= boxes.card.right + 0.5,
-          JSON.stringify({ size, button, card: boxes.card }),
-        );
-        for (const text of boxes.texts) {
-          assert.equal(intersects(button, text), false, JSON.stringify({ size, button, text }));
-        }
-      }
+      assert.ok(boxes.more.height >= 44 - 0.5, JSON.stringify({ size, boxes }));
+      assert.ok(boxes.menu.left >= -1 && boxes.menu.right <= boxes.vw + 1, JSON.stringify({ size, boxes }));
+      assert.ok(boxes.menu.bottom <= boxes.vh + 1, JSON.stringify({ size, boxes }));
+      assert.equal(intersects(boxes.more, boxes.menu), false, JSON.stringify({ size, boxes }));
     } finally {
       await page.context().close();
     }
@@ -145,7 +132,8 @@ test("the edit sheet from the map card scrolls every field clear of the keyboard
         await page.reload();
         await dismiss(page);
         await openMapCard(page);
-        await page.locator(".map-card").getByRole("button", { name: /^Edit/ }).click();
+        await page.locator(".map-card").getByRole("button", { name: /^More for / }).click();
+        await page.getByRole("menuitem", { name: "Edit" }).click();
         await page.locator("#admin-note").waitFor();
         await page.locator("#admin-note").focus();
         await openKeyboard(page, mode, width, height);

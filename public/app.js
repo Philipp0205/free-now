@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v20";
+const APP_VERSION = "hangry-v21";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -96,6 +96,9 @@ const state = {
   pastDays: null,
   circleId: localStorage.getItem(CIRCLE_KEY) || "",
   circleMenu: false,
+  cardMenu: null,
+  eventDetail: null,
+  arrivalPick: null,
   newCircleName: "",
   whatsNew: null,
   whatsNewView: null,
@@ -140,6 +143,7 @@ const ICONS = {
   chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.2 16.2 5 19.2c-.3.4.1 1 .6.8l3.2-.9A7.2 7.2 0 1 0 7.2 16.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 14.5V4.5M8.2 8 12 4.2 15.8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11H6.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1H16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -839,6 +843,10 @@ function render() {
   bindSheetSwipe();
   liftSheetToast();
   syncOverlayHistory();
+  if (state.cardMenu) {
+    placeOpenCardMenus();
+    requestAnimationFrame(() => { if (state.cardMenu) placeOpenCardMenus(); });
+  }
   if (state.focusPlanScroll) {
     state.focusPlanScroll = false;
     const id = state.focusPlan;
@@ -1239,21 +1247,33 @@ function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
   const people = [social.creator, ...social.joined.filter((person) => person.reply !== "declined")];
   const upcoming = social.startsAt && social.startsAt > Date.now();
+  const menuOpen = state.cardMenu === `social:${social.id}`;
   return el("article", {
-    class: state.focusSocial === social.id ? "card card-now focused" : upcoming ? "card card-now later" : "card card-now",
+    class: [
+      state.focusSocial === social.id ? "card card-now focused" : upcoming ? "card card-now later" : "card card-now",
+      menuOpen ? "menu-open" : "",
+    ].filter(Boolean).join(" "),
     "data-social": social.id,
   }, [
-    el("div", { class: "card-bg" }),
-    eventTools("social", social),
+    el("div", { class: "card-bg", onclick: () => openEventDetail("social", social) }),
+    cardOverflow("social", social),
     el("div", { class: "card-copy" }, [
-      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
-      el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
-      el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
-      placeLine(social.location, social.place, { kind: "social", id: social.id }),
-      replySummary(social),
-      mine ? null : removedNote(social) || replyActions(social),
-      deliveryLine("social", social),
-      chatEntry("social", social),
+      el("div", {
+        class: "card-body",
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Open details",
+        onclick: () => openEventDetail("social", social),
+      }, [
+        el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+        el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
+        el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
+        placeLine(social.location, social.place, { kind: "social", id: social.id }),
+        replySummary(social),
+        removedNote(social),
+      ]),
+      chatRow("social", social),
+      social.removedBy ? null : inToggle("social", social, { locked: mine }),
     ]),
   ]);
 }
@@ -1261,24 +1281,36 @@ function socialCard(social) {
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const people = [plan.creator, ...plan.joined];
+  const menuOpen = state.cardMenu === `plan:${plan.id}`;
   return el("article", {
-    class: state.focusPlan === plan.id ? "card card-photo card-plan focused" : "card card-photo card-plan",
+    class: [
+      state.focusPlan === plan.id ? "card card-photo card-plan focused" : "card card-photo card-plan",
+      menuOpen ? "menu-open" : "",
+    ].filter(Boolean).join(" "),
     style: `--photo:url("${bgFor(plan.id)}")`,
     "data-plan": plan.id,
   }, [
-    el("div", { class: "card-bg" }),
-    eventTools("plan", plan),
+    el("div", { class: "card-bg", onclick: () => openEventDetail("plan", plan) }),
+    cardOverflow("plan", plan),
     el("div", { class: "card-copy" }, [
-      el("div", { class: "avatars" }, people.map((person) => avatar(person))),
-      el("h3", { text: plan.note }),
-      el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
-      planCirclesLine(plan),
-      planDescription(plan),
-      placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
-      planReplySummary(plan),
-      mine ? null : removedNote(plan) || planReplyButtons(plan),
-      deliveryLine("plan", plan),
-      el("div", { class: "card-actions" }, [chatEntry("plan", plan), shareChip(plan)]),
+      el("div", {
+        class: "card-body",
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Open details",
+        onclick: () => openEventDetail("plan", plan),
+      }, [
+        el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+        el("h3", { text: plan.note }),
+        el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
+        planCirclesLine(plan),
+        planDescription(plan),
+        placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
+        planReplySummary(plan),
+        removedNote(plan),
+      ]),
+      chatRow("plan", plan),
+      plan.removedBy ? null : inToggle("plan", plan, { locked: mine }),
     ]),
   ]);
 }
@@ -1292,12 +1324,12 @@ function shareChip(plan) {
   }, [icon("share"), el("span", { text: "Share" })]);
 }
 
-/** Two lines until tapped. Tap again to fold it back. Links stay tappable. */
 function planDescription(plan) {
   const text = (plan?.description || "").trim();
   if (!text) return null;
   const open = state.openDescriptions.has(plan.id);
   const toggle = (event) => {
+    event.stopPropagation();
     if (event.target.closest("a")) return;
     const next = !state.openDescriptions.has(plan.id);
     if (next) state.openDescriptions.add(plan.id);
@@ -1642,21 +1674,39 @@ function confirmDeleteMessage(message) {
 }
 
 function chatChip(kind, id) {
-  const unread = eventUnread(kind, id);
-  return el("button", {
-    class: "chip chat-chip",
-    type: "button",
-    "aria-label": unread ? `Chat, ${unread} unread` : "Chat",
-    onclick: () => { void openChat({ kind, id }); },
-  }, [
-    icon("chat"),
-    el("span", { text: "Chat" }),
-    unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
-  ]);
+  return chatRow(kind, { id });
 }
 
-function chatEntry(kind, item) {
-  return chatChip(kind, item.id);
+function eventChatMeta(kind, id) {
+  return state.chatSummary?.events?.find((row) => row.kind === kind && row.id === id) || null;
+}
+
+function chatRow(kind, item) {
+  const id = item.id;
+  const unread = eventUnread(kind, id);
+  const meta = eventChatMeta(kind, id);
+  const preview = (meta?.preview || "").trim();
+  const by = (meta?.previewBy || "").trim();
+  const previewText = preview
+    ? (by ? `${by}: ${preview}` : preview)
+    : "Chat";
+  return el("button", {
+    class: "chat-row",
+    type: "button",
+    "aria-label": unread ? `Chat, ${unread} unread` : "Chat",
+    onclick: (event) => {
+      event.stopPropagation();
+      state.cardMenu = null;
+      void openChat({ kind, id });
+    },
+  }, [
+    icon("chat"),
+    el("div", { class: "chat-row-copy" }, [
+      el("strong", { text: "Chat" }),
+      preview ? el("span", { class: "chat-row-preview", text: previewText }) : el("span", { class: "chat-row-preview muted", text: "Say hi" }),
+    ]),
+    unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+  ]);
 }
 
 function alertsScreen() {
@@ -1958,6 +2008,75 @@ function confirmRemoveMember(member) {
   render();
 }
 
+function openEventDetail(kind, item) {
+  if (!item?.id) return;
+  state.cardMenu = null;
+  state.eventDetail = { kind, id: item.id };
+  state.sheet = "event-detail";
+  render();
+}
+
+function eventDetailItem() {
+  const detail = state.eventDetail;
+  if (!detail) return null;
+  if (detail.kind === "plan") return state.plans.find((row) => row.id === detail.id) || null;
+  return state.socials.find((row) => row.id === detail.id) || null;
+}
+
+function eventDetailSheet() {
+  const detail = state.eventDetail;
+  const item = eventDetailItem();
+  if (!detail || !item) {
+    return el("div", {}, [
+      el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+      el("div", { class: "sheet", role: "dialog", "aria-label": "Details" }, [
+        el("div", { class: "sheet-head" }, [
+          el("div", { class: "grabber" }),
+          el("h2", { text: "Details" }),
+          el("p", { class: "help", text: "This hangout is gone." }),
+        ]),
+      ]),
+    ]);
+  }
+  const kind = detail.kind;
+  const title = item.note || (kind === "plan" ? "Plan" : "Free now");
+  const when = kind === "plan"
+    ? `${item.whenLabel}${item.time ? ` · ${item.time}` : ""}`
+    : (item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt));
+  const people = kind === "plan"
+    ? [item.creator, ...item.joined]
+    : [item.creator, ...item.joined.filter((person) => person.reply !== "declined")];
+  const unique = [];
+  const seen = new Set();
+  for (const person of people) {
+    if (!person?.id || seen.has(person.id)) continue;
+    seen.add(person.id);
+    unique.push(person);
+  }
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("div", { class: "sheet", role: "dialog", "aria-label": "Details" }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: title }),
+        el("p", { class: "help", text: `${when} · ${item.creator.name}` }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
+        item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
+        deliveryLine(kind, item),
+        el("h3", { class: "members-title", text: "Who's in" }),
+        el("div", { class: "list" }, unique.map((person) => {
+          const line = person.id === item.creator.id
+            ? `${person.name} · host`
+            : (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
+          return guestDetailRow(line, person, kind, item);
+        })),
+      ]),
+    ]),
+  ]);
+}
+
 function canManageEvent(item) {
   return Boolean(item?.creator) && (item.creator.id === state.me.user.id || adminOver(item));
 }
@@ -1969,12 +2088,193 @@ function adminOver(item) {
 }
 
 function eventTools(kind, item) {
-  if (!canManageEvent(item)) return null;
+  /* Host Edit/End moved into cardOverflow (⋯). */
+  return null;
+}
+
+function cardMenuKey(kind, item) {
+  return `${kind}:${item.id}`;
+}
+
+function closeCardMenu() {
+  if (!state.cardMenu) return;
+  state.cardMenu = null;
+  render();
+}
+
+
+function placeOpenCardMenus() {
+  const gap = 8;
+  const tabbar = document.querySelector(".tabbar");
+  const tabTop = tabbar ? tabbar.getBoundingClientRect().top : window.innerHeight;
+  const floor = Math.min(window.innerHeight, tabTop > 0 ? tabTop : window.innerHeight) - gap;
+  document.querySelectorAll(".card-menu").forEach((menu) => {
+    const more = menu.parentElement?.querySelector(".card-more");
+    if (!more) return;
+    menu.classList.remove("drop-up");
+    menu.style.maxHeight = "";
+    menu.style.right = "";
+    const btn = more.getBoundingClientRect();
+    const natural = menu.scrollHeight;
+    const below = floor - btn.bottom - 4;
+    const above = btn.top - 4 - gap;
+    let room = below;
+    if (natural > below && above > below) {
+      menu.classList.add("drop-up");
+      room = above;
+    }
+    if (natural > room) menu.style.maxHeight = `${Math.max(88, Math.floor(room))}px`;
+    const rect = menu.getBoundingClientRect();
+    if (rect.left < gap) menu.style.right = `${Math.floor(rect.left - gap)}px`;
+  });
+}
+
+function cardOverflow(kind, item, { onMap = false } = {}) {
+  if (!item?.id) return null;
+  const key = cardMenuKey(kind, item);
+  const open = state.cardMenu === key;
+  const hostish = canManageEvent(item);
+  const mine = item.joined?.find((person) => person.id === state.me.user.id);
+  const inNow = Boolean(mine) && inReply(mine) && mine.reply !== "declined";
+  const declined = mine?.reply === "declined";
+  const isHost = item.creator?.id === state.me.user.id;
+  const chosen = arriveClock(mine);
+  const preset = arrivalDefault(kind, item);
   const label = item.note || (kind === "plan" ? "plan" : "free post");
-  return el("div", { class: "card-tools" }, [
-    el("button", { class: "text-btn event-tool", type: "button", text: "Edit", "aria-label": `Edit ${label}`, onclick: () => openAdminEdit(kind, item) }),
-    el("button", { class: "text-btn event-tool", type: "button", text: "End", "aria-label": `End ${label}`, onclick: () => endManaged(kind, item) }),
+  const items = [];
+  if (kind === "plan") {
+    items.push({
+      text: "Share link",
+      action: () => { state.cardMenu = null; void sharePlan(item); },
+    });
+  }
+  if (!isHost && !item.removedBy) {
+    items.push({
+      text: chosen ? `Arriving ${chosen}` : "Pick arrival time",
+      action: () => {
+        state.cardMenu = null;
+        openArrivalPicker(kind, item, chosen || preset);
+      },
+    });
+    items.push({
+      text: "Can't make it",
+      action: () => { state.cardMenu = null; void sendReply(kind, item, "declined"); },
+      on: declined,
+    });
+  }
+  /* Map card already has a quiet Open in Maps link; keep the menu item on plan cards only. */
+  if (!onMap && kind === "plan" && item.location) {
+    items.push({
+      text: "Open in Maps",
+      action: () => {
+        state.cardMenu = null;
+        const url = mapsUrl(item.location.lat, item.location.lng, item.place || item.note);
+        if (url) window.open(url, "_blank", "noopener");
+      },
+    });
+  }
+  if (hostish) {
+    items.push({
+      text: "Edit",
+      action: () => { state.cardMenu = null; openAdminEdit(kind, item); },
+    });
+    items.push({
+      text: kind === "plan" ? "End plan" : "End",
+      danger: true,
+      action: () => { state.cardMenu = null; endManaged(kind, item); },
+    });
+  }
+  return el("div", { class: "card-overflow" }, [
+    el("button", {
+      class: "card-more",
+      type: "button",
+      "aria-label": `More for ${label}`,
+      "aria-expanded": String(open),
+      "aria-haspopup": "menu",
+      onclick: (event) => {
+        event.stopPropagation();
+        state.cardMenu = open ? null : key;
+        render();
+      },
+    }, [icon("more")]),
+    open ? el("div", {
+      class: "card-menu",
+      role: "menu",
+      onclick: (event) => event.stopPropagation(),
+    }, items.map((row) => el("button", {
+      type: "button",
+      role: "menuitem",
+      class: [row.danger ? "danger" : "", row.on ? "on" : ""].filter(Boolean).join(" "),
+      text: row.text,
+      onclick: (event) => {
+        event.stopPropagation();
+        row.action();
+      },
+    }))) : null,
   ]);
+}
+
+function openArrivalPicker(kind, item, value) {
+  state.arrivalPick = {
+    kind,
+    id: item.id,
+    value: /^\d{2}:\d{2}$/.test(value) ? value : (arrivalDefault(kind, item) || ""),
+  };
+  state.sheet = "arrival";
+  render();
+}
+
+function arrivalSheet() {
+  const pick = state.arrivalPick;
+  if (!pick) return el("div");
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", {
+      class: "sheet",
+      role: "dialog",
+      "aria-label": "Pick arrival",
+      onsubmit: (event) => {
+        event.preventDefault();
+        const value = document.getElementById("arrival-time")?.value || pick.value;
+        const kind = pick.kind;
+        const item = kind === "plan"
+          ? state.plans.find((row) => row.id === pick.id)
+          : state.socials.find((row) => row.id === pick.id);
+        state.arrivalPick = null;
+        state.sheet = null;
+        if (item && value) chooseArrival(kind, item, value);
+        else render();
+      },
+    }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Pick arrival" }),
+        el("p", { class: "help", text: "When do you think you'll get there?" }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        el("label", { class: "sheet-group" }, [
+          el("span", { class: "sheet-label", text: "Time" }),
+          el("input", {
+            id: "arrival-time",
+            class: "sheet-control",
+            type: "time",
+            step: "60",
+            value: pick.value,
+            "aria-label": "Pick time",
+            oninput: (event) => { pick.value = event.target.value; },
+          }),
+        ]),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", { class: "btn", type: "submit", text: "Save" }),
+      ]),
+    ]),
+  ]);
+}
+
+function mapsUrl(lat, lng, label) {
+  if (lat == null || lng == null) return "";
+  return mapsHref(lat, lng, label);
 }
 
 function openAdminEdit(kind, item) {
@@ -2474,6 +2774,8 @@ function sheet() {
   if (state.sheet === "notifications") return notificationsSheet();
   if (state.sheet === "member") return memberSheet();
   if (state.sheet === "admin-edit") return adminEditSheet();
+  if (state.sheet === "event-detail") return eventDetailSheet();
+  if (state.sheet === "arrival") return arrivalSheet();
   if (state.sheet === "push") return pushSheet();
   if (state.sheet === "whats-new") return whatsNewSheet();
   if (state.sheet === "feedback") return feedbackSheet();
@@ -3048,28 +3350,46 @@ function replyActions(social) {
 }
 
 function replyControls(kind, item) {
-  const mine = item.joined.find((person) => person.id === state.me.user.id);
-  const inNow = Boolean(mine) && inReply(mine) && mine.reply !== "declined";
-  const declined = mine?.reply === "declined";
-  const chosen = arriveClock(mine);
-  const preset = arrivalDefault(kind, item);
+  /* Legacy row — cards now use inToggle + cardOverflow. Kept for any stray call sites. */
   return el("div", { class: "reply-actions" }, [
-    el("div", { class: "reply-row" }, [
-      el("button", {
-        class: inNow ? "chip on" : "chip",
-        type: "button",
-        text: "I'm in",
-        onclick: () => sendReply(kind, item, "in"),
-      }),
-      el("button", {
-        class: declined ? "chip on" : "chip",
-        type: "button",
-        text: "Can't",
-        onclick: () => sendReply(kind, item, "declined"),
-      }),
-    ]),
-    timeChip(kind, item, chosen || preset, Boolean(chosen)),
+    inToggle(kind, item, { locked: false }),
   ]);
+}
+
+function inToggle(kind, item, { locked = false } = {}) {
+  const isHost = item.creator?.id === state.me.user.id;
+  const mine = item.joined?.find((person) => person.id === state.me.user.id);
+  const inNow = isHost || (Boolean(mine) && inReply(mine) && mine.reply !== "declined");
+  const hostLocked = locked || isHost;
+  return el("button", {
+    class: inNow ? "in-toggle on" : "in-toggle",
+    type: "button",
+    text: inNow ? "In ✓" : "I'm in",
+    "aria-pressed": String(inNow),
+    "aria-label": inNow ? "In ✓" : "I'm in",
+    title: inNow ? (hostLocked ? "You're in" : "Tap to undo") : "Join this plan",
+    disabled: hostLocked && inNow ? true : undefined,
+    onclick: (event) => {
+      event.stopPropagation();
+      if (hostLocked && inNow) return;
+      state.cardMenu = null;
+      if (inNow) void leaveEvent(kind, item);
+      else void sendReply(kind, item, "in");
+    },
+  });
+}
+
+async function leaveEvent(kind, item) {
+  await run(async () => {
+    const data = await api(`/api/${kind}s/${item.id}/leave`, { method: "POST", body: {} });
+    if (kind === "plan" && data.plan) {
+      state.plans = state.plans.map((row) => row.id === data.plan.id ? data.plan : row);
+    }
+    if (kind === "social" && data.social) {
+      state.socials = state.socials.map((row) => row.id === data.social.id ? data.social : row);
+    }
+    await refresh({ initial: true });
+  });
 }
 
 function timeChip(kind, item, value, chosen) {
@@ -3779,25 +4099,49 @@ function mapCard(pin) {
   const plan = pin.kind === "plan"
     ? state.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
     : null;
-  const tools = social?.creator ? eventTools("social", social) : plan?.creator ? eventTools("plan", plan) : null;
-  return el("article", { class: "map-card" }, [
+  const item = social?.creator ? social : plan?.creator ? plan : null;
+  const kind = social?.creator ? "social" : plan?.creator ? "plan" : pin.kind;
+  const menuOpen = item ? state.cardMenu === `${kind}:${item.id}` : false;
+  const own = Boolean(pin.own);
+  return el("article", { class: menuOpen ? "map-card menu-open" : "map-card" }, [
     el("div", { class: "map-card-head" }, [
-      el("strong", { text: pin.title }),
-      tools,
+      el("strong", {
+        text: pin.title,
+        role: "button",
+        tabindex: "0",
+        onclick: () => item && openEventDetail(kind, item),
+      }),
+      item ? cardOverflow(kind, item, { onMap: true }) : null,
     ]),
-    el("p", { text: pin.note }),
-    el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
-    planCirclesLine(plan),
-    plan ? planDescription(plan) : null,
-    social && !pin.own ? replySummary(social) : null,
-    social && !pin.own ? removedNote(social) || replyActions(social) : null,
-    plan && !pin.own ? planPinActions(plan) : null,
-    el("div", { class: "map-card-actions" }, [
-      mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
-      plan?.creator
-        ? el("button", { class: "btn secondary", type: "button", text: "Share", "aria-label": `Share ${plan.note}`, onclick: () => { void sharePlan(plan); } })
-        : null,
+    el("div", {
+      class: "map-card-body",
+      role: item ? "button" : null,
+      tabindex: item ? "0" : null,
+      onclick: () => item && openEventDetail(kind, item),
+    }, [
+      el("p", { text: pin.note }),
+      el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+      planCirclesLine(plan),
+      plan ? planDescription(plan) : null,
+      social && !own ? replySummary(social) : null,
+      social ? removedNote(social) : null,
+      plan && !own ? (plan.removedBy ? removedNote(plan) : (
+        (plan.joined.find((person) => person.id === state.me.user.id) && el("p", {
+          class: "reply-line",
+          text: planReplyLine(plan.joined.find((person) => person.id === state.me.user.id)),
+        }))
+      )) : null,
     ]),
+    item ? chatRow(kind, item) : null,
+    item && !item.removedBy ? inToggle(kind, item, { locked: own }) : null,
+    pin.lat != null ? el("a", {
+      class: "map-link quiet",
+      href: mapsUrl(pin.lat, pin.lng, pin.note),
+      target: "_blank",
+      rel: "noopener noreferrer",
+      text: "Open in Maps",
+      onclick: (event) => event.stopPropagation(),
+    }) : null,
   ]);
 }
 
@@ -3820,8 +4164,15 @@ function canRemoveGuest(event) {
 }
 
 function guestLine(text, person, kind, event) {
+  /* Remove moved to the event detail sheet so cards stay clean. */
+  return el("p", { class: "reply-line", text });
+}
+
+function guestDetailRow(text, person, kind, event) {
   const line = el("p", { class: "reply-line", text });
-  if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) return line;
+  if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) {
+    return el("div", { class: "guest-row" }, [line]);
+  }
   return el("div", { class: "guest-row" }, [
     line,
     el("button", {
@@ -3866,7 +4217,6 @@ function planPinActions(plan) {
     mine && (mine.reply === "declined" || inReply(mine))
       ? el("p", { class: "reply-line", text: planReplyLine(mine) })
       : null,
-    planReplyButtons(plan),
   ]);
 }
 
@@ -3930,7 +4280,7 @@ function placeLine(location, placeName, target) {
     class: "place-line",
     type: "button",
     "aria-label": `Show ${text} on the map`,
-    onclick: () => showOnMap(target.kind, target.id),
+    onclick: (event) => { event.stopPropagation(); showOnMap(target.kind, target.id); },
   }, [
     el("span", { class: "place-pin", "aria-hidden": "true" }),
     el("span", { text }),
@@ -4065,6 +4415,9 @@ function openSheet(name) {
 function closeSheet() {
   if (state.sheet === "feedback" && state.feedbackSent) resetFeedback();
   if (state.sheet === "whats-new") state.whatsNewView = null;
+  if (state.sheet === "event-detail") state.eventDetail = null;
+  if (state.sheet === "arrival") state.arrivalPick = null;
+  state.cardMenu = null;
   state.sheet = null;
   state.whereMap = false;
   if (state.planWhere) state.planWhere.whereMap = false;
@@ -4084,6 +4437,7 @@ const TAB_LAYERS = ["map", "circle", "you"];
 function currentOverlayDepth() {
   let depth = 0;
   if (state.confirm) depth += 1;
+  if (state.cardMenu) depth += 1;
   if (state.installOpen) depth += 1;
   // Onboarding waits behind an open sheet (see view), so it only counts once the sheet is gone.
   if (state.onboarding && !state.sheet) depth += 1;
@@ -4118,6 +4472,11 @@ function shellShown() {
 function dismissTopOverlay() {
   if (state.confirm) {
     state.confirm = null;
+    render();
+    return;
+  }
+  if (state.cardMenu) {
+    state.cardMenu = null;
     render();
     return;
   }
@@ -4305,6 +4664,14 @@ window.addEventListener("popstate", () => {
   overlayHistoryDepth = 0;
 });
 
+document.addEventListener("pointerdown", (event) => {
+  if (!state.cardMenu) return;
+  const target = event.target;
+  if (target && target.closest && target.closest(".card-overflow")) return;
+  state.cardMenu = null;
+  render();
+}, true);
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || currentOverlayDepth() === 0) return;
   event.preventDefault();
@@ -4334,6 +4701,7 @@ async function onTab(id) {
   state.sheet = null;
   state.focusPlan = "";
   state.mapHistory = false;
+  state.cardMenu = null;
   if (id === "alerts") {
     render();
     try {

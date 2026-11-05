@@ -104,9 +104,8 @@ for (const [width, height] of SIZES) {
     try {
       await page.goto(baseUrl);
       await dismiss(page);
-      await page.getByRole("button", { name: `Edit ${note}` }).click().catch(async () => {
-        await page.locator(".card-plan", { hasText: note }).getByRole("button", { name: "Edit" }).click();
-      });
+      await page.locator(".card-plan", { hasText: note }).locator(".card-more").click();
+      await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
       const sheet = page.locator(".sheet");
       await sheet.getByRole("button", { name: "Pick a date" }).click();
       await page.locator("#admin-date").fill(target);
@@ -159,7 +158,8 @@ test("a title-only edit sends no push", { timeout: 60_000 }, async () => {
   try {
     await page.goto(baseUrl);
     await dismiss(page);
-    await page.locator(".card-plan", { hasText: "Walk" }).getByRole("button", { name: "Edit" }).click();
+    await page.locator(".card-plan", { hasText: "Walk" }).getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
     await page.locator("#admin-note").fill("Long walk");
     await page.locator(".sheet").getByRole("button", { name: "Save" }).click();
     await page.locator(".card-plan", { hasText: "Long walk" }).waitFor();

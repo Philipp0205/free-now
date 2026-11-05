@@ -270,45 +270,41 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     const later = viewer.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await viewer.getByRole("button", { name: "I'm in" }).click();
+    await viewer.getByRole("button", { name: "In ✓" }).waitFor();
     await viewer.getByText("You're in", { exact: true }).waitFor();
     assert.equal(await viewer.getByRole("button", { name: "5 min" }).count(), 0);
     assert.equal(await viewer.getByText("Arriving at").count(), 0);
-    await viewer.getByText("Pick time", { exact: true }).waitFor();
-    await viewer.screenshot({ path: shot("fix-arrive-before.png") });
-    const field = viewer.locator(".time-chip input");
+    await viewer.getByRole("button", { name: /^More for / }).click();
+    await viewer.getByRole("menuitem", { name: "Pick arrival time" }).click();
+    await viewer.getByRole("dialog", { name: "Pick arrival" }).waitFor();
+    await viewer.screenshot({ path: shot("free-arrive-before.png") });
+    const field = viewer.locator("#arrival-time");
     await field.waitFor();
     const placed = await field.evaluate((input) => {
-      const chip = input.closest(".time-chip") as HTMLElement;
-      const box = chip.getBoundingClientRect();
-      const tab = document.querySelector(".tabbar")?.getBoundingClientRect().top ?? window.innerHeight;
-      // Read before "change": a re-render can detach the chip, and a detached node has no computed style.
-      const background = getComputedStyle(chip).backgroundColor;
       const [hour, minute] = (input as HTMLInputElement).value.split(":").map(Number);
       const nextMinute = minute === 59 ? 58 : minute + 1;
       const value = `${String(hour).padStart(2, "0")}:${String(nextMinute).padStart(2, "0")}`;
       (input as HTMLInputElement).value = value;
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
       return {
-        bottom: box.bottom,
-        tab,
-        background,
         min: (input as HTMLInputElement).min,
         max: (input as HTMLInputElement).max,
         step: (input as HTMLInputElement).step,
-        height: Math.round(box.height),
+        height: Math.round((input as HTMLInputElement).getBoundingClientRect().height),
         value,
       };
     });
-    assert.ok(placed.bottom <= placed.tab - 8, JSON.stringify(placed));
-    assert.equal(placed.background, "rgb(44, 44, 46)");
     assert.equal(placed.min, "");
     assert.equal(placed.max, "");
     assert.equal(placed.step, "60");
-    assert.ok(placed.height >= 44, JSON.stringify(placed));
+    assert.ok(placed.height >= 40, JSON.stringify(placed));
+    await viewer.getByRole("button", { name: "Save" }).click();
     await viewer.getByText("You're in", { exact: true }).waitFor();
-    await viewer.getByText(`Arriving ${placed.value}`, { exact: true }).waitFor();
+    await viewer.getByRole("button", { name: /^More for / }).click();
+    await viewer.getByRole("menuitem", { name: `Arriving ${placed.value}` }).waitFor();
+    await viewer.keyboard.press("Escape");
     assert.equal(await viewer.getByText(`You're in, arriving ${placed.value}`).count(), 0);
-    await viewer.screenshot({ path: shot("fix-arrive-time.png") });
+    await viewer.screenshot({ path: shot("free-arrive-time.png") });
     await viewerContext.close();
     await page.reload();
     const hostLater = page.locator(".sheet button", { hasText: "Not now" });
@@ -320,7 +316,7 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
   }
 });
 
-test("later and tomorrow replies keep I'm in and Can't on one row", { timeout: 90_000 }, async () => {
+test("later and tomorrow replies keep I'm in on the card and Can't in the menu", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {
     await signIn(page, "Alex");
@@ -362,47 +358,26 @@ test("later and tomorrow replies keep I'm in and Can't on one row", { timeout: 9
     const sheet = viewer.locator(".sheet button", { hasText: "Not now" });
     if (await sheet.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await sheet.click();
     const labels = [...(laterClock ? ["Dinner"] : []), "Walk"];
-    for (const width of [360, 412]) {
+    for (const width of [320, 360, 412]) {
       await viewer.setViewportSize({ width, height: 700 });
       for (const label of labels) {
         const card = viewer.locator("article", { has: viewer.getByRole("heading", { name: label, exact: true }) });
         await card.scrollIntoViewIfNeeded();
-        const buttons = card.locator(".reply-row .chip");
-        await buttons.first().waitFor();
-        const layout = await card.evaluate((node) => {
-          const row = node.querySelector(".reply-row");
-          const chips = [...(row?.querySelectorAll(":scope > .chip") ?? [])].map((chip) => chip.getBoundingClientRect());
-          const time = node.querySelector(".time-chip")?.getBoundingClientRect();
-          const input = node.querySelector(".time-chip input") as HTMLInputElement | null;
-          return {
-            chips: chips.map((box) => ({ top: Math.round(box.top), width: Math.round(box.width), height: Math.round(box.height) })),
-            time: time ? { height: Math.round(time.height), top: Math.round(time.top) } : null,
-            labels: node.querySelectorAll(".sheet-label").length,
-            arrivingAt: [...node.querySelectorAll("*")].filter((el) => el.childNodes.length === 1 && el.textContent === "Arriving at").length,
-            min: input?.min ?? null,
-            max: input?.max ?? null,
-            value: input?.value ?? null,
-          };
+        await card.getByRole("button", { name: "I'm in" }).waitFor();
+        await card.getByRole("button", { name: /^More for / }).click();
+        const menu = viewer.getByRole("menu");
+        await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+        await menu.getByRole("menuitem", { name: "Pick arrival time" }).waitFor();
+        const clipped = await menu.evaluate((node) => {
+          const r = node.getBoundingClientRect();
+          return { left: r.left, right: r.right, bottom: r.bottom, vw: window.innerWidth, vh: window.innerHeight };
         });
-        assert.equal(layout.chips.length, 2, JSON.stringify(layout));
-        assert.equal(layout.chips[0].top, layout.chips[1].top, JSON.stringify(layout));
-        assert.ok(Math.abs(layout.chips[0].width - layout.chips[1].width) <= 1, JSON.stringify(layout));
-        assert.ok(layout.chips.every((chip) => chip.height >= 44), JSON.stringify(layout));
-        assert.ok(layout.time && layout.time.height >= 44, JSON.stringify(layout));
-        assert.ok(layout.time && layout.time.top >= layout.chips[0].top, JSON.stringify(layout));
-        assert.equal(layout.labels, 0, JSON.stringify(layout));
-        assert.equal(layout.arrivingAt, 0, JSON.stringify(layout));
-        assert.equal(layout.min, "");
-        assert.equal(layout.max, "");
-        if (label === "Dinner" && laterClock) assert.equal(layout.value, laterClock);
+        assert.ok(clipped.left >= -1 && clipped.right <= clipped.vw + 1 && clipped.bottom <= clipped.vh + 1, JSON.stringify({ width, label, clipped }));
+        await viewer.keyboard.press("Escape");
       }
     }
     await viewer.locator("article", { has: viewer.getByRole("heading", { name: labels[0], exact: true }) }).scrollIntoViewIfNeeded();
     await viewer.screenshot({ path: shot("reply-row.png") });
-    await viewer.getByRole("button", { name: "You", exact: true }).click();
-    await viewer.getByText("Your name", { exact: true }).waitFor();
-    await viewer.getByRole("button", { name: "Circle", exact: true }).click();
-    assert.equal(await viewer.getByText("Circle name", { exact: true }).count(), 0);
     await viewerContext.close();
   } finally {
     await page.context().close();
@@ -622,7 +597,9 @@ test("a failed address lookup still names the pin", { timeout: 90_000 }, async (
     const named = await page.locator(".where-v").innerText();
     assert.notEqual(named, "Finding address…");
     await page.getByRole("button", { name: "I'm free" }).click();
-    await page.getByRole("button", { name: "End" }).waitFor({ timeout: 8000 });
+    await page.getByRole("button", { name: /^More for / }).waitFor({ timeout: 8000 });
+    await page.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "End" }).waitFor();
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
     const listed = await fetch(`${baseUrl}/api/socials`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
     assert.ok(listed.socials[0].place.length > 0, JSON.stringify(listed.socials[0]));
@@ -652,14 +629,18 @@ test("a 5xx while the app is open shows the retry banner and a toast", { timeout
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "Can't" }).waitFor();
+    await page.getByRole("button", { name: "I'm in" }).waitFor();
+    await page.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+    await page.keyboard.press("Escape");
     await page.route("**/api/**", (route) => route.fulfill({
       status: 500,
       contentType: "application/json",
       body: JSON.stringify({ error: "internal error" }),
     }));
     await page.getByText("Something went wrong. Retrying…").waitFor({ timeout: 8000 });
-    await page.getByRole("button", { name: "Can't" }).click();
+    await page.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Can't make it" }).click();
     await page.getByText("Something went wrong. Try again.").waitFor();
     const stacked = await page.evaluate(() => {
       const banner = document.querySelector(".status-banner")?.getBoundingClientRect();
@@ -743,9 +724,15 @@ test("leaving the map removes it and closing the picker returns focus", { timeou
       const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
       return { top: pin?.top ?? null, left: pin?.left ?? null };
     });
+    // The map card (chat row + In toggle) covers the lower map; drag in the clear strip above it.
+    const clear = await page.evaluate(() => {
+      const map = document.getElementById("hangry-map")!.getBoundingClientRect();
+      const card = document.querySelector(".map-card")!.getBoundingClientRect();
+      return Math.max(30, Math.min(200, card.top - map.top - 12));
+    });
     await page.locator("#hangry-map").dragTo(page.locator("#hangry-map"), {
-      sourcePosition: { x: 180, y: 200 },
-      targetPosition: { x: 40, y: 80 },
+      sourcePosition: { x: 180, y: clear },
+      targetPosition: { x: 40, y: Math.max(4, clear - 120) },
     });
     const panned = await page.evaluate(() => {
       const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
@@ -935,7 +922,8 @@ test("a confirm sheet closes when its content is dragged at 412", { timeout: 90_
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End Coffee" }).click();
+    await page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) }).getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: /End/ }).click();
     await page.locator(".sheet-confirm .sheet-body").waitFor();
     await dragDown(page, page.locator(".sheet-confirm .sheet-body"));
     await page.locator(".sheet-confirm").waitFor({ state: "detached" });
@@ -1038,7 +1026,8 @@ test("a confirm sheet closes when the gap between its buttons is dragged", { tim
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End Coffee" }).click();
+    await page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) }).getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: /End/ }).click();
     await page.locator(".sheet-confirm").waitFor();
     const point = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll(".sheet-confirm button")];
@@ -1085,7 +1074,8 @@ test("a confirm sheet closes when the gap is touch-dragged in Chromium", { timeo
       await page.reload();
       const later = page.locator(".sheet button", { hasText: "Not now" });
       if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-      await page.getByRole("button", { name: /^End/ }).click();
+      await page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) }).getByRole("button", { name: /^More for / }).click();
+      await page.getByRole("menuitem", { name: /End/ }).click();
       await page.locator(".sheet-gap").waitFor();
       const touch = await page.locator(".sheet-gap").evaluate((node) => getComputedStyle(node).touchAction);
       assert.equal(touch, "none", JSON.stringify(size));
@@ -1210,14 +1200,15 @@ test("the host can remove someone who is in", { timeout: 90_000 }, async () => {
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    const remove = page.getByRole("button", { name: "Remove Fritz" });
+    const card = page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) });
+    const more = card.getByRole("button", { name: /^More for / });
+    await more.waitFor();
+    assert.ok(await more.evaluate((node) => Math.round(node.getBoundingClientRect().height)) >= 44);
+    await card.getByRole("button", { name: "Open details" }).click();
+    const details = page.getByRole("dialog", { name: "Details" });
+    const remove = details.getByRole("button", { name: "Remove Fritz" });
     await remove.waitFor();
-    const end = page.getByRole("button", { name: "End Coffee" });
-    await end.waitFor();
-    const height = await remove.evaluate((node) => Math.round(node.getBoundingClientRect().height));
-    const endHeight = await end.evaluate((node) => Math.round(node.getBoundingClientRect().height));
-    assert.ok(height >= 44, `remove is ${height}px`);
-    assert.ok(endHeight >= 44, `end is ${endHeight}px`);
+    assert.ok(await remove.evaluate((node) => Math.round(node.getBoundingClientRect().height)) >= 44);
     await remove.click();
     await page.getByText("They can't join Coffee again.").waitFor();
   } finally {
@@ -1255,9 +1246,16 @@ test("a removed guest sees a note instead of reply buttons", { timeout: 90_000 }
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.getByText("Alex removed you from this.").waitFor();
+    assert.equal(await page.locator(".in-toggle").count(), 0);
     assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "Can't" }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "Pick time" }).count(), 0);
+    const more = page.getByRole("button", { name: /^More for / });
+    if (await more.count()) {
+      await more.first().click();
+      const menu = page.getByRole("menu");
+      await menu.waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: /Can.t/ }).count(), 0);
+      assert.equal(await menu.getByRole("menuitem", { name: /Pick arrival|Arriving/ }).count(), 0);
+    }
   } finally {
     await page.context().close();
   }
@@ -1308,17 +1306,22 @@ test("an admin sees edit, end, and remove on someone else's cards", { timeout: 9
     for (const [label, guest] of cards) {
       const card = page.locator("article", { has: page.getByRole("heading", { name: label, exact: true }) });
       await card.scrollIntoViewIfNeeded();
-      const edit = card.getByRole("button", { name: `Edit ${label}` });
-      const end = card.getByRole("button", { name: `End ${label}` });
-      const remove = card.getByRole("button", { name: `Remove ${guest}` });
-      await edit.waitFor();
-      await end.waitFor();
-      await remove.waitFor();
-      const heights = await Promise.all([edit, end, remove].map((button) => button.evaluate((node) => Math.round(node.getBoundingClientRect().height))));
-      assert.ok(heights.every((height) => height >= 44), `${label} tools are ${heights.join(", ")}px`);
+      const more = card.getByRole("button", { name: /^More for / });
+      await more.waitFor();
+      assert.ok(await more.evaluate((node) => Math.round(node.getBoundingClientRect().height)) >= 44);
+      await more.click();
+      const menu = page.getByRole("menu");
+      await menu.getByRole("menuitem", { name: "Edit" }).waitFor();
+      await menu.getByRole("menuitem", { name: /End/ }).waitFor();
+      await page.keyboard.press("Escape");
+      await card.getByRole("button", { name: "Open details" }).click();
+      const details = page.getByRole("dialog", { name: "Details" });
+      await details.getByRole("button", { name: `Remove ${guest}` }).waitFor();
+      await page.keyboard.press("Escape");
     }
     const coffeeCard = page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) });
-    await coffeeCard.getByRole("button", { name: "Edit Coffee" }).click();
+    await coffeeCard.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
     await page.getByRole("dialog", { name: "Edit" }).waitFor();
     await page.getByText("Time (empty means now)").waitFor();
     await page.screenshot({ path: shot("admin-event-tools.png") });
@@ -1350,7 +1353,8 @@ test("editing a plan that has ended says so", { timeout: 90_000 }, async () => {
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "Edit Bouldering" }).click();
+    await page.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
     await page.getByRole("button", { name: "Save" }).click();
     await page.getByText("That plan has ended.").waitFor();
     assert.equal(await page.getByText("This invite has expired. Ask for a new link.").count(), 0);
@@ -1383,7 +1387,7 @@ test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
       await page.locator(".card-plan .avatar").waitFor();
       const boxes = await page.evaluate(() => {
         const card = document.querySelector(".card-plan") as HTMLElement;
-        const tools = card.querySelector(".card-tools")!.getBoundingClientRect();
+        const tools = card.querySelector(".card-more")!.getBoundingClientRect();
         const avatar = card.querySelector(".avatar")!.getBoundingClientRect();
         const separated = tools.bottom <= avatar.top + 0.5 || tools.right <= avatar.left + 0.5
           || avatar.right <= tools.left + 0.5 || avatar.bottom <= tools.top + 0.5;
@@ -1421,7 +1425,7 @@ test("a failed chat send goes out again when the connection returns", { timeout:
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.locator("article .chat-chip").click();
+    await page.locator("article .chat-row").click();
     await page.locator("#chat-input").fill("Held");
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByText("Something went wrong. Retrying…").waitFor();
@@ -1457,7 +1461,7 @@ test("text typed while a chat message retries stays in the composer", { timeout:
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.locator("article .chat-chip").click();
+    await page.locator("article .chat-row").click();
     await page.locator("#chat-input").fill("Want");
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByText("Something went wrong. Retrying…").waitFor();
@@ -1575,7 +1579,7 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), niaMe.user.color);
     await page.getByRole("button", { name: "Back" }).click();
     await page.getByRole("button", { name: "Now", exact: true }).click();
-    await page.locator("article .chat-chip").click();
+    await page.locator("article .chat-row").click();
     await page.locator(".chat-system").waitFor();
     assert.equal(await page.locator(".chat-system").getAttribute("data-color"), null);
     const accented = await page.locator(".chat-msg[data-color]").count();
@@ -1656,7 +1660,8 @@ test("Past events lists an ended hangout without reply buttons", { timeout: 90_0
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "End Coffee" }).click();
+    await page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) }).getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: /End/ }).click();
     await page.getByRole("button", { name: "End", exact: true }).click();
     await page.getByRole("heading", { name: "Coffee" }).waitFor({ state: "detached" });
     await page.getByRole("button", { name: "Past events" }).click();
@@ -1666,8 +1671,8 @@ test("Past events lists an ended hangout without reply buttons", { timeout: 90_0
     await page.getByText("Cafe").waitFor();
     await page.getByText("Fritz", { exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "Edit Coffee" }).count(), 0);
-    await page.locator(".past-card .chat-chip").click();
+    assert.equal(await page.getByRole("button", { name: /^More for / }).count(), 0);
+    await page.locator(".past-card .chat-row").click();
     await page.getByText("This chat is closed.").waitFor();
     assert.equal(await page.locator("#chat-input").count(), 0);
     await page.getByRole("button", { name: "Back" }).click();

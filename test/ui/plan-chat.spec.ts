@@ -75,7 +75,8 @@ test("plan and edit sheets send a picked place and free text clears the pin", { 
     assert.equal(posted.time, "19:00");
     await page.getByRole("heading", { name: "Dinner" }).waitFor();
 
-    await page.getByRole("button", { name: "Edit Dinner" }).click();
+    await page.getByRole("button", { name: "More for Dinner" }).click();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
     await page.getByRole("button", { name: "Where" }).click();
     await page.locator("#where-query").fill("Schloss");
     await page.locator(".where-hit").click();
@@ -86,7 +87,8 @@ test("plan and edit sheets send a picked place and free text clears the pin", { 
     assert.equal(patched.lng, HIT.lng);
     await page.getByRole("heading", { name: "Dinner" }).waitFor();
 
-    await page.getByRole("button", { name: "Edit Dinner" }).click();
+    await page.getByRole("button", { name: "More for Dinner" }).click();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
     await page.getByRole("button", { name: "Where" }).click();
     const searched = page.waitForResponse((response) => response.url().includes("/api/geocode") && response.url().includes("Kitchen"));
     await page.locator("#where-query").fill("Kitchen");

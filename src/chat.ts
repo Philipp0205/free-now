@@ -134,11 +134,25 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
   );
   return {
     circle: { unread: circle ? unreadCount(deps.db, circle.id, userId) : 0, muted: circle ? isMuted(deps.db, circle.id, userId) : false },
-    events: rows.map((row) => ({
-      kind: row.kind,
-      id: row.ref_id,
-      unread: unreadCount(deps.db, row.id, userId),
-    })),
+    events: rows.map((row) => {
+      const last = one<{ body: string; name: string | null; kind: string }>(
+        deps.db,
+        `SELECT m.body, m.kind, u.name AS name
+         FROM messages m
+         LEFT JOIN users u ON u.id = m.user_id
+         WHERE m.chat_id = ? AND m.deleted_at IS NULL
+         ORDER BY m.created_at DESC LIMIT 1`,
+        row.id,
+      );
+      const preview = last && last.kind === "text" ? last.body : last?.body || "";
+      return {
+        kind: row.kind,
+        id: row.ref_id,
+        unread: unreadCount(deps.db, row.id, userId),
+        preview: preview.slice(0, 80),
+        previewBy: last && last.kind === "text" ? (last.name || "") : "",
+      };
+    }),
     unreadByCircle: unreadTotals(deps, userId),
   };
 }

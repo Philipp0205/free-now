@@ -73,7 +73,8 @@ test("the host opens a delivery sheet and a friend does not see it", { timeout: 
   const errors: string[] = [];
   host.on("pageerror", (error) => errors.push(String(error)));
   try {
-    await host.getByRole("button", { name: "Delivered to 1 of 3" }).click();
+    await host.locator(".card-now, .card-plan").filter({ hasText: "Coffee" }).getByRole("button", { name: "Open details" }).click();
+    await host.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 1 of 3" }).click();
     const sheet = host.getByRole("dialog", { name: "Push delivery" });
     await sheet.getByText("Delivered", { exact: true }).waitFor();
     await sheet.getByText("Bea", { exact: true }).waitFor();
@@ -84,7 +85,9 @@ test("the host opens a delivery sheet and a friend does not see it", { timeout: 
     await host.keyboard.press("Escape");
     await sheet.waitFor({ state: "detached" });
 
-    await host.getByRole("button", { name: "Delivered to 0 of 3" }).click();
+    await host.keyboard.press("Escape");
+    await host.locator(".card-plan").filter({ hasText: "Dinner" }).getByRole("button", { name: "Open details" }).click();
+    await host.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 0 of 3" }).click();
     const plan = host.getByRole("dialog", { name: "Push delivery" });
     await plan.getByText("Sent, not confirmed", { exact: true }).waitFor();
     await plan.getByText("Bea", { exact: true }).waitFor();
@@ -151,12 +154,8 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 360, height: 640 }
     const { host, names } = await crowd(16, note);
     const page = await openAs(host.token, viewport);
     try {
-      const line = page.getByRole("button", { name: "Delivered to 0 of 16" });
-      const card = page.locator("article", { has: line });
-      const lineBox = await line.boundingBox();
-      const chipBox = await card.getByRole("button", { name: "Chat" }).boundingBox();
-      assert.ok(lineBox && chipBox);
-      assert.ok(lineBox.y + lineBox.height <= chipBox.y + 0.5, "the delivery line sits above the Chat chip, not beside it");
+      await page.getByRole("button", { name: "Open details" }).first().click();
+      const line = page.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 0 of 16" });
       await line.click();
       const sheet = page.getByRole("dialog", { name: "Push delivery" });
       const list = sheet.locator(".sheet-scroll");
@@ -208,7 +207,8 @@ test("an open push sheet updates when a friend acks, without reopening", { timeo
   const { host, names, ids } = await crowd(16, "Live");
   const page = await openAs(host.token, { width: 320, height: 568 });
   try {
-    await page.getByRole("button", { name: "Delivered to 0 of 16" }).click();
+    await page.getByRole("button", { name: "Open details" }).first().click();
+    await page.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 0 of 16" }).click();
     const sheet = page.getByRole("dialog", { name: "Push delivery" });
     const target = names[names.length - 1];
     const row = sheet.locator(".row", { hasText: target });
@@ -229,7 +229,8 @@ test("an open push sheet updates when a friend acks, without reopening", { timeo
     await sheet.getByText("Live · Delivered to 2 of 16", { exact: true }).waitFor({ timeout: 10_000 });
     await page.keyboard.press("Escape");
     await sheet.waitFor({ state: "detached" });
-    await page.getByRole("button", { name: "Delivered to 2 of 16" }).waitFor();
+    await page.getByRole("button", { name: "Open details" }).first().click();
+    await page.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 2 of 16" }).waitFor();
   } finally {
     await page.context().close();
   }
@@ -242,7 +243,8 @@ test("a friend with notifications on but no push for this event says so", { time
   await post("/api/push/subscribe", { endpoint: "https://push.example/late", keys: { p256dh: "p", auth: "a" } }, late.token);
   const page = await openAs(host.token);
   try {
-    await page.getByRole("button", { name: "Delivered to 0 of 2" }).click();
+    await page.getByRole("button", { name: "Open details" }).first().click();
+    await page.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 0 of 2" }).click();
     const sheet = page.getByRole("dialog", { name: "Push delivery" });
     await sheet.locator(".row", { hasText: "Late" }).getByText("Notifications on · not sent for this event", { exact: true }).waitFor();
     await sheet.locator(".row", { hasText: "Friend 01" }).getByText("Sent, not confirmed", { exact: true }).waitFor();
@@ -270,7 +272,8 @@ test("a sheet opened from a plan card refreshes live and survives the plan endin
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   try {
-    await page.getByRole("button", { name: "Delivered to 0 of 2" }).click();
+    await page.getByRole("button", { name: "Open details" }).first().click();
+    await page.getByRole("dialog", { name: "Details" }).getByRole("button", { name: "Delivered to 0 of 2" }).click();
     const sheet = page.getByRole("dialog", { name: "Push delivery" });
     await sheet.getByText("Picnic · Delivered to 0 of 2", { exact: true }).waitFor();
     await ack(ids[0]);

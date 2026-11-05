@@ -122,6 +122,10 @@ async function inView(page: Page, locator: Locator, where: string) {
 }
 
 const planCard = (page: Page, note: string) => page.locator(".card-plan", { has: page.getByRole("heading", { name: note }) });
+async function openEdit(page: Page, note: string) {
+  await planCard(page, note).locator(".card-more").click();
+  await page.getByRole("menu").getByRole("menuitem", { name: "Edit", exact: true }).click();
+}
 const newPlanPushes = (from: number, endpoint: string, planId: string) =>
   sent.slice(from).filter((item) => item.endpoint === endpoint && item.payload.tag === `plan:${planId}`);
 
@@ -148,7 +152,7 @@ for (const [width, height] of SIZES) {
       assert.equal(newPlanPushes(start, ends.ben, planId).length, 1, "Ben hears about the new Friends plan once");
       assert.equal(newPlanPushes(start, ends.cleo, planId).length, 0, "Cleo is not in Friends");
 
-      await page.getByRole("button", { name: `Edit ${note}` }).click();
+      await openEdit(page, note);
       const sheet = page.locator(".sheet");
       const label = sheet.getByText("Also share with", { exact: true });
       await label.waitFor();
@@ -195,10 +199,10 @@ for (const [width, height] of SIZES) {
       await noSideScroll(page, "Cleo home");
       await shot(page, "cleo-card");
       const replied = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes(`/api/plans/${planId}/`));
-      await card.getByRole("button", { name: "I'm in" }).click();
+      await card.locator(".in-toggle").click();
       assert.ok((await replied).ok(), "Cleo's reply is accepted");
       await card.getByText("You're in").waitFor();
-      assert.equal(await card.getByRole("button", { name: "I'm in" }).getAttribute("class"), "chip on");
+      await card.locator(".in-toggle.on").waitFor();
 
       await card.getByRole("button", { name: /^Chat/ }).click();
       await page.locator("#chat-input").fill("Count me in, bringing chalk");
@@ -248,7 +252,7 @@ for (const [width, height] of SIZES) {
     try {
       const page = anaAgain.page;
       await open(page);
-      await page.getByRole("button", { name: `Edit ${note}` }).click();
+      await openEdit(page, note);
       const chip = page.locator(".sheet").getByRole("group", { name: "Also share with" }).getByRole("button", { name: "Climbing" });
       assert.equal(await chip.getAttribute("aria-pressed"), "true", "the sheet shows it as shared");
       await chip.click();
@@ -289,7 +293,7 @@ test("a host in one circle sees no Also share with", { timeout: 60_000 }, async 
     const { page, errors } = await phone(width, height, ben.token);
     try {
       await open(page);
-      await page.getByRole("button", { name: `Edit ${note}` }).click();
+      await openEdit(page, note);
       const sheet = page.locator(".sheet");
       await sheet.getByRole("button", { name: "Save" }).waitFor();
       assert.equal(await sheet.getByText("Also share with").count(), 0);

@@ -87,7 +87,8 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
     await page.locator(".scrim").click({ position: { x: 20, y: 20 } });
     await page.locator("#sheet-note").waitFor({ state: "detached" });
 
-    await page.locator(".card-plan").getByRole("button", { name: /^Edit/ }).click();
+    await page.locator(".card-plan").getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
     const area = page.locator("#admin-description");
     await area.waitFor();
     assert.equal(await area.getAttribute("maxlength"), "280");
@@ -139,7 +140,8 @@ test("at 320 the Save button stays clear of the keyboard with the description fo
     try {
       await signIn(page, "Alex");
       await addPlan(page, "Bagels");
-      await page.locator(".card-plan").getByRole("button", { name: /^Edit/ }).click();
+      await page.locator(".card-plan").getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
       const area = page.locator("#admin-description");
       await area.waitFor();
       await area.focus();
