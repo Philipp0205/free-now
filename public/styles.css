@@ -674,6 +674,12 @@ input[type="text"], input[type="url"], input[type="time"] {
   margin-top: 8px;
 }
 .chat-chip .icon, .chat-chip .icon svg { width: 18px; height: 18px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.share-gate .panel { margin: 0 0 18px; }
+.share-preview h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.share-preview .share-when { color: #fff; font-size: 16px; margin: 0 0 8px; }
+.share-preview .help { margin: 0; }
+.share-lede { text-align: center; font-size: 15px; margin: 0 0 18px; }
 .chat-chip .badge {
   position: static;
   min-width: 18px;

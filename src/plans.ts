@@ -15,6 +15,7 @@ import { addDays, clockLabel, isCalendarDate, isoDate, noticeDay, zonedDateTime 
 import { recordEventLine, replyLogText } from "./chat.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "./app.js";
 import { normalizeReply, readArriveAt } from "./socials.js";
+import { ensureShareId } from "./plan-share.js";
 
 /** How far ahead a plan can go, in calendar days in APP_TZ. */
 export const PLAN_DAYS_AHEAD = 365;
@@ -70,6 +71,8 @@ export async function publishPlan(
     place,
     atTime: time,
   });
+  // Made now so the first Share tap needs no round trip. Old plans get one on first share.
+  ensureShareId(deps.db, id);
   const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
   const when = time ? ` · ${time}` : "";
   await notifyUsers(
