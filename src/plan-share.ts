@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getPlan, getPlanByShareId, listCirclesForUser, getCircleById, setPlanShareId, type PlanRow } from "./db.js";
-import { dayLabel, noticeDay } from "./time.js";
+import { shortDate } from "./time.js";
 
-/** Same copy for an ended, a deleted and an unknown link, so a guess learns nothing. */
-export const ENDED_COPY = "This plan has ended";
+/** Same copy for an ended, a deleted, a revoked and an unknown link, so a guess learns nothing. */
+export const ENDED_COPY = "This link no longer works";
 
 /** What anyone with the link may see. No place, pin, people, chat or push status. */
 export type SharePreview =
@@ -66,17 +66,17 @@ export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string
   const base = {
     ended: false as const,
     note: plan.note,
-    whenLabel: dayLabel(plan.for_date, today),
+    whenLabel: shortDate(plan.for_date, today),
     time: plan.at_time,
   };
   if (!isPlanMember(db, plan, viewerId)) return { ...base, member: false };
   return { ...base, member: true, circleName: circle.name, planId: plan.id, circleId: plan.circle_id };
 }
 
-/** Link-preview text: the note, then the day and time. Read later, so never a bare weekday. */
+/** Link-preview text: the note, then an absolute day ("Fri 7 Nov") and time. Read later, so never Today/Tomorrow. */
 export function shareMeta(plan: PlanRow | undefined, today: string): { title: string; description: string } {
   if (!plan) return { title: ENDED_COPY, description: "Hangry" };
-  const day = noticeDay(plan.for_date, today);
+  const day = shortDate(plan.for_date, today);
   return { title: plan.note, description: plan.at_time ? `${day} · ${plan.at_time}` : day };
 }
 

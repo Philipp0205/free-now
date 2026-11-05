@@ -1953,6 +1953,7 @@ function openAdminEdit(kind, item) {
     time,
     day,
     date: item.forDate || "",
+    shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
     ...session,
   };
   state.sheet = "admin-edit";
@@ -1987,6 +1988,7 @@ function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           whereBlock(edit),
+          edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
         ]),
       ]),
       el("div", { class: "sheet-dock" }, [
@@ -1994,6 +1996,17 @@ function adminEditSheet() {
       ]),
     ]),
   ]);
+}
+
+async function stopSharing(edit) {
+  await run(async () => {
+    await api(`/api/plans/${edit.id}/share`, { method: "DELETE" });
+    edit.shared = false;
+    await refresh({ initial: true });
+    state.error = "Link stopped. Old links no longer work.";
+    render();
+    scheduleErrorClear();
+  });
 }
 
 function descriptionField(edit) {
@@ -3149,7 +3162,7 @@ function sharePreviewScreen() {
     return el("section", { class: "gate share-gate" }, [
       head,
       el("article", { class: "panel share-preview" }, [
-        el("h2", { text: "This plan has ended" }),
+        el("h2", { text: "This link no longer works" }),
         el("p", { class: "help", text: "Ask a friend for a new link." }),
       ]),
       el("div", { class: "stack" }, [

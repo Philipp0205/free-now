@@ -1152,6 +1152,11 @@ export function setPlanShareId(db: DatabaseSync, planId: string, shareId: string
   return one<{ share_id: string | null }>(db, "SELECT share_id FROM plans WHERE id = ?", planId)?.share_id ?? null;
 }
 
+/** Drops the share id, so the old link stops working. Sharing again makes a new one. */
+export function clearPlanShareId(db: DatabaseSync, planId: string): void {
+  db.prepare("UPDATE plans SET share_id = NULL WHERE id = ?").run(planId);
+}
+
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,

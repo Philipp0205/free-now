@@ -108,7 +108,7 @@ test("the preview has only title, day and time; a member also gets the plan id",
     assert.deepEqual(outsider, {
       ended: false,
       note: "Pizza <b>&</b> \"fun\"",
-      whenLabel: "Tomorrow",
+      whenLabel: "Tue 2 Jun",
       time: "19:30",
       member: false,
     });
@@ -151,7 +151,7 @@ test("ended, deleted, unknown and junk links all say the same thing", async () =
       assert.deepEqual(body, { ended: true }, guess);
       const shown = await page(port, `/p/${guess}`);
       assert.equal(shown.status, 200, guess);
-      assert.equal(ogTags(shown.html)["og:title"], "This plan has ended", guess);
+      assert.equal(ogTags(shown.html)["og:title"], "This link no longer works", guess);
       assert.ok(!shown.html.includes("Ended one") && !shown.html.includes("Deleted one"), guess);
     }
     await api(port, "POST", `/api/plans/${ended.id}/share`, { token: host.token, body: {}, status: 410 });
@@ -198,7 +198,7 @@ test("a plan without a time shows just the day", async () => {
     const { host } = await circleOf(port, "Hana");
     const made = await plan(port, host.token, { note: "Walk", time: null, place: "", lat: null, lng: null });
     const tags = ogTags((await page(port, `/p/${made.shareId}`)).html);
-    assert.equal(tags["og:description"], "Tomorrow");
+    assert.equal(tags["og:description"], "Tue 2 Jun");
     const body = await api(port, "GET", `/api/plans/share/${made.shareId}`, { status: 200 });
     assert.equal(body.time, null);
   });
@@ -217,4 +217,48 @@ test("share lookups are rate limited per client", async () => {
 
 test("escapeHtml covers the five characters", () => {
   assert.equal(escapeHtml(`<a href="x">'&'</a>`), "&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;");
+});
+
+test("outsiders and link previews get an absolute Berlin day, never Today or Tomorrow; members still open the plan", async () => {
+  await withApp(async ({ port }) => {
+    const { host, circle } = await circleOf(port, "Hana");
+    const friend = await joinWith(port, "Finn", circle.inviteCode);
+    // 23:30 UTC on 1 Jun is already 2 Jun in Berlin, so "today" is Tue 2 Jun there.
+    const today = await plan(port, host.token, { note: "Late one", time: "23:45" });
+    const tags = ogTags((await page(port, `/p/${today.shareId}`)).html);
+    assert.match(tags["og:description"], /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} · 23:45$/);
+    assert.ok(!/Today|Tomorrow/.test(tags["og:description"] + tags["twitter:description"]));
+    const outsider = await api(port, "GET", `/api/plans/share/${today.shareId}`, { status: 200 });
+    assert.ok(!/Today|Tomorrow/.test(outsider.whenLabel));
+    const member = await api(port, "GET", `/api/plans/share/${today.shareId}`, { token: friend.token, status: 200 });
+    assert.equal(member.member, true);
+  }, { tz: "Europe/Berlin" });
+});
+
+test("only the creator can stop sharing; the old link then reads like an unknown one, and sharing again makes a new token", async () => {
+  await withApp(async ({ port }) => {
+    const { host, circle } = await circleOf(port, "Hana");
+    const friend = await joinWith(port, "Finn", circle.inviteCode);
+    const stranger = await circleOf(port, "Sam");
+    const made = await plan(port, host.token);
+    const old = made.shareId;
+
+    await api(port, "DELETE", `/api/plans/${made.id}/share`, { status: 401 });
+    await api(port, "DELETE", `/api/plans/${made.id}/share`, { token: friend.token, status: 403 });
+    await api(port, "DELETE", `/api/plans/${made.id}/share`, { token: stranger.host.token, status: 404 });
+    assert.equal((await api(port, "GET", `/api/plans/share/${old}`, { status: 200 })).ended, false);
+
+    await api(port, "DELETE", `/api/plans/${made.id}/share`, { token: host.token, status: 200 });
+    assert.deepEqual(await api(port, "GET", `/api/plans/share/${old}`, { status: 200 }), { ended: true });
+    assert.deepEqual(await api(port, "GET", `/api/plans/share/${old}`, { token: friend.token, status: 200 }), { ended: true });
+    const shown = await page(port, `/p/${old}`);
+    assert.equal(ogTags(shown.html)["og:title"], "This link no longer works");
+    assert.ok(!shown.html.includes("Pizza"));
+
+    const fresh = await api(port, "POST", `/api/plans/${made.id}/share`, { token: host.token, body: {}, status: 200 });
+    assert.match(fresh.shareId, /^[A-Za-z0-9_-]{24}$/);
+    assert.notEqual(fresh.shareId, old);
+    assert.deepEqual(await api(port, "GET", `/api/plans/share/${old}`, { status: 200 }), { ended: true });
+    assert.equal((await api(port, "GET", `/api/plans/share/${fresh.shareId}`, { status: 200 })).ended, false);
+  });
 });

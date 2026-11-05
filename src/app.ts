@@ -99,6 +99,7 @@ import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, isoDate, noticeDay, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { assertPlanClock, joinPlan, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
+import { clearPlanShareId } from "./db.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
 
 export type AppDeps = {
@@ -601,6 +602,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!isOpenPlan(plan, isoDate(deps.now(), deps.config.tz))) throw new HttpError(410, "That plan has ended.");
     const shareId = ensureShareId(deps.db, plan.id);
     sendJson(res, 200, { shareId, url: `${requestOrigin(req, deps.config)}/p/${shareId}` });
+    return;
+  }
+
+  if (planShare && method === "DELETE") {
+    const circle = requireCircle(deps, me.id, requested);
+    const plan = getPlan(deps.db, parseId(planShare[1]));
+    if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+    if (plan.creator_id !== me.id) throw new HttpError(403, "Only the host can stop sharing.");
+    clearPlanShareId(deps.db, plan.id);
+    sendJson(res, 200, { ok: true });
     return;
   }
 

@@ -167,7 +167,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
       try {
         await asUser(visitor, null);
         await visitor.goto(link);
-        await visitor.getByRole("heading", { name: "This plan has ended" }).waitFor();
+        await visitor.getByRole("heading", { name: "This link no longer works" }).waitFor();
         assert.ok(!(await visitor.locator("body").innerText()).includes("Rooftop drinks"));
       } finally {
         await visitor.context().close();
