@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v16";
+const APP_VERSION = "hangry-v17";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -1257,6 +1257,7 @@ function planCard(plan) {
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
+      planCirclesLine(plan),
       planDescription(plan),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
@@ -1922,7 +1923,13 @@ function confirmRemoveMember(member) {
 }
 
 function canManageEvent(item) {
-  return Boolean(item?.creator) && (item.creator.id === state.me.user.id || youAreAdmin());
+  return Boolean(item?.creator) && (item.creator.id === state.me.user.id || adminOver(item));
+}
+
+/** Admins manage events of their own circle. A shared plan belongs to its home circle (circles[0]). */
+function adminOver(item) {
+  const home = item?.circles?.[0]?.id;
+  return youAreAdmin() && (!home || home === state.me?.circle?.id);
 }
 
 function eventTools(kind, item) {
@@ -1954,6 +1961,11 @@ function openAdminEdit(kind, item) {
     day,
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
+    homeCircle: kind === "plan" ? (item.circles?.[0]?.id || "") : "",
+    alsoCircles: new Set(kind === "plan"
+      ? (item.circles || []).slice(1).map((circle) => circle.id).filter((id) => (state.me.circles || []).some((mine) => mine.id === id))
+      : []),
+    canShareCircles: kind === "plan" && item.creator?.id === state.me.user.id && (state.me.circles || []).length > 1 && Boolean(item.circles?.length),
     ...session,
   };
   state.sheet = "admin-edit";
@@ -1988,6 +2000,7 @@ function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           whereBlock(edit),
+          edit.canShareCircles ? alsoShareBlock(edit) : null,
           edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
         ]),
       ]),
@@ -1996,6 +2009,35 @@ function adminEditSheet() {
       ]),
     ]),
   ]);
+}
+
+/** Toggle chips for the host's other circles. The home circle always keeps the plan. */
+function alsoShareBlock(edit) {
+  const others = (state.me.circles || []).filter((circle) => circle.id !== edit.homeCircle);
+  if (!others.length) return null;
+  return el("div", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", id: "also-share-label", text: "Also share with" }),
+    el("div", { class: "also-circles", role: "group", "aria-labelledby": "also-share-label" }, others.map((circle) => {
+      const on = edit.alsoCircles.has(circle.id);
+      return el("button", {
+        type: "button",
+        class: on ? "chip on" : "chip",
+        "aria-pressed": on ? "true" : "false",
+        text: circle.name,
+        onclick: () => {
+          if (edit.alsoCircles.has(circle.id)) edit.alsoCircles.delete(circle.id);
+          else edit.alsoCircles.add(circle.id);
+          render();
+        },
+      });
+    })),
+  ]);
+}
+
+/** "Friends + Climbing" when a plan is in more than one circle. */
+function planCirclesLine(plan) {
+  if (!plan?.circles || plan.circles.length < 2) return null;
+  return el("p", { class: "plan-circles", text: plan.circles.map((circle) => circle.name).join(" + ") });
 }
 
 async function stopSharing(edit) {
@@ -2044,6 +2086,7 @@ async function saveAdminEdit(event) {
       ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
       : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
+    if (edit.canShareCircles) body.circleIds = [edit.homeCircle, ...edit.alsoCircles];
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
     await refresh({ initial: true });
@@ -3708,6 +3751,7 @@ function mapCard(pin) {
     ]),
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+    planCirclesLine(plan),
     plan ? planDescription(plan) : null,
     social && !pin.own ? replySummary(social) : null,
     social && !pin.own ? removedNote(social) || replyActions(social) : null,
@@ -3736,7 +3780,7 @@ function planReplySummary(plan) {
 }
 
 function canRemoveGuest(event) {
-  return Boolean(event?.creator) && (event.creator.id === state.me.user.id || youAreAdmin());
+  return Boolean(event?.creator) && (event.creator.id === state.me.user.id || adminOver(event));
 }
 
 function guestLine(text, person, kind, event) {

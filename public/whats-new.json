@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-05-multi-circle-plans",
+    "date": "2026-11-05",
+    "title": "One plan, several circles",
+    "bullets": [
+      "Hosts can share a plan with their other circles from Edit, under Also share with.",
+      "Everyone sees the same plan: one list of who's in and one chat.",
+      "A newly added circle gets one push. Circles that already had the plan stay quiet."
+    ]
+  },
+  {
     "id": "2026-11-05-reschedule-push",
     "date": "2026-11-05",
     "title": "Heads-up when plans move",

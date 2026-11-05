@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { getPlan, getPlanByShareId, listCirclesForUser, getCircleById, setPlanShareId, type PlanRow } from "./db.js";
+import { getPlan, getPlanByShareId, planCircleForUser, setPlanShareId, type PlanRow } from "./db.js";
 import { shortDate } from "./time.js";
 
 /** Same copy for an ended, a deleted, a revoked and an unknown link, so a guess learns nothing. */
@@ -31,9 +31,10 @@ export function isOpenPlan(plan: PlanRow, today: string): boolean {
   return plan.ended_at == null && plan.for_date >= today;
 }
 
+/** In any circle the plan is linked to. */
 export function isPlanMember(db: DatabaseSync, plan: PlanRow, userId: string | null | undefined): boolean {
   if (!userId) return false;
-  return listCirclesForUser(db, userId).some((circle) => circle.id === plan.circle_id);
+  return Boolean(planCircleForUser(db, plan.id, userId));
 }
 
 /** Gives the plan a share id on first use and keeps it after that. */
@@ -61,16 +62,17 @@ export function openSharedPlan(db: DatabaseSync, shareId: string, today: string)
 
 export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string | null, today: string): SharePreview {
   const plan = openSharedPlan(db, shareId, today);
-  const circle = plan ? getCircleById(db, plan.circle_id) : undefined;
-  if (!plan || !circle) return { ended: true };
+  if (!plan) return { ended: true };
   const base = {
     ended: false as const,
     note: plan.note,
     whenLabel: shortDate(plan.for_date, today),
     time: plan.at_time,
   };
-  if (!isPlanMember(db, plan, viewerId)) return { ...base, member: false };
-  return { ...base, member: true, circleName: circle.name, planId: plan.id, circleId: plan.circle_id };
+  // The viewer's own linked circle: home if they are in it, else the first linked one they are in.
+  const circle = viewerId ? planCircleForUser(db, plan.id, viewerId) : undefined;
+  if (!circle) return { ...base, member: false };
+  return { ...base, member: true, circleName: circle.name, planId: plan.id, circleId: circle.id };
 }
 
 /** Link-preview text: the note, then an absolute day ("Fri 7 Nov") and time. Read later, so never Today/Tomorrow. */

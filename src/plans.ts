@@ -5,6 +5,7 @@ import {
   getPlan,
   getPlanReply,
   insertPlan,
+  planInCircle,
   listMembers,
   setPlanReply,
   type PlanRow,
@@ -73,33 +74,38 @@ export async function publishPlan(
   });
   // Made now so the first Share tap needs no round trip. Old plans get one on first share.
   ensureShareId(deps.db, id);
+  const plan = getPlan(deps.db, id);
+  if (!plan) throw new HttpError(500, "plan missing");
   const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
-  const when = time ? ` · ${time}` : "";
   await notifyUsers(
     deps.db,
     deps.push,
     now,
-    recipients.map((member) => ({
-      userId: member.id,
-      title: noticeDay(forDate, today),
-      body: place ? `${user.name}: ${note}${when} · ${audiencePlace(place)}` : `${user.name}: ${note}${when}`,
-      kind: "plan",
-      refId: id,
-      tag: `plan:${id}`,
-      url: `/?plan=${id}`,
-    })),
+    recipients.map((member) => ({ userId: member.id, ...newPlanNotice(plan, user.name, today) })),
     circle,
   );
-  const plan = getPlan(deps.db, id);
-  if (!plan) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, plan, today, user.id);
+}
+
+/** The new-plan push. Also sent once to a circle the plan is shared with later. */
+export function newPlanNotice(plan: PlanRow, hostName: string, today: string) {
+  const when = plan.at_time ? ` · ${plan.at_time}` : "";
+  const place = plan.place ?? "";
+  return {
+    title: noticeDay(plan.for_date, today),
+    body: place ? `${hostName}: ${plan.note}${when} · ${audiencePlace(place)}` : `${hostName}: ${plan.note}${when}`,
+    kind: "plan",
+    refId: plan.id,
+    tag: `plan:${plan.id}`,
+    url: `/?plan=${plan.id}`,
+  };
 }
 
 export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   assertPlanOpen(plan, today);
@@ -138,7 +144,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   assertPlanOpen(plan, today);
@@ -158,7 +164,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
     if (became || arriveChanged) {
       const arriveLabel = arriveAt ? clockLabel(arriveAt, deps.config.tz) : "";
       recordEventLine(deps.db, {
-        circleId: circle.id,
+        circleId: plan.circle_id,
         kind: "plan",
         refId: plan.id,
         hostId: plan.creator_id,
@@ -179,14 +185,14 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
           tag: `plan-reply:${plan.id}:${user.id}`,
           url: `/?plan=${plan.id}`,
         },
-      ], circle);
+      ], getCircleById(deps.db, plan.circle_id));
     }
   } else {
     const previous = getPlanReply(deps.db, plan.id, user.id);
     if (previous?.reply !== "declined") {
       setPlanReply(deps.db, plan.id, user.id, now, "declined", null);
       recordEventLine(deps.db, {
-        circleId: circle.id,
+        circleId: plan.circle_id,
         kind: "plan",
         refId: plan.id,
         hostId: plan.creator_id,
