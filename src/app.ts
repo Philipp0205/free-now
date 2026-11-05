@@ -82,9 +82,9 @@ import { pushSummaryForViewer, reachForCircle } from "./push-status.js";
 import { clientKey } from "./client-key.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
-import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, dayLabel, isoDate, noticeDay, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
-import { joinPlan, publishPlan, replyPlan } from "./plans.js";
+import { assertPlanClock, joinPlan, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
 
 export type AppDeps = {
   db: DatabaseSync;
@@ -491,9 +491,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const circle = requireCircle(deps, me.id, requested);
     const now = deps.now();
     const today = isoDate(now, deps.config.tz);
-    const tomorrow = addDays(today, 1);
-    const plans = listVisiblePlans(deps.db, circle.id, today, tomorrow).map((row) =>
-      planPayload(deps.db, row, today, tomorrow, me.id),
+    const plans = listVisiblePlans(deps.db, circle.id, today, addDays(today, PLAN_DAYS_AHEAD)).map((row) =>
+      planPayload(deps.db, row, today, me.id),
     );
     sendJson(res, 200, { plans });
     return;
@@ -503,7 +502,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const note = cleanNote(body.note, true);
     const place = cleanPlace(body.place);
     const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested) });
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date) });
     return;
   }
 
@@ -668,7 +667,7 @@ function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: strin
   removePlanJoin(deps.db, plan.id, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  return planPayload(deps.db, plan, today, addDays(today, 1), user.id);
+  return planPayload(deps.db, plan, today, user.id);
 }
 
 function createCircle(deps: AppDeps, userId: string, name: string, now: number): CircleRow {
@@ -958,12 +957,16 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   }
   let atTime = plan.at_time;
   if (Object.prototype.hasOwnProperty.call(body, "time")) atTime = readClock(body.time);
+  const forDate = body.date == null ? plan.for_date : readPlanDate(body.date, today);
+  const dateChanged = forDate !== plan.for_date;
+  const timeChanged = atTime !== plan.at_time;
+  if (dateChanged || timeChanged) assertPlanClock(forDate, atTime, now, deps.config.tz);
   const noteChanged = note !== plan.note;
   const placeChanged = place !== (plan.place ?? "") || lat !== plan.lat || lng !== plan.lng;
-  const timeChanged = atTime !== plan.at_time;
-  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime);
+  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate);
   const changes = [];
   if (noteChanged) changes.push({ name: "Note", next: note });
+  if (dateChanged) changes.push({ name: "Day", next: noticeDay(forDate, today) });
   if (timeChanged) changes.push({ name: "Time", next: atTime ?? "" });
   if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
   if (changes.length) {
@@ -993,7 +996,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, addDays(today, 1), user.id);
+  return planPayload(deps.db, fresh, today, user.id);
 }
 
 type PastEvent = {
@@ -1113,13 +1116,13 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
   };
 }
 
-export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomorrow: string, viewerId: string | null = null) {
+export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, viewerId: string | null = null) {
   return {
     id: plan.id,
     note: plan.note,
     place: plan.place ?? "",
     forDate: plan.for_date,
-    whenLabel: whenLabel(plan.for_date, today, tomorrow),
+    whenLabel: dayLabel(plan.for_date, today),
     time: plan.at_time,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),

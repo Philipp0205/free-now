@@ -1,5 +1,5 @@
 /**
- * Pure "later today" clock helpers. The page passes the circle timezone;
+ * Pure "later today" clock and plan day helpers. The page passes the circle timezone;
  * this file does not touch app state, so the rules can be tested.
  */
 
@@ -59,4 +59,63 @@ export function isLaterToday(hhmm, now = Date.now(), tz = "Europe/Berlin") {
   const min = minLaterClock(now, tz);
   if (!min) return false;
   return hhmm >= min;
+}
+
+/** How far ahead a plan can go, in calendar days. Same as PLAN_DAYS_AHEAD on the server. */
+export const PLAN_DAYS_AHEAD = 365;
+
+/** Calendar math on YYYY-MM-DD, so a DST day never shifts the date. */
+export function addDays(iso, days) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function daysBetween(from, to) {
+  const utc = (iso) => {
+    const [year, month, day] = iso.split("-").map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((utc(to) - utc(from)) / 86400000);
+}
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function weekday(iso) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+}
+
+/** Today, Tomorrow, a weekday for the next 6 days, then "Sat 14 Nov" (plus the year if not this year). */
+export function dayLabel(iso, today) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return "";
+  const gap = daysBetween(today, iso);
+  if (gap === 0) return "Today";
+  if (gap === 1) return "Tomorrow";
+  if (gap > 1 && gap <= 6) return weekday(iso);
+  const [year, month, day] = iso.split("-").map(Number);
+  const base = `${weekday(iso).slice(0, 3)} ${day} ${MONTHS[month - 1]}`;
+  return iso.slice(0, 4) === today.slice(0, 4) ? base : `${base} ${year}`;
+}
+
+/** The days a plan can be on, from today in `tz`. */
+export function planDayRange(now = Date.now(), tz = "Europe/Berlin") {
+  const today = zonedParts(now, tz).day;
+  return { today, tomorrow: addDays(today, 1), min: today, max: addDays(today, PLAN_DAYS_AHEAD) };
+}
+
+/** "today", "tomorrow", or "pick" for a stored plan day. */
+export function planDayChoice(forDate, now = Date.now(), tz = "Europe/Berlin") {
+  const range = planDayRange(now, tz);
+  if (forDate === range.today) return "today";
+  if (forDate === range.tomorrow) return "tomorrow";
+  return "pick";
+}
+
+/** The YYYY-MM-DD a choice stands for. "pick" uses the picked date. */
+export function planDayDate(choice, picked, now = Date.now(), tz = "Europe/Berlin") {
+  const range = planDayRange(now, tz);
+  if (choice === "today") return range.today;
+  if (choice === "tomorrow") return range.tomorrow;
+  return /^\d{4}-\d{2}-\d{2}$/.test(picked || "") ? picked : "";
 }
