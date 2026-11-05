@@ -38,6 +38,13 @@ import {
   kickMember,
   getPlan,
   getPlanReply,
+  linkPlanCircle,
+  listPlanAudience,
+  listPlanCircleIds,
+  listPlanCircles,
+  planCircleForUser,
+  planInCircle,
+  unlinkPlanCircle,
   getSocial,
   getSocialReply,
   getUserByBuzzToken,
@@ -98,7 +105,7 @@ import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } f
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
-import { assertPlanClock, joinPlan, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
+import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
 
@@ -598,7 +605,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (planShare && method === "POST") {
     const circle = requireCircle(deps, me.id, requested);
     const plan = getPlan(deps.db, parseId(planShare[1]));
-    if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+    if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
     if (!isOpenPlan(plan, isoDate(deps.now(), deps.config.tz))) throw new HttpError(410, "That plan has ended.");
     const shareId = ensureShareId(deps.db, plan.id);
     sendJson(res, 200, { shareId, url: `${requestOrigin(req, deps.config)}/p/${shareId}` });
@@ -608,7 +615,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (planShare && method === "DELETE") {
     const circle = requireCircle(deps, me.id, requested);
     const plan = getPlan(deps.db, parseId(planShare[1]));
-    if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+    if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
     if (plan.creator_id !== me.id) throw new HttpError(403, "Only the host can stop sharing.");
     clearPlanShareId(deps.db, plan.id);
     sendJson(res, 200, { ok: true });
@@ -747,7 +754,7 @@ function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: strin
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   removePlanJoin(deps.db, plan.id, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
@@ -839,14 +846,14 @@ async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, 
   const guestId = parseId(rawUserId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, planId);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   if (guestId === plan.creator_id) throw new HttpError(400, "you made this plan");
-  assertEventHost(deps, user, circle.id, plan.creator_id);
-  const guest = listMembers(deps.db, circle.id).find((member) => member.id === guestId);
+  assertEventHost(deps, user, plan.circle_id, plan.creator_id);
+  const guest = listPlanAudience(deps.db, plan.id).find((member) => member.id === guestId);
   if (!guest) throw new HttpError(404, "member not found");
   blockPlanGuest(deps.db, plan.id, guestId, deps.now(), user.name);
   recordEventLine(deps.db, {
-    circleId: circle.id,
+    circleId: plan.circle_id,
     kind: "plan",
     refId: plan.id,
     hostId: plan.creator_id,
@@ -864,7 +871,7 @@ async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: string, 
       refId: plan.id,
       tag: `removed:plan:${plan.id}:${guestId}`,
     },
-  ], circle);
+  ], planCircleForUser(deps.db, plan.id, guestId) ?? circle);
 }
 
 function removedMessage(actor: string | null | undefined): string {
@@ -1009,9 +1016,9 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string, requested: s
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
-  assertEventHost(deps, user, circle.id, plan.creator_id);
-  closeEventChat(deps.db, circle.id, "plan", plan.id, deps.now());
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  assertEventHost(deps, user, plan.circle_id, plan.creator_id);
+  closeEventChat(deps.db, plan.circle_id, "plan", plan.id, deps.now());
   if (!finishPlan(deps.db, plan.id, deps.now())) throw new HttpError(404, "plan not found");
   if (plan.creator_id !== user.id) {
     await notifyUsers(deps.db, deps.push, deps.now(), [
@@ -1023,7 +1030,7 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string, requested: s
         refId: plan.id,
         tag: `ended:plan:${plan.id}`,
       },
-    ], circle);
+    ], getCircleById(deps.db, plan.circle_id) ?? circle);
   }
 }
 
@@ -1031,8 +1038,8 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
-  assertEventHost(deps, user, circle.id, plan.creator_id);
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  assertEventHost(deps, user, plan.circle_id, plan.creator_id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   if (plan.ended_at != null || plan.for_date < today) throw new HttpError(410, "That plan has ended.");
@@ -1055,15 +1062,18 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   const description = Object.prototype.hasOwnProperty.call(body, "description")
     ? cleanDescription(body.description)
     : (plan.description ?? "");
+  const wantedCircles = body.circleIds === undefined ? null : readPlanCircles(deps, user, plan, body.circleIds);
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null);
+  // Unlinked circles go first, so a move in the same save does not ping them.
+  const kept = wantedCircles ? unlinkDropped(deps, plan.id, wantedCircles) : [];
   // Only a move (day, time, or place) pings people. Note or description edits stay quiet.
   if (dateChanged || timeChanged || placeChanged) {
     const spot = place ? audiencePlace(place) : "";
     const moved = dateChanged || timeChanged;
     const when = `${shortDate(forDate, today)}${atTime ? ` · ${atTime}` : ""}`;
     const title = moved ? `${note} moved to ${when}` : spot ? `${note} moved to ${spot}` : `${note}: place removed`;
-    // People who said they can't come are left out.
-    const others = listMembers(deps.db, circle.id).filter((member) =>
+    // Every linked circle, once each. People who said they can't come are left out.
+    const others = listPlanAudience(deps.db, plan.id).filter((member) =>
       member.id !== user.id && getPlanReply(deps.db, plan.id, member.id)?.reply !== "declined");
     await pushEdit(
       deps,
@@ -1073,12 +1083,56 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
       moved && spot ? spot : "Tap to see the plan.",
       plan.id,
       `/?plan=${plan.id}`,
-      circle,
+      getCircleById(deps.db, plan.circle_id) ?? circle,
     );
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
+  if (wantedCircles) await linkAdded(deps, user, fresh, kept, wantedCircles, now, today);
   return planPayload(deps.db, fresh, today, user.id);
+}
+
+/** circleIds is the full set. Creator only, their own circles only. The home circle always stays. */
+function readPlanCircles(deps: AppDeps, user: UserRow, plan: PlanRow, raw: unknown): string[] {
+  if (plan.creator_id !== user.id) throw new HttpError(403, "Only the host can do that.");
+  if (!Array.isArray(raw) || raw.length > 20 || raw.some((id) => typeof id !== "string")) {
+    throw new HttpError(400, "circleIds must be a list of circles");
+  }
+  const mine = new Set(listCirclesForUser(deps.db, user.id).map((item) => item.id));
+  const wanted = new Set<string>([plan.circle_id]);
+  for (const id of raw as string[]) {
+    if (id === plan.circle_id) continue;
+    if (!mine.has(id)) throw new HttpError(400, "You can only share with your own circles.");
+    wanted.add(id);
+  }
+  return [...wanted];
+}
+
+/** Drops links not in the wanted set. No push. Returns the links that stay. */
+function unlinkDropped(deps: AppDeps, planId: string, wanted: string[]): string[] {
+  const before = listPlanCircleIds(deps.db, planId);
+  for (const id of before) if (!wanted.includes(id)) unlinkPlanCircle(deps.db, planId, id);
+  return before.filter((id) => wanted.includes(id));
+}
+
+/** Links new circles and sends each one the new-plan push once. The circles it was already in hear nothing. */
+async function linkAdded(deps: AppDeps, user: UserRow, plan: PlanRow, kept: string[], wanted: string[], now: number, today: string): Promise<void> {
+  const added = wanted.filter((id) => !kept.includes(id));
+  if (!added.length) return;
+  // Anyone who could already see it is skipped, so no one hears about it twice.
+  const told = new Set<string>([user.id]);
+  for (const id of kept) for (const member of listMembers(deps.db, id)) told.add(member.id);
+  for (const id of added) {
+    linkPlanCircle(deps.db, plan.id, id, now);
+    const target = getCircleById(deps.db, id);
+    if (!target) continue;
+    const fresh = listMembers(deps.db, id).filter((member) => !told.has(member.id));
+    for (const member of fresh) told.add(member.id);
+    await notifyUsers(deps.db, deps.push, now, fresh.map((member) => ({
+      userId: member.id,
+      ...newPlanNotice(plan, user.name, today),
+    })), target);
+  }
 }
 
 type PastEvent = {
@@ -1213,6 +1267,8 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     location: pointPayload(plan.lat, plan.lng),
     shareId: plan.share_id ?? null,
     creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color) },
+    // Names only. Same event, so other circles' names show, but never their members or codes.
+    circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
     joined: listPlanJoins(db, plan.id).map((join) => ({
       id: join.id,
