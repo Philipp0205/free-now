@@ -288,11 +288,6 @@ button:disabled { cursor: default; opacity: 0.55; }
     radial-gradient(circle at 90% 0%, rgba(255, 110, 40, 0.32), transparent 42%),
     linear-gradient(160deg, #1a0c12, #0c0c0e 70%);
 }
-.card-photo .card-bg {
-  background:
-    linear-gradient(to top, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.08) 46%, rgba(0, 0, 0, 0.28) 100%),
-    var(--photo) center/cover no-repeat;
-}
 .card-plan {
   height: auto;
   min-height: 214px;
@@ -411,7 +406,7 @@ button:disabled { cursor: default; opacity: 0.55; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.chat-row-preview.muted { color: rgba(255, 255, 255, 0.45); }
+.chat-row-preview.muted { color: rgba(255, 255, 255, 0.6); }
 .chat-row .badge {
   position: static;
   min-width: 20px;
@@ -1508,3 +1503,51 @@ html.kb-open .sheet .help { margin-top: 0; }
   font-size: 14px;
   line-height: 1.35;
 }
+
+/* Plan colours: card-grad.js picks .grad-0 … .grad-13 from the plan id.
+ * Stops are dark enough that white copy, the chat row and the In toggle stay AA (test/card-grad.test.ts). */
+.grad-0 { --g1: #5e2b2c; --g2: #3d1c08; }
+.grad-1 { --g1: #5d2f18; --g2: #372100; }
+.grad-2 { --g1: #553503; --g2: #2d2700; }
+.grad-3 { --g1: #483d00; --g2: #1e2c07; }
+.grad-4 { --g1: #364310; --g2: #092f18; }
+.grad-5 { --g1: #1d4826; --g2: #003027; }
+.grad-6 { --g1: #00493a; --g2: #002e34; }
+.grad-7 { --g1: #00484d; --g2: #002b3e; }
+.grad-8 { --g1: #00445b; --g2: #112743; }
+.grad-9 { --g1: #1c3f63; --g2: #222243; }
+.grad-10 { --g1: #343864; --g2: #2e1e3d; }
+.grad-11 { --g1: #45325d; --g2: #371a33; }
+.grad-12 { --g1: #522e51; --g2: #3d1826; }
+.grad-13 { --g1: #5b2b40; --g2: #3f1917; }
+@media (prefers-color-scheme: light) {
+  .grad-0 { --g1: #763638; --g2: #53280c; }
+  .grad-1 { --g1: #743b1f; --g2: #4b2f00; }
+  .grad-2 { --g1: #6b4300; --g2: #3e3600; }
+  .grad-3 { --g1: #5b4c00; --g2: #2b3c0b; }
+  .grad-4 { --g1: #445514; --g2: #0d4022; }
+  .grad-5 { --g1: #245a30; --g2: #004136; }
+  .grad-6 { --g1: #005c4a; --g2: #004047; }
+  .grad-7 { --g1: #005b60; --g2: #003b54; }
+  .grad-8 { --g1: #005672; --g2: #19365b; }
+  .grad-9 { --g1: #234f7c; --g2: #2f2f5b; }
+  .grad-10 { --g1: #41477d; --g2: #402a53; }
+  .grad-11 { --g1: #574075; --g2: #4b2546; }
+  .grad-12 { --g1: #673a65; --g2: #532335; }
+  .grad-13 { --g1: #723650; --g2: #562422; }
+}
+
+.card-plan.card-grad .card-bg,
+.map-card.card-grad,
+.sheet-head.card-grad {
+  background: linear-gradient(155deg, var(--g1), var(--g2));
+}
+.map-card.card-grad .map-card-time { color: rgba(255, 255, 255, 0.72) !important; }
+.sheet-head.card-grad {
+  margin: -8px -20px 0;
+  padding: 8px 20px 16px;
+  border-radius: 22px 22px 0 0;
+}
+.sheet-head.card-grad .grabber { background: rgba(255, 255, 255, 0.35); }
+.sheet-head.card-grad .help { color: rgba(255, 255, 255, 0.78); }
+.card-grad .removed-note { color: rgba(255, 255, 255, 0.72); }

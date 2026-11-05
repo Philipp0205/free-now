@@ -4,6 +4,7 @@ import { clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLat
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
+import { gradientClass } from "./card-grad.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 
 const TOKEN_KEY = "fn_token";
@@ -14,9 +15,8 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v23";
+const APP_VERSION = "hangry-v24";
 const FEEDBACK_MAX = 2000;
-const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
 let overlayHistoryDepth = 0;
@@ -1286,10 +1286,10 @@ function planCard(plan) {
   const menuOpen = state.cardMenu === `plan:${plan.id}`;
   return el("article", {
     class: [
-      state.focusPlan === plan.id ? "card card-photo card-plan focused" : "card card-photo card-plan",
+      state.focusPlan === plan.id ? "card card-plan focused" : "card card-plan",
+      `card-grad ${gradientClass(plan.id)}`,
       menuOpen ? "menu-open" : "",
     ].filter(Boolean).join(" "),
-    style: `--photo:url("${bgFor(plan.id)}")`,
     "data-plan": plan.id,
   }, [
     el("div", { class: "card-bg", onclick: () => openEventDetail("plan", plan) }),
@@ -2064,7 +2064,7 @@ function eventDetailSheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-label": "Details" }, [
-      el("div", { class: "sheet-head" }, [
+      el("div", { class: kind === "plan" ? `sheet-head card-grad ${gradientClass(item.id)}` : "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: title }),
         el("p", { class: "help", text: `${when} · ${item.creator.name}` }),
@@ -4111,7 +4111,8 @@ function mapCard(pin) {
   const kind = social?.creator ? "social" : plan?.creator ? "plan" : pin.kind;
   const menuOpen = item ? state.cardMenu === `${kind}:${item.id}` : false;
   const own = Boolean(pin.own);
-  return el("article", { class: menuOpen ? "map-card menu-open" : "map-card" }, [
+  const grad = pin.kind === "plan" ? `card-grad ${gradientClass(pin.id)}` : "";
+  return el("article", { class: ["map-card", grad, menuOpen ? "menu-open" : ""].filter(Boolean).join(" ") }, [
     el("div", { class: "map-card-head" }, [
       el("strong", {
         text: pin.title,
@@ -5525,12 +5526,6 @@ function ttlLabel(ms) {
   if (Math.abs(hours - 2) < 0.05) return "about 2 hours";
   if (hours >= 1) return `about ${Math.round(hours)} hours`;
   return `about ${Math.round(ms / 60000)} minutes`;
-}
-
-function bgFor(id) {
-  let hash = 0;
-  for (const char of id) hash = (hash + char.charCodeAt(0)) % BACKGROUNDS.length;
-  return BACKGROUNDS[hash];
 }
 
 /** The server picks one color per person and sends it with every user it lists. */

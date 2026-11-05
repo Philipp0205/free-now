@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-card-gradients",
+    "date": "2026-11-05",
+    "title": "Every plan has its own colour",
+    "bullets": [
+      "Each plan card gets its own soft gradient, so you can tell them apart at a glance.",
+      "The colour stays the same on the map and in the plan's details."
+    ]
+  },
+  {
     "id": "2026-11-05-notifications-off",
     "date": "2026-11-05",
     "title": "Turn notifications off",
