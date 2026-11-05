@@ -66,7 +66,10 @@ test("two friends can invite, start a social, push, join, and expire", async () 
     assert.equal(veitNotes.json.notifications[0].body, "Alex is free now – Rooftop coffee??");
 
     const alexBefore = await api(ctx, "GET", "/api/notifications", { token: alex.token });
-    assert.equal(alexBefore.json.notifications.length, 0);
+    assert.deepEqual(
+      alexBefore.json.notifications.map((note: { kind: string; body: string }) => [note.kind, note.body]),
+      [["member-join", "Veit joined friends"]],
+    );
 
     const listed = await api(ctx, "GET", "/api/socials", { token: veit.token });
     assert.equal(listed.json.socials.length, 1);

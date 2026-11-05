@@ -874,7 +874,7 @@ test("alert times sit on the right of the card", { timeout: 90_000 }, async () =
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.getByRole("button", { name: /Alerts/ }).click();
-    await page.locator(".alert-card .time").waitFor();
+    await page.locator(".alert-card .time").first().waitFor();
     const aligned = await page.evaluate(() => {
       const card = document.querySelector(".alert-card") as HTMLElement;
       const time = card.querySelector(".time") as HTMLElement;

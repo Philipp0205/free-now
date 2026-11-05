@@ -22,6 +22,8 @@ export type Notice = {
   tag: string;
   url?: string;
   skipAlert?: boolean;
+  /** The body already says which circle, so no " · circle" suffix. */
+  namesCircle?: boolean;
 };
 
 export function socialTitle(note: string): string {
@@ -188,7 +190,7 @@ function scopeNotice(
   if (!circle || countCirclesForUser(db, notice.userId) <= 1) return { body: notice.body, url };
   const join = url.includes("?") ? "&" : "?";
   return {
-    body: `${notice.body} · ${circle.name}`,
+    body: notice.namesCircle ? notice.body : `${notice.body} · ${circle.name}`,
     url: `${url}${join}circle=${encodeURIComponent(circle.id)}`,
   };
 }
