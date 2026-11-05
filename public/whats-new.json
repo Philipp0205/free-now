@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-location-search",
+    "date": "2026-11-05",
+    "title": "Clearer place search",
+    "bullets": [
+      "You'll see Searching\u2026 while places load, and a note if nothing turns up.",
+      "Enter in the place field searches \u2014 it no longer saves the plan."
+    ]
+  },
+  {
     "id": "2026-11-05-waiting-tap",
     "date": "2026-11-05",
     "title": "Easier to tap who's in",
