@@ -252,7 +252,9 @@ async function assertFieldsClear(page: Page, selectors: string[]) {
       for (const button of node.querySelectorAll("button")) {
         if (button.scrollWidth > button.clientWidth + 1) out.push(`${selector} "${button.textContent}" text clipped`);
       }
-      boxes.push({ name: selector, box });
+      // Each field may scroll the sheet. Compare in content coordinates, not viewport ones.
+      const scrolled = sheet.querySelector(".sheet-scroll")?.scrollTop ?? 0;
+      boxes.push({ name: selector, box: new DOMRect(box.left, box.top + scrolled, box.width, box.height) });
     }
     boxes.sort((a, b) => a.box.top - b.box.top);
     for (let i = 1; i < boxes.length; i += 1) {

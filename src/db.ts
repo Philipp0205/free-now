@@ -75,6 +75,7 @@ export type PlanRow = {
   at_time: string | null;
   ended_at: number | null;
   share_id: string | null;
+  description: string | null;
 };
 
 export type PushSubRow = {
@@ -362,6 +363,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "ended_at", "ended_at INTEGER");
   ensureColumn(db, "plans", "share_id", "share_id TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_share ON plans(share_id)");
+  ensureColumn(db, "plans", "description", "description TEXT");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -1248,16 +1250,11 @@ export function patchPlanDetails(
   lng: number | null,
   atTime: string | null,
   forDate: string,
+  description: string | null,
 ): void {
-  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ? WHERE id = ?").run(
-    note,
-    place,
-    lat,
-    lng,
-    atTime,
-    forDate,
-    id,
-  );
+  db.prepare(
+    "UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ?, description = ? WHERE id = ?",
+  ).run(note, place, lat, lng, atTime, forDate, description, id);
 }
 
 function backfillCircleAdmins(db: DatabaseSync): void {
@@ -1502,7 +1499,7 @@ const SOCIAL_SELECT = `
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id
+         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
