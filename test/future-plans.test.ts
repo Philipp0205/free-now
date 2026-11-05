@@ -215,12 +215,12 @@ test("host moves a plan tomorrow to next week and back, with a push to guests", 
     assert.equal(moved.plan.forDate, "2026-06-08");
     assert.equal(moved.plan.whenLabel, "Mon 8 Jun");
     assert.equal(moved.plan.time, "19:00");
-    assert.equal(sent.at(-1)?.title, "Plan changed: Dinner");
-    assert.equal(sent.at(-1)?.body, "Day is now Mon 8 Jun.");
+    assert.equal(sent.at(-1)?.title, "Dinner moved to Mon 8 Jun · 19:00");
+    assert.equal(sent.at(-1)?.body, "Tap to see the plan.");
 
     const back = await patch({ date: "2026-06-02", time: "18:00" }, 200);
     assert.equal(back.plan.whenLabel, "Tomorrow");
-    assert.equal(sent.at(-1)?.body, "Day is now Tomorrow. Time is now 18:00.");
+    assert.equal(sent.at(-1)?.title, "Dinner moved to Tue 2 Jun · 18:00");
 
     assert.equal((await patch({ date: "2026-05-31" }, 400)).error, "Pick a date from today on.");
     assert.equal((await patch({ date: "2027-06-02" }, 400)).error, "Pick a date within a year.");

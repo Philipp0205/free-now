@@ -103,7 +103,7 @@ test("changing only the description sends no push", async () => {
     const before = notificationCount(db);
 
     await api(port, "PATCH", `/api/plans/${made.plan.id}`, { token: alex.token, body: { description: "Bring snacks" }, status: 200 });
-    // An admin edit would normally tell the host too. Not for description alone.
+    // An admin's description-only edit stays quiet too.
     await api(port, "PATCH", `/api/plans/${made.plan.id}`, { token: bea.token, body: { description: "Bring more snacks" }, status: 200 });
     // Same note and place sent back with a new description still counts as description only.
     await api(port, "PATCH", `/api/plans/${made.plan.id}`, {
@@ -120,9 +120,16 @@ test("changing only the description sends no push", async () => {
       body: { note: "Dinner at 8", description: "New text" },
       status: 200,
     });
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].title, "Plan changed: Dinner at 8");
-    assert.equal(sent[0].body, "Note is now Dinner at 8.");
+    assert.equal(sent.length, 0, "a note change is quiet too");
+
+    await api(port, "PATCH", `/api/plans/${made.plan.id}`, {
+      token: alex.token,
+      body: { place: "Bar", description: "Newer text" },
+      status: 200,
+    });
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0].title, "Dinner at 8 moved to Bar");
+    assert.equal(sent[0].body, "Tap to see the plan.");
   });
 });
 
