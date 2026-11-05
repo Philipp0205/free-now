@@ -11,6 +11,9 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 
+/** The build label app.js sends with feedback, so a version bump does not break this test. */
+const APP_VERSION = /const APP_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.resolve("public/app.js"), "utf8"))?.[1] ?? "";
+
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const ENTRIES = JSON.parse(
   fs.readFileSync(new URL("../../public/whats-new.json", import.meta.url), "utf8"),
@@ -194,7 +197,8 @@ test("Send feedback checks the text, sends it with the circle, and says thanks",
     const row = db.prepare("SELECT * FROM feedback WHERE user_id = ?").get(eli.user.id) as Record<string, unknown>;
     assert.equal(row.text, "The map pins could be bigger.\nThanks!");
     assert.equal(row.circle_id, eli.circleId);
-    assert.equal(row.app_version, "hangry-v17");
+    assert.ok(APP_VERSION, "APP_VERSION found in public/app.js");
+    assert.equal(row.app_version, APP_VERSION);
 
     await done.getByRole("button", { name: "Done" }).click();
     await done.waitFor({ state: "detached" });
