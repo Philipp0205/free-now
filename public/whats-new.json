@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-unify-create",
+    "date": "2026-11-05",
+    "title": "One list, any day",
+    "bullets": [
+      "Now shows everything in one list: who's free, then plans by day.",
+      "Tap the red button and choose Pick a date to plan something days ahead."
+    ]
+  },
+  {
     "id": "2026-11-05-circle-dot-sync",
     "date": "2026-11-05",
     "title": "Red dot matches your alerts",

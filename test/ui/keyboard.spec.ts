@@ -11,6 +11,7 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 type Measure = {
   kb: number;
@@ -156,8 +157,8 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
       if (scrim instanceof HTMLElement) scrim.click();
     });
     await page.locator(".sheet").waitFor({ state: "detached" });
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
-    await page.locator(".sheet").getByRole("heading", { name: "Tomorrow" }).waitFor();
+    await openPlanSheet(page);
+    await page.locator("#plan-date").waitFor();
     await page.waitForTimeout(FIELD_REVEAL_MS + 250);
     const plan = await measure(page);
     assertSheetAboveKeyboard(plan);

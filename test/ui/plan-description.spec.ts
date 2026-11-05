@@ -8,6 +8,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const LONG = "Meet at the side door, not the front. Bring a jacket because we sit outside until late. "
@@ -81,7 +82,7 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
     await signIn(page, "Alex");
     await addPlan(page, "Dinner on the roof");
     // Create sheet stays as it was: no description there.
-    await page.getByRole("button", { name: "Plan" }).click();
+    await openPlanSheet(page);
     await page.locator("#sheet-note").waitFor();
     assert.equal(await page.locator(".sheet textarea").count(), 0);
     await page.locator(".scrim").click({ position: { x: 20, y: 20 } });

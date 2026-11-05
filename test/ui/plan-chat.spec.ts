@@ -8,6 +8,7 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const HIT = { name: "RATTO Bistrobar", address: "Cottastraße 4", lat: 48.7674, lng: 9.1708, distanceM: 400 };
@@ -59,7 +60,7 @@ test("plan and edit sheets send a picked place and free text clears the pin", { 
       return route.fulfill({ json: { results: [HIT] } });
     });
     await signIn(page, "Alex");
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    await openPlanSheet(page);
     await page.locator("#sheet-note").fill("Dinner");
     await page.locator("#plan-time").fill("19:00");
     await page.getByRole("button", { name: "Where" }).click();
@@ -221,7 +222,7 @@ test("the last place result is reachable on a 320x568 screen", { timeout: 90_000
     }));
     await page.route("**/api/geocode?**", (route) => route.fulfill({ json: { results: hits } }));
     await signIn(page, "Alex");
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    await openPlanSheet(page);
     await page.getByRole("button", { name: "Where" }).click();
     await page.locator("#where-query").fill("Cafe");
     const last = page.locator(".where-hit", { hasText: "Cafe 5" });
