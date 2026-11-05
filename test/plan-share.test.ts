@@ -96,7 +96,7 @@ test("POST share gives a stable /p/ link that is not the plan id, members only",
   });
 });
 
-test("the preview has only title, day, time and circle; a member also gets the plan id", async () => {
+test("the preview has only title, day and time; a member also gets the plan id", async () => {
   await withApp(async ({ port }) => {
     const { host, circle } = await circleOf(port, "Hana");
     const friend = await joinWith(port, "Finn", circle.inviteCode);
@@ -110,14 +110,13 @@ test("the preview has only title, day, time and circle; a member also gets the p
       note: "Pizza <b>&</b> \"fun\"",
       whenLabel: "Tomorrow",
       time: "19:30",
-      circleName: "Kreuzberg crew",
       member: false,
     });
     const otherCircle = await api(port, "GET", url, { token: stranger.host.token, status: 200 });
     assert.deepEqual(otherCircle, outsider);
     for (const body of [outsider, otherCircle]) {
       const text = JSON.stringify(body);
-      for (const leak of [...LEAKS, made.id, circle.id, "Hana"]) assert.ok(!text.includes(leak), `leaked ${leak}`);
+      for (const leak of [...LEAKS, made.id, circle.id, "Hana", "Kreuzberg crew"]) assert.ok(!text.includes(leak), `leaked ${leak}`);
     }
 
     const member = await api(port, "GET", url, { token: friend.token, status: 200 });
@@ -178,6 +177,10 @@ test("/p/ serves the app with escaped Open Graph tags: title, then day and time 
       assert.equal(tags["og:description"], "Sat 14 Nov · 19:30");
       assert.equal(tags["og:url"], `http://127.0.0.1:${port}/p/${made.shareId}`);
       assert.equal(tags["twitter:card"], "summary");
+      assert.equal(tags["twitter:title"], tags["og:title"]);
+      assert.equal(tags["twitter:description"], "Sat 14 Nov · 19:30");
+      assert.equal(tags["og:image"], `http://127.0.0.1:${port}/icons/icon-512.png`);
+      assert.equal(tags["twitter:image"], tags["og:image"]);
       assert.ok(!shown.html.includes("<script>alert"));
       assert.ok(shown.html.includes('<script type="module" src="/app.js"></script>'), "boots the app");
       assert.ok(shown.html.includes('name="robots" content="noindex"'));

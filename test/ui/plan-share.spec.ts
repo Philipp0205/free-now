@@ -7,6 +7,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const PLACE = "Secret Garden Bar";
@@ -82,6 +83,7 @@ async function makePlan(token: string, body: Record<string, unknown>) {
 async function phone(width = 360, height = 640) {
   const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
   await context.addInitScript(CLIPBOARD);
+  await skipWhatsNew(context);
   await context.route("https://*.tile.openstreetmap.org/**", (route) => route.fulfill({ status: 204, body: "" }));
   return context.newPage();
 }
@@ -139,7 +141,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
       await friendPage.context().close();
     }
 
-    // Signed out: title, day, time and circle. No place, no people, no map.
+    // Signed out or not in the circle: title, day and time only. No place, no people, no map.
     for (const [token, signedIn] of [[null, false], [outsider.token, true]] as const) {
       const visitor = await phone();
       try {
@@ -148,9 +150,8 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
         const preview = visitor.locator(".share-preview");
         await preview.getByRole("heading", { name: "Rooftop drinks" }).waitFor();
         assert.equal(await preview.locator(".share-when").innerText(), "Today · 19:30".replace("Today", (await call("GET", `/api/plans/share/${copied[0].split("/p/")[1]}`)).whenLabel));
-        await preview.getByText(`A plan in ${circle.name}`).waitFor();
         const text = await visitor.locator("body").innerText();
-        for (const leak of [PLACE, "Hana", "Finn", "Chat"]) assert.ok(!text.includes(leak), `${leak} shown`);
+        for (const leak of [PLACE, "Hana", "Finn", "Chat", circle.name]) assert.ok(!text.includes(leak), `${leak} shown`);
         assert.equal(await visitor.locator(".leaflet-container, .map-card, .tabbar").count(), 0);
         if (signedIn) await visitor.getByRole("button", { name: "Open Hangry" }).waitFor();
         else await visitor.getByRole("button", { name: "Sign back in" }).waitFor();

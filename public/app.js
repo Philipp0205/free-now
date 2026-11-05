@@ -3090,7 +3090,6 @@ function sharePreviewScreen() {
     el("article", { class: "panel share-preview" }, [
       el("h2", { text: preview.note }),
       el("p", { class: "share-when", text: when }),
-      el("p", { class: "help", text: `A plan in ${preview.circleName}` }),
     ]),
     el("p", { class: "lede share-lede", text: signedIn
       ? "Only people in this circle can open it. Ask a friend there for an invite."

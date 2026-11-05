@@ -14,7 +14,7 @@ export type SharePreview =
       note: string;
       whenLabel: string;
       time: string | null;
-      circleName: string;
+      circleName?: string;
       member: boolean;
       planId?: string;
       circleId?: string;
@@ -68,10 +68,9 @@ export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string
     note: plan.note,
     whenLabel: dayLabel(plan.for_date, today),
     time: plan.at_time,
-    circleName: circle.name,
   };
   if (!isPlanMember(db, plan, viewerId)) return { ...base, member: false };
-  return { ...base, member: true, planId: plan.id, circleId: plan.circle_id };
+  return { ...base, member: true, circleName: circle.name, planId: plan.id, circleId: plan.circle_id };
 }
 
 /** Link-preview text: the note, then the day and time. Read later, so never a bare weekday. */
@@ -103,6 +102,9 @@ export function shareHtml(template: string, meta: { title: string; description: 
     `<meta property="og:url" content="${escapeHtml(url)}" />`,
     `<meta property="og:image" content="${escapeHtml(`${origin}/icons/icon-512.png`)}" />`,
     `<meta name="twitter:card" content="summary" />`,
+    `<meta name="twitter:title" content="${title}" />`,
+    `<meta name="twitter:description" content="${description}" />`,
+    `<meta name="twitter:image" content="${escapeHtml(`${origin}/icons/icon-512.png`)}" />`,
   ].join("\n    ");
   // A function replacer, so "$&" in a note stays literal text.
   return template
