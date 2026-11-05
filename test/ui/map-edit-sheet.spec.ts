@@ -8,6 +8,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const HITS = [
@@ -84,7 +85,7 @@ test("map card Edit and End sit clear of the host name and title", { timeout: 12
     const page = await phone(width, height, false);
     try {
       await signIn(page, `Alex${width}`);
-      await page.getByRole("button", { name: "Plan tomorrow" }).click();
+      await page.getByRole("button", { name: "Plan", exact: true }).click();
       await page.locator("#sheet-note").fill("Bagels for lunch with everyone??");
       await page.locator("#plan-time").fill("12:45");
       await page.getByRole("button", { name: "Where" }).click();
@@ -174,7 +175,7 @@ test("the create plan sheet scrolls every field clear of the keyboard", { timeou
       const label = JSON.stringify({ width, height, mode });
       try {
         await signIn(page, "Alex");
-        await page.getByRole("button", { name: "Plan tomorrow" }).click();
+        await page.getByRole("button", { name: "Plan", exact: true }).click();
         await page.locator("#sheet-note").fill("Dinner");
         await page.locator("#sheet-note").focus();
         await openKeyboard(page, mode, width, height);
@@ -202,7 +203,7 @@ test("a pasted URL that is not a Maps link is never sent as search text", { time
   });
   try {
     await signIn(page, "Alex");
-    await page.getByRole("button", { name: "Plan tomorrow" }).click();
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
     await page.getByRole("button", { name: "Where" }).click();
     const query = page.locator("#where-query");
     await query.focus();
@@ -235,6 +236,7 @@ async function phone(width: number, height: number, mockViewport: boolean) {
     hasTouch: true,
     userAgent: CHROME_UA,
   });
+  await skipWhatsNew(context);
   if (mockViewport) await context.addInitScript(vvMock);
   await context.route("**/api/geocode?**", (route) => {
     const url = new URL(route.request().url());

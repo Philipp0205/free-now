@@ -9,6 +9,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const shotsDir = path.resolve("test/ui/screenshots");
@@ -157,6 +158,7 @@ async function openAs(token: string): Promise<Page> {
     hasTouch: true,
     userAgent: CHROME_UA,
   });
+  await skipWhatsNew(context);
   await context.addInitScript((value) => localStorage.setItem("fn_token", value), token);
   const page = await context.newPage();
   await page.goto(baseUrl);

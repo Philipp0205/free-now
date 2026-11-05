@@ -7,6 +7,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 let browser: Browser;
 let baseUrl = "";
@@ -327,6 +328,7 @@ async function openAs(token: string, viewport = { width: 360, height: 640 }): Pr
     hasTouch: true,
     userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
   });
+  await skipWhatsNew(context);
   await context.addInitScript((value) => {
     localStorage.setItem("fn_token", value);
     localStorage.setItem("fn_install_later", String(Date.now()));
