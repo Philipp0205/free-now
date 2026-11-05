@@ -11,8 +11,10 @@ const CIRCLE_KEY = "fn_circle";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
+/** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
+const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v21";
+const APP_VERSION = "hangry-v23";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -1899,12 +1901,18 @@ function notificationsSheet() {
         el("p", {
           class: "help",
           text: state.pushOn
-            ? "Notifications are on."
+            ? "Notifications are on for this phone."
             : "Allow notifications so a friend can reach this phone.",
         }),
       ]),
       state.pushOn
-        ? null
+        ? el("button", {
+            class: "btn secondary",
+            type: "button",
+            text: state.pushBusy ? "Waiting…" : "Turn off notifications",
+            disabled: state.pushBusy,
+            onclick: () => { void onDisablePush(); },
+          })
         : el("button", {
             class: "btn",
             type: "button",
@@ -5053,6 +5061,8 @@ async function onEnablePush() {
       method: "POST",
       body: { endpoint: json.endpoint, keys: json.keys },
     });
+    localStorage.removeItem(PUSH_OFF_KEY);
+    state.pushOn = true;
     state.error = "Notifications are on";
     state.pushReminder = null;
   } catch (error) {
@@ -5063,6 +5073,37 @@ async function onEnablePush() {
     scheduleErrorClear();
   }
   void considerReminders();
+}
+
+async function onDisablePush() {
+  state.pushBusy = true;
+  render();
+  try {
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        // Server first, so no more pushes go out even if the device step fails.
+        await api("/api/push/subscribe", { method: "DELETE", body: { endpoint: subscription.endpoint } });
+        await subscription.unsubscribe();
+      }
+    }
+    localStorage.setItem(PUSH_OFF_KEY, "1");
+    state.pushOn = false;
+    state.pushReminder = null;
+    state.onboarding = false;
+    state.error = "Notifications are off";
+  } catch (error) {
+    state.error = error.message || "Could not turn off notifications";
+  } finally {
+    state.pushBusy = false;
+    render();
+    scheduleErrorClear();
+  }
+}
+
+function pushTurnedOff() {
+  return localStorage.getItem(PUSH_OFF_KEY) === "1";
 }
 
 async function onTestPush() {
@@ -5123,7 +5164,7 @@ async function considerReminders() {
   const due = reminderDue();
   const denied = "Notification" in window && Notification.permission === "denied";
   const wantInstall = due && !isInstalled() && installDue() && !prompt.quiet && !denied;
-  const wantPush = due && !state.pushOn && !denied;
+  const wantPush = due && !state.pushOn && !denied && !pushTurnedOff();
   const wantDenied = due && denied;
   state.onboarding = wantInstall || wantPush || wantDenied;
   state.installSheet = false;
@@ -5164,7 +5205,7 @@ function onboardingSheet() {
   const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
   const denied = "Notification" in window && Notification.permission === "denied";
   const showInstall = !denied && !isInstalled() && !prompt.quiet;
-  const showPush = !denied && !state.pushOn;
+  const showPush = !denied && !state.pushOn && !pushTurnedOff();
   const actions = [];
   if (showPush) {
     actions.push(el("button", {
