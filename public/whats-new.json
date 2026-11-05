@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-05-reschedule-push",
+    "date": "2026-11-05",
+    "title": "Heads-up when plans move",
+    "bullets": [
+      "When a plan changes day, time or place, your circle gets a push. People who said they can't come are left alone.",
+      "The push shows the new date and time, like Fri 7 Nov · 20:00.",
+      "Fixing a typo in the title or description stays quiet."
+    ]
+  },
+  {
     "id": "2026-11-05-plan-share",
     "date": "2026-11-05",
     "title": "Share a plan",

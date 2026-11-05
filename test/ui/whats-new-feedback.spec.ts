@@ -194,7 +194,7 @@ test("Send feedback checks the text, sends it with the circle, and says thanks",
     const row = db.prepare("SELECT * FROM feedback WHERE user_id = ?").get(eli.user.id) as Record<string, unknown>;
     assert.equal(row.text, "The map pins could be bigger.\nThanks!");
     assert.equal(row.circle_id, eli.circleId);
-    assert.equal(row.app_version, "hangry-v15");
+    assert.equal(row.app_version, "hangry-v16");
 
     await done.getByRole("button", { name: "Done" }).click();
     await done.waitFor({ state: "detached" });

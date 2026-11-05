@@ -432,11 +432,7 @@ test("editing a plan tells people who are in, keeps an omitted place, and a past
     assert.equal(edited.plan.note, "Bouldering at 7");
     assert.equal(edited.plan.place, "Gym");
     assert.deepEqual(edited.plan.location, plan.plan.location);
-    const notePushes = sent.filter((item) => item.title.startsWith("Plan changed"));
-    assert.equal(notePushes.length, 1);
-    assert.equal(notePushes[0]?.endpoint, `https://push.example/${fritz.user.id}`);
-    assert.equal(notePushes[0]?.title, "Plan changed: Bouldering at 7");
-    assert.equal(notePushes[0]?.body, "Note is now Bouldering at 7.");
+    assert.equal(sent.length, 0, "a note-only edit sends no push");
     sent.length = 0;
     const timed = await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
       token: alex.token,
@@ -446,9 +442,13 @@ test("editing a plan tells people who are in, keeps an omitted place, and a past
     assert.equal(timed.plan.place, "Gym");
     assert.equal(timed.plan.time, "19:40");
     assert.deepEqual(timed.plan.location, plan.plan.location);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.endpoint, `https://push.example/${fritz.user.id}`);
-    assert.equal(sent[0]?.body, "Time is now 19:40.");
+    assert.deepEqual(
+      sent.map((item) => item.endpoint).sort(),
+      [`https://push.example/${fritz.user.id}`],
+      "Sam said can't, so only Fritz is told",
+    );
+    assert.equal(sent[0]?.title, "Bouldering at 7 moved to Tue 2 Jun · 19:40");
+    assert.equal(sent[0]?.body, "Gym");
     sent.length = 0;
     await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
       token: alex.token,
@@ -578,10 +578,7 @@ test("an admin editing someone else's plan or free post tells the host, and the 
     await api(port, "POST", `/api/plans/${plan.plan.id}/reply`, { token: sam.token, body: { reply: "in" }, status: 200 });
     sent.length = 0;
     await api(port, "PATCH", `/api/plans/${plan.plan.id}`, { token: alex.token, body: { note: "Bouldering at 7" }, status: 200 });
-    const own = sent.map((item) => item.title);
-    assert.equal(own.some((title) => title.includes("edited your plan")), false);
-    assert.deepEqual(own, ["Plan changed: Bouldering at 7"]);
-    assert.equal(sent[0]?.endpoint, `https://push.example/${sam.user.id}`);
+    assert.equal(sent.length, 0, "a note-only edit sends no push");
 
     sent.length = 0;
     await api(port, "PATCH", `/api/plans/${plan.plan.id}`, {
@@ -592,10 +589,9 @@ test("an admin editing someone else's plan or free post tells the host, and the 
     const hostPlan = sent.find((item) => item.endpoint === `https://push.example/${alex.user.id}`);
     const samPlan = sent.find((item) => item.endpoint === `https://push.example/${sam.user.id}`);
     const fritzPlan = sent.find((item) => item.endpoint === `https://push.example/${fritz.user.id}`);
-    assert.equal(hostPlan?.title, "Fritz edited your plan: Bouldering at 8");
-    assert.match(hostPlan?.body ?? "", /Note is now Bouldering at 8/);
-    assert.match(hostPlan?.body ?? "", /Time is now 20:00/);
-    assert.equal(samPlan?.title, "Plan changed: Bouldering at 8");
+    assert.equal(hostPlan?.title, "Bouldering at 8 moved to Tue 2 Jun · 20:00");
+    assert.equal(hostPlan?.body, "Tap to see the plan.");
+    assert.equal(samPlan?.title, "Bouldering at 8 moved to Tue 2 Jun · 20:00");
     assert.equal(fritzPlan, undefined);
     assert.equal(sent.length, 2);
 
