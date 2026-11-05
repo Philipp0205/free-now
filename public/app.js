@@ -4,12 +4,16 @@ import { clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLat
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
+import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 
 const TOKEN_KEY = "fn_token";
 const CIRCLE_KEY = "fn_circle";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
+/** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
+const APP_VERSION = "hangry-v15";
+const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
 let sheetHistoryPushed = false;
@@ -89,6 +93,13 @@ const state = {
   circleId: localStorage.getItem(CIRCLE_KEY) || "",
   circleMenu: false,
   newCircleName: "",
+  whatsNew: null,
+  whatsNewView: null,
+  whatsNewChecked: false,
+  feedbackDraft: "",
+  feedbackError: "",
+  feedbackBusy: false,
+  feedbackSent: false,
 };
 
 const deepLinkParams = new URLSearchParams(location.search);
@@ -304,8 +315,10 @@ function friendlyMessage(raw, status) {
   const text = String(raw || "");
   const lower = text.toLowerCase();
   if (status >= 500) return "Something went wrong. Retrying…";
+  if (status === 429) return "That's a lot at once. Try again in a few minutes.";
   if (!text || lower.includes("failed to fetch") || status === 0) return "You're offline. Retrying…";
   if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
+  if (lower.includes("feedback")) return `Write 1–${FEEDBACK_MAX} characters.`;
   if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
   if (lower.includes("plan has ended")) return "That plan has ended.";
   if (lower.includes("post has ended") || lower.includes("hangout has ended")) return "That post has ended.";
@@ -400,6 +413,7 @@ async function refresh({ initial = false } = {}) {
   state.offline = false;
   state.statusMessage = "";
   if (consumeDeepLink()) return;
+  if (!state.whatsNewChecked) void considerWhatsNew();
   if (signature === state.signature && !hadStatus) return;
   state.signature = signature;
   if (syncPushDetail() && !state.confirm && !state.installOpen && !isTyping()) {
@@ -755,6 +769,9 @@ async function api(path, options = {}) {
 
 function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
+  // What's new is per person. The next account on this phone starts from its own server value.
+  localStorage.removeItem(SEEN_KEY);
+  state.whatsNewChecked = false;
   rememberCircle("");
   state.token = null;
   state.displayReported = false;
@@ -1123,7 +1140,7 @@ function home() {
   const tomorrow = el("section", { class: "section" }, [
     el("div", { class: "section-row" }, [
       el("h2", { text: "Today & tomorrow" }),
-      el("button", { class: "text-btn", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
+      el("button", { class: "text-btn", type: "button", text: "Plan", onclick: () => openSheet("plan") }),
     ]),
     el("div", { class: "cards" }, soon.length
       ? soon.map(planCard)
@@ -1131,7 +1148,7 @@ function home() {
           el("button", {
             class: "empty",
             type: "button",
-            text: "Nothing tomorrow yet",
+            text: "Nothing planned yet",
             onclick: () => openSheet("plan"),
           }),
         ]),
@@ -1643,6 +1660,22 @@ function youScreen() {
         ? el("button", { class: "btn secondary", type: "button", text: "Install app", onclick: onInstall })
         : null,
     ]),
+    el("div", { class: "panel panel-rows" }, [
+      el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
+        el("div", { class: "grow" }, [
+          el("h3", { text: "What's new" }),
+          el("p", { text: "Recent changes to Hangry" }),
+        ]),
+        icon("chevron"),
+      ]),
+      el("button", { class: "row nav-row", type: "button", onclick: openFeedback }, [
+        el("div", { class: "grow" }, [
+          el("h3", { text: "Send feedback" }),
+          el("p", { text: "Ideas, bugs, anything" }),
+        ]),
+        icon("chevron"),
+      ]),
+    ]),
     el("div", { class: "panel" }, [
       el("button", {
         class: "text-btn",
@@ -2010,6 +2043,266 @@ function pushSheet() {
   ]);
 }
 
+let whatsNewLoad = null;
+
+/** The changelog, fetched once per page. Null while offline with nothing cached, so the next check retries. */
+async function loadWhatsNew() {
+  if (state.whatsNew) return state.whatsNew;
+  if (!whatsNewLoad) {
+    whatsNewLoad = fetch("/whats-new.json", { cache: "no-cache" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("whats-new"))))
+      .then((raw) => {
+        state.whatsNew = normalizeEntries(raw);
+        return state.whatsNew;
+      })
+      .catch(() => {
+        whatsNewLoad = null;
+        return null;
+      });
+  }
+  return whatsNewLoad;
+}
+
+function readSeen() {
+  try {
+    return localStorage.getItem(SEEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSeen(id) {
+  try {
+    localStorage.setItem(SEEN_KEY, id);
+  } catch {
+    /* storage can be full */
+  }
+}
+
+/** This phone and the account both remember it, so a second phone does not show it again. */
+async function markSeen(id) {
+  if (!id) return;
+  writeSeen(id);
+  if (state.me?.user) state.me.user.whatsNewSeen = id;
+  try {
+    await api("/api/me/whats-new", { method: "POST", body: { id } });
+  } catch {
+    /* The local copy holds. The next check sends it again. */
+  }
+}
+
+async function markNewAccountSeen() {
+  const id = latestId(await loadWhatsNew());
+  if (id) await markSeen(id);
+}
+
+function canShowWhatsNew() {
+  return Boolean(state.me?.circle)
+    && !state.sheet
+    && !state.confirm
+    && !state.onboarding
+    && !state.installOpen
+    && !state.installSheet
+    && !state.chat
+    && !state.past
+    && !state.offline
+    && !isTyping();
+}
+
+/** Once per page: catch this phone and the account up, then show anything new. */
+async function considerWhatsNew() {
+  if (state.whatsNewChecked || !state.me?.user) return;
+  state.whatsNewChecked = true;
+  const entries = await loadWhatsNew();
+  if (!entries || !state.me?.user) {
+    state.whatsNewChecked = false;
+    return;
+  }
+  if (!entries.length) return;
+  const local = readSeen();
+  const server = state.me.user.whatsNewSeen ?? null;
+  const seen = newerSeen(entries, local, server);
+  if (seen && seen !== local) writeSeen(seen);
+  if (seen && seen !== server) void markSeen(seen);
+  const fresh = unseenEntries(entries, seen);
+  if (!fresh.length) return;
+  if (!canShowWhatsNew()) {
+    // Something else is open. Try again on the next poll.
+    state.whatsNewChecked = false;
+    return;
+  }
+  state.whatsNewView = { mode: "popup", entries: fresh };
+  state.sheet = "whats-new";
+  render();
+  void markSeen(latestId(entries));
+}
+
+async function openWhatsNewList() {
+  const entries = await loadWhatsNew();
+  if (!entries) {
+    state.error = "You're offline. Try again.";
+    render();
+    scheduleErrorClear();
+    return;
+  }
+  state.error = "";
+  state.whatsNewView = { mode: "list", entries };
+  state.sheet = "whats-new";
+  render();
+  const local = readSeen();
+  const next = newerSeen(entries, local, latestId(entries));
+  if (next && next !== local) void markSeen(next);
+}
+
+function whatsNewEntry(entry) {
+  return el("article", { class: "whats-new-entry" }, [
+    el("p", { class: "whats-new-date", text: formatEntryDate(entry.date) }),
+    el("h3", { text: entry.title }),
+    el("ul", {}, entry.bullets.map((bullet) => el("li", { text: bullet }))),
+  ]);
+}
+
+function whatsNewSheet() {
+  const popup = state.whatsNewView?.mode === "popup";
+  const entries = state.whatsNewView?.entries || state.whatsNew || [];
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("div", { class: "sheet whats-new", role: "dialog", "aria-label": "What's new" }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "What's new" }),
+        el("p", { class: "help", text: popup ? "Since you last opened Hangry." : "Recent changes to Hangry." }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        entries.length
+          ? el("div", { class: "whats-new-list" }, entries.map(whatsNewEntry))
+          : el("p", { class: "help", text: "Nothing here yet." }),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", { class: "btn", type: "button", text: popup ? "Got it" : "Done", onclick: closeSheet }),
+      ]),
+    ]),
+  ]);
+}
+
+function resetFeedback() {
+  state.feedbackDraft = "";
+  state.feedbackError = "";
+  state.feedbackBusy = false;
+  state.feedbackSent = false;
+}
+
+function openFeedback() {
+  if (state.feedbackSent) resetFeedback();
+  state.feedbackError = "";
+  state.error = "";
+  state.sheet = "feedback";
+  render();
+}
+
+/** Count and error update in place, so typing never re-renders the sheet. */
+function paintFeedbackMeta() {
+  const count = document.getElementById("feedback-count");
+  if (count) count.textContent = `${state.feedbackDraft.length}/${FEEDBACK_MAX}`;
+  if (!state.feedbackError) {
+    document.getElementById("feedback-error")?.remove();
+    document.getElementById("feedback-text")?.removeAttribute("aria-invalid");
+  }
+}
+
+function feedbackSheet() {
+  const scrim = el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet });
+  if (state.feedbackSent) {
+    return el("div", {}, [
+      scrim,
+      el("div", { class: "sheet feedback-done", role: "dialog", "aria-label": "Feedback sent" }, [
+        el("div", { class: "sheet-head" }, [
+          el("div", { class: "grabber" }),
+          el("h2", { text: "Thanks!" }),
+          el("p", { class: "help", text: "We read every message. When it turns into a change, you'll see it in What's new." }),
+        ]),
+        el("div", { class: "sheet-dock" }, [
+          el("button", { class: "btn", type: "button", text: "Done", onclick: closeSheet }),
+        ]),
+      ]),
+    ]);
+  }
+  return el("div", {}, [
+    scrim,
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Send feedback", novalidate: "", onsubmit: onSendFeedback }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Send feedback" }),
+        el("p", { class: "help", text: "Ideas, bugs, anything. Your name and circle are sent with it." }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        el("div", { class: "sheet-form" }, [
+          el("label", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", text: "Your feedback" }),
+            el("textarea", {
+              id: "feedback-text",
+              class: "sheet-control",
+              rows: "6",
+              maxlength: String(FEEDBACK_MAX),
+              placeholder: "What should we change?",
+              "aria-describedby": "feedback-count",
+              "aria-invalid": state.feedbackError ? "true" : null,
+              oninput: (event) => {
+                state.feedbackDraft = event.target.value;
+                state.feedbackError = "";
+                paintFeedbackMeta();
+              },
+            }, [state.feedbackDraft]),
+            el("div", { class: "feedback-meta" }, [
+              state.feedbackError
+                ? el("p", { class: "time-error", id: "feedback-error", role: "alert", text: state.feedbackError })
+                : null,
+              el("span", { class: "feedback-count", id: "feedback-count", text: `${state.feedbackDraft.length}/${FEEDBACK_MAX}` }),
+            ]),
+          ]),
+        ]),
+      ]),
+      el("div", { class: "sheet-dock" }, [
+        el("button", {
+          class: "btn",
+          type: "submit",
+          text: state.feedbackBusy ? "Sending…" : "Send",
+          disabled: state.feedbackBusy,
+        }),
+      ]),
+    ]),
+  ]);
+}
+
+async function onSendFeedback(event) {
+  event.preventDefault();
+  if (state.feedbackBusy) return;
+  const raw = document.getElementById("feedback-text")?.value ?? state.feedbackDraft;
+  state.feedbackDraft = raw;
+  const text = raw.trim();
+  if (!text || text.length > FEEDBACK_MAX) {
+    state.feedbackError = text ? `Keep it under ${FEEDBACK_MAX} characters.` : "Write something first.";
+    render();
+    return;
+  }
+  state.feedbackBusy = true;
+  state.feedbackError = "";
+  render();
+  try {
+    await api("/api/feedback", {
+      method: "POST",
+      body: { text, circleId: state.me?.circle?.id || undefined, appVersion: APP_VERSION },
+    });
+    state.feedbackSent = true;
+    state.feedbackDraft = "";
+  } catch (error) {
+    state.feedbackError = isNetworkFailure(error) ? "You're offline. Try again." : error.message;
+  } finally {
+    state.feedbackBusy = false;
+    if (state.sheet === "feedback") render();
+  }
+}
+
 function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
   if (state.sheet === "join-circle") return joinLinkSheet();
@@ -2017,6 +2310,8 @@ function sheet() {
   if (state.sheet === "member") return memberSheet();
   if (state.sheet === "admin-edit") return adminEditSheet();
   if (state.sheet === "push") return pushSheet();
+  if (state.sheet === "whats-new") return whatsNewSheet();
+  if (state.sheet === "feedback") return feedbackSheet();
   if (state.sheet === "action") {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
@@ -2024,7 +2319,7 @@ function sheet() {
         el("div", { class: "sheet-head" }, [el("div", { class: "grabber" })]),
         el("div", { class: "actions" }, [
           el("button", { class: "action", type: "button", text: "I'm free now", onclick: () => openSheet("free") }),
-          el("button", { class: "action", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
+          el("button", { class: "action", type: "button", text: "Plan", onclick: () => openSheet("plan") }),
           el("button", { class: "action", type: "button", text: "Cancel", onclick: closeSheet }),
         ]),
       ]),
@@ -3596,6 +3891,8 @@ function openSheet(name) {
 }
 
 function closeSheet() {
+  if (state.sheet === "feedback" && state.feedbackSent) resetFeedback();
+  if (state.sheet === "whats-new") state.whatsNewView = null;
   state.sheet = null;
   state.whereMap = false;
   if (state.planWhere) state.planWhere.whereMap = false;
@@ -3619,7 +3916,8 @@ function dismissTopSheet() {
     render();
     return;
   }
-  if (state.onboarding) {
+  // Onboarding waits behind an open sheet (see view), so the sheet on screen closes first.
+  if (state.onboarding && !state.sheet) {
     state.onboarding = false;
     render();
     return;
@@ -3851,6 +4149,8 @@ async function onStart(event) {
     });
     localStorage.setItem(TOKEN_KEY, data.token);
     state.token = data.token;
+    // Someone new has nothing to catch up on. Everything up to today counts as seen.
+    await markNewAccountSeen();
     if (data.circle) rememberCircle(data.circle.id);
     state.me = await api("/api/me");
     if (data.circle) {

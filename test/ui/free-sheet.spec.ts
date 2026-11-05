@@ -10,6 +10,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
 
@@ -261,6 +262,7 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
       hasTouch: true,
       userAgent: CHROME_UA,
     });
+    await skipWhatsNew(viewerContext);
     await viewerContext.addInitScript(vvMock);
     await viewerContext.addInitScript((value) => localStorage.setItem("fn_token", value), friend.token);
     const viewer = await viewerContext.newPage();
@@ -279,6 +281,8 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
       const chip = input.closest(".time-chip") as HTMLElement;
       const box = chip.getBoundingClientRect();
       const tab = document.querySelector(".tabbar")?.getBoundingClientRect().top ?? window.innerHeight;
+      // Read before "change": a re-render can detach the chip, and a detached node has no computed style.
+      const background = getComputedStyle(chip).backgroundColor;
       const [hour, minute] = (input as HTMLInputElement).value.split(":").map(Number);
       const nextMinute = minute === 59 ? 58 : minute + 1;
       const value = `${String(hour).padStart(2, "0")}:${String(nextMinute).padStart(2, "0")}`;
@@ -287,7 +291,7 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
       return {
         bottom: box.bottom,
         tab,
-        background: getComputedStyle(chip).backgroundColor,
+        background,
         min: (input as HTMLInputElement).min,
         max: (input as HTMLInputElement).max,
         step: (input as HTMLInputElement).step,
@@ -350,6 +354,7 @@ test("later and tomorrow replies keep I'm in and Can't on one row", { timeout: 9
       hasTouch: true,
       userAgent: CHROME_UA,
     });
+    await skipWhatsNew(viewerContext);
     await viewerContext.addInitScript(vvMock);
     await viewerContext.addInitScript((value) => localStorage.setItem("fn_token", value), friend.token);
     const viewer = await viewerContext.newPage();
@@ -1707,6 +1712,7 @@ test("two circles stay separate when you switch, post, join, and leave", { timeo
       body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const beaContext = await browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
+    await skipWhatsNew(beaContext);
     await beaContext.addInitScript(vvMock);
     const beaPage = await beaContext.newPage();
     await beaPage.addInitScript((value) => localStorage.setItem("fn_token", value), bea.token);
@@ -1735,6 +1741,7 @@ async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
     userAgent,
     ...(locate ? { geolocation: { latitude: 48.7784, longitude: 9.18 }, permissions: ["geolocation"] } : {}),
   });
+  await skipWhatsNew(context);
   await context.addInitScript(vvMock);
   if (extraScript) await context.addInitScript(extraScript);
   if (locate) {

@@ -12,6 +12,7 @@ export type UserRow = {
   buzz_token: string;
   created_at: number;
   color?: number | null;
+  whats_new_seen?: string | null;
 };
 
 export type CircleRow = {
@@ -129,7 +130,8 @@ CREATE TABLE IF NOT EXISTS users (
   display_at INTEGER,
   standalone_at INTEGER,
   push_seen_at INTEGER,
-  color INTEGER
+  color INTEGER,
+  whats_new_seen TEXT
 );
 
 CREATE TABLE IF NOT EXISTS circles (
@@ -227,6 +229,20 @@ CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, created_at 
 
 ${pushDeliveriesTable("push_deliveries")}
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_ref ON push_deliveries(circle_id, kind, ref_id, created_at);
+
+CREATE TABLE IF NOT EXISTS feedback (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  circle_id TEXT REFERENCES circles(id) ON DELETE SET NULL,
+  text TEXT NOT NULL,
+  app_version TEXT,
+  created_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new',
+  pr_url TEXT,
+  note TEXT,
+  updated_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -332,6 +348,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "standalone_at", "standalone_at INTEGER");
   ensureColumn(db, "users", "push_seen_at", "push_seen_at INTEGER");
   ensureColumn(db, "users", "color", "color INTEGER");
+  ensureColumn(db, "users", "whats_new_seen", "whats_new_seen TEXT");
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -799,6 +816,7 @@ export type CircleDeleteResult = {
  *
  * Tables that reference circle_id:
  * memberships, socials, plans, notifications, circle_removals, chats, push_deliveries.
+ * feedback is the exception: its rows stay and circle_id is set to NULL.
  *
  * Also removed in that same transaction (no circle_id column of their own;
  * they hang off the rows above): social_joins, plan_joins, messages,
@@ -814,6 +832,8 @@ export function deleteCircle(db: DatabaseSync, circleId: string): CircleDeleteRe
     const inChats = "chat_id IN (SELECT id FROM chats WHERE circle_id = ?)";
     const inSocials = "social_id IN (SELECT id FROM socials WHERE circle_id = ?)";
     const inPlans = "plan_id IN (SELECT id FROM plans WHERE circle_id = ?)";
+    // Feedback outlives the circle it was sent from. Not counted below.
+    db.prepare("UPDATE feedback SET circle_id = NULL WHERE circle_id = ?").run(circleId);
     const counts: CircleDeleteCounts = {
       messages: removed(db, `DELETE FROM messages WHERE ${inChats}`, circleId),
       chat_reads: removed(db, `DELETE FROM chat_reads WHERE ${inChats}`, circleId),
@@ -1286,6 +1306,11 @@ export function markPushSeen(db: DatabaseSync, userId: string, at: number): void
 }
 
 /** `standalone` is display-mode standalone (or iOS navigator.standalone). A browser report never clears a previous install. */
+/** Newest What's new entry this person has seen. The client decides what newer means. */
+export function setWhatsNewSeen(db: DatabaseSync, userId: string, id: string): void {
+  db.prepare("UPDATE users SET whats_new_seen = ? WHERE id = ?").run(id, userId);
+}
+
 export function recordDisplay(db: DatabaseSync, userId: string, standalone: boolean, at: number): void {
   if (standalone) {
     db.prepare("UPDATE users SET display_at = ?, standalone_at = COALESCE(standalone_at, ?) WHERE id = ?").run(at, at, userId);

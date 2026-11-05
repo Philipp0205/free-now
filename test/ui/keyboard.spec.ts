@@ -10,6 +10,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 type Measure = {
   kb: number;
@@ -155,7 +156,7 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
       if (scrim instanceof HTMLElement) scrim.click();
     });
     await page.locator(".sheet").waitFor({ state: "detached" });
-    await page.getByRole("button", { name: "Plan tomorrow" }).click();
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
     await page.locator(".sheet").getByRole("heading", { name: "Tomorrow" }).waitFor();
     await page.waitForTimeout(FIELD_REVEAL_MS + 250);
     const plan = await measure(page);
@@ -205,6 +206,7 @@ test("join form clears a 280px keyboard on a 360x640 phone", { timeout: 90_000 }
     hasTouch: true,
     userAgent: pixel.userAgent,
   });
+  await skipWhatsNew(context);
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -318,6 +320,7 @@ async function mobilePage(emulatePhone: boolean) {
   const context = await browser.newContext(emulatePhone
     ? { ...pixel, deviceScaleFactor: 1 }
     : { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, hasTouch: false, isMobile: false });
+  await skipWhatsNew(context);
   if (emulatePhone) await context.addInitScript(vvMock);
   return context.newPage();
 }
