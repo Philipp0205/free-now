@@ -624,6 +624,9 @@ input[type="text"], input[type="url"], input[type="time"] {
 .chat-msg { margin: 0 0 12px; }
 .chat-msg[data-color] { border-left: 3px solid var(--person); padding-left: 10px; }
 .chat-msg[data-color] strong { color: var(--person); }
+/* Own messages keep their flush text; the bar sits in the log's left gutter. */
+.chat-msg.mine[data-color] { position: relative; border-left: 0; padding-left: 0; }
+.chat-msg.mine[data-color]::before { content: ""; position: absolute; top: 0; bottom: 0; left: -9px; width: 3px; background: var(--person); }
 .chat-msg header { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 13px; }
 .chat-msg p { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
 .chat-msg .text-btn { min-height: 44px; }
@@ -1160,8 +1163,11 @@ html.kb-open .sheet .help { margin-top: 0; }
   height: var(--pin);
   margin: 0;
   padding: 0;
-  border: 0;
-  line-height: var(--pin);
+  border: 4px solid transparent;
+  border-radius: 50%;
+  background: var(--person, transparent) padding-box;
+  color: #fff;
+  line-height: calc(var(--pin) - 8px);
   text-align: center;
   font-size: 14px;
   font-weight: 700;
