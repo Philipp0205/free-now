@@ -7,3 +7,5 @@ data/
 .playwright-mcp/
 test/ui/screenshots/
 test-results/
+
+.oc/
