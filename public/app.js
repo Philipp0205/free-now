@@ -1110,7 +1110,7 @@ function home() {
   const upcoming = state.plans.filter((plan) => plan.forDate > nextDay);
   const tomorrow = el("section", { class: "section" }, [
     el("div", { class: "section-row" }, [
-      el("h2", { text: "Tomorrow" }),
+      el("h2", { text: "Today & tomorrow" }),
       el("button", { class: "text-btn", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
     ]),
     el("div", { class: "cards" }, soon.length
