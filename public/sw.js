@@ -1,7 +1,7 @@
-const CACHE = "hangry-v30";
+const CACHE = "hangry-v31";
 /** Wait before each ack retry. One first try, then up to three more. */
 const ACK_DELAYS = [1000, 3000, 9000];
-const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/whats-new.json", "/map.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/whats-new.json", "/map.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
