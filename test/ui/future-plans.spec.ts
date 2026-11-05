@@ -11,6 +11,7 @@ import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 import { addDays, dayLabel, isoDate } from "../../src/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
@@ -62,13 +63,11 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     await signIn(page, "Hana");
     await addPlan(page, "Tomorrow walk", "tomorrow", "18:00");
 
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    await openPlanSheet(page);
     const sheet = page.locator(".sheet");
-    assert.equal(await sheet.getByRole("button", { name: "Tomorrow", exact: true }).getAttribute("aria-pressed"), "true");
-    assert.equal(await page.locator("#plan-date").count(), 0);
-    await sheet.getByRole("button", { name: "Pick a date" }).click();
+    assert.equal(await sheet.getByRole("button", { name: "Pick a date" }).getAttribute("aria-pressed"), "true");
     const date = page.locator("#plan-date");
-    await date.waitFor();
+    assert.equal(await date.inputValue(), addDays(d.today, 3));
     assert.equal(await date.getAttribute("min"), d.today);
     assert.equal(await date.getAttribute("max"), d.max);
     await date.fill(d.nextWeek);
@@ -81,12 +80,10 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     assert.equal(posted.date, d.nextWeek);
     assert.equal(posted.time, "19:30");
 
-    const upcoming = page.locator("section.section", { has: page.getByRole("heading", { name: "Upcoming" }) });
-    await upcoming.getByRole("heading", { name: "Sushi night" }).waitFor();
-    assert.match(await upcoming.locator(".card-plan p").first().innerText(), new RegExp(`^${d.nextWeekLabel} · 19:30 · Hana$`));
+    await page.locator(".card-plan").getByRole("heading", { name: "Sushi night" }).waitFor();
+    assert.match(await planLine(page, "Sushi night"), new RegExp(`^${d.nextWeekLabel} · 19:30 · Hana$`));
     assert.deepEqual(await planOrder(page), ["Tomorrow walk", "Sushi night"]);
-    const soon = page.locator("section.section", { has: page.getByRole("heading", { name: "Today & tomorrow" }) });
-    await soon.getByRole("heading", { name: "Tomorrow walk" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Upcoming" }).count(), 0);
     assert.equal(await page.getByRole("heading", { name: "Tomorrow", exact: true }).count(), 0);
 
     // Next week -> tomorrow.
@@ -114,7 +111,8 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     patched = page.waitForResponse((response) => response.request().method() === "PATCH");
     await page.locator(".sheet").getByRole("button", { name: "Save" }).click();
     assert.equal((await patched).request().postDataJSON().date, d.nextWeek);
-    await upcoming.getByRole("heading", { name: "Sushi night" }).waitFor();
+    await page.waitForFunction((label) => Array.from(document.querySelectorAll(".card-plan"))
+      .some((card) => card.querySelector("h3")?.textContent === "Sushi night" && card.querySelector(".card-body > p")?.textContent?.startsWith(label)), d.nextWeekLabel);
     assert.match(await planLine(page, "Sushi night"), new RegExp(`^${d.nextWeekLabel} · 19:30`));
 
     // End it.
@@ -135,8 +133,7 @@ test("a date in the past is refused before it is sent", { timeout: 60_000 }, asy
   const page = await phone();
   try {
     await signIn(page, "Hana");
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
-    await page.locator(".sheet").getByRole("button", { name: "Pick a date" }).click();
+    await openPlanSheet(page);
     await page.locator("#plan-date").fill("");
     await page.locator("#sheet-note").fill("Nothing");
     let posted = false;
@@ -149,13 +146,12 @@ test("a date in the past is refused before it is sent", { timeout: 60_000 }, asy
   }
 });
 
-test("at 320x568 the day choice, date input and time picker are visible and clear of each other", { timeout: 90_000 }, async () => {
+test("at 320x568 the when choice, date input and time picker are visible and clear of each other", { timeout: 90_000 }, async () => {
   const page = await phone(320, 568);
   try {
     const d = days();
     await signIn(page, "Hana");
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
-    await page.locator(".sheet").getByRole("button", { name: "Pick a date" }).click();
+    await openPlanSheet(page);
     await page.locator("#plan-date").fill(d.nextWeek);
     await assertFieldsClear(page, [".sheet .segment-3", "#plan-date", "#plan-time"]);
     await page.locator("#sheet-note").fill("Tiny screen");
@@ -170,16 +166,14 @@ test("at 320x568 the day choice, date input and time picker are visible and clea
   }
 });
 
-test("the Now tab says Plan, and both plan headings stay on one line at 320, 360 and 412", { timeout: 120_000 }, async () => {
+test("Now is one list: no section headings, no Plan button, plans in day order at 320, 360 and 412", { timeout: 120_000 }, async () => {
   for (const [width, height] of [[320, 568], [360, 640], [412, 915]]) {
     const page = await phone(width, height);
     try {
       const d = days();
       await signIn(page, `Ida ${width}`);
-      assert.equal(await page.getByRole("button", { name: /tomorrow/i }).count(), 0);
-      await page.getByRole("button", { name: "Nothing planned yet" }).waitFor();
       const token = await page.evaluate(() => localStorage.getItem("fn_token") as string);
-      for (const [note, date] of [["Long walk by the river", d.tomorrow], ["Sushi night", d.nextWeek]]) {
+      for (const [note, date] of [["Sushi night", d.nextWeek], ["Long walk by the river", d.tomorrow], ["Movie", addDays(d.today, 3)]]) {
         const response = await fetch(`${baseUrl}/api/plans`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -187,47 +181,21 @@ test("the Now tab says Plan, and both plan headings stay on one line at 320, 360
         });
         assert.equal(response.status, 201);
       }
+      await page.reload();
       await page.getByRole("heading", { name: "Sushi night" }).waitFor({ timeout: 10_000 });
-      await page.getByRole("heading", { name: "Upcoming" }).waitFor();
-      // A plain string, so tsx does not inject helpers into the page.
-      const report = await page.evaluate(`(() => {
-        const lines = (node) => {
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          return new Set(Array.from(range.getClientRects()).filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top))).size;
-        };
-        const headings = Array.from(document.querySelectorAll(".section h2"))
-          .filter((node) => node.textContent === "Today & tomorrow" || node.textContent === "Upcoming")
-          .map((node) => ({ text: node.textContent, lines: lines(node), overflow: node.scrollWidth > node.clientWidth + 1, right: node.getBoundingClientRect().right }));
-        const button = Array.from(document.querySelectorAll(".section-row .text-btn")).find((node) => node.textContent === "Plan");
-        const box = button ? button.getBoundingClientRect() : null;
-        return {
-          headings,
-          button: box ? { left: box.left, right: box.right, lines: lines(button) } : null,
-          viewport: window.innerWidth,
-          scrollWidth: document.documentElement.scrollWidth,
-        };
-      })()`) as {
-        headings: Array<{ text: string; lines: number; overflow: boolean; right: number }>;
-        button: { left: number; right: number; lines: number } | null;
-        viewport: number;
-        scrollWidth: number;
-      };
-      assert.equal(report.headings.length, 2, `${width}`);
-      for (const heading of report.headings) {
-        assert.equal(heading.lines, 1, `${heading.text} wraps at ${width}`);
-        assert.equal(heading.overflow, false, `${heading.text} overflows at ${width}`);
+      for (const name of ["Later today", "Today & tomorrow", "Upcoming"]) {
+        assert.equal(await page.getByRole("heading", { name, exact: true }).count(), 0, `${name} at ${width}`);
       }
-      assert.ok(report.button, `Plan button at ${width}`);
-      assert.equal(report.button.lines, 1);
-      assert.ok(report.button.left >= report.headings[0].right, `Plan button overlaps the heading at ${width}`);
-      assert.ok(report.button.right <= report.viewport, `Plan button clipped at ${width}`);
-      assert.ok(report.scrollWidth <= report.viewport, `Now tab scrolls sideways at ${width}`);
+      assert.equal(await page.locator(".text-btn", { hasText: /^Plan$/ }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "Nothing planned yet" }).count(), 0);
+      assert.equal(await page.locator(".cards").count(), 1);
+      assert.deepEqual(await planOrder(page), ["Long walk by the river", "Movie", "Sushi night"]);
+      await page.getByRole("button", { name: "Past events" }).waitFor();
+      const scroll = await page.evaluate(() => ({ viewport: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+      assert.ok(scroll.scrollWidth <= scroll.viewport, `Now tab scrolls sideways at ${width}`);
       if (SHOT_DIR) {
         fs.mkdirSync(SHOT_DIR, { recursive: true });
-        await page.getByRole("heading", { name: "Today & tomorrow" }).evaluate((node) => node.scrollIntoView({ block: "start" }));
-        await page.waitForTimeout(150);
-        await page.screenshot({ path: path.join(SHOT_DIR, `now-plan-${width}.png`) });
+        await page.screenshot({ path: path.join(SHOT_DIR, `now-list-${width}.png`) });
       }
     } finally {
       await page.context().close();
@@ -270,8 +238,8 @@ async function assertFieldsClear(page: Page, selectors: string[]) {
 }
 
 async function addPlan(page: Page, note: string, day: "today" | "tomorrow", time: string) {
-  await page.getByRole("button", { name: "Plan", exact: true }).click();
-  if (day === "today") await page.locator(".sheet").getByRole("button", { name: "Today", exact: true }).click();
+  await openPlanSheet(page);
+  await page.locator("#plan-date").fill(day === "today" ? days().today : days().tomorrow);
   await page.locator("#sheet-note").fill(note);
   await page.locator("#plan-time").fill(time);
   await page.locator(".sheet-dock").getByRole("button", { name: "Add plan" }).click();

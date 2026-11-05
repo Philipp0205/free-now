@@ -10,6 +10,7 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const SHOT_DIR = path.resolve(process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/location-search/");
@@ -125,7 +126,7 @@ async function home(page: Page) {
 }
 
 async function openPlanWhere(page: Page) {
-  await page.getByRole("button", { name: "Plan", exact: true }).click();
+  await openPlanSheet(page);
   await page.locator("form.sheet #sheet-note").waitFor();
   await page.locator(".sheet button.where-row").click();
   await page.locator("#where-query").waitFor();
@@ -344,7 +345,7 @@ test("Enter in the plan title or a time field does not create the plan", { timeo
   const sent = writes(page);
   try {
     await home(page);
-    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    await openPlanSheet(page);
     const note = page.locator("#sheet-note");
     await note.fill("Walk and din");
     await note.press("Enter");

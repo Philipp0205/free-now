@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v29";
+const APP_VERSION = "hangry-v30";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -1159,45 +1159,21 @@ function home() {
   );
   const live = state.socials.filter((social) => isLiveSocial(social) || social.creator.id === state.me.user.id);
   const later = state.socials.filter((social) => !isLiveSocial(social) && social.creator.id !== state.me.user.id);
-  if (live.length) {
-    parts.push(el("div", { class: "section" }, [el("div", { class: "cards" }, live.map(socialCard))]));
-  }
-  if (later.length) {
-    parts.push(el("section", { class: "section" }, [
-      el("h2", { text: "Later today" }),
-      el("div", { class: "cards" }, later.map(socialCard)),
-    ]));
-  }
-  const { tomorrow: nextDay } = planDayRange(Date.now(), appTz());
-  const soon = state.plans.filter((plan) => plan.forDate <= nextDay);
-  const upcoming = state.plans.filter((plan) => plan.forDate > nextDay);
-  const tomorrow = el("section", { class: "section" }, [
-    el("div", { class: "section-row" }, [
-      el("h2", { text: "Today & tomorrow" }),
-      el("button", { class: "text-btn", type: "button", text: "Plan", onclick: () => openSheet("plan") }),
-    ]),
-    el("div", { class: "cards" }, soon.length
-      ? soon.map(planCard)
-      : [
-          el("button", {
-            class: "empty",
-            type: "button",
-            text: "Nothing planned yet",
-            onclick: () => openSheet("plan"),
-          }),
-        ]),
-  ]);
-  parts.push(tomorrow);
-  if (upcoming.length) {
-    parts.push(el("section", { class: "section" }, [
-      el("h2", { text: "Upcoming" }),
-      el("div", { class: "cards" }, upcoming.map(planCard)),
-    ]));
-  }
+  const feed = [...live.map(socialCard), ...later.map(socialCard), ...sortedPlans(state.plans).map(planCard)];
+  if (feed.length) parts.push(el("div", { class: "section" }, [el("div", { class: "cards" }, feed)]));
   parts.push(el("div", { class: "past-entry" }, [
     el("button", { class: "text-btn", type: "button", text: "Past events", onclick: () => { void openPast(); } }),
   ]));
   return el("div", {}, parts);
+}
+
+/** Plans by day, then time (no time last that day), like the server sends them. */
+function sortedPlans(plans) {
+  return [...plans].sort((a, b) => (
+    a.forDate.localeCompare(b.forDate)
+    || (a.time ? 0 : 1) - (b.time ? 0 : 1)
+    || (a.time || "").localeCompare(b.time || "")
+  ));
 }
 
 async function openPast() {
@@ -2823,7 +2799,7 @@ function sheet() {
   const ttl = ttlLabel(state.meta?.socialTtlMs ?? 7200000);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
-    el("form", { class: "sheet", role: "dialog", ...saveOnlyFromButton(planning ? onCreatePlan : onFree) }, [
+    el("form", { class: "sheet", role: "dialog", ...saveOnlyFromButton((event) => (state.sheet === "plan" ? onCreatePlan(event) : onFree(event))) }, [
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("div", { class: "sheet-intro" }, [
@@ -2843,7 +2819,7 @@ function sheet() {
       ]),
       el("div", { class: "sheet-scroll" }, [
         el("div", { class: "sheet-form" }, [
-          planning ? null : whenBlock(),
+          whenBlock(),
           planning ? null : timeBlock(),
           sheetField(planning ? "Plan" : "Note (optional)", "sheet-note", state.noteDraft, (value) => {
             state.noteDraft = value;
@@ -2852,7 +2828,7 @@ function sheet() {
             placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
             maxlength: "80",
           }),
-          planning ? planDayBlock(state, "plan") : null,
+          planning ? planDateField() : null,
           planning ? el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: "Time (optional)" }),
             el("input", {
@@ -3143,13 +3119,44 @@ function clock(ms) {
   }).format(new Date(ms));
 }
 
+/** Now and Later make you free. Pick a date makes a plan on that day. */
 function whenBlock() {
   return el("div", { class: "sheet-group" }, [
     el("span", { class: "sheet-label", id: "when-label", text: "When" }),
-    el("div", { class: "segment", role: "group", "aria-labelledby": "when-label" }, [
+    el("div", { class: "segment segment-3", role: "group", "aria-labelledby": "when-label" }, [
       whenChoice("now", "Now"),
       whenChoice("later", offeringTomorrow() ? "Tomorrow" : "Later today"),
+      whenChoice("pick", "Pick a date"),
     ]),
+  ]);
+}
+
+const PLAN_DEFAULT_DAYS = 3;
+
+function enterPlanMode() {
+  state.whenMode = "pick";
+  state.sheet = "plan";
+  state.planDay = "pick";
+  if (!state.planDate) state.planDate = addDaysIso(planDayRange(Date.now(), appTz()).today, PLAN_DEFAULT_DAYS);
+}
+
+function planDateField() {
+  const range = planDayRange(Date.now(), appTz());
+  return el("label", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", text: "Date" }),
+    el("input", {
+      id: "plan-date",
+      class: "sheet-control",
+      type: "date",
+      min: range.min,
+      max: range.max,
+      value: state.planDate || "",
+      onchange: (event) => {
+        state.planDate = event.target.value;
+        if (state.error === PICK_DATE_ERROR) state.error = "";
+        render();
+      },
+    }),
   ]);
 }
 
@@ -3161,6 +3168,14 @@ function whenChoice(mode, text) {
     "aria-pressed": on ? "true" : "false",
     text,
     onclick: () => {
+      if (state.error === PICK_DATE_ERROR) state.error = "";
+      if (mode === "pick") {
+        if (state.error === TIME_LATER_ERROR) state.error = "";
+        enterPlanMode();
+        render();
+        return;
+      }
+      state.sheet = "free";
       state.whenMode = mode;
       if (mode === "now") {
         state.startChoice = "";
@@ -4752,7 +4767,7 @@ function el(tag, attrs = {}, children = []) {
 function openSheet(name) {
   state.sheet = name;
   state.error = "";
-  if (name === "free") {
+  if (name === "free" || name === "plan") {
     state.noteDraft = mySocial()?.note ?? "";
     state.where = whereFromSocial(mySocial());
     state.whereQuery = state.where.place;
@@ -4767,13 +4782,16 @@ function openSheet(name) {
     state.whenMode = upcoming ? "later" : "now";
     state.startChoice = upcoming ? clock(mine.startsAt) : "";
   }
-  if (name === "plan") {
-    state.noteDraft = "";
+  if (name === "free" || name === "plan") {
     state.placeDraft = "";
     state.planTime = "";
-    state.planDay = "tomorrow";
+    state.planDay = "pick";
     state.planDate = "";
     state.planWhere = emptyWhereSession();
+  }
+  if (name === "plan") {
+    state.noteDraft = "";
+    enterPlanMode();
   }
   state.focusSheet = false;
   render();
@@ -5263,7 +5281,7 @@ async function onCreatePlan(event) {
     state.sheet = null;
     state.placeDraft = "";
     state.planTime = "";
-    state.planDay = "tomorrow";
+    state.planDay = "pick";
     state.planDate = "";
     state.planWhere = emptyWhereSession();
     state.error = locationNote;
