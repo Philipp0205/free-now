@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v13";
+const APP_VERSION = "hangry-v14";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -82,6 +82,7 @@ const state = {
   startChoice: "",
   etaFor: "",
   chat: null,
+  openDescriptions: new Set(),
   chatQueue: null,
   chatThread: null,
   chatReturn: "home",
@@ -1235,6 +1236,7 @@ function planCard(plan) {
       el("div", { class: "avatars" }, people.map((person) => avatar(person))),
       el("h3", { text: plan.note }),
       el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
+      planDescription(plan),
       placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
       planReplySummary(plan),
       mine ? null : removedNote(plan) || planReplyButtons(plan),
@@ -1242,6 +1244,50 @@ function planCard(plan) {
       chatEntry("plan", plan),
     ]),
   ]);
+}
+
+/** Two lines until tapped. Tap again to fold it back. Links stay tappable. */
+function planDescription(plan) {
+  const text = (plan?.description || "").trim();
+  if (!text) return null;
+  const open = state.openDescriptions.has(plan.id);
+  const toggle = (event) => {
+    if (event.target.closest("a")) return;
+    const next = !state.openDescriptions.has(plan.id);
+    if (next) state.openDescriptions.add(plan.id);
+    else state.openDescriptions.delete(plan.id);
+    document.querySelectorAll(`.plan-desc[data-plan="${plan.id}"]`).forEach((node) => {
+      node.classList.toggle("open", next);
+      node.setAttribute("aria-expanded", String(next));
+    });
+  };
+  return el("p", {
+    class: open ? "plan-desc open" : "plan-desc",
+    "data-plan": plan.id,
+    role: "button",
+    tabindex: "0",
+    "aria-expanded": String(open),
+    onclick: toggle,
+    onkeydown: (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggle(event);
+    },
+  }, linkify(text));
+}
+
+/** Plain text with http(s) links made tappable. Built as nodes, so nothing is parsed as HTML. */
+function linkify(text) {
+  const parts = [];
+  let last = 0;
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"]+/g)) {
+    const url = match[0].replace(/[.,!?;:)\]]+$/, "");
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    parts.push(el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: url }));
+    last = match.index + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
 }
 
 function circleScreen() {
@@ -1869,7 +1915,16 @@ function openAdminEdit(kind, item) {
     session.whereQuery = place;
   }
   const day = kind === "plan" ? planDayChoice(item.forDate, Date.now(), appTz()) : "";
-  state.adminEdit = { kind, id: item.id, note: item.note || "", time, day, date: item.forDate || "", ...session };
+  state.adminEdit = {
+    kind,
+    id: item.id,
+    note: item.note || "",
+    description: item.description || "",
+    time,
+    day,
+    date: item.forDate || "",
+    ...session,
+  };
   state.sheet = "admin-edit";
   render();
 }
@@ -1888,6 +1943,7 @@ function adminEditSheet() {
       el("div", { class: "sheet-scroll" }, [
         el("div", { class: "sheet-form" }, [
           sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
+          edit.kind === "plan" ? descriptionField(edit) : null,
           edit.kind === "plan" ? planDayBlock(edit, "admin") : null,
           el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
@@ -1910,11 +1966,28 @@ function adminEditSheet() {
   ]);
 }
 
+function descriptionField(edit) {
+  const area = el("textarea", {
+    id: "admin-description",
+    class: "sheet-control sheet-textarea",
+    rows: "3",
+    maxlength: "280",
+    placeholder: "Optional",
+    oninput: (event) => { edit.description = event.target.value; },
+  });
+  area.value = edit.description;
+  return el("label", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", text: "Description" }),
+    area,
+  ]);
+}
+
 async function saveAdminEdit(event) {
   event.preventDefault();
   const edit = state.adminEdit;
   if (!edit) return;
   const note = document.getElementById("admin-note")?.value ?? edit.note;
+  const description = document.getElementById("admin-description")?.value ?? edit.description;
   const picked = wherePayload(edit);
   const time = document.getElementById("admin-time")?.value || null;
   const date = edit.kind === "plan" ? planDayDate(edit.day, edit.date, Date.now(), appTz()) : "";
@@ -1926,7 +1999,7 @@ async function saveAdminEdit(event) {
   await run(async () => {
     const body = edit.kind === "social"
       ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
-      : { note, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
+      : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
@@ -3481,6 +3554,7 @@ function mapCard(pin) {
     ]),
     el("p", { text: pin.note }),
     el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+    plan ? planDescription(plan) : null,
     social && !pin.own ? replySummary(social) : null,
     social && !pin.own ? removedNote(social) || replyActions(social) : null,
     plan && !pin.own ? planPinActions(plan) : null,
