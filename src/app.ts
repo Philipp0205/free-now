@@ -103,6 +103,7 @@ const MIME: Record<string, string> = {
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".webmanifest": "application/manifest+json",
+  ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".txt": "text/plain; charset=utf-8",
@@ -964,7 +965,11 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   if (dateChanged || timeChanged) assertPlanClock(forDate, atTime, now, deps.config.tz);
   const noteChanged = note !== plan.note;
   const placeChanged = place !== (plan.place ?? "") || lat !== plan.lat || lng !== plan.lng;
-  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate);
+  const description = Object.prototype.hasOwnProperty.call(body, "description")
+    ? cleanDescription(body.description)
+    : (plan.description ?? "");
+  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null);
+  // Description is left out on purpose: changing only it pings no one.
   const changes = [];
   if (noteChanged) changes.push({ name: "Note", next: note });
   if (dateChanged) changes.push({ name: "Day", next: noticeDay(forDate, today) });
@@ -1123,6 +1128,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
   return {
     id: plan.id,
     note: plan.note,
+    description: plan.description ?? "",
     place: plan.place ?? "",
     forDate: plan.for_date,
     whenLabel: dayLabel(plan.for_date, today),
@@ -1531,6 +1537,14 @@ function cleanNote(value: unknown, required: boolean): string {
   if (note.length > 80) throw new HttpError(400, "note is too long (80)");
   if (required && note.length === 0) throw new HttpError(400, "note is required");
   return note;
+}
+
+/** Plain text, one line, at most 280 characters. Longer text is cut, not refused. */
+function cleanDescription(value: unknown): string {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string") throw new HttpError(400, "description must be a string");
+  const text = value.replace(/[\r\n\t]+/g, " ").replace(/[\u0000-\u001f\u007f]/g, "").replace(/ {2,}/g, " ").trim();
+  return text.slice(0, 280).trim();
 }
 
 function cleanCode(value: unknown): string {
