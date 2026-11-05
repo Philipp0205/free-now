@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-button-feel",
+    "date": "2026-11-05",
+    "title": "Buttons feel nicer",
+    "bullets": [
+      "Buttons and cards give a small press when you tap them.",
+      "I'm in pops when you join. Reduce motion on your phone keeps it still."
+    ]
+  },
+  {
     "id": "2026-11-05-profile-pictures",
     "date": "2026-11-05",
     "title": "Profile pictures",
