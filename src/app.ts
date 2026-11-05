@@ -57,6 +57,7 @@ import {
   markPushDelivered,
   markPushSeen,
   recordDisplay,
+  setWhatsNewSeen,
   listVisiblePlans,
   markNotificationsRead,
   removeMember,
@@ -81,6 +82,18 @@ import type { PushSender } from "./push.js";
 import { pushSummaryForViewer, reachForCircle } from "./push-status.js";
 import { clientKey } from "./client-key.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
+import {
+  FEEDBACK_LIMIT,
+  cleanAppVersion,
+  cleanFeedbackNote,
+  cleanFeedbackText,
+  cleanPrUrl,
+  insertFeedback,
+  isFeedbackStatus,
+  listFeedback,
+  updateFeedback,
+  type FeedbackStatus,
+} from "./feedback.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, isoDate, noticeDay, zonedDateTime } from "./time.js";
@@ -96,12 +109,14 @@ export type AppDeps = {
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const WHATS_NEW_ID_RE = /^[a-z0-9-]{1,64}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
   ".webmanifest": "application/manifest+json",
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
@@ -122,10 +137,10 @@ export class HttpError extends Error {
 /** Service worker acks per client (see clientKey). A phone back online can flush a burst at once. */
 export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
 
-type Limits = { ack: RateLimiter };
+type Limits = { ack: RateLimiter; feedback: RateLimiter };
 
 export function createApp(deps: AppDeps): http.RequestListener {
-  const limits: Limits = { ack: createRateLimiter(ACK_LIMIT) };
+  const limits: Limits = { ack: createRateLimiter(ACK_LIMIT), feedback: createRateLimiter(FEEDBACK_LIMIT) };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
       if (error instanceof HttpError || error instanceof ChatError) {
@@ -166,7 +181,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE"
       ? await readJson(req)
       : {};
-  const requested = readRequestedCircle(req, url, body);
+  // Feedback reads its own circle and ignores a bad one instead of failing the send.
+  const requested = pathname === "/api/feedback" ? null : readRequestedCircle(req, url, body);
 
   if (method === "GET" && pathname === "/api/health") {
     sendJson(res, 200, { ok: true });
@@ -205,7 +221,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     sendJson(res, 201, {
       token,
       buzzToken,
-      user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color) },
+      user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color), whatsNewSeen: null },
       circle: invited ? circlePayload(deps, req, invited, id) : null,
     });
     return;
@@ -333,6 +349,30 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (typeof body.standalone !== "boolean") throw new HttpError(400, "standalone is required");
     recordDisplay(deps.db, me.id, body.standalone, deps.now());
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/me/whats-new") {
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!WHATS_NEW_ID_RE.test(id)) throw new HttpError(400, "id is required");
+    setWhatsNewSeen(deps.db, me.id, id);
+    sendJson(res, 200, { whatsNewSeen: id });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/feedback") {
+    const text = cleanFeedbackText(body.text);
+    if (!text) throw new HttpError(400, "feedback must be 1–2000 characters");
+    if (!limits.feedback.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
+    const id = insertFeedback(deps.db, {
+      userId: me.id,
+      circleId: feedbackCircle(deps, req, me.id, body),
+      text,
+      appVersion: cleanAppVersion(body.appVersion),
+      createdAt: deps.now(),
+    });
+    console.log("feedback ok");
+    sendJson(res, 201, { ok: true, id });
     return;
   }
 
@@ -702,7 +742,13 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
     active = circles[0];
   }
   return {
-    user: { id: user.id, name: user.name, color: colorHex(user.id, getUserById(deps.db, user.id)?.color), buzzToken: user.buzz_token },
+    user: {
+      id: user.id,
+      name: user.name,
+      color: colorHex(user.id, getUserById(deps.db, user.id)?.color),
+      buzzToken: user.buzz_token,
+      whatsNewSeen: user.whats_new_seen ?? null,
+    },
     circles: circles.map((circle) => ({
       id: circle.id,
       name: circle.name,
@@ -1197,6 +1243,14 @@ async function handleAdmin(
     setMemberAdminAsOperator(res, deps, pathname, body);
     return;
   }
+  if (method === "GET" && pathname === "/api/admin/feedback") {
+    listFeedbackAsOperator(req, res, deps);
+    return;
+  }
+  if (method === "POST" && /^\/api\/admin\/feedback\/[^/]+$/.test(pathname)) {
+    updateFeedbackAsOperator(res, deps, pathname, body);
+    return;
+  }
   try {
     if (method === "POST" && pathname === "/api/admin/query") {
       const sql = body.sql;
@@ -1240,7 +1294,84 @@ function isOperatorPath(pathname: string): boolean {
   return pathname === "/api/admin/query"
     || pathname === "/api/admin/schema"
     || /^\/api\/admin\/circles\/[^/]+\/delete$/.test(pathname)
-    || /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname);
+    || /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname)
+    || pathname === "/api/admin/feedback"
+    || /^\/api\/admin\/feedback\/[^/]+$/.test(pathname);
+}
+
+function listFeedbackAsOperator(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps): void {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const raw = url.searchParams.get("status");
+  let status: FeedbackStatus | null = null;
+  if (raw !== null && raw !== "") {
+    if (!isFeedbackStatus(raw)) {
+      console.log("admin feedback denied");
+      sendJson(res, 400, { error: "invalid status" });
+      return;
+    }
+    status = raw;
+  }
+  const feedback = listFeedback(deps.db, status);
+  console.log(`admin feedback ok rows=${feedback.length}`);
+  sendJson(res, 200, { feedback });
+}
+
+function updateFeedbackAsOperator(
+  res: http.ServerResponse,
+  deps: AppDeps,
+  pathname: string,
+  body: Record<string, unknown>,
+): void {
+  const match = /^\/api\/admin\/feedback\/([^/]+)$/.exec(pathname);
+  let id = "";
+  try {
+    id = parseId(match?.[1] ?? "");
+  } catch {
+    console.log("admin feedback denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const patch: { status?: FeedbackStatus; prUrl?: string | null; note?: string | null } = {};
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+  if (has("status")) {
+    if (!isFeedbackStatus(body.status)) {
+      console.log("admin feedback denied");
+      sendJson(res, 400, { error: "invalid status" });
+      return;
+    }
+    patch.status = body.status;
+  }
+  if (has("prUrl")) {
+    const prUrl = cleanPrUrl(body.prUrl);
+    if (prUrl === undefined) {
+      console.log("admin feedback denied");
+      sendJson(res, 400, { error: "invalid prUrl" });
+      return;
+    }
+    patch.prUrl = prUrl;
+  }
+  if (has("note")) {
+    const note = cleanFeedbackNote(body.note);
+    if (note === undefined) {
+      console.log("admin feedback denied");
+      sendJson(res, 400, { error: "invalid note" });
+      return;
+    }
+    patch.note = note;
+  }
+  if (patch.status === undefined && patch.prUrl === undefined && patch.note === undefined) {
+    console.log("admin feedback denied");
+    sendJson(res, 400, { error: "nothing to update" });
+    return;
+  }
+  const updated = updateFeedback(deps.db, id, patch, deps.now());
+  if (!updated) {
+    console.log("admin feedback denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  console.log(`admin feedback update ok id=${updated.id} status=${updated.status}`);
+  sendJson(res, 200, { feedback: updated });
 }
 
 function deleteCircleAsOperator(res: http.ServerResponse, deps: AppDeps, pathname: string): void {
@@ -1355,6 +1486,19 @@ function readRequestedCircle(req: http.IncomingMessage, url: URL, body: Record<s
   const raw = (header || url.searchParams.get("circle") || fromBody).trim();
   if (!raw) return null;
   return parseId(raw);
+}
+
+/** The circle feedback was sent from, if the sender is a member. Anything else is dropped, not rejected. */
+function feedbackCircle(deps: AppDeps, req: http.IncomingMessage, userId: string, body: Record<string, unknown>): string | null {
+  const raw = (typeof body.circleId === "string" && body.circleId.trim()) || firstHeader(req.headers["x-circle"]).trim();
+  if (!raw) return null;
+  let id = "";
+  try {
+    id = parseId(raw);
+  } catch {
+    return null;
+  }
+  return listCirclesForUser(deps.db, userId).some((circle) => circle.id === id) ? id : null;
 }
 
 /** A buzz with no circle posts to the circle joined last, so the bare link still works. */

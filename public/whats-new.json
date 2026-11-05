@@ -8,5 +8,55 @@
       "It shows on the plan card and the map card. Tap to read more.",
       "Changing only the description does not ping anyone."
     ]
+  },
+  {
+    "id": "2026-11-05-whats-new-feedback",
+    "date": "2026-11-05",
+    "title": "What's new and feedback",
+    "bullets": [
+      "New features show up here once, the first time you open the app after an update.",
+      "Open this list again any time from What's new in the You tab.",
+      "Send feedback from the You tab. It goes straight to the people building Hangry.",
+      "The Plan button now just says Plan, since plans can be for any day, not only tomorrow."
+    ]
+  },
+  {
+    "id": "2026-11-05-chat-colours",
+    "date": "2026-11-05",
+    "title": "Your own colour",
+    "bullets": [
+      "Everyone gets one colour that stays the same in every circle.",
+      "Your own messages show your colour as a bar along the side.",
+      "Avatars and map pins use the same colour."
+    ]
+  },
+  {
+    "id": "2026-11-05-future-plans",
+    "date": "2026-11-05",
+    "title": "Plans for any day",
+    "bullets": [
+      "Make a plan for today, tomorrow or any date up to a year ahead.",
+      "Plans for today and tomorrow are under Today & tomorrow. Later ones are under Upcoming.",
+      "You can change the day when you edit a plan."
+    ]
+  },
+  {
+    "id": "2026-11-04-push-status",
+    "date": "2026-11-04",
+    "title": "See who got your ping",
+    "bullets": [
+      "Hosts see Delivered to X of Y under their post or plan.",
+      "Tap it to see each friend's status, like Delivered, Not installed or Notifications off.",
+      "Only the host sees this. Friends don't."
+    ]
+  },
+  {
+    "id": "2026-11-04-map-edit",
+    "date": "2026-11-04",
+    "title": "Smoother map editing",
+    "bullets": [
+      "The Edit and End buttons on the map card no longer get in the way of the edit sheet.",
+      "The edit sheet stays above the keyboard while you type."
+    ]
   }
 ]
