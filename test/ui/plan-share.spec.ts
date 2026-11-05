@@ -149,7 +149,9 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
         await visitor.goto(copied[0]);
         const preview = visitor.locator(".share-preview");
         await preview.getByRole("heading", { name: "Rooftop drinks" }).waitFor();
-        assert.equal(await preview.locator(".share-when").innerText(), "Today · 19:30".replace("Today", (await call("GET", `/api/plans/share/${copied[0].split("/p/")[1]}`)).whenLabel));
+        const when = await preview.locator(".share-when").innerText();
+        assert.match(when, /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}( \d{4})? · 19:30$/);
+        assert.ok(!/Today|Tomorrow/.test(when));
         const text = await visitor.locator("body").innerText();
         for (const leak of [PLACE, "Hana", "Finn", "Chat", circle.name]) assert.ok(!text.includes(leak), `${leak} shown`);
         assert.equal(await visitor.locator(".leaflet-container, .map-card, .tabbar").count(), 0);
@@ -226,5 +228,59 @@ test("at 320x568 the Share and Chat chips fit the card and the preview fits the 
     assert.ok(button && button.y + button.height <= 568 + 200, "sign-in button reachable");
   } finally {
     await page.context().close();
+  }
+});
+
+test("the host stops sharing in Edit; the old link no longer works and Share makes a new one", { timeout: 120_000 }, async () => {
+  const { host, friend } = await people("Revoke crew");
+  const plan = await makePlan(host.token, { note: "Board games" });
+  const oldLink = `${baseUrl}/p/${plan.shareId}`;
+
+  // A friend in the circle does not get the action.
+  const friendPage = await phone();
+  try {
+    await asUser(friendPage, friend.token);
+    await friendPage.goto(baseUrl);
+    await dismiss(friendPage);
+    const card = friendPage.locator(".card-plan", { hasText: "Board games" });
+    await card.waitFor();
+    assert.equal(await card.getByRole("button", { name: "Edit" }).count(), 0);
+  } finally {
+    await friendPage.context().close();
+  }
+
+  const hostPage = await phone(320, 568);
+  try {
+    await asUser(hostPage, host.token);
+    await hostPage.goto(baseUrl);
+    await dismiss(hostPage);
+    const card = hostPage.locator(".card-plan", { hasText: "Board games" });
+    await card.getByRole("button", { name: "Edit" }).click();
+    const stop = hostPage.getByRole("button", { name: "Stop sharing" });
+    await stop.scrollIntoViewIfNeeded();
+    await stop.click();
+    await hostPage.locator(".toast", { hasText: "Link stopped" }).waitFor();
+    await noSideScroll(hostPage);
+
+    const visitor = await phone();
+    try {
+      await asUser(visitor, friend.token);
+      await visitor.goto(oldLink);
+      await visitor.getByRole("heading", { name: "This link no longer works" }).waitFor();
+      assert.ok(!(await visitor.locator("body").innerText()).includes("Board games"));
+    } finally {
+      await visitor.context().close();
+    }
+
+    await hostPage.keyboard.press("Escape").catch(() => {});
+    await hostPage.goto(baseUrl);
+    await dismiss(hostPage);
+    await hostPage.locator(".card-plan", { hasText: "Board games" }).getByRole("button", { name: "Share Board games" }).click();
+    await hostPage.locator(".toast", { hasText: "Link copied" }).waitFor();
+    const copied = await hostPage.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
+    assert.match(copied.at(-1)!, new RegExp(`^${baseUrl}/p/[A-Za-z0-9_-]{24}$`));
+    assert.notEqual(copied.at(-1), oldLink);
+  } finally {
+    await hostPage.context().close();
   }
 });
