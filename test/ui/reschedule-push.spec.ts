@@ -91,8 +91,11 @@ for (const [width, height] of SIZES) {
     for (const [user, tag] of [[host, "host"], [friend, "friend"]] as const) {
       await call("POST", "/api/push/subscribe", user.token, { endpoint: `https://push.example/${tag}-${width}`, keys: { p256dh: "p", auth: "a" } });
     }
+    const ola = await call("POST", "/api/auth/start", undefined, { name: "Ola", code: circle.inviteCode });
+    await call("POST", "/api/push/subscribe", ola.token, { endpoint: `https://push.example/ola-${width}`, keys: { p256dh: "p", auth: "a" } });
     const note = `Board games ${width}`;
-    await call("POST", "/api/plans", host.token, { note, time: "19:30" });
+    const made = (await call("POST", "/api/plans", host.token, { note, time: "19:30" })).plan;
+    await call("POST", `/api/plans/${made.id}/reply`, ola.token, { reply: "cant" });
     const today = isoDate(Date.now(), TZ);
     const target = addDays(today, 3);
     const before = sent.length;
@@ -118,7 +121,7 @@ for (const [width, height] of SIZES) {
 
     const mine = sent.slice(before);
     const expected = `${note} moved to ${shortDate(target, today)} · 20:00`;
-    assert.deepEqual(mine.map((item) => item.endpoint), [`https://push.example/friend-${width}`], "only the friend is pushed, once");
+    assert.deepEqual(mine.map((item) => item.endpoint), [`https://push.example/friend-${width}`], "only the friend is pushed, once: not the host, not Ola who said can't");
     const payload = mine[0].payload as unknown as Record<string, unknown>;
     assert.match(String(payload.title), new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.ok(!/Today|Tomorrow/.test(String(payload.title)));

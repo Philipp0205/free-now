@@ -444,7 +444,8 @@ test("editing a plan tells people who are in, keeps an omitted place, and a past
     assert.deepEqual(timed.plan.location, plan.plan.location);
     assert.deepEqual(
       sent.map((item) => item.endpoint).sort(),
-      [`https://push.example/${fritz.user.id}`, `https://push.example/${sam.user.id}`].sort(),
+      [`https://push.example/${fritz.user.id}`],
+      "Sam said can't, so only Fritz is told",
     );
     assert.equal(sent[0]?.title, "Bouldering at 7 moved to Tue 2 Jun · 19:40");
     assert.equal(sent[0]?.body, "Gym");

@@ -1062,7 +1062,9 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
     const moved = dateChanged || timeChanged;
     const when = `${shortDate(forDate, today)}${atTime ? ` · ${atTime}` : ""}`;
     const title = moved ? `${note} moved to ${when}` : spot ? `${note} moved to ${spot}` : `${note}: place removed`;
-    const others = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
+    // People who said they can't come are left out.
+    const others = listMembers(deps.db, circle.id).filter((member) =>
+      member.id !== user.id && getPlanReply(deps.db, plan.id, member.id)?.reply !== "declined");
     await pushEdit(
       deps,
       now,
