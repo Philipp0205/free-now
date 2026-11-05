@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-profile-pictures",
+    "date": "2026-11-05",
+    "title": "Profile pictures",
+    "bullets": [
+      "Add a photo on the You tab \u2014 friends see it on cards and in the circle.",
+      "No photo? Initials stay as they are."
+    ]
+  },
+  {
     "id": "2026-11-05-location-search",
     "date": "2026-11-05",
     "title": "Clearer place search",
@@ -15,6 +24,7 @@
     "bullets": [
       "Tapping \"Waiting for friends\" now opens the plan instead of the map.",
       "The map only opens from the place with the pin."
+
     ]
   },
   {

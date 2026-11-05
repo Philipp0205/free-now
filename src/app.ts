@@ -33,6 +33,9 @@ import {
   getCircleByCode,
   getCircleById,
   getUserById,
+  bumpAvatarRev,
+  clearAvatarRev,
+  sharesCircle,
   listCirclesForUser,
   isCircleAdmin,
   kickMember,
@@ -108,6 +111,7 @@ import { addDays, clockLabel, dayLabel, isoDate, shortDate, zonedDateTime } from
 import { publishSocial, replySocial } from "./socials.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
+import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
 
 export type AppDeps = {
@@ -198,6 +202,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const user = userFromRequest(req, deps.db);
+  if (pathname === "/api/me/avatar" || /^\/api\/users\/[^/]+\/avatar$/.test(pathname)) {
+    await handleAvatar(req, res, deps, method, pathname, requireUser(user));
+    return;
+  }
   const body =
     method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE"
       ? await readJson(req)
@@ -245,7 +253,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     sendJson(res, 201, {
       token,
       buzzToken,
-      user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color), whatsNewSeen: null },
+      user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color), avatarRev: null, whatsNewSeen: null },
       circle: invited ? circlePayload(deps, req, invited, id) : null,
     });
     return;
@@ -275,7 +283,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     sendJson(res, 200, {
       token,
       buzzToken: existing.buzz_token,
-      user: { id: existing.id, name: existing.name, color: colorHex(existing.id, existing.color) },
+      user: { id: existing.id, name: existing.name, color: colorHex(existing.id, existing.color), avatarRev: existing.avatar_rev || null },
     });
     return;
   }
@@ -788,6 +796,59 @@ function createCircle(deps: AppDeps, userId: string, name: string, now: number):
   throw new HttpError(500, "could not create a circle");
 }
 
+async function handleAvatar(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  deps: AppDeps,
+  method: string,
+  pathname: string,
+  me: UserRow,
+): Promise<void> {
+  const dir = deps.config.avatarDir;
+  if (pathname === "/api/me/avatar") {
+    if (method === "PUT") {
+      const data = await readAvatarBody(req, AVATAR_MAX_BYTES);
+      if (!data) throw new HttpError(413, "That photo is too big.");
+      const kind = avatarMime(data);
+      if (!kind) throw new HttpError(400, "Send a WebP or JPEG photo.");
+      await writeAvatarFile(dir, me.id, data);
+      bumpAvatarRev(deps.db, me.id, deps.now());
+    } else if (method === "DELETE") {
+      await removeAvatarFile(dir, me.id);
+      clearAvatarRev(deps.db, me.id);
+    } else {
+      throw new HttpError(405, "method not allowed");
+    }
+    const fresh = getUserById(deps.db, me.id) ?? me;
+    sendJson(res, 200, mePayload(deps, req, { ...me, avatar_rev: fresh.avatar_rev ?? null }, null));
+    return;
+  }
+  if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
+  const match = /^\/api\/users\/([^/]+)\/avatar$/.exec(pathname);
+  const id = parseId(match?.[1] ?? "");
+  // A stranger gets the same 404 as "no photo", so they learn nothing.
+  const target = sharesCircle(deps.db, me.id, id) ? getUserById(deps.db, id) : undefined;
+  const rev = target?.avatar_rev ?? 0;
+  const file = rev ? await avatarFile(dir, id) : null;
+  if (!file) throw new HttpError(404, "not found");
+  const etag = `"${rev}"`;
+  const headers: http.OutgoingHttpHeaders = {
+    "content-type": file.mime,
+    "cache-control": "private, max-age=31536000, immutable",
+    etag,
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+  };
+  if (firstHeader(req.headers["if-none-match"]) === etag) {
+    res.writeHead(304, headers);
+    res.end();
+    return;
+  }
+  res.writeHead(200, { ...headers, "content-length": file.data.length });
+  if (method === "HEAD") res.end();
+  else res.end(file.data);
+}
+
 function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requested: string | null = null) {
   const circles = listCirclesForUser(deps.db, user.id);
   const alertUnread = unreadNotificationsByCircle(deps.db, user.id);
@@ -798,11 +859,13 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
   } else {
     active = circles[0];
   }
+  const row = getUserById(deps.db, user.id);
   return {
     user: {
       id: user.id,
       name: user.name,
-      color: colorHex(user.id, getUserById(deps.db, user.id)?.color),
+      color: colorHex(user.id, row?.color),
+      avatarRev: row?.avatar_rev || null,
       buzzToken: user.buzz_token,
       whatsNewSeen: user.whats_new_seen ?? null,
     },
@@ -1152,8 +1215,8 @@ type PastEvent = {
   at: number;
   time: string;
   place: string;
-  host: { id: string; name: string; color: string };
-  people: Array<{ id: string; name: string; color: string; arriveAt: number | null }>;
+  host: { id: string; name: string; color: string; avatarRev: number | null };
+  people: Array<{ id: string; name: string; color: string; avatarRev: number | null; arriveAt: number | null }>;
 };
 
 function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
@@ -1171,10 +1234,10 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: clockLabel(at, deps.config.tz),
       place: social.place ?? "",
-      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color) },
+      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
       people: listSocialJoins(deps.db, social.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, arriveAt: join.arrive_at })),
     });
   }
   for (const plan of listPastPlans(deps.db, circleId, today)) {
@@ -1189,10 +1252,10 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: plan.at_time ?? "",
       place: plan.place ?? "",
-      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color) },
+      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null },
       people: listPlanJoins(deps.db, plan.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, arriveAt: join.arrive_at })),
     });
   }
   events.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at || b.id.localeCompare(a.id));
@@ -1228,6 +1291,7 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
       id: member.id,
       name: member.name,
       color: colorHex(member.id, member.color),
+      avatarRev: member.avatar_rev || null,
       admin: Boolean(member.is_admin),
       reach: reach.get(member.id) ?? "off",
     })),
@@ -1248,12 +1312,13 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
-    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color) },
+    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
       name: join.name,
       color: colorHex(join.id, join.color),
+      avatarRev: join.avatar_rev || null,
       joinedAt: join.joined_at,
       reply: join.reply ?? "join",
       etaMin: join.eta_min ?? null,
@@ -1275,7 +1340,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
     shareId: plan.share_id ?? null,
-    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color) },
+    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null },
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
@@ -1283,6 +1348,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
       id: join.id,
       name: join.name,
       color: colorHex(join.id, join.color),
+      avatarRev: join.avatar_rev || null,
       joinedAt: join.joined_at,
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,

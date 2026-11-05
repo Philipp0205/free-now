@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v26";
+const APP_VERSION = "hangry-v27";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -348,6 +348,7 @@ function friendlyMessage(raw, status) {
     if (named && named[1].toLowerCase() !== "the host") return text.endsWith(".") ? text : `${text}.`;
     return "The host removed you from this.";
   }
+  if (lower.includes("photo")) return text;
   if (lower.includes("chat is closed")) return "This chat is closed.";
   if (lower.includes("1000")) return "Keep it under 1000 characters.";
   if (lower.includes("write a message")) return "Write a message.";
@@ -783,6 +784,7 @@ async function api(path, options = {}) {
 
 function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
+  forgetAvatars();
   // What's new is per person. The next account on this phone starts from its own server value.
   localStorage.removeItem(SEEN_KEY);
   state.whatsNewChecked = false;
@@ -1763,11 +1765,24 @@ function buzzNote(code) {
 
 function youScreen() {
   const code = state.me.user.buzzToken;
+  const hasPhoto = Boolean(state.me.user.avatarRev);
   return el("div", {}, [
     screenHeader("You"),
     el("div", { class: "profile-hero" }, [
-      avatar(state.me.user, 72, "lg"),
+      el("button", {
+        class: "avatar-btn",
+        type: "button",
+        "aria-label": hasPhoto ? "Change photo" : "Add photo",
+        disabled: state.avatarBusy,
+        onclick: pickPhoto,
+      }, [avatar(state.me.user, 72, "lg")]),
       el("strong", { text: state.me.user.name }),
+      el("div", { class: "photo-actions" }, state.avatarBusy
+        ? [el("span", { class: "help", text: "Saving photo…" })]
+        : [
+            el("button", { class: "text-btn", type: "button", text: hasPhoto ? "Change photo" : "Add photo", onclick: pickPhoto }),
+            hasPhoto ? el("button", { class: "text-btn", type: "button", text: "Remove photo", onclick: () => { void onRemovePhoto(); } }) : null,
+          ]),
     ]),
     el("form", { class: "panel stack", onsubmit: onRename }, [
       field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
@@ -4286,9 +4301,10 @@ function guestLine(text, person, kind, event) {
 function guestDetailRow(text, person, kind, event) {
   const line = el("p", { class: "reply-line", text });
   if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) {
-    return el("div", { class: "guest-row" }, [line]);
+    return el("div", { class: "guest-row" }, [avatar(person), line]);
   }
   return el("div", { class: "guest-row" }, [
+    avatar(person),
     line,
     el("button", {
       class: "text-btn",
@@ -4464,10 +4480,47 @@ function icon(name) {
   return node;
 }
 
-function avatar(person, size = 28, extra = "") {
-  const node = el("span", {
-    class: `avatar ${extra}`.trim(),
-    text: initial(person.name),
+/** Blob URLs for photos, by `${id}:${rev}`. A string is ready, a Promise is loading, null failed. */
+const avatarUrls = new Map();
+
+function avatarKey(person) {
+  return person?.id && person.avatarRev ? `${person.id}:${person.avatarRev}` : "";
+}
+
+/** Photos need the Bearer token, so <img src> cannot fetch them. Fetch once, keep a blob URL. */
+function loadAvatar(person) {
+  const key = avatarKey(person);
+  if (avatarUrls.has(key)) return avatarUrls.get(key);
+  const token = state.token;
+  const job = fetch(`/api/users/${encodeURIComponent(person.id)}/avatar?v=${encodeURIComponent(person.avatarRev)}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  })
+    .then((response) => (response.ok ? response.blob() : null))
+    .then((blob) => {
+      const url = blob && blob.size ? URL.createObjectURL(blob) : null;
+      avatarUrls.set(key, url);
+      return url;
+    })
+    .catch(() => {
+      // Offline: forget the failure so the next render tries again.
+      avatarUrls.delete(key);
+      return null;
+    });
+  avatarUrls.set(key, job);
+  return job;
+}
+
+function forgetAvatars() {
+  for (const value of avatarUrls.values()) if (typeof value === "string") URL.revokeObjectURL(value);
+  avatarUrls.clear();
+}
+
+function avatarImg(url, person, size, extra) {
+  const node = el("img", {
+    class: `avatar photo ${extra}`.trim(),
+    src: url,
+    alt: "",
+    "data-person": person.id,
     style: `background:${colorFor(person)}`,
   });
   if (size !== 28) {
@@ -4475,6 +4528,159 @@ function avatar(person, size = 28, extra = "") {
     node.style.height = `${size}px`;
   }
   return node;
+}
+
+function avatar(person, size = 28, extra = "") {
+  const key = avatarKey(person);
+  const cached = key ? avatarUrls.get(key) : undefined;
+  if (typeof cached === "string") return avatarImg(cached, person, size, extra);
+  const node = el("span", {
+    class: `avatar ${extra}`.trim(),
+    text: initial(person.name),
+    "data-person": person?.id || null,
+    style: `background:${colorFor(person)}`,
+  });
+  if (size !== 28) {
+    node.style.width = `${size}px`;
+    node.style.height = `${size}px`;
+  }
+  if (key && cached !== null) {
+    // Initials while it loads. Swap in place when ready; a later render reads the cache.
+    void Promise.resolve(loadAvatar(person)).then((url) => {
+      if (url && node.isConnected) node.replaceWith(avatarImg(url, person, size, extra));
+    });
+  }
+  return node;
+}
+
+const PHOTO_SIZE = 256;
+const PHOTO_MAX_BYTES = 50 * 1024;
+let photoInputNode = null;
+
+/** One hidden picker outside #app, so a re-render while it is open does not lose the change event. */
+function photoInput() {
+  if (photoInputNode) return photoInputNode;
+  photoInputNode = el("input", { type: "file", accept: "image/*", id: "avatar-file", class: "visually-hidden", tabindex: "-1", "aria-hidden": "true" });
+  photoInputNode.addEventListener("change", () => {
+    const file = photoInputNode.files?.[0];
+    photoInputNode.value = "";
+    if (file) void onPhotoChosen(file);
+  });
+  document.body.append(photoInputNode);
+  return photoInputNode;
+}
+
+function pickPhoto() {
+  if (state.avatarBusy) return;
+  photoInput().click();
+}
+
+async function decodePhoto(file) {
+  if ("createImageBitmap" in window) {
+    try {
+      return await createImageBitmap(file);
+    } catch {
+      /* fall back to <img> */
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+}
+
+function canvasBlob(canvas, type, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+/** Centre square, 256×256, WebP (JPEG where WebP will not encode), at most 50 KB. */
+async function squarePhoto(file) {
+  const image = await decodePhoto(file);
+  const width = image.width || image.naturalWidth;
+  const height = image.height || image.naturalHeight;
+  if (!width || !height) throw new Error("That photo could not be read.");
+  const side = Math.min(width, height);
+  const canvas = document.createElement("canvas");
+  canvas.width = PHOTO_SIZE;
+  canvas.height = PHOTO_SIZE;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, (width - side) / 2, (height - side) / 2, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
+  image.close?.();
+  let type = "image/webp";
+  let quality = 0.8;
+  let blob = await canvasBlob(canvas, type, quality);
+  if (!blob || blob.type !== "image/webp") {
+    type = "image/jpeg";
+    quality = 0.85;
+    blob = await canvasBlob(canvas, type, quality);
+  }
+  while (blob && blob.size > PHOTO_MAX_BYTES && quality > 0.3) {
+    quality -= 0.1;
+    blob = await canvasBlob(canvas, type, quality);
+  }
+  if (!blob || blob.size > PHOTO_MAX_BYTES) throw new Error("That photo is too big.");
+  return blob;
+}
+
+async function onPhotoChosen(file) {
+  state.avatarBusy = true;
+  render();
+  await run(async () => {
+    try {
+      let blob;
+      try {
+        blob = await squarePhoto(file);
+      } catch (error) {
+        throw new Error(error?.message === "That photo is too big." ? error.message : "That photo could not be read.");
+      }
+      let response;
+      try {
+        response = await fetch("/api/me/avatar", {
+          method: "PUT",
+          headers: { "content-type": blob.type, authorization: `Bearer ${state.token}` },
+          body: blob,
+        });
+      } catch {
+        const error = new Error("You're offline. Retrying…");
+        error.status = 0;
+        throw error;
+      }
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const error = new Error(friendlyMessage(data?.error, response.status));
+        error.status = response.status;
+        throw error;
+      }
+      // The bytes we just sent are the photo. No need to fetch them back.
+      avatarUrls.set(`${data.user.id}:${data.user.avatarRev}`, URL.createObjectURL(blob));
+      state.me = { ...state.me, user: data.user };
+      state.error = "Photo saved";
+    } finally {
+      state.avatarBusy = false;
+    }
+    await refresh();
+  });
+}
+
+async function onRemovePhoto() {
+  state.avatarBusy = true;
+  render();
+  await run(async () => {
+    try {
+      const data = await api("/api/me/avatar", { method: "DELETE" });
+      state.me = { ...state.me, user: data.user };
+      state.error = "Photo removed";
+    } finally {
+      state.avatarBusy = false;
+    }
+    await refresh();
+  });
 }
 
 function el(tag, attrs = {}, children = []) {

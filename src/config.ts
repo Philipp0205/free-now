@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { configuredAdminToken } from "./admin-query.js";
 import { assertTimeZone } from "./time.js";
@@ -11,6 +12,8 @@ export type VapidConfig = {
 export type Config = {
   port: number;
   dbPath: string;
+  /** Profile photos, one file per person, next to the database (same volume). */
+  avatarDir: string;
   publicBaseUrl: string;
   vapid: VapidConfig | null;
   socialTtlMs: number;
@@ -33,8 +36,9 @@ const DEFAULT_MAP_TILE_ATTRIBUTION = "Powered by Esri | © Esri, HERE, Garmin, U
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Config {
   const port = readPort(env.PORT);
-  const dbPath = env.DB_PATH?.trim()
-    ? path.resolve(cwd, env.DB_PATH.trim())
+  const rawDb = env.DB_PATH?.trim() ?? "";
+  const dbPath = rawDb
+    ? path.resolve(cwd, rawDb)
     : path.join(cwd, "data", "free-now.sqlite");
   const publicBaseUrl = readBaseUrl(env.PUBLIC_BASE_URL);
   const socialTtlMs = readTtl(env.SOCIAL_TTL_MS);
@@ -43,6 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
   return {
     port,
     dbPath,
+    avatarDir: avatarDirFor(rawDb === ":memory:" ? ":memory:" : dbPath),
     publicBaseUrl,
     vapid: readVapid(env),
     socialTtlMs,
@@ -52,6 +57,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
   };
+}
+
+/** `{dir of the db}/avatars`. An in-memory db (tests) gets a per-process temp dir, never the cwd or /data. */
+export function avatarDirFor(dbPath: string): string {
+  if (dbPath === ":memory:" || path.basename(dbPath) === ":memory:") {
+    return path.join(os.tmpdir(), `hangry-avatars-${process.pid}`);
+  }
+  return path.join(path.dirname(dbPath), "avatars");
 }
 
 function readPort(value: string | undefined): number {
