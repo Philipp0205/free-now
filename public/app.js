@@ -11,10 +11,6 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
-const COLORS = [
-  "#9d174d", "#9a3412", "#166534", "#155e75", "#5b21b6", "#9f1239", "#3f3f46", "#1e3a8a",
-  "#7f1d1d", "#7c2d12", "#14532d", "#164e63", "#4c1d95", "#831843", "#134e4a", "#312e81",
-];
 
 let sheetHistoryPushed = false;
 let ignoreSheetPop = false;
@@ -768,7 +764,6 @@ function clearSession() {
 }
 
 function render() {
-  assignAvatarColors();
   const activeId = state.focusSheet ? null : document.activeElement?.id || null;
   const caret = document.activeElement?.selectionStart ?? null;
   const y = document.scrollingElement?.scrollTop ?? 0;
@@ -1403,16 +1398,11 @@ function systemLine(message) {
   ]);
 }
 
-function personAccent(message) {
-  if (message.mine || message.system || message.color == null) return "";
-  return state.chatThread?.palette?.[message.color] || "";
-}
-
 function messageRow(message) {
-  const accent = personAccent(message);
+  const accent = message.system ? "" : message.color || "";
   return el("article", {
     class: message.mine ? "chat-msg mine" : "chat-msg",
-    "data-color": accent ? String(message.color) : null,
+    "data-color": accent || null,
     style: accent ? `--person:${accent}` : null,
   }, [
     el("header", {}, [
@@ -2229,6 +2219,7 @@ function collectPins() {
       lng: social.location.lng,
       title: social.creator.name,
       initial: initial(social.creator.name),
+      color: colorFor(social.creator),
       note: place
         ? (social.note ? `${social.note} · ${place}` : place)
         : (social.note || "Free now"),
@@ -2247,6 +2238,7 @@ function collectPins() {
       lng: plan.location.lng,
       title: plan.creator.name,
       initial: initial(plan.creator.name),
+      color: colorFor(plan.creator),
       note: place ? `${plan.note} · ${place}` : plan.note,
       time: plan.time ? `${plan.whenLabel} · ${plan.time}` : plan.whenLabel,
       own: mine,
@@ -3407,7 +3399,7 @@ function avatar(person, size = 28, extra = "") {
   const node = el("span", {
     class: `avatar ${extra}`.trim(),
     text: initial(person.name),
-    style: `background:${colorFor(person.id)}`,
+    style: `background:${colorFor(person)}`,
   });
   if (size !== 28) {
     node.style.width = `${size}px`;
@@ -4434,36 +4426,9 @@ function bgFor(id) {
   return BACKGROUNDS[hash];
 }
 
-function colorFor(id) {
-  if (state.colorMap?.has(id)) return state.colorMap.get(id);
-  let hash = 0;
-  for (const char of id || "") hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return COLORS[hash % COLORS.length];
-}
-
-function assignAvatarColors() {
-  const ids = new Set();
-  for (const member of state.me?.circle?.members || []) ids.add(member.id);
-  if (state.me?.user?.id) ids.add(state.me.user.id);
-  for (const social of state.socials || []) {
-    ids.add(social.creator?.id);
-    for (const person of social.joined || []) ids.add(person.id);
-  }
-  const used = new Set();
-  const map = new Map();
-  for (const id of [...ids].filter(Boolean).sort()) {
-    let hash = 0;
-    for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-    let index = hash % COLORS.length;
-    let guard = 0;
-    while (used.has(COLORS[index]) && guard < COLORS.length) {
-      index = (index + 1) % COLORS.length;
-      guard += 1;
-    }
-    used.add(COLORS[index]);
-    map.set(id, COLORS[index]);
-  }
-  state.colorMap = map;
+/** The server picks one color per person and sends it with every user it lists. */
+function colorFor(person) {
+  return person?.color || "#636366";
 }
 
 function initial(name) {

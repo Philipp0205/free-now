@@ -8,7 +8,7 @@ import {
   isCircleAdmin,
   listMembers,
 } from "./db.js";
-import { CHAT_COLORS, assignChatColors, preferredColor } from "./chat-color.js";
+import { colorHex } from "./chat-color.js";
 import { notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
 import { isoDate } from "./time.js";
@@ -48,6 +48,7 @@ type MessageRow = {
   kind: string;
   created_at: number;
   name: string;
+  color: number | null;
 };
 
 const TEXT_MAX = 1000;
@@ -375,31 +376,10 @@ function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
   return members.filter((member) => allowed.has(member.id));
 }
 
-function circleColors(db: DatabaseSync, circleId: string): Map<string, number> {
-  const rows = all<{ user_id: string; chat_color: number | null }>(
-    db,
-    "SELECT user_id, chat_color FROM memberships WHERE circle_id = ? ORDER BY joined_at ASC, user_id ASC",
-    circleId,
-  );
-  const prior = new Map<string, number>();
-  for (const row of rows) {
-    if (row.chat_color != null) prior.set(row.user_id, row.chat_color);
-  }
-  const assigned = assignChatColors(rows.map((row) => row.user_id), prior);
-  const save = db.prepare(
-    "UPDATE memberships SET chat_color = ? WHERE circle_id = ? AND user_id = ? AND chat_color IS NULL",
-  );
-  for (const row of rows) {
-    const color = assigned.get(row.user_id);
-    if (row.chat_color == null && color != null) save.run(color, circleId, row.user_id);
-  }
-  return assigned;
-}
-
 function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   const messages = all<MessageRow>(
     deps.db,
-    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name
+    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color
      FROM messages m JOIN users u ON u.id = m.user_id
      WHERE m.chat_id = ? AND m.deleted_at IS NULL
      ORDER BY m.created_at ASC
@@ -408,7 +388,6 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   );
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
-  const colors = circleColors(deps.db, access.chat.circle_id);
   return {
     id: access.chat.id,
     kind: access.chat.kind,
@@ -417,7 +396,6 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     closed: access.closed,
     removed: access.blocked,
     muted: isMuted(deps.db, access.chat.id, userId),
-    palette: [...CHAT_COLORS],
     messages: messages.map((message) => ({
       id: message.id,
       name: message.name,
@@ -425,7 +403,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       at: message.created_at,
       system: message.kind === "system",
       mine: message.user_id === userId,
-      color: message.kind === "text" ? (colors.get(message.user_id) ?? preferredColor(message.user_id)) : null,
+      color: message.kind === "text" ? colorHex(message.user_id, message.color) : null,
       canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
     })),
   };
