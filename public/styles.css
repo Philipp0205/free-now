@@ -965,6 +965,7 @@ textarea.sheet-control {
   color: #fff;
   overflow-wrap: anywhere;
 }
+textarea.sheet-control.sheet-textarea { min-height: 0; max-height: none; }
 textarea.sheet-control::placeholder { color: var(--faint); }
 input.sheet-control:focus,
 textarea.sheet-control:focus {
