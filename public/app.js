@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v18";
+const APP_VERSION = "hangry-v20";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -386,6 +386,7 @@ async function refresh({ initial = false } = {}) {
   state.plans = plans.plans;
   state.notifications = notifications.notifications;
   state.me = me;
+  applyAlertUnread(notifications.unreadByCircle);
   state.chatSummary = summary;
   if (state.chat) forgetOpenUnread(state.chat);
   if (thread?.chat) state.chatThread = thread.chat;
@@ -408,6 +409,7 @@ async function refresh({ initial = false } = {}) {
     plans: state.plans,
     notifications: state.notifications.map((note) => [note.id, note.readAt]),
     members: state.me?.circle?.members ?? null,
+    circles: state.me?.circles ?? null,
     banner: state.banner?.id ?? null,
     chats: state.chatSummary,
     thread: state.chatThread?.messages?.map((message) => message.id) ?? null,
@@ -1094,8 +1096,14 @@ async function switchCircle(id) {
   state.past = false;
   state.pastDays = null;
   rememberCircle(id);
+  // Another circle's list is not news. The bell badge shows what is unread there.
+  state.bootstrappedNotifs = false;
   await run(async () => {
     await refresh({ initial: true });
+    // Switching while Alerts is open shows that circle's list, so it counts as read.
+    if (state.tab === "alerts" && state.notifications.some((note) => !note.readAt)) {
+      await markAlertsRead();
+    }
   });
 }
 
@@ -1398,13 +1406,34 @@ function circleUnread() {
   return state.chatSummary?.circle?.unread || 0;
 }
 
+/** A circle dot means unread alerts or unread chat in that circle. */
 function circleHasUnread(id) {
-  return (state.chatSummary?.unreadByCircle?.[id] || 0) > 0;
+  const alerts = state.me?.circles?.find((circle) => circle.id === id)?.alertUnread || 0;
+  return alerts > 0 || (state.chatSummary?.unreadByCircle?.[id] || 0) > 0;
 }
 
 function anyCircleUnread() {
-  const totals = state.chatSummary?.unreadByCircle || {};
-  return Object.values(totals).some((count) => count > 0);
+  const ids = new Set([
+    ...(state.me?.circles || []).map((circle) => circle.id),
+    ...Object.keys(state.chatSummary?.unreadByCircle || {}),
+  ]);
+  return [...ids].some((id) => circleHasUnread(id));
+}
+
+/** Copies fresh per-circle alert counts from /api/notifications onto the circle list. */
+function applyAlertUnread(totals) {
+  if (!totals || !state.me?.circles) return;
+  for (const circle of state.me.circles) circle.alertUnread = totals[circle.id] || 0;
+}
+
+/** Marks this circle's alerts read, then clears the bell badge and the circle dot together. */
+async function markAlertsRead() {
+  await api("/api/notifications/read", { method: "POST", body: {} });
+  const readAt = Date.now();
+  state.notifications = state.notifications.map((note) => ({ ...note, readAt: note.readAt ?? readAt }));
+  const current = state.me?.circles?.find((circle) => circle.id === state.me?.circle?.id);
+  if (current) current.alertUnread = 0;
+  persistCachedState();
 }
 
 function forgetOpenUnread(target) {
@@ -4308,9 +4337,7 @@ async function onTab(id) {
   if (id === "alerts") {
     render();
     try {
-      await api("/api/notifications/read", { method: "POST", body: {} });
-      const readAt = Date.now();
-      state.notifications = state.notifications.map((note) => ({ ...note, readAt: note.readAt ?? readAt }));
+      await markAlertsRead();
     } catch (error) {
       state.error = error.message;
     }

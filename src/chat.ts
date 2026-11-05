@@ -344,7 +344,8 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[],
       refId: ref,
       tag: `chat:${chat.id}`,
       url: `/?chat=${encodeURIComponent(ref)}`,
-      skipAlert: true,
+      // Plan and free-post chats land in Alerts. Circle chat has its own tab, so it stays out.
+      skipAlert: chat.kind === "circle",
     })), named ? { id: circleId, name: named.name } : null);
   }
 }

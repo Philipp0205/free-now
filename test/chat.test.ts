@@ -154,8 +154,12 @@ test("circle members can chat on an event, and a removed person cannot post", as
     assert.equal(circlePushes.some((item) => item.endpoint.includes(nia.user.id)), false);
     const hostBurst = circlePushes.filter((item) => item.endpoint.includes(alex.user.id));
     assert.deepEqual(hostBurst.map((item) => item.payload.body), ["2 new messages"]);
-    const alerts = db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'chat'").get() as { n: number | bigint };
-    assert.equal(Number(alerts.n), 0);
+    // Circle chat stays out of Alerts. Free-post chat lands there for the people who got the push.
+    const circleAlerts = db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'chat' AND ref_id = 'circle'").get() as { n: number | bigint };
+    assert.equal(Number(circleAlerts.n), 0);
+    const eventAlerts = db.prepare("SELECT user_id, circle_id FROM notifications WHERE kind = 'chat' AND ref_id = ?").all(`social:${social.social.id}`) as Array<{ user_id: string; circle_id: string }>;
+    assert.ok(eventAlerts.some((row) => row.user_id === alex.user.id));
+    assert.ok(eventAlerts.every((row) => row.circle_id === created.circle.id));
     const circleMsg = hello.chat.messages.find((message: { text: string }) => message.text === "Hello");
     await api(port, "DELETE", `/api/messages/${circleMsg.id}`, { token: nia.token, status: 403 });
     await api(port, "POST", `/api/circles/members/${nia.user.id}`, { token: alex.token, body: { admin: true }, status: 200 });
