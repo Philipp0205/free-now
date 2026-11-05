@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v14";
+const APP_VERSION = "hangry-v15";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -120,6 +120,8 @@ if (state.deepLink || circleFocus) {
   url.searchParams.delete("circle");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}` || "/");
 }
+const sharePath = location.pathname.match(/^\/p\/([A-Za-z0-9_-]+)\/?$/);
+if (sharePath) state.shareLink = sharePath[1];
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
 if (joinPath) state.pendingCode = joinPath[1].toUpperCase();
 state.codeDraft = state.pendingCode;
@@ -134,6 +136,7 @@ const ICONS = {
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.2 16.2 5 19.2c-.3.4.1 1 .6.8l3.2-.9A7.2 7.2 0 1 0 7.2 16.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 14.5V4.5M8.2 8 12 4.2 15.8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11H6.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1H16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -204,6 +207,7 @@ async function boot() {
       }
     }
     if (state.me) adoptCircle(state.me);
+    if (state.shareLink) await resolveShareLink();
     if (state.token && state.me && state.pendingCode && !state.inviteError) {
       try {
         const joined = await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
@@ -715,7 +719,7 @@ function adoptCircle(me) {
 
 function circleHeader(path, options) {
   if (!state.circleId || options.circle === null || options.token === null) return {};
-  if (/^\/api\/(meta|auth\/|invites\/|buzz\/)/.test(path)) return {};
+  if (/^\/api\/(meta|auth\/|invites\/|buzz\/|plans\/share\/)/.test(path)) return {};
   return { "x-circle": state.circleId };
 }
 
@@ -830,6 +834,13 @@ function render() {
   bindSheetSwipe();
   liftSheetToast();
   syncSheetHistory();
+  if (state.focusPlanScroll) {
+    state.focusPlanScroll = false;
+    const id = state.focusPlan;
+    queueMicrotask(() => {
+      document.querySelector(`[data-plan="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
+    });
+  }
   if (state.focusSocial) {
     const id = state.focusSocial;
     queueMicrotask(() => {
@@ -849,6 +860,12 @@ function view() {
       el("div", { class: "orb live", "aria-hidden": "true" }),
       el("p", { class: "lede", text: "You're offline. Retrying…" }),
     ]));
+    if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+    return root;
+  }
+  if (state.sharePreview) {
+    root.append(sharePreviewScreen());
+    if (state.installOpen) root.append(installGuideView());
     if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
     return root;
   }
@@ -1229,7 +1246,11 @@ function socialCard(social) {
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const people = [plan.creator, ...plan.joined];
-  return el("article", { class: "card card-photo card-plan", style: `--photo:url("${bgFor(plan.id)}")` }, [
+  return el("article", {
+    class: state.focusPlan === plan.id ? "card card-photo card-plan focused" : "card card-photo card-plan",
+    style: `--photo:url("${bgFor(plan.id)}")`,
+    "data-plan": plan.id,
+  }, [
     el("div", { class: "card-bg" }),
     eventTools("plan", plan),
     el("div", { class: "card-copy" }, [
@@ -1241,9 +1262,18 @@ function planCard(plan) {
       planReplySummary(plan),
       mine ? null : removedNote(plan) || planReplyButtons(plan),
       deliveryLine("plan", plan),
-      chatEntry("plan", plan),
+      el("div", { class: "card-actions" }, [chatEntry("plan", plan), shareChip(plan)]),
     ]),
   ]);
+}
+
+function shareChip(plan) {
+  return el("button", {
+    class: "chip chat-chip share-chip",
+    type: "button",
+    "aria-label": `Share ${plan.note}`,
+    onclick: () => { void sharePlan(plan); },
+  }, [icon("share"), el("span", { text: "Share" })]);
 }
 
 /** Two lines until tapped. Tap again to fold it back. Links stay tappable. */
@@ -1923,6 +1953,7 @@ function openAdminEdit(kind, item) {
     time,
     day,
     date: item.forDate || "",
+    shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
     ...session,
   };
   state.sheet = "admin-edit";
@@ -1957,6 +1988,7 @@ function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           whereBlock(edit),
+          edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
         ]),
       ]),
       el("div", { class: "sheet-dock" }, [
@@ -1964,6 +1996,17 @@ function adminEditSheet() {
       ]),
     ]),
   ]);
+}
+
+async function stopSharing(edit) {
+  await run(async () => {
+    await api(`/api/plans/${edit.id}/share`, { method: "DELETE" });
+    edit.shared = false;
+    await refresh({ initial: true });
+    state.error = "Link stopped. Old links no longer work.";
+    render();
+    scheduleErrorClear();
+  });
 }
 
 function descriptionField(edit) {
@@ -3052,6 +3095,103 @@ async function shareInvite() {
   await copyText(circle.inviteUrl, "Invite link copied");
 }
 
+async function sharePlan(plan) {
+  let url = plan.shareId ? `${state.meta?.publicBaseUrl || location.origin}/p/${plan.shareId}` : "";
+  if (!url) {
+    try {
+      url = (await api(`/api/plans/${plan.id}/share`, { method: "POST", body: {} })).url;
+    } catch (error) {
+      state.error = error.message;
+      render();
+      scheduleErrorClear();
+      return;
+    }
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: plan.note, text: `${plan.note} on Hangry`, url });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+  await copyText(url, "Link copied");
+}
+
+/** A /p/ link: a member lands on the plan. Anyone else gets the small preview. */
+async function resolveShareLink() {
+  const id = state.shareLink;
+  let preview;
+  try {
+    preview = await api(`/api/plans/share/${encodeURIComponent(id)}`, { circle: null });
+  } catch (error) {
+    if (isNetworkFailure(error)) throw error;
+    preview = { ended: true };
+  }
+  if (preview.member && preview.planId) {
+    state.shareLink = "";
+    state.sharePreview = null;
+    if (preview.circleId && preview.circleId !== state.me?.circle?.id) {
+      rememberCircle(preview.circleId);
+      state.me = await api("/api/me");
+    }
+    state.deepLink = { kind: "plan", id: preview.planId, share: true };
+    history.replaceState(null, "", "/");
+    return;
+  }
+  state.sharePreview = preview;
+}
+
+function leaveSharePreview(next = null) {
+  state.sharePreview = null;
+  state.shareLink = next ? state.shareLink : "";
+  state.sheet = next;
+  state.error = "";
+  history.replaceState(null, "", "/");
+  render();
+}
+
+function sharePreviewScreen() {
+  const preview = state.sharePreview;
+  const signedIn = Boolean(state.token && state.me);
+  const head = el("div", { class: "hero" }, [
+    el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
+    el("h1", { class: "wordmark", text: "Hangry" }),
+  ]);
+  if (preview.ended) {
+    return el("section", { class: "gate share-gate" }, [
+      head,
+      el("article", { class: "panel share-preview" }, [
+        el("h2", { text: "This link no longer works" }),
+        el("p", { class: "help", text: "Ask a friend for a new link." }),
+      ]),
+      el("div", { class: "stack" }, [
+        el("button", { class: "btn", type: "button", text: "Open Hangry", onclick: () => leaveSharePreview() }),
+      ]),
+    ]);
+  }
+  const when = preview.time ? `${preview.whenLabel} · ${preview.time}` : preview.whenLabel;
+  return el("section", { class: "gate share-gate" }, [
+    head,
+    el("article", { class: "panel share-preview" }, [
+      el("h2", { text: preview.note }),
+      el("p", { class: "share-when", text: when }),
+    ]),
+    el("p", { class: "lede share-lede", text: signedIn
+      ? "Only people in this circle can open it. Ask a friend there for an invite."
+      : "Hangry is invite-only. Sign in, or ask a friend in this circle for an invite." }),
+    el("div", { class: "stack" }, signedIn
+      ? [
+          el("button", { class: "btn", type: "button", text: "Open Hangry", onclick: () => leaveSharePreview() }),
+        ]
+      : [
+          el("button", { class: "btn", type: "button", text: "Sign back in", onclick: () => leaveSharePreview("recover") }),
+          el("button", { class: "btn secondary", type: "button", text: "Add to home screen", onclick: openInstallGuide }),
+          el("button", { class: "btn ghost", type: "button", text: "Open Hangry", onclick: () => leaveSharePreview() }),
+        ]),
+  ]);
+}
+
 async function rotateInvite() {
   await run(async () => {
     const data = await api("/api/circles/invite", { method: "POST", body: {} });
@@ -3523,7 +3663,7 @@ function consumeDeepLink() {
     }
     return true;
   }
-  const { kind, id } = state.deepLink;
+  const { kind, id, share } = state.deepLink;
   const list = kind === "plan" ? state.plans : state.socials;
   const item = list.find((entry) => entry.id === id);
   state.deepLink = null;
@@ -3533,8 +3673,14 @@ function consumeDeepLink() {
     showOnMap(kind, item.id);
     return true;
   }
-  state.tab = "map";
   state.sheet = null;
+  if (share) {
+    state.tab = "home";
+    state.focusPlan = item.id;
+    state.focusPlanScroll = true;
+    return false;
+  }
+  state.tab = "map";
   return false;
 }
 
@@ -3560,6 +3706,9 @@ function mapCard(pin) {
     plan && !pin.own ? planPinActions(plan) : null,
     el("div", { class: "map-card-actions" }, [
       mapsLink(pin.lat, pin.lng, pin.note, "Open in Maps"),
+      plan?.creator
+        ? el("button", { class: "btn secondary", type: "button", text: "Share", "aria-label": `Share ${plan.note}`, onclick: () => { void sharePlan(plan); } })
+        : null,
     ]),
   ]);
 }
@@ -4010,6 +4159,7 @@ async function onTab(id) {
   }
   state.tab = id;
   state.sheet = null;
+  state.focusPlan = "";
   if (id === "alerts") {
     render();
     try {
@@ -4125,6 +4275,8 @@ async function onRecover(event) {
     state.token = data.token;
     state.sheet = null;
     state.me = await api("/api/me");
+    adoptCircle(state.me);
+    if (state.shareLink) await resolveShareLink();
     state.pushSnooze = false;
     render();
     reportDisplay();
