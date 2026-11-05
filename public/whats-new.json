@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-05-plan-description",
+    "date": "2026-11-05",
+    "title": "Plan description",
+    "bullets": [
+      "Hosts can add a short description when they edit a plan.",
+      "It shows on the plan card and the map card. Tap to read more.",
+      "Changing only the description does not ping anyone."
+    ]
+  },
+  {
     "id": "2026-11-05-whats-new-feedback",
     "date": "2026-11-05",
     "title": "What's new and feedback",

@@ -326,6 +326,22 @@ button:disabled { cursor: default; opacity: 0.55; }
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 .card-copy p { margin: 0; color: rgba(255, 255, 255, 0.82); font-size: 14px; }
+/* Plan description: two lines until tapped. */
+.plan-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.card-copy .plan-desc { margin: 6px 0 4px; color: #fff; }
+.plan-desc.open { display: block; -webkit-line-clamp: unset; line-clamp: none; }
+.plan-desc a { color: inherit; text-decoration: underline; }
+.plan-desc:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; border-radius: 6px; }
 .pill {
   position: absolute;
   top: 14px;
@@ -922,7 +938,8 @@ form.sheet,
 .where-picker > *,
 .where-results > * { flex-shrink: 0; }
 .sheet-label { font-size: 13px; font-weight: 650; color: var(--muted); line-height: 1.2; }
-input.sheet-control {
+input.sheet-control,
+textarea.sheet-control {
   width: 100%;
   min-height: 52px;
   background: #2c2c2e;
@@ -948,6 +965,7 @@ textarea.sheet-control {
   color: #fff;
   overflow-wrap: anywhere;
 }
+textarea.sheet-control.sheet-textarea { min-height: 0; max-height: none; }
 textarea.sheet-control::placeholder { color: var(--faint); }
 input.sheet-control:focus,
 textarea.sheet-control:focus {
@@ -1116,7 +1134,8 @@ html.kb-open .sheet .help { margin-top: 0; }
 .map-empty p { margin: 0; color: var(--muted); line-height: 1.4; }
 .map-card {
   position: absolute;
-  z-index: 500;
+  /* Above Leaflet's zoom controls (1000). Still inside .map-wrap, so sheets stay on top. */
+  z-index: 1001;
   left: 12px;
   right: 12px;
   bottom: var(--attr-h, 64px);
@@ -1132,6 +1151,9 @@ html.kb-open .sheet .help { margin-top: 0; }
 .map-card .card-tools .event-tool { background: #2c2c2e; }
 .map-card p { margin: 4px 0 0; color: #d1d1d6; }
 .map-card-time { color: var(--muted) !important; font-size: 13px; }
+.map-card .plan-desc { margin-top: 8px; font-size: 14px; }
+/* Open text scrolls inside the card, so a long one does not push it off the map. */
+.map-card .plan-desc.open { max-height: 8.4em; overflow-y: auto; overscroll-behavior: contain; }
 .map-card-actions { display: flex; gap: 8px; margin-top: 12px; }
 .map-card-actions .btn { width: auto; flex: 1; min-height: 44px; }
 .map-link {
