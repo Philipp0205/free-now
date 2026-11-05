@@ -136,3 +136,32 @@ test("a plan whose time has passed today still pushes when moved to a future day
     assert.equal(sent[0].payload.body, "Kim's");
   }, { sent: "envelope" });
 });
+
+test("people who said they can't come are left out; 'in' and no answer still get it, and changing back to 'in' brings them back", async () => {
+  await withApp(async ({ port, sent }) => {
+    const { alex, bea, sam, kim } = await circle(port);
+    const made = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Picnic", time: "12:00" }, status: 201 });
+    await api(port, "POST", `/api/plans/${made.plan.id}/reply`, { token: sam.token, body: { reply: "cant" }, status: 200 });
+    await api(port, "POST", `/api/plans/${made.plan.id}/reply`, { token: bea.token, body: { reply: "in" }, status: 200 });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${made.plan.id}`, { token: alex.token, body: { time: "13:00" }, status: 200 });
+    // Bea said in, Kim never answered, Sam declined, Alex edited.
+    assert.deepEqual(endpoints(sent), [to(bea), to(kim)].sort());
+
+    await api(port, "POST", `/api/plans/${made.plan.id}/reply`, { token: sam.token, body: { reply: "in" }, status: 200 });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${made.plan.id}`, { token: alex.token, body: { time: "14:00" }, status: 200 });
+    assert.ok(endpoints(sent).includes(to(sam)), "back in, so pushed again");
+  }, { sent: "envelope" });
+});
+
+test("an admin edit still reaches the creator, but not a creator-side decliner or the admin", async () => {
+  await withApp(async ({ port, sent }) => {
+    const { alex, bea, sam, kim } = await circle(port);
+    const made = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Swim", time: "09:00" }, status: 201 });
+    await api(port, "POST", `/api/plans/${made.plan.id}/reply`, { token: kim.token, body: { reply: "declined" }, status: 200 });
+    sent.length = 0;
+    await api(port, "PATCH", `/api/plans/${made.plan.id}`, { token: bea.token, body: { place: "Lake" }, status: 200 });
+    assert.deepEqual(endpoints(sent), [to(alex), to(sam)].sort());
+  }, { sent: "envelope" });
+});
