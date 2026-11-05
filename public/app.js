@@ -16,8 +16,10 @@ const APP_VERSION = "hangry-v18";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
-let sheetHistoryPushed = false;
-let ignoreSheetPop = false;
+/** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
+let overlayHistoryDepth = 0;
+/** Pops we caused ourselves via history.go() and must not treat as Back. */
+let ignoreSheetPop = 0;
 let closingFromPop = false;
 
 const state = {
@@ -834,7 +836,7 @@ function render() {
   anchorOpenSheet();
   bindSheetSwipe();
   liftSheetToast();
-  syncSheetHistory();
+  syncOverlayHistory();
   if (state.focusPlanScroll) {
     state.focusPlanScroll = false;
     const id = state.focusPlan;
@@ -3916,10 +3918,8 @@ function showOnMap(kind, id) {
   }
   if (state.tab !== "map") {
     state.mapReturnTab = state.tab;
-    if (!state.mapHistory) {
-      history.pushState({ hangryMap: 1 }, "", clean);
-      state.mapHistory = true;
-    }
+    // syncOverlayHistory (from render) pushes the entry Back pops to return here.
+    state.mapHistory = true;
   }
   state.focusPin = `${kind}:${id}`;
   state.tab = "map";
@@ -4048,7 +4048,45 @@ function sheetIsOpen() {
   return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen);
 }
 
-function dismissTopSheet() {
+/** Tabs other than Now that Back leaves for Now. Alerts is its own layer (closeAlerts). */
+const TAB_LAYERS = ["map", "circle", "you"];
+
+/** Open layers Back can close, one history entry each (see dismissTopOverlay for order). */
+function currentOverlayDepth() {
+  let depth = 0;
+  if (state.confirm) depth += 1;
+  if (state.installOpen) depth += 1;
+  // Onboarding waits behind an open sheet (see view), so it only counts once the sheet is gone.
+  if (state.onboarding && !state.sheet) depth += 1;
+  if (state.installSheet) depth += 1;
+  if (state.sheet) depth += 1;
+  if (!shellShown()) return depth;
+  if (state.circleMenu) depth += 1;
+  if (state.chat) depth += 1;
+  if (state.past) depth += 1;
+  return depth + tabLayers();
+}
+
+function plainTabLayer(tab) {
+  return TAB_LAYERS.includes(tab) ? 1 : 0;
+}
+
+/** Alerts and a place's map sit on top of the tab they return to, so that tab keeps its own entry. */
+function tabLayers() {
+  if (state.tab === "alerts") return 1 + plainTabLayer(state.alertsReturn);
+  if (state.tab === "map" && state.mapHistory) {
+    const back = state.mapReturnTab;
+    return 1 + (back === "alerts" ? 1 + plainTabLayer(state.alertsReturn) : plainTabLayer(back));
+  }
+  return plainTabLayer(state.tab);
+}
+
+function shellShown() {
+  return Boolean(!state.booting && !state.sharePreview && state.token && state.me?.circle);
+}
+
+/** Closes exactly the topmost layer. Same order as currentOverlayDepth. */
+function dismissTopOverlay() {
   if (state.confirm) {
     state.confirm = null;
     render();
@@ -4059,7 +4097,6 @@ function dismissTopSheet() {
     render();
     return;
   }
-  // Onboarding waits behind an open sheet (see view), so the sheet on screen closes first.
   if (state.onboarding && !state.sheet) {
     state.onboarding = false;
     render();
@@ -4070,20 +4107,57 @@ function dismissTopSheet() {
     render();
     return;
   }
-  if (state.sheet) closeSheet();
-}
-
-function syncSheetHistory() {
-  const open = sheetIsOpen();
-  if (open && !sheetHistoryPushed) {
-    history.pushState({ hangrySheet: 1 }, "");
-    sheetHistoryPushed = true;
+  if (state.sheet) {
+    closeSheet();
     return;
   }
-  if (!open && sheetHistoryPushed && !closingFromPop) {
-    sheetHistoryPushed = false;
-    ignoreSheetPop = true;
-    history.back();
+  if (!shellShown()) return;
+  if (state.circleMenu) {
+    state.circleMenu = false;
+    render();
+    return;
+  }
+  if (state.chat) {
+    closeChat();
+    return;
+  }
+  if (state.past) {
+    closePast();
+    return;
+  }
+  if (state.tab === "alerts") {
+    closeAlerts();
+    return;
+  }
+  if (state.mapHistory && state.tab === "map") {
+    state.mapHistory = false;
+    state.tab = state.mapReturnTab || "home";
+    state.focusPin = "";
+    render();
+    return;
+  }
+  if (TAB_LAYERS.includes(state.tab)) {
+    state.tab = "home";
+    state.focusPin = "";
+    render();
+  }
+}
+
+/** Keeps one pushed history entry per open layer so the phone's Back closes them, not the app. */
+function syncOverlayHistory() {
+  // A history.go() we started has not landed yet. Pushing now would be undone by it; catch up on its popstate.
+  if (ignoreSheetPop > 0) return;
+  const depth = currentOverlayDepth();
+  while (depth > overlayHistoryDepth) {
+    overlayHistoryDepth += 1;
+    history.pushState({ hangryOverlay: overlayHistoryDepth }, "");
+  }
+  if (depth < overlayHistoryDepth && !closingFromPop) {
+    const extra = overlayHistoryDepth - depth;
+    overlayHistoryDepth = depth;
+    // One go(-n) fires a single popstate; back() called n times in a row is not reliable.
+    ignoreSheetPop += 1;
+    history.go(-extra);
   }
 }
 
@@ -4169,7 +4243,7 @@ function bindSheetSwipe() {
       dragging = false;
       panel.classList.remove("dragging");
       panel.style.transform = "";
-      if (drag > 72) dismissTopSheet();
+      if (drag > 72) dismissTopOverlay();
     };
     panel.addEventListener("pointerup", finish);
     panel.addEventListener("pointercancel", finish);
@@ -4182,30 +4256,30 @@ function bindSheetSwipe() {
 }
 
 window.addEventListener("popstate", () => {
-  if (ignoreSheetPop) {
-    ignoreSheetPop = false;
+  if (ignoreSheetPop > 0) {
+    ignoreSheetPop -= 1;
+    syncOverlayHistory();
     return;
   }
-  if (sheetIsOpen()) {
-    sheetHistoryPushed = false;
+  if (currentOverlayDepth() > 0) {
+    overlayHistoryDepth = Math.max(0, overlayHistoryDepth - 1);
     closingFromPop = true;
-    dismissTopSheet();
-    closingFromPop = false;
+    try {
+      dismissTopOverlay();
+    } finally {
+      closingFromPop = false;
+    }
+    // A layer that hands back to another (map → the tab it came from) needs its entry again.
+    syncOverlayHistory();
     return;
   }
-  sheetHistoryPushed = false;
-  if (state.mapHistory) {
-    state.mapHistory = false;
-    state.tab = state.mapReturnTab || "home";
-    state.focusPin = "";
-    render();
-  }
+  overlayHistoryDepth = 0;
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || !sheetIsOpen()) return;
+  if (event.key !== "Escape" || currentOverlayDepth() === 0) return;
   event.preventDefault();
-  dismissTopSheet();
+  dismissTopOverlay();
 });
 
 const ALERTS_RETURN_TABS = ["home", "map", "circle", "you"];
@@ -4230,6 +4304,7 @@ async function onTab(id) {
   state.tab = id;
   state.sheet = null;
   state.focusPlan = "";
+  state.mapHistory = false;
   if (id === "alerts") {
     render();
     try {

@@ -2,10 +2,10 @@
   {
     "id": "2026-11-05-bell-toggle",
     "date": "2026-11-05",
-    "title": "Bell closes Alerts",
+    "title": "Back works like you expect",
     "bullets": [
-      "Tap the bell again to close Alerts.",
-      "Your previous tab comes back."
+      "Tap the bell again to close Alerts. Your previous tab comes back.",
+      "The Back button closes sheets and panels instead of the app."
     ]
   },
   {
