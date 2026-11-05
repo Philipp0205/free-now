@@ -96,7 +96,7 @@ import {
 } from "./feedback.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { colorHex } from "./chat-color.js";
-import { addDays, clockLabel, dayLabel, isoDate, noticeDay, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, dayLabel, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { assertPlanClock, joinPlan, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
@@ -1051,42 +1051,28 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   const dateChanged = forDate !== plan.for_date;
   const timeChanged = atTime !== plan.at_time;
   if (dateChanged || timeChanged) assertPlanClock(forDate, atTime, now, deps.config.tz);
-  const noteChanged = note !== plan.note;
   const placeChanged = place !== (plan.place ?? "") || lat !== plan.lat || lng !== plan.lng;
   const description = Object.prototype.hasOwnProperty.call(body, "description")
     ? cleanDescription(body.description)
     : (plan.description ?? "");
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null);
-  // Description is left out on purpose: changing only it pings no one.
-  const changes = [];
-  if (noteChanged) changes.push({ name: "Note", next: note });
-  if (dateChanged) changes.push({ name: "Day", next: noticeDay(forDate, today) });
-  if (timeChanged) changes.push({ name: "Time", next: atTime ?? "" });
-  if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
-  if (changes.length) {
-    const coming = listPlanJoins(deps.db, plan.id).filter((join) => isInReply(join.reply) && join.id !== user.id && join.id !== plan.creator_id);
+  // Only a move (day, time, or place) pings people. Note or description edits stay quiet.
+  if (dateChanged || timeChanged || placeChanged) {
+    const spot = place ? audiencePlace(place) : "";
+    const moved = dateChanged || timeChanged;
+    const when = `${shortDate(forDate, today)}${atTime ? ` · ${atTime}` : ""}`;
+    const title = moved ? `${note} moved to ${when}` : spot ? `${note} moved to ${spot}` : `${note}: place removed`;
+    const others = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
     await pushEdit(
       deps,
       now,
-      coming.map((join) => join.id),
-      `Plan changed: ${note}`,
-      changeBody(changes),
+      others.map((member) => member.id),
+      title,
+      moved && spot ? spot : "Tap to see the plan.",
       plan.id,
       `/?plan=${plan.id}`,
       circle,
     );
-    if (user.id !== plan.creator_id) {
-      await pushEdit(
-        deps,
-        now,
-        [plan.creator_id],
-        `${user.name} edited your plan: ${note}`,
-        changeBody(changes),
-        plan.id,
-        `/?plan=${plan.id}`,
-        circle,
-      );
-    }
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
