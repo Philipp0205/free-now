@@ -82,6 +82,7 @@ import { pushSummaryForViewer, reachForCircle } from "./push-status.js";
 import { clientKey } from "./client-key.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
+import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, isoDate, whenLabel, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { joinPlan, publishPlan, replyPlan } from "./plans.js";
@@ -203,7 +204,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     sendJson(res, 201, {
       token,
       buzzToken,
-      user: { id, name },
+      user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color) },
       circle: invited ? circlePayload(deps, req, invited, id) : null,
     });
     return;
@@ -225,7 +226,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     sendJson(res, 200, {
       token,
       buzzToken: existing.buzz_token,
-      user: { id: existing.id, name: existing.name },
+      user: { id: existing.id, name: existing.name, color: colorHex(existing.id, existing.color) },
     });
     return;
   }
@@ -701,7 +702,7 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
     active = circles[0];
   }
   return {
-    user: { id: user.id, name: user.name, buzzToken: user.buzz_token },
+    user: { id: user.id, name: user.name, color: colorHex(user.id, getUserById(deps.db, user.id)?.color), buzzToken: user.buzz_token },
     circles: circles.map((circle) => ({
       id: circle.id,
       name: circle.name,
@@ -1004,8 +1005,8 @@ type PastEvent = {
   at: number;
   time: string;
   place: string;
-  host: { id: string; name: string };
-  people: Array<{ id: string; name: string; arriveAt: number | null }>;
+  host: { id: string; name: string; color: string };
+  people: Array<{ id: string; name: string; color: string; arriveAt: number | null }>;
 };
 
 function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
@@ -1023,10 +1024,10 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: clockLabel(at, deps.config.tz),
       place: social.place ?? "",
-      host: { id: social.creator_id, name: social.creator_name },
+      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color) },
       people: listSocialJoins(deps.db, social.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), arriveAt: join.arrive_at })),
     });
   }
   for (const plan of listPastPlans(deps.db, circleId, today)) {
@@ -1041,10 +1042,10 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: plan.at_time ?? "",
       place: plan.place ?? "",
-      host: { id: plan.creator_id, name: plan.creator_name },
+      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color) },
       people: listPlanJoins(deps.db, plan.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), arriveAt: join.arrive_at })),
     });
   }
   events.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at || b.id.localeCompare(a.id));
@@ -1079,6 +1080,7 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
     members: members.map((member) => ({
       id: member.id,
       name: member.name,
+      color: colorHex(member.id, member.color),
       admin: Boolean(member.is_admin),
       reach: reach.get(member.id) ?? "off",
     })),
@@ -1099,11 +1101,12 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
-    creator: { id: social.creator_id, name: social.creator_name },
+    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color) },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
       name: join.name,
+      color: colorHex(join.id, join.color),
       joinedAt: join.joined_at,
       reply: join.reply ?? "join",
       etaMin: join.eta_min ?? null,
@@ -1123,11 +1126,12 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, tomo
     time: plan.at_time,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
-    creator: { id: plan.creator_id, name: plan.creator_name },
+    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color) },
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
     joined: listPlanJoins(db, plan.id).map((join) => ({
       id: join.id,
       name: join.name,
+      color: colorHex(join.id, join.color),
       joinedAt: join.joined_at,
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,

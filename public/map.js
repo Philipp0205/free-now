@@ -106,7 +106,7 @@ export function bindMap({
   function pinIcon(L, pin) {
     return L.divIcon({
       className: `pin pin-${pin.kind}`,
-      html: `<span class="pin-letter">${escapeHtml(pin.initial || "")}</span>`,
+      html: `<span class="pin-letter" style="--person:${escapeHtml(pin.color || "")}">${escapeHtml(pin.initial || "")}</span>`,
       iconSize: [PIN_PX, PIN_PX],
       iconAnchor: [PIN_PX / 2, PIN_PX / 2],
     });
@@ -117,7 +117,7 @@ export function bindMap({
     for (const pin of pins) {
       const key = pinKey(pin);
       next.add(key);
-      const sig = `${pin.lat},${pin.lng},${pin.initial},${pin.kind}`;
+      const sig = `${pin.lat},${pin.lng},${pin.initial},${pin.kind},${pin.color}`;
       const existing = liveMarkers.get(key);
       if (existing) {
         if (existing.sig !== sig) {
