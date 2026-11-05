@@ -1,6 +1,6 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
-import { clockText, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, zonedParts } from "./when.js";
+import { clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
@@ -53,6 +53,8 @@ const state = {
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
   planTime: "",
+  planDay: "tomorrow",
+  planDate: "",
   planWhere: emptyWhereSession(),
   viewerLocation: null,
   mapCenter: null,
@@ -308,6 +310,7 @@ function friendlyMessage(raw, status) {
   if (lower.includes("you can arrive")) return "Pick a time you can arrive.";
   if (lower.includes("only an admin")) return "Only an admin can do that.";
   if (lower.includes("valid time")) return "Pick a valid time, like 19:30";
+  if (lower.includes("pick a date") || lower.includes("date doesn't exist")) return text;
   if (lower.includes("pick a time")) return "Pick a time later today.";
   if (lower.includes("already in a circle")) return "You're already in a circle.";
   if (lower.includes("removed you from this circle")) return "An admin removed you from this circle.";
@@ -1097,13 +1100,16 @@ function home() {
       el("div", { class: "cards" }, later.map(socialCard)),
     ]));
   }
+  const { tomorrow: nextDay } = planDayRange(Date.now(), appTz());
+  const soon = state.plans.filter((plan) => plan.forDate <= nextDay);
+  const upcoming = state.plans.filter((plan) => plan.forDate > nextDay);
   const tomorrow = el("section", { class: "section" }, [
     el("div", { class: "section-row" }, [
-      el("h2", { text: "Tomorrow" }),
+      el("h2", { text: "Today & tomorrow" }),
       el("button", { class: "text-btn", type: "button", text: "Plan tomorrow", onclick: () => openSheet("plan") }),
     ]),
-    el("div", { class: "cards" }, state.plans.length
-      ? state.plans.map(planCard)
+    el("div", { class: "cards" }, soon.length
+      ? soon.map(planCard)
       : [
           el("button", {
             class: "empty",
@@ -1114,6 +1120,12 @@ function home() {
         ]),
   ]);
   parts.push(tomorrow);
+  if (upcoming.length) {
+    parts.push(el("section", { class: "section" }, [
+      el("h2", { text: "Upcoming" }),
+      el("div", { class: "cards" }, upcoming.map(planCard)),
+    ]));
+  }
   parts.push(el("div", { class: "past-entry" }, [
     el("button", { class: "text-btn", type: "button", text: "Past events", onclick: () => { void openPast(); } }),
   ]));
@@ -1823,7 +1835,8 @@ function openAdminEdit(kind, item) {
     session.where = { mode: "place", place, lat, lng, precise: lat != null && lng != null };
     session.whereQuery = place;
   }
-  state.adminEdit = { kind, id: item.id, note: item.note || "", time, ...session };
+  const day = kind === "plan" ? planDayChoice(item.forDate, Date.now(), appTz()) : "";
+  state.adminEdit = { kind, id: item.id, note: item.note || "", time, day, date: item.forDate || "", ...session };
   state.sheet = "admin-edit";
   render();
 }
@@ -1842,6 +1855,7 @@ function adminEditSheet() {
       el("div", { class: "sheet-scroll" }, [
         el("div", { class: "sheet-form" }, [
           sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
+          edit.kind === "plan" ? planDayBlock(edit, "admin") : null,
           el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
             el("input", {
@@ -1851,6 +1865,7 @@ function adminEditSheet() {
               value: edit.time,
               oninput: (event) => { edit.time = event.target.value; },
             }),
+            edit.kind === "plan" ? planTimeError() : null,
           ]),
           whereBlock(edit),
         ]),
@@ -1869,10 +1884,16 @@ async function saveAdminEdit(event) {
   const note = document.getElementById("admin-note")?.value ?? edit.note;
   const picked = wherePayload(edit);
   const time = document.getElementById("admin-time")?.value || null;
+  const date = edit.kind === "plan" ? planDayDate(edit.day, edit.date, Date.now(), appTz()) : "";
+  if (edit.kind === "plan" && !date) {
+    state.error = PICK_DATE_ERROR;
+    render();
+    return;
+  }
   await run(async () => {
     const body = edit.kind === "social"
       ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
-      : { note, place: picked.place, time, lat: picked.lat, lng: picked.lng };
+      : { note, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
@@ -1989,11 +2010,11 @@ function sheet() {
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("div", { class: "sheet-intro" }, [
-          el("h2", { text: planning ? "Tomorrow" : editing ? "Update" : later ? (offeringTomorrow() ? "Free tomorrow" : "Free later today") : "Free now" }),
+          el("h2", { text: planning ? planHeading() : editing ? "Update" : later ? (offeringTomorrow() ? "Free tomorrow" : "Free later today") : "Free now" }),
           el("p", {
             class: "help",
             text: planning
-              ? "Friends can join. It stays up through tomorrow."
+              ? `Friends can join. It stays up through ${planThrough()}.`
               : later
                 ? `Friends get a push now, and a reminder when it starts. It then lasts ${ttl}.`
                 : `Friends in your circle get a push. This lasts ${ttl}.`,
@@ -2014,6 +2035,7 @@ function sheet() {
             placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
             maxlength: "80",
           }),
+          planning ? planDayBlock(state, "plan") : null,
           planning ? el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: "Time (optional)" }),
             el("input", {
@@ -2023,6 +2045,7 @@ function sheet() {
               value: state.planTime,
               oninput: (event) => { state.planTime = event.target.value; },
             }),
+            planTimeError(),
           ]) : null,
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
@@ -2217,7 +2240,7 @@ function collectPins() {
       initial: initial(plan.creator.name),
       color: colorFor(plan.creator),
       note: place ? `${plan.note} · ${place}` : plan.note,
-      time: plan.whenLabel,
+      time: plan.time ? `${plan.whenLabel} · ${plan.time}` : plan.whenLabel,
       own: mine,
     });
   }
@@ -2329,6 +2352,80 @@ function whenChoice(mode, text) {
 }
 
 const TIME_LATER_ERROR = "Pick a time later today.";
+const PICK_DATE_ERROR = "Pick a date from today on.";
+
+function appTz() {
+  return state.meta?.tz || "Europe/Berlin";
+}
+
+/** Today, Tomorrow, or Pick a date. `bag` is state for a new plan, or the edit session. */
+function planDayBlock(bag, prefix) {
+  const dayKey = prefix === "plan" ? "planDay" : "day";
+  const dateKey = prefix === "plan" ? "planDate" : "date";
+  const range = planDayRange(Date.now(), appTz());
+  const choice = (value, text) => {
+    const on = bag[dayKey] === value;
+    return el("button", {
+      type: "button",
+      class: on ? "on" : "",
+      "aria-pressed": on ? "true" : "false",
+      text,
+      onclick: () => {
+        bag[dayKey] = value;
+        if (value === "pick" && !bag[dateKey]) bag[dateKey] = addDaysIso(range.today, 7);
+        if (state.error === PICK_DATE_ERROR || state.error === TIME_LATER_ERROR) state.error = "";
+        render();
+      },
+    });
+  };
+  return el("div", { class: "sheet-group" }, [
+    el("span", { class: "sheet-label", id: `${prefix}-day-label`, text: "Day" }),
+    el("div", { class: "segment segment-3", role: "group", "aria-labelledby": `${prefix}-day-label` }, [
+      choice("today", "Today"),
+      choice("tomorrow", "Tomorrow"),
+      choice("pick", "Pick a date"),
+    ]),
+    bag[dayKey] === "pick"
+      ? el("input", {
+          id: `${prefix}-date`,
+          class: "sheet-control",
+          type: "date",
+          "aria-label": "Date",
+          min: range.min,
+          max: range.max,
+          value: bag[dateKey] || "",
+          onchange: (event) => {
+            bag[dateKey] = event.target.value;
+            render();
+          },
+        })
+      : null,
+  ]);
+}
+
+function addDaysIso(iso, days) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function planTimeError() {
+  return state.error === TIME_LATER_ERROR ? el("p", { class: "time-error", text: TIME_LATER_ERROR }) : null;
+}
+
+function chosenPlanDay() {
+  return planDayDate(state.planDay, state.planDate, Date.now(), appTz());
+}
+
+function planHeading() {
+  const day = chosenPlanDay();
+  return day ? dayLabel(day, planDayRange(Date.now(), appTz()).today) : "Plan";
+}
+
+function planThrough() {
+  const label = planHeading();
+  if (label === "Plan") return "that day";
+  return label === "Today" || label === "Tomorrow" ? label.toLowerCase() : label;
+}
 
 function offeringTomorrow(now = Date.now()) {
   return nextLaterDay(now, state.meta?.tz || "Europe/Berlin") === "tomorrow";
@@ -3352,6 +3449,8 @@ function openSheet(name) {
     state.noteDraft = "";
     state.placeDraft = "";
     state.planTime = "";
+    state.planDay = "tomorrow";
+    state.planDate = "";
     state.planWhere = emptyWhereSession();
   }
   state.focusSheet = false;
@@ -3717,13 +3816,21 @@ async function onCreatePlan(event) {
     place = "";
   }
   const time = document.getElementById("plan-time")?.value || state.planTime || null;
+  const date = chosenPlanDay();
+  if (!date) {
+    state.error = PICK_DATE_ERROR;
+    render();
+    return;
+  }
   const locationNote = state.error;
   if (locationNote) render();
   await run(async () => {
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time } });
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date } });
     state.sheet = null;
     state.placeDraft = "";
     state.planTime = "";
+    state.planDay = "tomorrow";
+    state.planDate = "";
     state.planWhere = emptyWhereSession();
     state.error = locationNote;
     await refresh({ initial: true });

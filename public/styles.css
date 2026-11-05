@@ -929,7 +929,11 @@ input.sheet-control:focus {
   outline: none;
   box-shadow: inset 0 0 0 2px #ff4d8d;
 }
-input[type="time"].sheet-control { color-scheme: dark; }
+input[type="time"].sheet-control,
+input[type="date"].sheet-control { color-scheme: dark; }
+/* iOS gives a native date field its own width and centred text. Keep it a normal row. */
+input[type="date"].sheet-control { display: block; -webkit-appearance: none; appearance: none; text-align: left; }
+input[type="date"].sheet-control::-webkit-date-and-time-value { text-align: left; }
 .segment {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -948,6 +952,8 @@ input[type="time"].sheet-control { color-scheme: dark; }
   font-size: 16px;
 }
 .segment button.on { background: #fff; color: #000; }
+.segment-3 { grid-template-columns: 1fr 1fr 1.25fr; }
+.segment-3 button { padding: 0 4px; white-space: nowrap; }
 .sheet-summary {
   margin: 0;
   color: var(--muted);
