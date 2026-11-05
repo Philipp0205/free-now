@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v25";
+const APP_VERSION = "hangry-v26";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -73,6 +73,7 @@ const state = {
   whereAutofill: false,
   whereResults: [],
   whereSearching: false,
+  whereStatus: "",
   whereHint: "",
   whereMap: false,
   focusSocial: "",
@@ -2322,7 +2323,7 @@ function adminEditSheet() {
   if (!edit) return el("div");
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
-    el("form", { class: "sheet", role: "dialog", "aria-label": "Edit", onsubmit: saveAdminEdit }, [
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Edit", ...saveOnlyFromButton(saveAdminEdit) }, [
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: "Edit" }),
@@ -2807,7 +2808,7 @@ function sheet() {
   const ttl = ttlLabel(state.meta?.socialTtlMs ?? 7200000);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
-    el("form", { class: "sheet", role: "dialog", onsubmit: planning ? onCreatePlan : onFree }, [
+    el("form", { class: "sheet", role: "dialog", ...saveOnlyFromButton(planning ? onCreatePlan : onFree) }, [
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("div", { class: "sheet-intro" }, [
@@ -3050,6 +3051,8 @@ function collectPins() {
 
 let mapWrap = null;
 let whereTimer = 0;
+/** Bumped on every new search or reset. Older answers see a different number and are dropped. */
+let whereSeq = 0;
 let skipWhereInput = false;
 let reverseTimer = 0;
 
@@ -3065,6 +3068,7 @@ function emptyWhereSession() {
     whereAutofill: false,
     whereResults: [],
     whereSearching: false,
+    whereStatus: "",
     whereHint: "",
     whereMap: false,
     whereArea: "",
@@ -3301,6 +3305,31 @@ function friendsSummary() {
 function paintSummary() {
   const node = document.querySelector(".sheet-summary");
   if (node) node.textContent = friendsSummary();
+}
+
+/**
+ * Create and edit sheets save only from their Save / I'm free / Add plan button.
+ * Enter in a field (Android sends its Go / Search key as Enter) would submit the form
+ * implicitly, so the key is cancelled here. Textareas keep Enter for new lines.
+ * (Implicit submit still names the default button as submitter, so the key guard is
+ * what stops it.) #where-query also handles Enter itself and searches. A submit with
+ * no submit button behind it, such as requestSubmit(), is ignored too.
+ */
+function saveOnlyFromButton(handler) {
+  return {
+    onkeydown: (event) => {
+      if (event.key !== "Enter") return;
+      if (event.target instanceof HTMLInputElement) event.preventDefault();
+    },
+    onsubmit: (event) => {
+      const button = event.submitter;
+      if (!(button instanceof HTMLButtonElement) || button.type !== "submit") {
+        event.preventDefault();
+        return;
+      }
+      return handler(event);
+    },
+  };
 }
 
 function sheetField(label, id, value, onValue, attrs = {}) {
@@ -3703,9 +3732,9 @@ function wherePicker(bag = state) {
       enterkeyhint: "search",
       onbeforeinput: (event) => onWhereBeforeInput(bag, event),
       oninput: (event) => onWhereInput(bag, event),
+      onkeydown: (event) => onWhereKeydown(bag, event),
     }),
-    bag.whereHint ? el("p", { class: "where-hint", role: "status", text: bag.whereHint }) : null,
-    !bag.whereHint && bag.whereSearching ? el("p", { class: "where-hint", text: "Searching…" }) : null,
+    whereStatusRow(bag),
     bag.whereResults.length
       ? el("div", { class: "where-results" }, bag.whereResults.map((hit) => el("button", {
           class: "where-hit",
@@ -3735,6 +3764,29 @@ function wherePicker(bag = state) {
   ]);
 }
 
+/** One line under the search field. It keeps its height, so idle, searching, empty and error never shift the sheet. */
+function whereStatusRow(bag) {
+  let child = null;
+  if (bag.whereHint) child = el("span", { class: "where-hint", text: bag.whereHint });
+  else if (bag.whereSearching) child = [el("span", { class: "where-spinner", "aria-hidden": "true" }), el("span", { text: "Searching…" })];
+  else if (bag.whereStatus === "empty") child = el("span", { text: "No places found" });
+  else if (bag.whereStatus === "error") child = el("span", { class: "where-error", text: "Couldn't search. Try again." });
+  return el("p", {
+    class: bag.whereSearching && !bag.whereHint ? "where-status is-searching" : "where-status",
+    role: "status",
+    "aria-live": "polite",
+  }, child);
+}
+
+/** Swap just the status line, so typing never rebuilds the input mid-word. */
+function paintWhereStatus(bag) {
+  const row = document.querySelector(".where-picker .where-status");
+  if (!row) return;
+  const next = whereStatusRow(bag);
+  row.className = next.className;
+  row.replaceChildren(...next.childNodes);
+}
+
 function hitMeta(hit) {
   const distance = Number.isFinite(hit.distanceM) ? formatDistance(hit.distanceM) : "";
   return [distance, hit.address].filter(Boolean).join(" · ");
@@ -3761,7 +3813,7 @@ function chooseWhereHit(bag, hit) {
   bag.where = { mode: "place", place: hit.name, lat: hit.lat, lng: hit.lng, precise: true };
   bag.whereQuery = hit.name;
   bag.whereResults = [];
-  bag.whereSearching = false;
+  stopWhereSearch(bag);
   bag.whereHint = "";
   render();
 }
@@ -3775,11 +3827,10 @@ function clearWhereSelection(bag, keepOpen) {
   bag.where = emptyWhere();
   bag.whereQuery = "";
   bag.whereResults = [];
-  bag.whereSearching = false;
+  stopWhereSearch(bag);
   bag.whereHint = "";
   bag.whereMap = false;
   bag.whereOpen = Boolean(keepOpen);
-  clearTimeout(whereTimer);
   render();
   paintSummary();
   if (keepOpen) queueMicrotask(() => document.getElementById("where-query")?.focus());
@@ -3905,36 +3956,75 @@ function searchQuery(value) {
   return limitWhereQuery(value).trim();
 }
 
-function scheduleWhereSearch(bag = state) {
+/** What the Where status row shows. Only re-render when this changes, not on every key. */
+function whereView(bag) {
+  return [bag.whereHint || "", bag.whereSearching ? 1 : 0, bag.whereStatus || "", bag.whereResults.length].join("|");
+}
+
+/** Repaint after a status change: just the status line if the hit list is the same, else the whole picker. */
+function refreshWhere(bag, before) {
+  const now = whereView(bag);
+  if (now === before) return;
+  const sameList = now.split("|")[3] === before.split("|")[3] && document.querySelector(".where-picker .where-status");
+  if (sameList) paintWhereStatus(bag);
+  else rerenderWhere();
+}
+
+/** Stop any pending or in-flight search so its answer is ignored. */
+function stopWhereSearch(bag) {
   clearTimeout(whereTimer);
+  whereTimer = 0;
+  whereSeq += 1;
+  bag.whereSearching = false;
+  bag.whereStatus = "";
+}
+
+function scheduleWhereSearch(bag = state, { now = false } = {}) {
+  const before = whereView(bag);
   const query = searchQuery(bag.whereQuery);
   const maps = isMapsLink(query);
   const hint = looksLikeUrl(query) && !maps ? URL_HINT : "";
-  if ((bag.whereHint || "") !== hint) {
-    bag.whereHint = hint;
-    if (hint) bag.whereResults = [];
-    rerenderWhere();
-  }
+  stopWhereSearch(bag);
+  bag.whereHint = hint;
   if (hint || (!maps && query.length < 2)) {
     bag.whereResults = [];
-    bag.whereSearching = false;
+    refreshWhere(bag, before);
     return;
   }
-  whereTimer = setTimeout(() => {
-    bag.whereSearching = true;
+  // Show Searching… straight away, through the debounce and the fetch.
+  bag.whereSearching = true;
+  refreshWhere(bag, before);
+  const seq = whereSeq;
+  const go = () => {
+    whereTimer = 0;
     const origin = searchOrigin();
     const near = origin && !maps ? `&lat=${encodeURIComponent(origin.lat)}&lng=${encodeURIComponent(origin.lng)}` : "";
     api(`/api/geocode?q=${encodeURIComponent(query)}${near}`).then((data) => {
-      if (searchQuery(bag.whereQuery) !== query) return;
-      bag.whereResults = data.results || [];
+      if (seq !== whereSeq) return;
+      bag.whereResults = data?.results || [];
       bag.whereSearching = false;
+      bag.whereStatus = bag.whereResults.length ? "" : "empty";
       rerenderWhere();
     }).catch(() => {
+      if (seq !== whereSeq) return;
       bag.whereSearching = false;
       bag.whereResults = [];
+      bag.whereStatus = "error";
       rerenderWhere();
     });
-  }, 400);
+  };
+  if (now) go();
+  else whereTimer = setTimeout(go, 400);
+}
+
+/** Enter / the keyboard's search key runs the search now. It never saves the sheet. */
+function onWhereKeydown(bag, event) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  if (bag.whereAutofill) return;
+  const value = event.target.value;
+  if (value !== bag.whereQuery) applyWhereQuery(bag, value);
+  scheduleWhereSearch(bag, { now: true });
 }
 
 async function defaultCurrentWhere() {
@@ -3968,6 +4058,7 @@ async function useCurrentWhere(bag = state) {
     bag.where = { mode: "here", place: "near you", lat: pos.coords.latitude, lng: pos.coords.longitude, precise: false };
     bag.whereQuery = "Current location";
     bag.whereResults = [];
+    stopWhereSearch(bag);
     state.error = "";
     const keepFocus = document.activeElement?.id === "where-query";
     render();
@@ -4415,7 +4506,7 @@ function openSheet(name) {
     state.whereAutofill = false;
     state.whereOpen = false;
     state.whereResults = [];
-    state.whereSearching = false;
+    stopWhereSearch(state);
     state.whereHint = "";
     state.whereMap = false;
     const mine = mySocial();
