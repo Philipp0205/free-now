@@ -1095,7 +1095,8 @@ export function listVisiblePlans(db: DatabaseSync, circleId: string, today: stri
   clearExpiredPlanPoints(db, today);
   return all<PlanRow>(
     db,
-    `${PLAN_SELECT} WHERE p.circle_id = ? AND p.ended_at IS NULL AND p.for_date >= ? AND p.for_date <= ? ORDER BY p.for_date ASC, p.created_at ASC`,
+    `${PLAN_SELECT} WHERE p.circle_id = ? AND p.ended_at IS NULL AND p.for_date >= ? AND p.for_date <= ?
+     ORDER BY p.for_date ASC, p.at_time IS NULL, p.at_time ASC, p.created_at ASC`,
     circleId,
     today,
     through,
@@ -1213,13 +1214,15 @@ export function patchPlanDetails(
   lat: number | null,
   lng: number | null,
   atTime: string | null,
+  forDate: string,
 ): void {
-  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ? WHERE id = ?").run(
+  db.prepare("UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ? WHERE id = ?").run(
     note,
     place,
     lat,
     lng,
     atTime,
+    forDate,
     id,
   );
 }
@@ -1444,8 +1447,10 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   const planDay = today ? addDays(today, -HISTORY_DAYS) : planCutoff;
   deleteEventChats(db, "social", "expires_at < ?", socialCutoff);
   db.prepare("DELETE FROM socials WHERE expires_at < ?").run(socialCutoff);
-  deleteEventChats(db, "plan", "for_date < ?", planDay);
-  db.prepare("DELETE FROM plans WHERE for_date < ?").run(planDay);
+  // A plan goes 90 days after its day. One ended early goes 90 days after it ended, even if its day is far ahead.
+  const oldPlan = "for_date < ? OR (ended_at IS NOT NULL AND ended_at < ?)";
+  deleteEventChats(db, "plan", oldPlan, planDay, socialCutoff);
+  db.prepare(`DELETE FROM plans WHERE ${oldPlan}`).run(planDay, socialCutoff);
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
 }
