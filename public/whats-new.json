@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-06-icon-maskable",
+    "date": "2026-11-06",
+    "title": "Sharper home-screen icon",
+    "bullets": [
+      "On Android the Hangry icon now fills its shape, with no white frame around it.",
+      "If you still see the old icon, remove Hangry from your home screen and add it again."
+    ]
+  },
+  {
     "id": "2026-11-05-unify-create",
     "date": "2026-11-05",
     "title": "One list, any day",
