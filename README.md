@@ -27,7 +27,7 @@ Use two browser profiles, or a normal window and a private window. They do not s
 5. Profile B: the banner is `Alex is free now`, or `Alex is free from 18:00 – meet at Café X` when there is a time and a place. Tap **Join**, **On my way** (5, 10, or 20 minutes), or **Can't make it**.
 6. Profile A: the card lists who is coming, with ETAs, and who declined. A later social reminds only the people who joined or are on the way, when it starts, and then runs for about two hours.
 
-Tomorrow plans use the **+** button. Friends join those the same way. A social that is free now ends on its own after about two hours (change `SOCIAL_TTL_MS`), or the creator can end it early. A social posted for later today lasts about two hours from that start time.
+Plans use **Plan** (or the **+** button). Pick today, tomorrow, or any date up to a year ahead. Friends join those the same way. A social that is free now ends on its own after about two hours (change `SOCIAL_TTL_MS`), or the creator can end it early. A social posted for later today lasts about two hours from that start time.
 
 Real phone push is a separate step. Generate VAPID keys, set them in the environment, restart, then follow [Install on your phone](#install-on-your-phone). The same guide is in the app, on the welcome screen and under You → notifications.
 
@@ -78,7 +78,7 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `APP_TZ` | `Europe/Berlin` | Timezone that decides what "tomorrow" means. Override it if the circle lives elsewhere. |
 | `MAP_TILE_URL` | Esri World Street Map | HTTPS tile template with `{z}`, `{x}`, and `{y}`. `{s}` is a subdomain and `{r}` is retina when the template contains them. |
 | `MAP_TILE_ATTRIBUTION` | `Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors` | Shown on the map. Change this whenever you change the tiles. |
-| `ADMIN_TOKEN` | unset | Bearer secret for operator routes. `POST /api/admin/query` and `GET /api/admin/schema` stay read-only. `POST /api/admin/circles/:id/delete` deletes a circle. `POST /api/admin/circles/:id/members/:userId/admin` with `{"admin":true}` or `{"admin":false}` sets that member's admin flag. Unset, or shorter than 32 characters, those paths stay hidden and answer 404. A bad token is also 404. Send `Authorization: Bearer <token>`. It is not shown in the app. Do not commit it. |
+| `ADMIN_TOKEN` | unset | Bearer secret for operator routes. `POST /api/admin/query` and `GET /api/admin/schema` stay read-only. `POST /api/admin/circles/:id/delete` deletes a circle. `POST /api/admin/circles/:id/members/:userId/admin` with `{"admin":true}` or `{"admin":false}` sets that member's admin flag. `GET /api/admin/feedback` lists feedback newest first (optional `?status=`), and `POST /api/admin/feedback/:id` with `{"status","prUrl","note"}` updates one. Unset, or shorter than 32 characters, those paths stay hidden and answer 404. A bad token is also 404. Send `Authorization: Bearer <token>`. It is not shown in the app. Do not commit it. |
 
 A wrong admin token is counted per client, eight failures in 60 seconds, and further wrong tokens from that address stay hidden. A correct token is accepted even during that window. Behind Railway the address is the rightmost `X-Forwarded-For` hop, the one the proxy appends; anything to the left is the caller's own header and is ignored. A direct connection uses the socket address. Each query runs in its own process and is killed after one second. A timeout is HTTP 408 `{ "error": "timeout" }`. When a result is cut at 500 rows the body includes `"truncated": true`.
 
@@ -209,7 +209,7 @@ railway.json    Dockerfile builder and health check
 
 ## Location
 
-Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Hangry does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A tomorrow plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
+Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Hangry does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
 
 The push says who is free and, when there is a meetup, where: `Alex is free – meet at Café Einstein`. It never includes coordinates. Tapping it opens that social.
 
@@ -219,11 +219,46 @@ The Map tab (not a switch on Now) shows the same places on a Leaflet map. The de
 
 Place search goes through the server to Photon, then Nominatim, with a Hangry user-agent and about one request a second. When this phone has a location, or the map has been moved, results prefer places within about 30 km and put bars, cafés, and other meeting spots ahead of streets and regions. Each hit shows the distance and a short address.
 
+## Feedback
+
+**Send feedback** on the You tab opens a sheet with one text box, up to 2000 characters. `POST /api/feedback` with `{"text","circleId","appVersion"}` stores it with the sender, the circle they had open (only if they are a member), and the build label. It answers `201 {"ok":true,"id":"…"}`. Empty or over-long text is `400`. Each client may send five in ten minutes, then `429`. Feedback stays when its circle is deleted; the circle is cleared from it.
+
+Operators read it with the admin token:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "$PUBLIC_BASE_URL/api/admin/feedback?status=new"
+curl -H "Authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json" \
+  -d '{"status":"done","prUrl":"https://github.com/Philipp0205/free-now/pulls","note":"Shipped"}' \
+  "$PUBLIC_BASE_URL/api/admin/feedback/<id>"
+```
+
+`status` is one of `new`, `planned`, `in_progress`, `done`, `rejected`. A bad status is `400`, an unknown id is `404`, and like every operator route a missing or wrong token is also `404`. The list returns at most 500 rows, each with `id`, `userId`, `userName`, `circleId`, `circleName`, `text`, `appVersion`, `createdAt`, `status`, `prUrl`, `note`.
+
+## Changelog
+
+The changelog lives in [`public/whats-new.json`](public/whats-new.json). The app shows it as **What's new**: once as a popup after an update, and any time from the You tab.
+
+**Every merged PR that changes something people can see adds an entry.** Put it at the top. The list is newest first.
+
+```json
+{
+  "id": "2026-11-05-short-name",
+  "date": "2026-11-05",
+  "title": "Short headline",
+  "bullets": ["Two to four short lines.", "Say what changed for the person using the app."]
+}
+```
+
+- `id` is lowercase letters, digits, and dashes, at most 64 characters, and never reused. The popup compares against the newest id each person has seen, stored on the phone (`fn_whats_new_seen`) and on the account (`users.whats_new_seen`, sent as `user.whatsNewSeen` from `/api/me`, set with `POST /api/me/whats-new {"id"}`).
+- The popup shows only the entries above the one they last saw. New accounts start with the newest entry marked seen.
+- Do not reorder or delete old entries. A seen id that is no longer in the file shows nothing new.
+- Bump `CACHE` in `public/sw.js` in the same PR.
+
 ## Limitations
 
 - One circle per person. Joining another means leaving the first. The last person to leave deletes the circle.
 - Run a single server process. SQLite on a Railway volume is not a multi-instance database.
-- Socials last two hours unless `SOCIAL_TTL_MS` says otherwise. Tomorrow plans stay through that calendar day in `APP_TZ`, then drop off.
+- Socials last two hours unless `SOCIAL_TTL_MS` says otherwise. Plans stay through their calendar day in `APP_TZ`, then drop off.
 - Repeating the same note is quiet for 30 seconds. A changed note can notify again after 15 seconds.
 - Without VAPID keys, nothing reaches the phone's notification tray. The in-app banner is the stand-in, on purpose, so two browsers can be tested on a laptop.
 - With VAPID keys, push is still best-effort. A dead subscription (HTTP 404 or 410) is deleted. Other failures are logged and the social is still created.
