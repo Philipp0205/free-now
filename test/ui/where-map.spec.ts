@@ -7,6 +7,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
+import { skipWhatsNew } from "./whats-new-seen.js";
 
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const PLACE = "Near Alexanderplatz, Berlin";
@@ -74,6 +75,7 @@ async function phonePage() {
     geolocation: { latitude: 52.52, longitude: 13.405 },
     permissions: ["geolocation"],
   });
+  await skipWhatsNew(context);
   await context.route("**/api/geocode?**", (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.has("q")) return route.fulfill({ json: { results: [] } });
