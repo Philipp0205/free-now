@@ -7,6 +7,8 @@ import {
   getSocialReply,
   isCircleAdmin,
   listMembers,
+  listPlanAudience,
+  planInCircle,
 } from "./db.js";
 import { colorHex } from "./chat-color.js";
 import { notifyUsers } from "./notify.js";
@@ -126,7 +128,8 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
   const circle = findChat(deps.db, circleId, "circle", "");
   const rows = all<{ kind: string; ref_id: string; id: string }>(
     deps.db,
-    "SELECT id, kind, ref_id FROM chats WHERE circle_id = ? AND kind != 'circle'",
+    `SELECT id, kind, ref_id FROM chats WHERE ${EVENT_CHATS_IN_CIRCLE}`,
+    circleId,
     circleId,
   );
   return {
@@ -140,12 +143,22 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
   };
 }
 
+/** Event chats a circle sees: its own socials, and every plan linked to it (whose chat lives under the plan's home). */
+const EVENT_CHATS_IN_CIRCLE =
+  "((circle_id = ? AND kind NOT IN ('circle', 'plan')) OR (kind = 'plan' AND ref_id IN (SELECT plan_id FROM plan_circles WHERE circle_id = ?)))";
+
 /** Circle chat plus every event chat, for each circle this person belongs to. */
 function unreadTotals(deps: ChatDeps, userId: string): Record<string, number> {
   const circles = all<{ circle_id: string }>(deps.db, "SELECT circle_id FROM memberships WHERE user_id = ?", userId);
   const totals: Record<string, number> = {};
   for (const circle of circles) {
-    const chats = all<{ id: string }>(deps.db, "SELECT id FROM chats WHERE circle_id = ?", circle.circle_id);
+    const chats = all<{ id: string }>(
+      deps.db,
+      `SELECT id FROM chats WHERE (circle_id = ? AND kind = 'circle') OR ${EVENT_CHATS_IN_CIRCLE}`,
+      circle.circle_id,
+      circle.circle_id,
+      circle.circle_id,
+    );
     let total = 0;
     for (const chat of chats) total += unreadCount(deps.db, chat.id, userId);
     totals[circle.circle_id] = total;
@@ -189,7 +202,7 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
   if (row.kind !== "text") throw new ChatError(403, "You can't delete that.");
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
-  if (!chat || !inCircle(deps, userId, chat.circle_id)) throw new ChatError(404, "message not found");
+  if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
   const host = chat.kind !== "circle" && chat.host_id === userId;
   const admin = isCircleAdmin(deps.db, chat.circle_id, userId);
   const ownText = row.kind === "text" && row.user_id === userId;
@@ -199,7 +212,7 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
 
 export function setMuted(deps: ChatDeps, userId: string, chatId: string, muted: boolean): void {
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
-  if (!chat || !inCircle(deps, userId, chat.circle_id)) throw new ChatError(404, "chat not found");
+  if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "chat not found");
   if (muted) {
     deps.db.prepare("INSERT INTO chat_mutes (user_id, chat_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(userId, chatId);
   } else {
@@ -313,17 +326,38 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[],
   const title = chat.kind === "circle" ? (chat.title || "Circle chat") : (chat.title || "Chat");
   const ref = chat.kind === "circle" ? "circle" : `${chat.kind}:${chat.ref_id}`;
   deps.db.prepare("UPDATE chats SET last_push_at = ? WHERE id = ?").run(deps.now(), chat.id);
-  const named = one<{ name: string }>(deps.db, "SELECT name FROM circles WHERE id = ?", chat.circle_id);
-  await notifyUsers(deps.db, deps.push, deps.now(), recipients.map((userId) => ({
+  // A shared plan's chat opens in a circle the reader is in: home if they can, else the first linked one.
+  const byCircle = new Map<string, string[]>();
+  for (const userId of recipients) {
+    const circleId = chat.kind === "plan" ? (readerCircle(deps.db, chat, userId) ?? chat.circle_id) : chat.circle_id;
+    const list = byCircle.get(circleId);
+    if (list) list.push(userId);
+    else byCircle.set(circleId, [userId]);
+  }
+  for (const [circleId, userIds] of byCircle) {
+    const named = one<{ name: string }>(deps.db, "SELECT name FROM circles WHERE id = ?", circleId);
+    await notifyUsers(deps.db, deps.push, deps.now(), userIds.map((userId) => ({
+      userId,
+      title,
+      body,
+      kind: "chat",
+      refId: ref,
+      tag: `chat:${chat.id}`,
+      url: `/?chat=${encodeURIComponent(ref)}`,
+      skipAlert: true,
+    })), named ? { id: circleId, name: named.name } : null);
+  }
+}
+
+function readerCircle(db: DatabaseSync, chat: Pick<ChatRow, "ref_id" | "circle_id">, userId: string): string | null {
+  return one<{ circle_id: string }>(
+    db,
+    `SELECT pc.circle_id FROM plan_circles pc JOIN memberships m ON m.circle_id = pc.circle_id AND m.user_id = ?
+     WHERE pc.plan_id = ? ORDER BY pc.circle_id = ? DESC, pc.added_at ASC LIMIT 1`,
     userId,
-    title,
-    body,
-    kind: "chat",
-    refId: ref,
-    tag: `chat:${chat.id}`,
-    url: `/?chat=${encodeURIComponent(ref)}`,
-    skipAlert: true,
-  })), named ? { id: chat.circle_id, name: named.name } : null);
+    chat.ref_id,
+    chat.circle_id,
+  )?.circle_id ?? null;
 }
 
 function noticeRecipients(db: DatabaseSync, chat: ChatRow, senderId: string): Array<{ id: string }> {
@@ -336,7 +370,8 @@ function recipientStillEligible(db: DatabaseSync, chat: ChatRow, userId: string)
 }
 
 function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
-  const members = listMembers(db, chat.circle_id);
+  const linked = chat.kind === "plan" ? listPlanAudience(db, chat.ref_id) : [];
+  const members = linked.length ? linked : listMembers(db, chat.circle_id);
   if (chat.kind === "circle") return members;
   const memberIds = new Set(members.map((member) => member.id));
   const blocked = new Set(
@@ -412,12 +447,32 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
 type Access = { chat: ChatRow; title: string; closed: boolean; blocked: boolean };
 
 function accessThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, writing: boolean, requestedCircle: string | null): Access {
-  const resourceCircle = kind === "social"
-    ? getSocial(deps.db, refId)?.circle_id ?? null
-    : kind === "plan"
-      ? getPlan(deps.db, refId)?.circle_id ?? null
-      : null;
+  if (kind === "plan") return accessPlanThread(deps, userId, refId, writing, requestedCircle);
+  const resourceCircle = kind === "social" ? getSocial(deps.db, refId)?.circle_id ?? null : null;
   const circleId = pickCircle(deps, userId, requestedCircle, resourceCircle);
+  return openThread(deps, userId, circleId, kind, refId, writing);
+}
+
+/** One chat per plan, kept under its home circle. Any linked circle's member may use it. */
+function accessPlanThread(deps: ChatDeps, userId: string, refId: string, writing: boolean, requestedCircle: string | null): Access {
+  const plan = getPlan(deps.db, refId);
+  if (!plan) {
+    const circleId = pickCircle(deps, userId, requestedCircle, null);
+    return openThread(deps, userId, circleId, "plan", refId, writing);
+  }
+  let viewing: string;
+  if (requestedCircle) {
+    viewing = pickCircle(deps, userId, requestedCircle, null);
+  } else {
+    const linked = readerCircle(deps.db, { ref_id: plan.id, circle_id: plan.circle_id }, userId);
+    if (!linked) throw new ChatError(404, "chat not found");
+    viewing = linked;
+  }
+  if (!planInCircle(deps.db, plan.id, viewing)) throw new ChatError(404, "chat not found");
+  return openThread(deps, userId, plan.circle_id, "plan", refId, writing);
+}
+
+function openThread(deps: ChatDeps, userId: string, circleId: string, kind: "circle" | "social" | "plan", refId: string, writing: boolean): Access {
   const now = deps.now();
   const looked = lookEvent(deps, circleId, userId, kind, refId, now);
   if (looked.missing) throw new ChatError(404, "chat not found");
@@ -471,6 +526,19 @@ function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: strin
     title: plan.note.trim() || "Plan",
     hostId: plan.creator_id,
   };
+}
+
+/** A plan chat is open to members of any circle the plan is linked to. */
+function canSeeChat(deps: ChatDeps, userId: string, chat: ChatRow): boolean {
+  if (inCircle(deps, userId, chat.circle_id)) return true;
+  if (chat.kind !== "plan") return false;
+  return Boolean(one(
+    deps.db,
+    `SELECT 1 AS ok FROM plan_circles pc JOIN memberships m ON m.circle_id = pc.circle_id
+     WHERE pc.plan_id = ? AND m.user_id = ?`,
+    chat.ref_id,
+    userId,
+  ));
 }
 
 function inCircle(deps: ChatDeps, userId: string, circleId: string): boolean {

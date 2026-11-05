@@ -7,7 +7,7 @@ import { flushChatNotices } from "../src/chat.js";
 import { api, START, withApp } from "./http.js";
 
 const ADMIN = "a".repeat(32);
-const CIRCLE_ID_TABLES = ["chats", "circle_removals", "feedback", "memberships", "notifications", "plans", "push_deliveries", "socials"];
+const CIRCLE_ID_TABLES = ["chats", "circle_removals", "feedback", "memberships", "notifications", "plan_circles", "plans", "push_deliveries", "socials"];
 
 test("deleting a circle leaves no orphan rows", async () => {
   const logs: string[] = [];
@@ -464,6 +464,7 @@ function belong(db: DatabaseSync, circleId: string): Record<string, number> {
     social_joins: count(db, `SELECT COUNT(*) AS n FROM social_joins WHERE ${inSocials}`, circleId),
     socials: count(db, "SELECT COUNT(*) AS n FROM socials WHERE circle_id = ?", circleId),
     plan_joins: count(db, `SELECT COUNT(*) AS n FROM plan_joins WHERE ${inPlans}`, circleId),
+    plan_circles: count(db, `SELECT COUNT(*) AS n FROM plan_circles WHERE circle_id = ? OR ${inPlans}`, circleId, circleId),
     plans: count(db, "SELECT COUNT(*) AS n FROM plans WHERE circle_id = ?", circleId),
     memberships: count(db, "SELECT COUNT(*) AS n FROM memberships WHERE circle_id = ?", circleId),
     circle_removals: count(db, "SELECT COUNT(*) AS n FROM circle_removals WHERE circle_id = ?", circleId),

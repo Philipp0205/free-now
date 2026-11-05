@@ -192,6 +192,14 @@ CREATE TABLE IF NOT EXISTS plans (
   ended_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS plan_circles (
+  plan_id TEXT NOT NULL,
+  circle_id TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (plan_id, circle_id)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_circles_circle ON plan_circles(circle_id);
+
 CREATE TABLE IF NOT EXISTS plan_joins (
   plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -365,6 +373,8 @@ export function openDb(dbPath: string): DatabaseSync {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_share ON plans(share_id)");
   ensureColumn(db, "plans", "description", "description TEXT");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
+  // Every plan is linked to its home circle. Safe on every boot.
+  db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -735,6 +745,8 @@ export function removeMember(db: DatabaseSync, circleId: string, userId: string)
       circleId,
     );
     if (!row || Number(row.n) === 0) {
+      dropPlanLinks(db, "circle_id = ?", circleId);
+      db.prepare("DELETE FROM plan_circles WHERE circle_id = ?").run(circleId);
       db.prepare("DELETE FROM circles WHERE id = ?").run(circleId);
     }
   });
@@ -765,7 +777,12 @@ function endMemberEvents(db: DatabaseSync, circleId: string, userId: string): vo
   deleteEventChats(db, "social", "circle_id = ? AND creator_id = ?", circleId, userId);
   db.prepare("DELETE FROM socials WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
   deleteEventChats(db, "plan", "circle_id = ? AND creator_id = ?", circleId, userId);
+  dropPlanLinks(db, "circle_id = ? AND creator_id = ?", circleId, userId);
   db.prepare("DELETE FROM plans WHERE circle_id = ? AND creator_id = ?").run(circleId, userId);
+  // Their plans shared into this circle from another one leave with them.
+  db.prepare(
+    "DELETE FROM plan_circles WHERE circle_id = ? AND plan_id IN (SELECT id FROM plans WHERE creator_id = ?)",
+  ).run(circleId, userId);
   db.prepare(
     "DELETE FROM social_joins WHERE user_id = ? AND social_id IN (SELECT id FROM socials WHERE circle_id = ?)",
   ).run(userId, circleId);
@@ -800,6 +817,7 @@ export type CircleDeleteCounts = {
   social_joins: number;
   socials: number;
   plan_joins: number;
+  plan_circles: number;
   plans: number;
   memberships: number;
   circle_removals: number;
@@ -817,7 +835,8 @@ export type CircleDeleteResult = {
  * Removes one circle and everything that belongs to it. One transaction.
  *
  * Tables that reference circle_id:
- * memberships, socials, plans, notifications, circle_removals, chats, push_deliveries.
+ * memberships, socials, plans, plan_circles, notifications, circle_removals, chats, push_deliveries.
+ * plan_circles also loses every link of a plan whose home is this circle.
  * feedback is the exception: its rows stay and circle_id is set to NULL.
  *
  * Also removed in that same transaction (no circle_id column of their own;
@@ -844,6 +863,7 @@ export function deleteCircle(db: DatabaseSync, circleId: string): CircleDeleteRe
       social_joins: removed(db, `DELETE FROM social_joins WHERE ${inSocials}`, circleId),
       socials: removed(db, "DELETE FROM socials WHERE circle_id = ?", circleId),
       plan_joins: removed(db, `DELETE FROM plan_joins WHERE ${inPlans}`, circleId),
+      plan_circles: removed(db, `DELETE FROM plan_circles WHERE circle_id = ? OR ${inPlans}`, circleId, circleId),
       plans: removed(db, "DELETE FROM plans WHERE circle_id = ?", circleId),
       memberships: removed(db, "DELETE FROM memberships WHERE circle_id = ?", circleId),
       circle_removals: removed(db, "DELETE FROM circle_removals WHERE circle_id = ?", circleId),
@@ -1114,13 +1134,14 @@ export function insertPlan(
     plan.place,
     plan.atTime ?? null,
   );
+  linkPlanCircle(db, plan.id, plan.circleId, plan.createdAt);
 }
 
 export function listVisiblePlans(db: DatabaseSync, circleId: string, today: string, through: string): PlanRow[] {
   clearExpiredPlanPoints(db, today);
   return all<PlanRow>(
     db,
-    `${PLAN_SELECT} WHERE p.circle_id = ? AND p.ended_at IS NULL AND p.for_date >= ? AND p.for_date <= ?
+    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ? AND p.for_date <= ?
      ORDER BY p.for_date ASC, p.at_time IS NULL, p.at_time ASC, p.created_at ASC`,
     circleId,
     today,
@@ -1131,11 +1152,66 @@ export function listVisiblePlans(db: DatabaseSync, circleId: string, today: stri
 export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string): number {
   const row = one<{ n: number | bigint }>(
     db,
-    "SELECT COUNT(*) AS n FROM plans WHERE circle_id = ? AND ended_at IS NULL AND for_date >= ?",
+    `SELECT COUNT(*) AS n FROM plans p WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ?`,
     circleId,
     today,
   );
   return Number(row?.n ?? 0);
+}
+
+/** A plan shows in every circle it is linked to. plans.circle_id is its home. */
+const IN_CIRCLE = "p.id IN (SELECT plan_id FROM plan_circles WHERE circle_id = ?)";
+
+export function listPlanCircleIds(db: DatabaseSync, planId: string): string[] {
+  return all<{ circle_id: string }>(
+    db,
+    `SELECT pc.circle_id FROM plan_circles pc JOIN plans p ON p.id = pc.plan_id
+     WHERE pc.plan_id = ? ORDER BY pc.circle_id = p.circle_id DESC, pc.added_at ASC, pc.circle_id ASC`,
+    planId,
+  ).map((row) => row.circle_id);
+}
+
+/** Linked circles, home first, as {id, name}. */
+export function listPlanCircles(db: DatabaseSync, planId: string): Array<{ id: string; name: string }> {
+  return all<{ id: string; name: string }>(
+    db,
+    `SELECT c.id, c.name FROM plan_circles pc
+     JOIN plans p ON p.id = pc.plan_id
+     JOIN circles c ON c.id = pc.circle_id
+     WHERE pc.plan_id = ? ORDER BY pc.circle_id = p.circle_id DESC, pc.added_at ASC, c.name ASC`,
+    planId,
+  );
+}
+
+export function planInCircle(db: DatabaseSync, planId: string, circleId: string): boolean {
+  return Boolean(one(db, "SELECT 1 AS ok FROM plan_circles WHERE plan_id = ? AND circle_id = ?", planId, circleId));
+}
+
+export function linkPlanCircle(db: DatabaseSync, planId: string, circleId: string, addedAt: number): void {
+  db.prepare("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) VALUES (?, ?, ?)").run(planId, circleId, addedAt);
+}
+
+export function unlinkPlanCircle(db: DatabaseSync, planId: string, circleId: string): void {
+  db.prepare("DELETE FROM plan_circles WHERE plan_id = ? AND circle_id = ?").run(planId, circleId);
+}
+
+/** The linked circle to show this person the plan in: home first, then link order. */
+export function planCircleForUser(db: DatabaseSync, planId: string, userId: string): CircleRow | undefined {
+  for (const circleId of listPlanCircleIds(db, planId)) {
+    if (one(db, "SELECT 1 AS ok FROM memberships WHERE circle_id = ? AND user_id = ?", circleId, userId)) {
+      return getCircleById(db, circleId);
+    }
+  }
+  return undefined;
+}
+
+/** Members of every linked circle, once each. */
+export function listPlanAudience(db: DatabaseSync, planId: string): MemberRow[] {
+  const seen = new Map<string, MemberRow>();
+  for (const circleId of listPlanCircleIds(db, planId)) {
+    for (const member of listMembers(db, circleId)) if (!seen.has(member.id)) seen.set(member.id, member);
+  }
+  return [...seen.values()];
 }
 
 export function getPlan(db: DatabaseSync, id: string): PlanRow | undefined {
@@ -1204,11 +1280,13 @@ export function removePlanJoin(db: DatabaseSync, planId: string, userId: string)
 }
 
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
+  dropPlanLinks(db, "id = ? AND creator_id = ?", id, creatorId);
   const result = db.prepare("DELETE FROM plans WHERE id = ? AND creator_id = ?").run(id, creatorId);
   return Number(result.changes);
 }
 
 export function deletePlanById(db: DatabaseSync, id: string): number {
+  dropPlanLinks(db, "id = ?", id);
   const result = db.prepare("DELETE FROM plans WHERE id = ?").run(id);
   return Number(result.changes);
 }
@@ -1240,7 +1318,7 @@ export function listPastSocials(db: DatabaseSync, circleId: string, now: number)
 export function listPastPlans(db: DatabaseSync, circleId: string, today: string): PlanRow[] {
   return all<PlanRow>(
     db,
-    `${PLAN_SELECT} WHERE p.circle_id = ? AND (p.for_date < ? OR p.ended_at IS NOT NULL) ORDER BY p.for_date DESC, p.created_at DESC`,
+    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND (p.for_date < ? OR p.ended_at IS NOT NULL) ORDER BY p.for_date DESC, p.created_at DESC`,
     circleId,
     today,
   );
@@ -1453,6 +1531,10 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, circleId
   ).run(readAt, userId, circleId);
 }
 
+function dropPlanLinks(db: DatabaseSync, whereSql: string, ...params: Array<string | number>): void {
+  db.prepare(`DELETE FROM plan_circles WHERE plan_id IN (SELECT id FROM plans WHERE ${whereSql})`).run(...params);
+}
+
 function deleteEventChats(db: DatabaseSync, kind: "social" | "plan", whereSql: string, ...params: Array<string | number>): void {
   const table = kind === "social" ? "socials" : "plans";
   db.prepare(`DELETE FROM chats WHERE kind = ? AND ref_id IN (SELECT id FROM ${table} WHERE ${whereSql})`).run(kind, ...params);
@@ -1490,6 +1572,7 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   // A plan goes 90 days after its day. One ended early goes 90 days after it ended, even if its day is far ahead.
   const oldPlan = "for_date < ? OR (ended_at IS NOT NULL AND ended_at < ?)";
   deleteEventChats(db, "plan", oldPlan, planDay, socialCutoff);
+  dropPlanLinks(db, oldPlan, planDay, socialCutoff);
   db.prepare(`DELETE FROM plans WHERE ${oldPlan}`).run(planDay, socialCutoff);
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
