@@ -20,6 +20,7 @@ export type PushPerson = {
   id: string;
   name: string;
   color: string;
+  avatarRev: number | null;
   status: PushPersonStatus;
   httpStatus: number | null;
 };
@@ -78,6 +79,7 @@ export function summarizePush(
       id: member.id,
       name: member.name,
       color: colorHex(member.id, member.color),
+      avatarRev: member.avatar_rev || null,
       status,
       httpStatus: status === "failed" ? (failed?.http_status ?? null) : null,
     };

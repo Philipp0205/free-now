@@ -13,6 +13,7 @@ export type UserRow = {
   created_at: number;
   color?: number | null;
   whats_new_seen?: string | null;
+  avatar_rev?: number | null;
 };
 
 export type CircleRow = {
@@ -30,6 +31,7 @@ export type SocialRow = {
   creator_id: string;
   creator_name: string;
   creator_color: number | null;
+  creator_avatar_rev: number | null;
   note: string;
   created_at: number;
   expires_at: number;
@@ -54,6 +56,7 @@ export type JoinRow = {
   id: string;
   name: string;
   color: number | null;
+  avatar_rev: number | null;
   joined_at: number;
   reply: string;
   eta_min: number | null;
@@ -66,6 +69,7 @@ export type PlanRow = {
   creator_id: string;
   creator_name: string;
   creator_color: number | null;
+  creator_avatar_rev: number | null;
   note: string;
   for_date: string;
   created_at: number;
@@ -102,6 +106,7 @@ export type MemberRow = {
   id: string;
   name: string;
   color: number | null;
+  avatar_rev: number | null;
   joined_at: number;
   is_admin: number;
 };
@@ -358,6 +363,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "push_seen_at", "push_seen_at INTEGER");
   ensureColumn(db, "users", "color", "color INTEGER");
   ensureColumn(db, "users", "whats_new_seen", "whats_new_seen TEXT");
+  ensureColumn(db, "users", "avatar_rev", "avatar_rev INTEGER");
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -533,6 +539,30 @@ export function updateUserName(db: DatabaseSync, id: string, name: string): void
   db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, id);
 }
 
+/** Bumps the photo revision and returns it. A new rev means a new URL, so caches never serve the old photo. */
+export function bumpAvatarRev(db: DatabaseSync, id: string, now: number): number {
+  // Seconds since epoch as a floor, so a photo set after a remove never reuses an old (cached) rev.
+  db.prepare("UPDATE users SET avatar_rev = MAX(COALESCE(avatar_rev, 0) + 1, ?) WHERE id = ?").run(Math.floor(now / 1000), id);
+  return Number(one<{ avatar_rev: number }>(db, "SELECT avatar_rev FROM users WHERE id = ?", id)?.avatar_rev ?? 0);
+}
+
+export function clearAvatarRev(db: DatabaseSync, id: string): void {
+  db.prepare("UPDATE users SET avatar_rev = NULL WHERE id = ?").run(id);
+}
+
+/** Same person, or someone in at least one circle with them. */
+export function sharesCircle(db: DatabaseSync, viewerId: string, userId: string): boolean {
+  if (viewerId === userId) return true;
+  return Boolean(one(
+    db,
+    `SELECT 1 AS ok FROM memberships mine
+     JOIN memberships theirs ON theirs.circle_id = mine.circle_id
+     WHERE mine.user_id = ? AND theirs.user_id = ? LIMIT 1`,
+    viewerId,
+    userId,
+  ));
+}
+
 export function updateCircleName(db: DatabaseSync, id: string, name: string): void {
   db.prepare("UPDATE circles SET name = ? WHERE id = ?").run(name, id);
 }
@@ -602,7 +632,7 @@ export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | 
 export function listMembers(db: DatabaseSync, circleId: string): MemberRow[] {
   return all<MemberRow>(
     db,
-    `SELECT u.id, u.name, u.color, m.joined_at, m.is_admin
+    `SELECT u.id, u.name, u.color, u.avatar_rev, m.joined_at, m.is_admin
      FROM memberships m
      JOIN users u ON u.id = m.user_id
      WHERE m.circle_id = ?
@@ -991,7 +1021,7 @@ export function getSocial(db: DatabaseSync, id: string): SocialRow | undefined {
 export function listSocialJoins(db: DatabaseSync, socialId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, u.color, j.joined_at, j.reply, j.eta_min, j.arrive_at
+    `SELECT u.id, u.name, u.color, u.avatar_rev, j.joined_at, j.reply, j.eta_min, j.arrive_at
      FROM social_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.social_id = ? AND j.blocked = 0
@@ -1236,7 +1266,7 @@ export function clearPlanShareId(db: DatabaseSync, planId: string): void {
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, u.color, j.joined_at, j.reply, NULL AS eta_min, j.arrive_at
+    `SELECT u.id, u.name, u.color, u.avatar_rev, j.joined_at, j.reply, NULL AS eta_min, j.arrive_at
      FROM plan_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.plan_id = ? AND j.blocked = 0
@@ -1604,14 +1634,14 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 }
 
 const SOCIAL_SELECT = `
-  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, s.note,
+  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, s.note,
          s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
 
 const PLAN_SELECT = `
-  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, p.note, p.for_date, p.created_at,
+  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
          p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description
   FROM plans p
   JOIN users u ON u.id = p.creator_id
