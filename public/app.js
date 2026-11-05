@@ -2129,7 +2129,7 @@ function placeOpenCardMenus() {
   });
 }
 
-function cardOverflow(kind, item) {
+function cardOverflow(kind, item, { onMap = false } = {}) {
   if (!item?.id) return null;
   const key = cardMenuKey(kind, item);
   const open = state.cardMenu === key;
@@ -2162,7 +2162,8 @@ function cardOverflow(kind, item) {
       on: declined,
     });
   }
-  if (kind === "plan" && item.location) {
+  /* Map card already has a quiet Open in Maps link; keep the menu item on plan cards only. */
+  if (!onMap && kind === "plan" && item.location) {
     items.push({
       text: "Open in Maps",
       action: () => {
@@ -4110,7 +4111,7 @@ function mapCard(pin) {
         tabindex: "0",
         onclick: () => item && openEventDetail(kind, item),
       }),
-      item ? cardOverflow(kind, item) : null,
+      item ? cardOverflow(kind, item, { onMap: true }) : null,
     ]),
     el("div", {
       class: "map-card-body",

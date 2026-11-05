@@ -155,6 +155,7 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
       await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
       await menu.getByRole("menuitem", { name: "Pick arrival time" }).waitFor();
       await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+      await menu.getByRole("menuitem", { name: "Open in Maps" }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: "Edit" }).count(), 0);
       assert.equal(await menu.getByRole("menuitem", { name: "End plan" }).count(), 0);
       await page.screenshot({ path: shot("friend-menu-w360.png") });
@@ -302,7 +303,9 @@ test("map card has the In toggle and ⋯ menu, and the menu stays on screen", { 
       const menu = page.getByRole("menu");
       await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: "Edit", exact: true }).count(), 0);
-      await page.screenshot({ path: shot(`map-menu-w${width}.png`) });
+      assert.equal(await menu.getByRole("menuitem", { name: "Open in Maps" }).count(), 0, "map ⋯ has no duplicate Open in Maps");
+      assert.equal(await card.getByRole("link", { name: "Open in Maps" }).count(), 1, "quiet Open in Maps stays on the map card");
+      await page.screenshot({ path: shot(width === 360 ? "map-menu-after-w360.png" : `map-menu-w${width}.png`) });
       assert.deepEqual(await noOverlap(page, ".map-card"), []);
     } finally {
       await page.context().close();
