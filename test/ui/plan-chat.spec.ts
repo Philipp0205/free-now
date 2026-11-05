@@ -152,7 +152,7 @@ test("an open sheet dims the page and blocks the form behind it", { timeout: 90_
   }
 });
 
-test("chat badge, banner, and per-circle dots follow unread", { timeout: 90_000 }, async () => {
+test("chat badge and banner follow unread; circle chat leaves circle dots alone", { timeout: 90_000 }, async () => {
   const page = await phone();
   try {
     await signIn(page, "Alex");
@@ -190,13 +190,20 @@ test("chat badge, banner, and per-circle dots follow unread", { timeout: 90_000 
       body: JSON.stringify({ text: "In friends" }),
     });
     assert.equal(posted.status, 201, await posted.text());
+    // Sam joining is an alert; read it so only the unread circle chat is left.
+    await fetch(`${baseUrl}/api/notifications/read?circle=${me.circle.id}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+    });
     await page.reload();
     await dismiss(page);
     await page.getByRole("button", { name: "Switch circle" }).click();
     const menu = page.locator(".circle-menu");
-    assert.equal(await menu.getByRole("button", { name: "friends" }).locator(".unread-dot").count(), 1);
+    // Circle dots mean unread Alerts only; circle chat stays out of Alerts, so no dot.
+    assert.equal(await menu.getByRole("button", { name: "friends" }).locator(".unread-dot").count(), 0);
     assert.equal(await menu.getByRole("button", { name: "Home" }).locator(".unread-dot").count(), 0);
-    assert.equal(await page.locator(".circle-switch-btn .unread-dot").count(), 1);
+    assert.equal(await page.locator(".circle-switch-btn .unread-dot").count(), 0);
   } finally {
     await page.context().close();
   }

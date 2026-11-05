@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v28";
+const APP_VERSION = "hangry-v29";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -1448,18 +1448,13 @@ function circleUnread() {
   return state.chatSummary?.circle?.unread || 0;
 }
 
-/** A circle dot means unread alerts or unread chat in that circle. */
+/** A circle dot means unread Alerts in that circle. Chat unread has its own badges. */
 function circleHasUnread(id) {
-  const alerts = state.me?.circles?.find((circle) => circle.id === id)?.alertUnread || 0;
-  return alerts > 0 || (state.chatSummary?.unreadByCircle?.[id] || 0) > 0;
+  return (state.me?.circles?.find((circle) => circle.id === id)?.alertUnread || 0) > 0;
 }
 
 function anyCircleUnread() {
-  const ids = new Set([
-    ...(state.me?.circles || []).map((circle) => circle.id),
-    ...Object.keys(state.chatSummary?.unreadByCircle || {}),
-  ]);
-  return [...ids].some((id) => circleHasUnread(id));
+  return (state.me?.circles || []).some((circle) => circleHasUnread(circle.id));
 }
 
 /** Copies fresh per-circle alert counts from /api/notifications onto the circle list. */
