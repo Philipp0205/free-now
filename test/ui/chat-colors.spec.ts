@@ -88,8 +88,8 @@ test("own messages carry the avatar color and a friend keeps one color in every 
 
     await page.getByRole("button", { name: "Back" }).click();
     await page.getByRole("button", { name: "Now", exact: true }).click();
-    await page.locator("article .chat-chip").first().click();
-    await page.getByText("No rush").waitFor();
+    await page.locator("article .chat-row").first().click();
+    await page.locator(".chat-msg", { hasText: "No rush" }).waitFor();
     const eventChat = await readChat(page);
     assert.equal(eventChat.find((row) => row.text === "Running 5 min late")?.bar, beaCircle.bar, "Bea is the same in both chats");
     assert.equal(eventChat.find((row) => row.text === "No rush")?.bar, avatar);

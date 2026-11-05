@@ -281,7 +281,7 @@ button:disabled { cursor: default; opacity: 0.55; }
   bottom: auto;
   padding: 16px;
 }
-.card-bg, .card-shade { position: absolute; inset: 0; }
+.card-bg, .card-shade { position: absolute; inset: 0; border-radius: inherit; }
 .card-now .card-bg {
   background:
     radial-gradient(circle at 18% 110%, rgba(255, 45, 120, 0.55), transparent 46%),
@@ -309,14 +309,184 @@ button:disabled { cursor: default; opacity: 0.55; }
 }
 .card-now:has(.card-tools) .card-copy,
 .card-plan:has(.card-tools) .card-copy {
-  padding-top: 72px;
+  padding-top: 16px;
 }
+.card-now .card-copy,
+.card-plan .card-copy {
+  padding-top: 16px;
+  padding-right: 16px;
+}
+.card.menu-open {
+  overflow: visible;
+  z-index: 6;
+}
+.card-overflow {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+}
+.card-more {
+  appearance: none;
+  border: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(28, 28, 30, 0.72);
+  color: #fff;
+  padding: 0;
+}
+.card-more .icon, .card-more .icon svg { width: 20px; height: 20px; }
+.card-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: min(220px, calc(100vw - 48px));
+  max-width: min(260px, calc(100vw - 32px));
+  max-height: min(320px, calc(100dvh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #1c1c1e;
+  border-radius: 14px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  z-index: 8;
+}
+.card-menu.drop-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.card-menu button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  font: inherit;
+  font-size: 16px;
+  padding: 12px;
+  border-radius: 10px;
+  min-height: 44px;
+}
+.card-menu button.on { background: rgba(255, 255, 255, 0.08); }
+.card-menu button.danger { color: #ff453a; }
+.card-menu button:active { background: rgba(255, 255, 255, 0.08); }
+.card-body { display: flex; flex-direction: column; gap: 0; cursor: pointer; }
+.card-body:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; border-radius: 12px; }
+/* Leave a quiet slot under the place line for a future plan-circles row. */
+.card-body .place-line { margin-bottom: 2px; }
+.plan-circles {
+  margin: 2px 0 4px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  min-height: 0;
+}
+.chat-row {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  margin-top: 10px;
+  min-height: 48px;
+  border-radius: 14px;
+  background: rgba(28, 28, 30, 0.72);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  text-align: left;
+  font: inherit;
+}
+.chat-row .icon, .chat-row .icon svg { width: 18px; height: 18px; flex: none; }
+.chat-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chat-row-copy strong { font-size: 14px; font-weight: 650; }
+.chat-row-preview {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-row-preview.muted { color: rgba(255, 255, 255, 0.45); }
+.chat-row .badge {
+  position: static;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 99px;
+  background: #9f1239;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.in-toggle {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  margin-top: 10px;
+  min-height: 48px;
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 650;
+}
+.in-toggle.on {
+  background: #fff;
+  color: #111;
+  box-shadow: none;
+}
+.in-toggle:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.in-toggle:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; }
+.map-card .card-overflow { position: relative; top: auto; right: auto; }
+.map-card .card-more { background: #2c2c2e; }
+.map-card.menu-open { overflow: visible; z-index: 1100; }
+.map-card .chat-row { background: #2c2c2e; }
+.map-card .in-toggle { margin-top: 10px; }
+.map-card .map-link.quiet {
+  margin-top: 10px;
+  flex: none;
+  width: 100%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.detail-desc { margin: 0 0 8px; color: #fff; line-height: 1.4; overflow-wrap: anywhere; }
+.detail-place { margin: 0 0 12px; color: var(--muted); }
+
 .card-copy {
   position: absolute;
   left: 16px;
   right: 16px;
   bottom: 16px;
   z-index: 1;
+}
+/* Proposal A cards grow with chat row + toggle; keep copy in normal flow. */
+.card-plan,
+.card-now {
+  height: auto;
+  overflow: visible;
+}
+.card-plan .card-copy,
+.card-now .card-copy {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  padding: 16px;
+  padding-top: 16px;
+  padding-right: 16px;
 }
 .card-copy h3 {
   margin: 6px 0 2px;
