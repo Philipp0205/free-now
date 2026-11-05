@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-notifications-off",
+    "date": "2026-11-05",
+    "title": "Turn notifications off",
+    "bullets": [
+      "You \u2192 Notifications now has a Turn off button.",
+      "This phone stops getting pushes. Turn them back on any time."
+    ]
+  },
+  {
     "id": "2026-11-05-card-redesign-a",
     "date": "2026-11-05",
     "title": "Clearer plan cards",
