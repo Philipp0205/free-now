@@ -1566,7 +1566,8 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     await page.locator("#chat-input").fill("From Nia");
     await page.getByRole("button", { name: "Send" }).click();
     await page.locator(".chat-msg.mine").waitFor();
-    assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), null);
+    const niaMe = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${nia.token}` } }).then((response) => response.json());
+    assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), niaMe.user.color);
     await page.getByRole("button", { name: "Back" }).click();
     await page.getByRole("button", { name: "Now", exact: true }).click();
     await page.locator("article .chat-chip").click();

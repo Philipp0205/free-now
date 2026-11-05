@@ -1,4 +1,8 @@
-/** Twelve hues tuned so the same hex is WCAG AA on both black and white. */
+/**
+ * Twelve hues tuned so the same hex is WCAG AA on both black and white, so a
+ * bar, a name, or white initials on it read in light and dark. Each person keeps
+ * one slot in users.color (see assignUserColor in db.ts).
+ */
 export const CHAT_COLORS = [
   "#dd341a",
   "#b26017",
@@ -13,6 +17,12 @@ export const CHAT_COLORS = [
   "#ad47cf",
   "#de158a",
 ] as const;
+
+/** Hex for a stored slot. Before someone's first circle there is no slot yet, so the hash slot stands in. */
+export function colorHex(userId: string, slot: number | null | undefined): string {
+  const index = slot != null && slot >= 0 && slot < CHAT_COLORS.length ? slot : preferredColor(userId);
+  return CHAT_COLORS[index];
+}
 
 export function preferredColor(userId: string): number {
   let hash = 2166136261;

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { CHAT_COLORS, chooseColor } from "./chat-color.js";
 import { addDays } from "./time.js";
 
 export type UserRow = {
@@ -10,6 +11,7 @@ export type UserRow = {
   token_hash: string;
   buzz_token: string;
   created_at: number;
+  color?: number | null;
 };
 
 export type CircleRow = {
@@ -26,6 +28,7 @@ export type SocialRow = {
   circle_id: string;
   creator_id: string;
   creator_name: string;
+  creator_color: number | null;
   note: string;
   created_at: number;
   expires_at: number;
@@ -49,6 +52,7 @@ export type DueStartReminder = {
 export type JoinRow = {
   id: string;
   name: string;
+  color: number | null;
   joined_at: number;
   reply: string;
   eta_min: number | null;
@@ -60,6 +64,7 @@ export type PlanRow = {
   circle_id: string;
   creator_id: string;
   creator_name: string;
+  creator_color: number | null;
   note: string;
   for_date: string;
   created_at: number;
@@ -93,6 +98,7 @@ export type NotificationRow = {
 export type MemberRow = {
   id: string;
   name: string;
+  color: number | null;
   joined_at: number;
   is_admin: number;
 };
@@ -121,7 +127,8 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL,
   display_at INTEGER,
   standalone_at INTEGER,
-  push_seen_at INTEGER
+  push_seen_at INTEGER,
+  color INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS circles (
@@ -323,6 +330,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "display_at", "display_at INTEGER");
   ensureColumn(db, "users", "standalone_at", "standalone_at INTEGER");
   ensureColumn(db, "users", "push_seen_at", "push_seen_at INTEGER");
+  ensureColumn(db, "users", "color", "color INTEGER");
+  backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
   db.prepare(
@@ -522,6 +531,7 @@ export function insertCircle(
       circle.id,
       joinedAt,
     );
+    assignUserColor(db, userId);
   });
 }
 
@@ -560,7 +570,7 @@ export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | 
 export function listMembers(db: DatabaseSync, circleId: string): MemberRow[] {
   return all<MemberRow>(
     db,
-    `SELECT u.id, u.name, m.joined_at, m.is_admin
+    `SELECT u.id, u.name, u.color, m.joined_at, m.is_admin
      FROM memberships m
      JOIN users u ON u.id = m.user_id
      WHERE m.circle_id = ?
@@ -607,6 +617,72 @@ export function addMember(db: DatabaseSync, circleId: string, userId: string, jo
     circleId,
     joinedAt,
   );
+  assignUserColor(db, userId);
+}
+
+const CHAT_COLOR_COUNT = CHAT_COLORS.length;
+
+/** Slots held by anyone who shares at least one circle with this person. */
+function coMemberColors(db: DatabaseSync, userId: string): Set<number> {
+  const rows = all<{ color: number }>(
+    db,
+    `SELECT DISTINCT u.color FROM users u
+     JOIN memberships other ON other.user_id = u.id
+     JOIN memberships mine ON mine.circle_id = other.circle_id
+     WHERE mine.user_id = ? AND u.id != ? AND u.color IS NOT NULL`,
+    userId,
+    userId,
+  );
+  return new Set(rows.map((row) => row.color));
+}
+
+/**
+ * One color per person, the same in every circle, chat, and device. It is picked
+ * once, when the first circle is joined: the hash slot for someone alone, else a
+ * hue nobody in a shared circle holds (chooseColor keeps neighbours apart). After
+ * that it never moves, so a later circle, or a 13th member, can share a hue with
+ * someone already there. Stability wins over distinctness.
+ */
+export function assignUserColor(db: DatabaseSync, userId: string): number | null {
+  const row = one<{ color: number | null }>(db, "SELECT color FROM users WHERE id = ?", userId);
+  if (!row) return null;
+  if (row.color != null) return row.color;
+  const color = chooseColor(userId, coMemberColors(db, userId));
+  db.prepare("UPDATE users SET color = ? WHERE id = ? AND color IS NULL").run(color, userId);
+  return color;
+}
+
+/**
+ * Gives a color to everyone in a circle who has none, oldest member first.
+ * A person whose old per-circle chat_color agrees across their circles keeps it
+ * unless a co-member already took it. Everyone else goes through assignUserColor.
+ * Runs on every open and only touches rows still NULL, so stored colors stay.
+ */
+export function backfillUserColors(db: DatabaseSync): void {
+  const users = all<{ id: string }>(
+    db,
+    `SELECT u.id FROM users u JOIN memberships m ON m.user_id = u.id
+     WHERE u.color IS NULL
+     GROUP BY u.id
+     ORDER BY MIN(m.joined_at) ASC, u.id ASC`,
+  );
+  if (users.length === 0) return;
+  const kept = db.prepare("UPDATE users SET color = ? WHERE id = ? AND color IS NULL");
+  withTx(db, () => {
+    const rest: string[] = [];
+    for (const user of users) {
+      const old = all<{ chat_color: number | null }>(
+        db,
+        "SELECT DISTINCT chat_color FROM memberships WHERE user_id = ? AND chat_color IS NOT NULL",
+        user.id,
+      ).map((row) => row.chat_color);
+      const slot = old.length === 1 ? old[0] : null;
+      if (slot != null && slot >= 0 && slot < CHAT_COLOR_COUNT && !coMemberColors(db, user.id).has(slot)) {
+        kept.run(slot, user.id);
+      } else rest.push(user.id);
+    }
+    for (const id of rest) assignUserColor(db, id);
+  });
 }
 
 export function removeMember(db: DatabaseSync, circleId: string, userId: string): void {
@@ -870,7 +946,7 @@ export function getSocial(db: DatabaseSync, id: string): SocialRow | undefined {
 export function listSocialJoins(db: DatabaseSync, socialId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, j.joined_at, j.reply, j.eta_min, j.arrive_at
+    `SELECT u.id, u.name, u.color, j.joined_at, j.reply, j.eta_min, j.arrive_at
      FROM social_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.social_id = ? AND j.blocked = 0
@@ -1043,7 +1119,7 @@ export function getPlan(db: DatabaseSync, id: string): PlanRow | undefined {
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,
-    `SELECT u.id, u.name, j.joined_at, j.reply, NULL AS eta_min, j.arrive_at
+    `SELECT u.id, u.name, u.color, j.joined_at, j.reply, NULL AS eta_min, j.arrive_at
      FROM plan_joins j
      JOIN users u ON u.id = j.user_id
      WHERE j.plan_id = ? AND j.blocked = 0
@@ -1375,14 +1451,14 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 }
 
 const SOCIAL_SELECT = `
-  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, s.note,
+  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, s.note,
          s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
 
 const PLAN_SELECT = `
-  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, p.note, p.for_date, p.created_at,
+  SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, p.note, p.for_date, p.created_at,
          p.lat, p.lng, p.place, p.at_time, p.ended_at
   FROM plans p
   JOIN users u ON u.id = p.creator_id
