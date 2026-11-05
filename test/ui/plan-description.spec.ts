@@ -81,7 +81,7 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
     await signIn(page, "Alex");
     await addPlan(page, "Dinner on the roof");
     // Create sheet stays as it was: no description there.
-    await page.getByRole("button", { name: "Plan tomorrow" }).click();
+    await page.getByRole("button", { name: "Plan" }).click();
     await page.locator("#sheet-note").waitFor();
     assert.equal(await page.locator(".sheet textarea").count(), 0);
     await page.locator(".scrim").click({ position: { x: 20, y: 20 } });
