@@ -80,6 +80,9 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     await upcoming.getByRole("heading", { name: "Sushi night" }).waitFor();
     assert.match(await upcoming.locator(".card-plan p").first().innerText(), new RegExp(`^${d.nextWeekLabel} · 19:30 · Hana$`));
     assert.deepEqual(await planOrder(page), ["Tomorrow walk", "Sushi night"]);
+    const soon = page.locator("section.section", { has: page.getByRole("heading", { name: "Today & tomorrow" }) });
+    await soon.getByRole("heading", { name: "Tomorrow walk" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Tomorrow", exact: true }).count(), 0);
 
     // Next week -> tomorrow.
     await page.getByRole("button", { name: "Edit Sushi night" }).click();
