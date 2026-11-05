@@ -372,8 +372,31 @@ button:disabled { cursor: default; opacity: 0.55; }
 .card-menu button:active { background: rgba(255, 255, 255, 0.08); }
 .card-body { display: flex; flex-direction: column; gap: 0; cursor: pointer; }
 .card-body:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; border-radius: 12px; }
-/* Leave a quiet slot under the place line for a future plan-circles row. */
-.card-body .place-line { margin-bottom: 2px; }
+/* Map pin button hugs its text, with a clear gap under the who row so taps can't land on the wrong one. */
+.card-body .place-line { align-self: flex-start; width: fit-content; max-width: 100%; margin: 10px 0 2px; }
+/* "Who's in" row: full width, 44px+, opens the details. */
+.who-row {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font: inherit;
+  font-size: 14px;
+  width: 100%;
+  min-height: 44px;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.who-row:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; border-radius: 10px; }
+.who-row .icon, .who-row .icon svg { width: 18px; height: 18px; flex: none; }
+.who-row .icon:last-child { opacity: 0.55; }
+.who-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.who-row .reply-line { margin: 0; color: inherit; font-size: 14px; }
 .plan-circles {
   margin: 2px 0 4px;
   color: rgba(255, 255, 255, 0.7);
@@ -1320,6 +1343,8 @@ html.kb-open .sheet .help { margin-top: 0; }
   padding: 14px;
 }
 .map-card .reply-line { margin-top: 8px; }
+.map-card .who-row { margin-top: 6px; color: #d1d1d6; }
+.map-card .who-row .reply-line { margin: 0; }
 .map-card strong { display: block; font-size: 16px; }
 .map-card-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .map-card-head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }

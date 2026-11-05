@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-waiting-tap",
+    "date": "2026-11-05",
+    "title": "Easier to tap who's in",
+    "bullets": [
+      "Tapping \"Waiting for friends\" now opens the plan instead of the map.",
+      "The map only opens from the place with the pin."
+    ]
+  },
+  {
     "id": "2026-11-05-card-gradients",
     "date": "2026-11-05",
     "title": "Every plan has its own colour",
