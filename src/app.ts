@@ -58,6 +58,7 @@ import {
   listMembers,
   setCircleAdmin,
   listNotifications,
+  unreadNotificationsByCircle,
   listPlanJoins,
   listPushSubs,
   listSocialJoins,
@@ -237,7 +238,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       buzz_token: buzzToken,
       created_at: now,
     });
-    if (invited) addMember(deps.db, invited.id, id, now);
+    if (invited) {
+      addMember(deps.db, invited.id, id, now);
+      await notifyMemberJoined(deps, invited, { id, name });
+    }
     sendJson(res, 201, {
       token,
       buzzToken,
@@ -426,7 +430,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!already && removalBlocksJoin(deps.db, circle.id, me.id, circle.invite_code)) {
       throw new HttpError(403, "An admin removed you from this circle.");
     }
-    if (!already) addMember(deps.db, circle.id, me.id, deps.now());
+    if (!already) {
+      addMember(deps.db, circle.id, me.id, deps.now());
+      await notifyMemberJoined(deps, circle, me);
+    }
     sendJson(res, 200, { circle: circlePayload(deps, req, circle, me.id) });
     return;
   }
@@ -698,7 +705,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       createdAt: row.created_at,
       readAt: row.read_at,
     }));
-    sendJson(res, 200, { notifications });
+    sendJson(res, 200, { notifications, unreadByCircle: unreadNotificationsByCircle(deps.db, me.id) });
     return;
   }
 
@@ -783,6 +790,7 @@ function createCircle(deps: AppDeps, userId: string, name: string, now: number):
 
 function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requested: string | null = null) {
   const circles = listCirclesForUser(deps.db, user.id);
+  const alertUnread = unreadNotificationsByCircle(deps.db, user.id);
   let active: CircleRow | undefined;
   if (requested) {
     active = circles.find((circle) => circle.id === requested);
@@ -802,6 +810,7 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
       id: circle.id,
       name: circle.name,
       admin: isCircleAdmin(deps.db, circle.id, user.id),
+      alertUnread: alertUnread[circle.id] ?? 0,
     })),
     circle: active ? circlePayload(deps, req, active, user.id) : null,
   };
@@ -897,19 +906,25 @@ async function endSocial(deps: AppDeps, user: UserRow, rawId: string, requested:
   assertEventHost(deps, user, circle.id, social.creator_id);
   closeEventChat(deps.db, circle.id, "social", social.id, deps.now());
   if (!finishSocial(deps.db, social.id, deps.now())) throw new HttpError(404, "social not found");
+  const notices = [];
   if (social.creator_id !== user.id) {
     const label = social.note.trim() || "your free post";
-    await notifyUsers(deps.db, deps.push, deps.now(), [
-      {
-        userId: social.creator_id,
-        title: "Ended",
-        body: `${user.name} ended ${label}`,
-        kind: "ended",
-        refId: social.id,
-        tag: `ended:social:${social.id}`,
-      },
-    ], circle);
+    notices.push(endedNotice(social.creator_id, `${user.name} ended ${label}`, "social", social.id));
   }
+  const label = social.note.trim() || "Free now";
+  for (const id of comingIds(listSocialJoins(deps.db, social.id), [user.id, social.creator_id])) {
+    notices.push(endedNotice(id, `${user.name} ended ${label}`, "social", social.id));
+  }
+  await notifyUsers(deps.db, deps.push, deps.now(), notices, circle);
+}
+
+function endedNotice(userId: string, body: string, kind: "social" | "plan", refId: string) {
+  return { userId, title: "Ended", body, kind: "ended", refId, tag: `ended:${kind}:${refId}` };
+}
+
+/** People who said they're in, minus the given ids. Declined and silent people are left out. */
+function comingIds(joins: Array<{ id: string; reply: string | null }>, skip: string[]): string[] {
+  return joins.filter((join) => isInReply(join.reply) && !skip.includes(join.id)).map((join) => join.id);
 }
 
 function isInReply(reply: string | null | undefined): boolean {
@@ -1020,18 +1035,12 @@ async function endPlan(deps: AppDeps, user: UserRow, rawId: string, requested: s
   assertEventHost(deps, user, plan.circle_id, plan.creator_id);
   closeEventChat(deps.db, plan.circle_id, "plan", plan.id, deps.now());
   if (!finishPlan(deps.db, plan.id, deps.now())) throw new HttpError(404, "plan not found");
-  if (plan.creator_id !== user.id) {
-    await notifyUsers(deps.db, deps.push, deps.now(), [
-      {
-        userId: plan.creator_id,
-        title: "Ended",
-        body: `${user.name} ended ${plan.note}`,
-        kind: "ended",
-        refId: plan.id,
-        tag: `ended:plan:${plan.id}`,
-      },
-    ], getCircleById(deps.db, plan.circle_id) ?? circle);
+  const notices = [];
+  if (plan.creator_id !== user.id) notices.push(endedNotice(plan.creator_id, `${user.name} ended ${plan.note}`, "plan", plan.id));
+  for (const id of comingIds(listPlanJoins(deps.db, plan.id), [user.id, plan.creator_id])) {
+    notices.push(endedNotice(id, `${user.name} ended ${plan.note}`, "plan", plan.id));
   }
+  await notifyUsers(deps.db, deps.push, deps.now(), notices, getCircleById(deps.db, plan.circle_id) ?? circle);
 }
 
 async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
@@ -1540,6 +1549,20 @@ function setMemberAdminAsOperator(
     user: { id: user.id, name: user.name },
     admin,
   });
+}
+
+/** Tells everyone else in the circle that someone new is in. */
+async function notifyMemberJoined(deps: AppDeps, circle: CircleRow, joiner: { id: string; name: string }): Promise<void> {
+  const others = listMembers(deps.db, circle.id).filter((member) => member.id !== joiner.id);
+  await notifyUsers(deps.db, deps.push, deps.now(), others.map((member) => ({
+    userId: member.id,
+    title: "New member",
+    body: `${joiner.name} joined ${circle.name}`,
+    kind: "member-join",
+    refId: joiner.id,
+    tag: `member-join:${circle.id}:${joiner.id}`,
+    namesCircle: true,
+  })), circle);
 }
 
 async function notifyCircleDeleted(

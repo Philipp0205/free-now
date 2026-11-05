@@ -1518,11 +1518,36 @@ export function insertNotification(
 export function listNotifications(db: DatabaseSync, userId: string, circleId: string, limit = 50): NotificationRow[] {
   return all<NotificationRow>(
     db,
-    `SELECT * FROM notifications WHERE user_id = ? AND circle_id = ? ORDER BY created_at DESC LIMIT ?`,
+    `SELECT * FROM notifications WHERE user_id = ? AND circle_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
     userId,
     circleId,
     limit,
   );
+}
+
+export function countUnreadNotifications(db: DatabaseSync, userId: string, circleId: string): number {
+  const row = one<{ n: number | bigint }>(
+    db,
+    "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND circle_id = ? AND read_at IS NULL",
+    userId,
+    circleId,
+  );
+  return Number(row?.n ?? 0);
+}
+
+/** Unread alerts per circle, only for circles this person is still in. */
+export function unreadNotificationsByCircle(db: DatabaseSync, userId: string): Record<string, number> {
+  const rows = all<{ circle_id: string; n: number | bigint }>(
+    db,
+    `SELECT n.circle_id, COUNT(*) AS n FROM notifications n
+     JOIN memberships m ON m.circle_id = n.circle_id AND m.user_id = n.user_id
+     WHERE n.user_id = ? AND n.read_at IS NULL AND n.circle_id IS NOT NULL
+     GROUP BY n.circle_id`,
+    userId,
+  );
+  const totals: Record<string, number> = {};
+  for (const row of rows) totals[row.circle_id] = Number(row.n);
+  return totals;
 }
 
 export function markNotificationsRead(db: DatabaseSync, userId: string, circleId: string, readAt: number): void {

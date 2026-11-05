@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-05-circle-read-alerts",
+    "date": "2026-11-05",
+    "title": "Circle dots match Alerts",
+    "bullets": [
+      "A red dot on a circle means that circle has unread alerts.",
+      "Open Alerts in that circle to mark them read — the dot clears.",
+      "Plan chats, new members and ended plans show up in Alerts too."
+    ]
+  },
+  {
     "id": "2026-11-05-bell-toggle",
     "date": "2026-11-05",
     "title": "Back works like you expect",
@@ -24,7 +34,7 @@
     "title": "Heads-up when plans move",
     "bullets": [
       "When a plan changes day, time or place, your circle gets a push. People who said they can't come are left alone.",
-      "The push shows the new date and time, like Fri 7 Nov \u00b7 20:00.",
+      "The push shows the new date and time, like Fri 7 Nov · 20:00.",
       "Fixing a typo in the title or description stays quiet."
     ]
   },
