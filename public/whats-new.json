@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-circle-dot-sync",
+    "date": "2026-11-05",
+    "title": "Red dot matches your alerts",
+    "bullets": [
+      "Reading your alerts now clears the red dot on the circle too.",
+      "Unread chat keeps its own count on Chat, so it no longer keeps the circle dot on."
+    ]
+  },
+  {
     "id": "2026-11-05-button-feel",
     "date": "2026-11-05",
     "title": "Buttons feel nicer",
@@ -33,7 +42,6 @@
     "bullets": [
       "Tapping \"Waiting for friends\" now opens the plan instead of the map.",
       "The map only opens from the place with the pin."
-
     ]
   },
   {
