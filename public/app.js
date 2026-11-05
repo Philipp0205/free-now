@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v17";
+const APP_VERSION = "hangry-v18";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -86,6 +86,7 @@ const state = {
   chatQueue: null,
   chatThread: null,
   chatReturn: "home",
+  alertsReturn: "home",
   chatDraft: "",
   chatStick: false,
   chatSummary: { circle: { unread: 0, muted: false }, events: [], unreadByCircle: {} },
@@ -1020,7 +1021,11 @@ function screenHeader(title) {
       class: state.tab === "alerts" ? "icon-btn on" : "icon-btn",
       type: "button",
       "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
-      onclick: () => { void onTab("alerts"); },
+      "aria-expanded": state.tab === "alerts" ? "true" : "false",
+      onclick: () => {
+        if (state.tab === "alerts") closeAlerts();
+        else void onTab("alerts");
+      },
     }, [
       icon("bell"),
       unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
@@ -4203,11 +4208,24 @@ document.addEventListener("keydown", (event) => {
   dismissTopSheet();
 });
 
+const ALERTS_RETURN_TABS = ["home", "map", "circle", "you"];
+
+/** A second tap on the bell leaves Alerts for the tab the user came from. */
+function closeAlerts() {
+  state.tab = ALERTS_RETURN_TABS.includes(state.alertsReturn) ? state.alertsReturn : "home";
+  state.sheet = null;
+  state.focusPlan = "";
+  render();
+}
+
 async function onTab(id) {
   if (id === "chat") {
     state.sheet = null;
     await openChat({ kind: "circle" });
     return;
+  }
+  if (id === "alerts" && state.tab !== "alerts") {
+    state.alertsReturn = ALERTS_RETURN_TABS.includes(state.tab) ? state.tab : "home";
   }
   state.tab = id;
   state.sheet = null;

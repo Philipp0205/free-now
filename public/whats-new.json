@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-05-bell-toggle",
+    "date": "2026-11-05",
+    "title": "Bell closes Alerts",
+    "bullets": [
+      "Tap the bell again to close Alerts.",
+      "Your previous tab comes back."
+    ]
+  },
+  {
     "id": "2026-11-05-multi-circle-plans",
     "date": "2026-11-05",
     "title": "One plan, several circles",
@@ -15,7 +24,7 @@
     "title": "Heads-up when plans move",
     "bullets": [
       "When a plan changes day, time or place, your circle gets a push. People who said they can't come are left alone.",
-      "The push shows the new date and time, like Fri 7 Nov · 20:00.",
+      "The push shows the new date and time, like Fri 7 Nov \u00b7 20:00.",
       "Fixing a typo in the title or description stays quiet."
     ]
   },
