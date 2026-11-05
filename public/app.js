@@ -843,6 +843,10 @@ function render() {
   bindSheetSwipe();
   liftSheetToast();
   syncOverlayHistory();
+  if (state.cardMenu) {
+    placeOpenCardMenus();
+    requestAnimationFrame(() => { if (state.cardMenu) placeOpenCardMenus(); });
+  }
   if (state.focusPlanScroll) {
     state.focusPlanScroll = false;
     const id = state.focusPlan;
@@ -2100,20 +2104,28 @@ function closeCardMenu() {
 
 
 function placeOpenCardMenus() {
+  const gap = 8;
+  const tabbar = document.querySelector(".tabbar");
+  const tabTop = tabbar ? tabbar.getBoundingClientRect().top : window.innerHeight;
+  const floor = Math.min(window.innerHeight, tabTop > 0 ? tabTop : window.innerHeight) - gap;
   document.querySelectorAll(".card-menu").forEach((menu) => {
+    const more = menu.parentElement?.querySelector(".card-more");
+    if (!more) return;
     menu.classList.remove("drop-up");
-    const rect = menu.getBoundingClientRect();
-    if (rect.bottom > window.innerHeight - 8 || rect.top < 8) {
+    menu.style.maxHeight = "";
+    menu.style.right = "";
+    const btn = more.getBoundingClientRect();
+    const natural = menu.scrollHeight;
+    const below = floor - btn.bottom - 4;
+    const above = btn.top - 4 - gap;
+    let room = below;
+    if (natural > below && above > below) {
       menu.classList.add("drop-up");
-      const up = menu.getBoundingClientRect();
-      if (up.top < 8) menu.classList.remove("drop-up");
+      room = above;
     }
-    const final = menu.getBoundingClientRect();
-    if (final.bottom > window.innerHeight - 4) {
-      menu.style.maxHeight = `${Math.max(120, window.innerHeight - final.top - 8)}px`;
-    } else {
-      menu.style.maxHeight = "";
-    }
+    if (natural > room) menu.style.maxHeight = `${Math.max(88, Math.floor(room))}px`;
+    const rect = menu.getBoundingClientRect();
+    if (rect.left < gap) menu.style.right = `${Math.floor(rect.left - gap)}px`;
   });
 }
 
@@ -2136,7 +2148,7 @@ function cardOverflow(kind, item) {
       action: () => { state.cardMenu = null; void sharePlan(item); },
     });
   }
-  if (!isHost) {
+  if (!isHost && !item.removedBy) {
     items.push({
       text: chosen ? `Arriving ${chosen}` : "Pick arrival time",
       action: () => {

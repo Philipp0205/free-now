@@ -90,7 +90,8 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     assert.equal(await page.getByRole("heading", { name: "Tomorrow", exact: true }).count(), 0);
 
     // Next week -> tomorrow.
-    await page.getByRole("button", { name: "Edit Sushi night" }).click();
+    await page.getByRole("button", { name: "More for Sushi night" }).click();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
     const edit = page.locator(".sheet");
     assert.equal(await edit.getByRole("button", { name: "Pick a date" }).getAttribute("aria-pressed"), "true");
     assert.equal(await page.locator("#admin-date").inputValue(), d.nextWeek);
@@ -105,7 +106,8 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     assert.match(await planLine(page, "Sushi night"), /^Tomorrow · 19:30 · Hana$/);
 
     // Tomorrow -> next week again.
-    await page.getByRole("button", { name: "Edit Sushi night" }).click();
+    await page.getByRole("button", { name: "More for Sushi night" }).click();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
     assert.equal(await page.locator(".sheet").getByRole("button", { name: "Tomorrow", exact: true }).getAttribute("aria-pressed"), "true");
     await page.locator(".sheet").getByRole("button", { name: "Pick a date" }).click();
     await page.locator("#admin-date").fill(d.nextWeek);
@@ -116,7 +118,8 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
     assert.match(await planLine(page, "Sushi night"), new RegExp(`^${d.nextWeekLabel} · 19:30`));
 
     // End it.
-    await page.getByRole("button", { name: "End Sushi night" }).click();
+    await page.getByRole("button", { name: "More for Sushi night" }).click();
+    await page.getByRole("menuitem", { name: "End plan" }).click();
     await page.locator(".sheet-confirm").getByRole("button", { name: "End", exact: true }).click();
     await page.getByRole("heading", { name: "Sushi night" }).waitFor({ state: "detached" });
     assert.equal(await page.getByRole("heading", { name: "Upcoming" }).count(), 0);
@@ -158,7 +161,8 @@ test("at 320x568 the day choice, date input and time picker are visible and clea
     await page.locator("#sheet-note").fill("Tiny screen");
     await page.locator(".sheet-dock").getByRole("button", { name: "Add plan" }).click();
     await page.getByRole("heading", { name: "Tiny screen" }).waitFor();
-    await page.getByRole("button", { name: "Edit Tiny screen" }).click();
+    await page.getByRole("button", { name: "More for Tiny screen" }).click();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
     await page.locator("#admin-date").waitFor();
     await assertFieldsClear(page, [".sheet .segment-3", "#admin-date", "#admin-time"]);
   } finally {
@@ -279,7 +283,7 @@ async function planOrder(page: Page) {
 }
 
 async function planLine(page: Page, note: string) {
-  return page.locator(".card-plan", { has: page.getByRole("heading", { name: note }) }).locator(".card-copy > p").first().innerText();
+  return page.locator(".card-plan", { has: page.getByRole("heading", { name: note }) }).locator(".card-body > p").first().innerText();
 }
 
 async function phone(width = 390, height = 844) {

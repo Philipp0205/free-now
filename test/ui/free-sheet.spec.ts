@@ -724,9 +724,15 @@ test("leaving the map removes it and closing the picker returns focus", { timeou
       const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
       return { top: pin?.top ?? null, left: pin?.left ?? null };
     });
+    // The map card (chat row + In toggle) covers the lower map; drag in the clear strip above it.
+    const clear = await page.evaluate(() => {
+      const map = document.getElementById("hangry-map")!.getBoundingClientRect();
+      const card = document.querySelector(".map-card")!.getBoundingClientRect();
+      return Math.max(30, Math.min(200, card.top - map.top - 12));
+    });
     await page.locator("#hangry-map").dragTo(page.locator("#hangry-map"), {
-      sourcePosition: { x: 180, y: 200 },
-      targetPosition: { x: 40, y: 80 },
+      sourcePosition: { x: 180, y: clear },
+      targetPosition: { x: 40, y: Math.max(4, clear - 120) },
     });
     const panned = await page.evaluate(() => {
       const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
@@ -1068,7 +1074,8 @@ test("a confirm sheet closes when the gap is touch-dragged in Chromium", { timeo
       await page.reload();
       const later = page.locator(".sheet button", { hasText: "Not now" });
       if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-      await page.getByRole("button", { name: /^End/ }).click();
+      await page.locator("article", { has: page.getByRole("heading", { name: "Coffee", exact: true }) }).getByRole("button", { name: /^More for / }).click();
+      await page.getByRole("menuitem", { name: /End/ }).click();
       await page.locator(".sheet-gap").waitFor();
       const touch = await page.locator(".sheet-gap").evaluate((node) => getComputedStyle(node).touchAction);
       assert.equal(touch, "none", JSON.stringify(size));
@@ -1239,9 +1246,16 @@ test("a removed guest sees a note instead of reply buttons", { timeout: 90_000 }
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.getByText("Alex removed you from this.").waitFor();
+    assert.equal(await page.locator(".in-toggle").count(), 0);
     assert.equal(await page.getByRole("button", { name: "I'm in" }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "Can't" }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "Pick time" }).count(), 0);
+    const more = page.getByRole("button", { name: /^More for / });
+    if (await more.count()) {
+      await more.first().click();
+      const menu = page.getByRole("menu");
+      await menu.waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: /Can.t/ }).count(), 0);
+      assert.equal(await menu.getByRole("menuitem", { name: /Pick arrival|Arriving/ }).count(), 0);
+    }
   } finally {
     await page.context().close();
   }

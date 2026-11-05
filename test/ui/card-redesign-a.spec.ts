@@ -216,7 +216,7 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
     await card.locator(".card-more").click();
     await hostPage.getByRole("menuitem", { name: "End plan" }).click();
     await hostPage.locator(".sheet-confirm").waitFor();
-    await hostPage.getByRole("button", { name: "Cancel" }).click();
+    await hostPage.locator(".sheet-confirm").getByRole("button", { name: "Cancel" }).click();
   } finally {
     await hostPage.context().close();
   }
@@ -233,27 +233,19 @@ test("chat row opens chat with badge; card body opens details with Remove and De
   assert.ok(event && event.unread > 0, `expected unread chat summary, got ${JSON.stringify(chats)}`);
 
   for (const [width, height] of SIZES) {
+    // Opening the chat at the previous width marks it read; give each width fresh unread.
+    if (width !== SIZES[0][0]) await call("POST", `/api/plans/${plan.id}/chat`, friend.token, { text: "Bring speakers?" });
     const page = await phone(width, height);
     try {
       await asUser(page, host.token);
       await page.goto(baseUrl);
       await dismiss(page);
       const card = page.locator(".card-plan", { hasText: "Board games" });
-      await card.locator(".chat-row").waitFor();
-      const rowInfo = await card.locator(".chat-row").evaluate((node) => ({
-        aria: node.getAttribute("aria-label"),
-        html: node.innerHTML,
-        badge: !!node.querySelector(".badge"),
-        badgeBox: node.querySelector(".badge")?.getBoundingClientRect(),
-      }));
-      if (!rowInfo.badge) {
-        console.log("NO BADGE", width, JSON.stringify(rowInfo), JSON.stringify(chats));
-      }
       await card.locator(".chat-row .badge").waitFor({ timeout: 10_000 });
       await page.screenshot({ path: shot(`chat-row-w${width}.png`) });
       await card.locator(".chat-row").click();
       await page.getByRole("heading", { name: "Board games" }).waitFor();
-      await page.getByText("Bring speakers?").waitFor();
+      await page.getByText("Bring speakers?").first().waitFor();
       await page.getByRole("button", { name: "Back" }).click();
 
       await card.getByRole("button", { name: "Open details" }).click();
@@ -269,6 +261,49 @@ test("chat row opens chat with badge; card body opens details with Remove and De
       await page.screenshot({ path: shot(`details-w${width}.png`) });
       await page.keyboard.press("Escape");
       assert.deepEqual(await noOverlap(page, `.card-plan[data-plan="${plan.id}"]`), []);
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
+test("map card has the In toggle and ⋯ menu, and the menu stays on screen", { timeout: 120_000 }, async () => {
+  const { host, friend } = await people();
+  await call("POST", "/api/plans", host.token, {
+    note: "Picnic",
+    time: "17:00",
+    place: "Tempelhofer Feld",
+    lat: 52.47,
+    lng: 13.4,
+    precise: true,
+  });
+
+  for (const [width, height] of SIZES) {
+    const page = await phone(width, height);
+    try {
+      await asUser(page, friend.token);
+      await page.goto(baseUrl);
+      await dismiss(page);
+      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      const pin = page.locator(".leaflet-marker-icon.pin").first();
+      await pin.waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(400);
+      await pin.click();
+      const card = page.locator(".map-card");
+      await card.waitFor();
+      const toggle = card.locator(".in-toggle");
+      if (width === SIZES[0][0]) {
+        await toggle.click();
+        await card.locator(".in-toggle.on").waitFor();
+      }
+      await card.locator(".in-toggle.on").waitFor();
+      await page.screenshot({ path: shot(`map-card-w${width}.png`) });
+      await card.locator(".card-more").click();
+      const menu = page.getByRole("menu");
+      await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: "Edit", exact: true }).count(), 0);
+      await page.screenshot({ path: shot(`map-menu-w${width}.png`) });
+      assert.deepEqual(await noOverlap(page, ".map-card"), []);
     } finally {
       await page.context().close();
     }

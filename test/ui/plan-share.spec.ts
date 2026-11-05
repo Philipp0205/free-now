@@ -121,7 +121,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
     await dismiss(hostPage);
     const card = hostPage.locator(".card-plan", { has: hostPage.getByRole("heading", { name: "Rooftop drinks" }) });
     await card.getByRole("button", { name: /^More for / }).click();
-    await page.getByRole("menuitem", { name: "Share link" }).click();
+    await hostPage.getByRole("menuitem", { name: "Share link" }).click();
     await hostPage.locator(".toast", { hasText: "Link copied" }).waitFor();
     const copied = await hostPage.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
     assert.equal(copied.length, 1);
@@ -257,7 +257,7 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
   const plan = await makePlan(host.token, { note: "Board games" });
   const oldLink = `${baseUrl}/p/${plan.shareId}`;
 
-  // A friend in the circle does not get the action.
+  // A friend in the circle gets ⋯ (Share / Can't) but no host actions.
   const friendPage = await phone();
   try {
     await asUser(friendPage, friend.token);
@@ -265,7 +265,12 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
     await dismiss(friendPage);
     const card = friendPage.locator(".card-plan", { hasText: "Board games" });
     await card.waitFor();
-    assert.equal(await card.getByRole("button", { name: /^More for / }).count(), 0);
+    await card.getByRole("button", { name: /^More for / }).click();
+    const menu = friendPage.getByRole("menu");
+    await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
+    for (const name of ["Edit", "End plan", "Stop sharing"]) {
+      assert.equal(await menu.getByRole("menuitem", { name, exact: true }).count(), 0, `friend should not see ${name}`);
+    }
   } finally {
     await friendPage.context().close();
   }

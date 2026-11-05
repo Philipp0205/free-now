@@ -99,14 +99,9 @@ test("map card Edit and End sit clear of the host name and title", { timeout: 12
       await menu.getByRole("menuitem", { name: "Edit" }).waitFor();
       await menu.getByRole("menuitem", { name: "End plan" }).waitFor();
       const boxes = await page.evaluate(() => {
-        const card = document.querySelector(".map-card")!;
-        const more = card.querySelector(".card-more")!;
-        const menuEl = card.querySelector(".card-menu")!;
-        const rect = (node: Element) => {
-          const r = node.getBoundingClientRect();
-          return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height, width: r.width };
-        };
-        return { card: rect(card), more: rect(more), menu: rect(menuEl), vw: window.innerWidth, vh: window.innerHeight };
+        const [card, more, menu] = [".map-card", ".map-card .card-more", ".map-card .card-menu"]
+          .map((sel) => document.querySelector(sel)!.getBoundingClientRect().toJSON());
+        return { card, more, menu, vw: window.innerWidth, vh: window.innerHeight };
       });
       const size = { width, height };
       assert.ok(boxes.more.height >= 44 - 0.5, JSON.stringify({ size, boxes }));

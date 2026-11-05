@@ -281,7 +281,7 @@ button:disabled { cursor: default; opacity: 0.55; }
   bottom: auto;
   padding: 16px;
 }
-.card-bg, .card-shade { position: absolute; inset: 0; }
+.card-bg, .card-shade { position: absolute; inset: 0; border-radius: inherit; }
 .card-now .card-bg {
   background:
     radial-gradient(circle at 18% 110%, rgba(255, 45, 120, 0.55), transparent 46%),
