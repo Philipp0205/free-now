@@ -243,17 +243,17 @@ test("an admin edit and a test push show in that circle's alerts", async () => {
     sent.length = 0;
     await api(port, "PATCH", `/api/plans/${plan.plan.id}?circle=${home.circle.id}`, {
       token: bea.token,
-      body: { note: "Dinner at 8" },
+      body: { time: "20:00" },
       status: 200,
     });
     const homeNotes = await api(port, "GET", `/api/notifications?circle=${home.circle.id}`, { token: alex.token });
-    const edited = homeNotes.notifications.find((note: { title: string }) => note.title === "Bea edited your plan: Dinner at 8");
+    const edited = homeNotes.notifications.find((note: { title: string }) => note.title === "Dinner moved to Tue 2 Jun · 20:00");
     assert.ok(edited);
-    assert.match(edited.body, /Note is now Dinner at 8/);
+    assert.match(edited.body, /Tap to see the plan\./);
     assert.match(edited.body, /· Home/);
     const uniNotes = await api(port, "GET", `/api/notifications?circle=${uni.circle.id}`, { token: alex.token });
-    assert.equal(uniNotes.notifications.some((note: { title: string }) => note.title.includes("edited your")), false);
-    const push = sent.find((item) => item.title === "Bea edited your plan: Dinner at 8");
+    assert.equal(uniNotes.notifications.some((note: { title: string }) => note.title.includes("moved to")), false);
+    const push = sent.find((item) => item.title === "Dinner moved to Tue 2 Jun · 20:00");
     assert.equal(push?.url, `/?plan=${plan.plan.id}&circle=${home.circle.id}`);
 
     const social = await api(port, "POST", `/api/socials?circle=${home.circle.id}`, {

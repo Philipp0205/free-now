@@ -12,7 +12,7 @@ const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v15";
+const APP_VERSION = "hangry-v16";
 const FEEDBACK_MAX = 2000;
 const BACKGROUNDS = ["/backgrounds/dusk.png", "/backgrounds/dinner.png", "/backgrounds/walk.png", "/backgrounds/roof.png"];
 
@@ -3634,6 +3634,14 @@ function openNotification(note) {
     showOnMap(kind, item.id);
     return;
   }
+  if (plan) {
+    state.tab = "home";
+    state.sheet = null;
+    state.focusPlan = plan.id;
+    state.focusPlanScroll = true;
+    render();
+    return;
+  }
   if (item || note.kind === "social" || note.kind === "plan" || note.kind === "plan-reply" || note.kind === "reply" || note.kind === "join") {
     state.tab = "map";
     state.sheet = null;
@@ -3674,7 +3682,7 @@ function consumeDeepLink() {
     return true;
   }
   state.sheet = null;
-  if (share) {
+  if (share || kind === "plan") {
     state.tab = "home";
     state.focusPlan = item.id;
     state.focusPlanScroll = true;
