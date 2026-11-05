@@ -10,6 +10,7 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { PushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
@@ -145,7 +146,7 @@ for (const [width, height] of SIZES) {
       await atRest(page);
 
       // Plan sheet.
-      await page.getByRole("button", { name: "Plan", exact: true }).click();
+      await openPlanSheet(page);
       await page.locator("form.sheet").waitFor();
       await shot(page, "back-plan");
       await back(page);

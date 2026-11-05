@@ -10,6 +10,7 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openPlanSheet } from "./plan-sheet.js";
 
 const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
@@ -141,7 +142,7 @@ for (const [width, height] of SIZES) {
     try {
       const page = anaPhone.page;
       await open(page);
-      await page.getByRole("button", { name: "Plan", exact: true }).click();
+      await openPlanSheet(page);
       await page.locator("#sheet-note").fill(note);
       await page.locator("#plan-time").fill("18:30");
       const created = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/plans"));
@@ -274,7 +275,7 @@ for (const [width, height] of SIZES) {
     try {
       const page = cleoAfter.page;
       await open(page);
-      await page.getByRole("button", { name: "Plan", exact: true }).waitFor();
+      await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
       await page.waitForLoadState("networkidle");
       assert.equal(await planCard(page, note).count(), 0, "Cleo no longer sees the plan");
       const plans = await call("GET", "/api/plans", cleo.token);
