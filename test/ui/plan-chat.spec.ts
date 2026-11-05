@@ -32,9 +32,18 @@ test.before(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
   };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
+  browser = await launch();
 });
+
+// The box shares memory with other Chrome jobs; if the OS kills our headless Chrome,
+// later tests must not inherit a dead browser. Log it and start a fresh one.
+async function launch(): Promise<Browser> {
+  let b: Browser;
+  try { b = await chromium.launch({ channel: "chrome", headless: true }); }
+  catch { b = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
+  b.on("disconnected", () => { if (b === browser) console.warn("plan-chat: headless Chrome disconnected"); });
+  return b;
+}
 
 test.after(async () => {
   await browser?.close();
@@ -220,6 +229,7 @@ test("the last place result is reachable on a 320x568 screen", { timeout: 90_000
 });
 
 async function phone(width = 390, height = 844) {
+  if (!browser.isConnected()) browser = await launch();
   const context = await browser.newContext({
     viewport: { width, height },
     isMobile: true,
