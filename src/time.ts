@@ -66,10 +66,51 @@ export function zonedDateTime(isoDay: string, hhmm: string, tz: string): number 
   return utc;
 }
 
-export function whenLabel(forDate: string, today: string, tomorrow: string): string {
-  if (forDate === tomorrow) return "Tomorrow";
-  if (forDate === today) return "Today";
-  return forDate;
+/** True for a real YYYY-MM-DD day. "2026-02-30" is not. */
+export function isCalendarDate(iso: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const [year, month, day] = iso.split("-").map(Number);
+  const back = new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+  return back === iso;
+}
+
+/** Calendar days from `from` to `to`. Works on dates, so DST never shifts it. */
+export function daysBetween(from: string, to: string): number {
+  const utc = (iso: string) => {
+    const [year, month, day] = iso.split("-").map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((utc(to) - utc(from)) / 86_400_000);
+}
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function weekday(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  return WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+}
+
+/** "Sat 14 Nov", with the year only when it is not this year: "Sun 28 Mar 2027". */
+export function shortDate(iso: string, today: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const base = `${weekday(iso).slice(0, 3)} ${day} ${MONTHS[month - 1]}`;
+  return iso.slice(0, 4) === today.slice(0, 4) ? base : `${base} ${year}`;
+}
+
+/** Today, Tomorrow, a weekday for the next 6 days, then a short date. */
+export function dayLabel(iso: string, today: string): string {
+  const gap = daysBetween(today, iso);
+  if (gap === 0) return "Today";
+  if (gap === 1) return "Tomorrow";
+  if (gap > 1 && gap <= 6) return weekday(iso);
+  return shortDate(iso, today);
+}
+
+/** For a push or a notification row, which is read later: no bare weekday. */
+export function noticeDay(iso: string, today: string): string {
+  const gap = daysBetween(today, iso);
+  return gap === 0 || gap === 1 ? dayLabel(iso, today) : shortDate(iso, today);
 }
 
 export function assertTimeZone(tz: string): void {
