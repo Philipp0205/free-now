@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v27";
+const APP_VERSION = "hangry-v28";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -100,6 +100,8 @@ const state = {
   circleId: localStorage.getItem(CIRCLE_KEY) || "",
   circleMenu: false,
   cardMenu: null,
+  /** In toggle the person just tapped: { key, on, startedAt, until }. Drives the one-off pop. */
+  inPop: null,
   eventDetail: null,
   arrivalPick: null,
   newCircleName: "",
@@ -193,6 +195,8 @@ setInterval(() => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh().catch(() => {});
 });
+/* iOS Safari only applies :active press styles once the page listens for touches. Passive, so scrolling is untouched. */
+document.addEventListener("touchstart", () => {}, { passive: true });
 
 render();
 
@@ -1616,6 +1620,7 @@ async function sendChat(event) {
   if (!state.chat || state.chatQueue) return;
   const text = state.chatDraft.trim();
   if (!text) return;
+  tick();
   const target = { kind: state.chat.kind, id: state.chat.id };
   state.chatQueue = { target, text };
   try {
@@ -3429,8 +3434,10 @@ function inToggle(kind, item, { locked = false } = {}) {
   const mine = item.joined?.find((person) => person.id === state.me.user.id);
   const inNow = isHost || (Boolean(mine) && inReply(mine) && mine.reply !== "declined");
   const hostLocked = locked || isHost;
-  return el("button", {
-    class: inNow ? "in-toggle on" : "in-toggle",
+  const pop = inPopClass(kind, item, inNow);
+  const node = el("button", {
+    class: ["in-toggle", inNow ? "on" : "", pop?.name || ""].filter(Boolean).join(" "),
+    style: pop?.delay ? `animation-delay: -${pop.delay}ms` : null,
     type: "button",
     text: inNow ? "In ✓" : "I'm in",
     "aria-pressed": String(inNow),
@@ -3441,10 +3448,55 @@ function inToggle(kind, item, { locked = false } = {}) {
       event.stopPropagation();
       if (hostLocked && inNow) return;
       state.cardMenu = null;
+      tick();
+      state.inPop = { key: `${kind}:${item.id}`, on: !inNow, startedAt: 0, until: Date.now() + 10_000 };
       if (inNow) void leaveEvent(kind, item);
       else void sendReply(kind, item, "in");
     },
   });
+  if (pop) node.addEventListener("animationend", () => {
+    node.classList.remove("pop-on", "pop-off");
+    node.style.animationDelay = "";
+    if (state.inPop?.key === `${kind}:${item.id}`) state.inPop = null;
+  }, { once: true });
+  return node;
+}
+
+const IN_POP_MS = 250;
+
+/**
+ * The In toggle pops once when the state the person tapped for shows up. The tap itself is
+ * never delayed: the class is added on the render that carries the new state. A re-render
+ * mid-pop picks the animation up where it was instead of restarting it.
+ */
+function inPopClass(kind, item, inNow) {
+  const pop = state.inPop;
+  if (!pop || pop.key !== `${kind}:${item.id}`) return null;
+  const now = Date.now();
+  if (pop.on !== inNow) {
+    if (pop.startedAt || now > pop.until) state.inPop = null;
+    return null;
+  }
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+    state.inPop = null;
+    return null;
+  }
+  if (!pop.startedAt) pop.startedAt = now;
+  const elapsed = now - pop.startedAt;
+  if (elapsed >= IN_POP_MS) {
+    state.inPop = null;
+    return null;
+  }
+  return { name: inNow ? "pop-on" : "pop-off", delay: elapsed };
+}
+
+/** A tiny buzz where the phone supports it. Never blocks or throws. */
+function tick() {
+  try {
+    navigator.vibrate?.(10);
+  } catch {
+    /* no vibration here */
+  }
 }
 
 async function leaveEvent(kind, item) {
