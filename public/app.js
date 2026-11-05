@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v24";
+const APP_VERSION = "hangry-v25";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -142,6 +142,7 @@ const ICONS = {
   person: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 19.2c.8-2.8 3.2-4.2 6.4-4.2s5.6 1.4 6.4 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
+  people: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8.5" r="2.8" stroke="currentColor" stroke-width="1.8"/><path d="M3.8 18.5c.6-2.6 2.6-4 5.2-4s4.6 1.4 5.2 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M15.2 6.2a2.6 2.6 0 0 1 0 5M17 14.7c1.6.5 2.7 1.8 3.2 3.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.2 16.2 5 19.2c-.3.4.1 1 .6.8l3.2-.9A7.2 7.2 0 1 0 7.2 16.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 14.5V4.5M8.2 8 12 4.2 15.8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11H6.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1H16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
@@ -1270,8 +1271,8 @@ function socialCard(social) {
         el("div", { class: "avatars" }, people.map((person) => avatar(person))),
         el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
         el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
-        placeLine(social.location, social.place, { kind: "social", id: social.id }),
         replySummary(social),
+        placeLine(social.location, social.place, { kind: "social", id: social.id }),
         removedNote(social),
       ]),
       chatRow("social", social),
@@ -1307,8 +1308,8 @@ function planCard(plan) {
         el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
         planCirclesLine(plan),
         planDescription(plan),
-        placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
         planReplySummary(plan),
+        placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
         removedNote(plan),
       ]),
       chatRow("plan", plan),
@@ -3349,8 +3350,23 @@ function replyLine(person, social) {
 
 function replySummary(social) {
   const people = social.joined.filter((person) => inReply(person) || person.reply === "declined");
-  if (!people.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
+  return whoRow("social", social, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
+}
+
+/* Full-width "who's in" row: its own 44px+ tap target that opens the details, never the map. */
+function whoRow(kind, item, lines) {
+  return el("button", {
+    class: "who-row",
+    type: "button",
+    onclick: (event) => {
+      event.stopPropagation();
+      if (item?.creator) openEventDetail(kind, item);
+    },
+  }, [
+    icon("people"),
+    el("span", { class: "who-row-copy" }, lines.length ? lines : [el("span", { class: "who-empty", text: "Waiting for friends" })]),
+    icon("chevron"),
+  ]);
 }
 
 function replyActions(social) {
@@ -4164,8 +4180,7 @@ function planReplyLine(person) {
 
 function planReplySummary(plan) {
   const people = plan.joined.filter((person) => person.reply === "declined" || inReply(person));
-  if (!people.length) return el("p", { text: "Waiting for friends" });
-  return el("div", {}, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
+  return whoRow("plan", plan, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
 }
 
 function canRemoveGuest(event) {
@@ -4173,8 +4188,8 @@ function canRemoveGuest(event) {
 }
 
 function guestLine(text, person, kind, event) {
-  /* Remove moved to the event detail sheet so cards stay clean. */
-  return el("p", { class: "reply-line", text });
+  /* Remove moved to the event detail sheet so cards stay clean. Spans: these sit inside the who-row button. */
+  return el("span", { class: "reply-line", text });
 }
 
 function guestDetailRow(text, person, kind, event) {
