@@ -118,7 +118,7 @@ const HOT = [255, 40, 96];
 const ORANGE = [255, 96, 32];
 const WHITE = [255, 228, 236];
 
-function glowIcon(size, { radiusFrac, sigmaFrac, maskable = false }) {
+function glowIcon(size, { radiusFrac, sigmaFrac }) {
   const pixels = Buffer.alloc(size * size * 3);
   const cx = (size - 1) / 2;
   const cy = (size - 1) / 2;
@@ -141,9 +141,7 @@ function glowIcon(size, { radiusFrac, sigmaFrac, maskable = false }) {
       pixels[index + 2] = color[2];
     }
   }
-  const blurred = blur(pixels, size, size, 3, size * sigmaFrac);
-  if (!maskable) return blurred;
-  return blurred;
+  return blur(pixels, size, size, 3, size * sigmaFrac);
 }
 
 function badge(size) {
@@ -208,10 +206,18 @@ for (const [name, size, radius, sigma] of icons) {
   fs.writeFileSync(path.join(root, "icons", name), png);
 }
 
-fs.writeFileSync(
-  path.join(root, "icons", "icon-maskable-512.png"),
-  encodePng(512, 512, glowIcon(512, { radiusFrac: 0.2, sigmaFrac: 0.055, maskable: true }), 3),
-);
+// Maskable: full-bleed black, and the orb plus its blur tail (radius + 3 sigma = 0.38)
+// stays inside Android's safe zone (central 80%), so launchers never pad it onto a white plate.
+const maskable = [
+  ["icon-maskable-192.png", 192],
+  ["icon-maskable-512.png", 512],
+];
+
+for (const [name, size] of maskable) {
+  const png = encodePng(size, size, glowIcon(size, { radiusFrac: 0.26, sigmaFrac: 0.04 }), 3);
+  fs.writeFileSync(path.join(root, "icons", name), png);
+}
+
 fs.writeFileSync(path.join(root, "icons", "badge-96.png"), encodePng(96, 96, badge(96), 4));
 
 const scenes = [
