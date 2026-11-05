@@ -309,3 +309,60 @@ test("map card has the In toggle and ⋯ menu, and the menu stays on screen", { 
     }
   }
 });
+
+test("a plan shared with two circles shows Friends + Climbing on the redesigned card", { timeout: 90_000 }, async () => {
+  const { host, circle } = await people();
+  const climbing = (await call("POST", "/api/circles", host.token, { name: "Climbing" })).circle;
+  const plan = (await call("POST", `/api/plans?circle=${circle.id}`, host.token, { note: "Crag day", time: "10:00" })).plan;
+  await call("PATCH", `/api/plans/${plan.id}?circle=${circle.id}`, host.token, { circleIds: [circle.id, climbing.id] });
+
+  for (const [width, height] of SIZES) {
+    const page = await phone(width, height);
+    try {
+      await asUser(page, host.token);
+      await page.evaluate((id) => localStorage.setItem("fn_circle", id), circle.id);
+      await page.goto(baseUrl);
+      await dismiss(page);
+      const card = page.locator(".card-plan", { hasText: "Crag day" });
+      await card.locator(".card-body .plan-circles").waitFor();
+      assert.equal((await card.locator(".plan-circles").innerText()).trim(), "Friends + Climbing");
+      await card.locator(".in-toggle.on").waitFor();
+      if (width === 360) await page.screenshot({ path: shot("multi-circle-w360.png") });
+      assert.deepEqual(await noOverlap(page, ".card-plan"), []);
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
+test("Android Back closes the ⋯ menu and the Details sheet, and stays on home", { timeout: 90_000 }, async () => {
+  const { host, friend } = await people();
+  await call("POST", "/api/plans", host.token, { note: "Back test", time: "20:00" });
+  const page = await phone(360, 640);
+  try {
+    await asUser(page, friend.token);
+    await page.goto(baseUrl);
+    await dismiss(page);
+    const card = page.locator(".card-plan", { hasText: "Back test" });
+    await card.locator(".in-toggle").waitFor();
+    const home = page.url();
+
+    await card.locator(".card-more").click();
+    await page.getByRole("menu").waitFor();
+    await page.evaluate(() => history.back());
+    await page.getByRole("menu").waitFor({ state: "detached" });
+    await card.locator(".in-toggle").waitFor();
+    assert.equal(page.url(), home);
+    assert.equal(await page.locator(".tabbar").isVisible(), true);
+
+    await card.getByRole("button", { name: "Open details" }).click();
+    const details = page.getByRole("dialog", { name: "Details" });
+    await details.waitFor();
+    await page.evaluate(() => history.back());
+    await details.waitFor({ state: "detached" });
+    await card.locator(".in-toggle").waitFor();
+    assert.equal(page.url(), home);
+  } finally {
+    await page.context().close();
+  }
+});

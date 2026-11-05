@@ -104,10 +104,8 @@ for (const [width, height] of SIZES) {
     try {
       await page.goto(baseUrl);
       await dismiss(page);
-      await page.getByRole("button", { name: `Edit ${note}` }).click().catch(async () => {
-        await page.locator(".card-plan", { hasText: note }).getByRole("button", { name: /^More for / }).click();
-        await page.getByRole("menuitem", { name: "Edit" }).click();
-      });
+      await page.locator(".card-plan", { hasText: note }).locator(".card-more").click();
+      await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
       const sheet = page.locator(".sheet");
       await sheet.getByRole("button", { name: "Pick a date" }).click();
       await page.locator("#admin-date").fill(target);
