@@ -73,6 +73,7 @@ export type PlanRow = {
   place: string;
   at_time: string | null;
   ended_at: number | null;
+  share_id: string | null;
 };
 
 export type PushSubRow = {
@@ -342,6 +343,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "place", "place TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "plans", "at_time", "at_time TEXT");
   ensureColumn(db, "plans", "ended_at", "ended_at INTEGER");
+  ensureColumn(db, "plans", "share_id", "share_id TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_share ON plans(share_id)");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -1117,6 +1120,16 @@ export function getPlan(db: DatabaseSync, id: string): PlanRow | undefined {
   return one<PlanRow>(db, `${PLAN_SELECT} WHERE p.id = ?`, id);
 }
 
+export function getPlanByShareId(db: DatabaseSync, shareId: string): PlanRow | undefined {
+  return one<PlanRow>(db, `${PLAN_SELECT} WHERE p.share_id = ?`, shareId);
+}
+
+/** Sets the share id once. Returns whatever id the plan has after that. */
+export function setPlanShareId(db: DatabaseSync, planId: string, shareId: string): string | null {
+  db.prepare("UPDATE plans SET share_id = ? WHERE id = ? AND share_id IS NULL").run(shareId, planId);
+  return one<{ share_id: string | null }>(db, "SELECT share_id FROM plans WHERE id = ?", planId)?.share_id ?? null;
+}
+
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,
@@ -1464,7 +1477,7 @@ const SOCIAL_SELECT = `
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place, p.at_time, p.ended_at
+         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;

@@ -86,6 +86,7 @@ import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, isoDate, noticeDay, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { assertPlanClock, joinPlan, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
+import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
 
 export type AppDeps = {
   db: DatabaseSync;
@@ -120,11 +121,13 @@ export class HttpError extends Error {
 
 /** Service worker acks per client (see clientKey). A phone back online can flush a burst at once. */
 export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
+/** Plan share links per client. Enough for a chat full of previews, not for guessing. */
+export const SHARE_LIMIT = { limit: 60, windowMs: 60_000 };
 
-type Limits = { ack: RateLimiter };
+type Limits = { ack: RateLimiter; share: RateLimiter };
 
 export function createApp(deps: AppDeps): http.RequestListener {
-  const limits: Limits = { ack: createRateLimiter(ACK_LIMIT) };
+  const limits: Limits = { ack: createRateLimiter(ACK_LIMIT), share: createRateLimiter(SHARE_LIMIT) };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
       if (error instanceof HttpError || error instanceof ChatError) {
@@ -154,6 +157,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (!pathname.startsWith("/api/")) {
     if (method !== "GET" && method !== "HEAD") {
       sendJson(res, 405, { error: "method not allowed" });
+      return;
+    }
+    const sharePage = matchPath(pathname, /^\/p\/([^/]+)\/?$/);
+    if (sharePage) {
+      if (!limits.share.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
+      await serveSharePage(req, res, deps, sharePage[1]);
       return;
     }
     await serveStatic(req, res, pathname);
@@ -207,6 +216,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color) },
       circle: invited ? circlePayload(deps, req, invited, id) : null,
     });
+    return;
+  }
+
+  const sharedPlan = matchPath(pathname, /^\/api\/plans\/share\/([^/]+)$/);
+  if (sharedPlan && method === "GET") {
+    if (!limits.share.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
+    const today = isoDate(deps.now(), deps.config.tz);
+    sendJson(res, 200, sharePreview(deps.db, safeDecode(sharedPlan[1]), user?.id ?? null, today));
     return;
   }
 
@@ -529,6 +546,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   const planLeave = matchPath(pathname, /^\/api\/plans\/([^/]+)\/leave$/);
   if (planLeave && method === "POST") {
     sendJson(res, 200, { plan: leavePlan(deps, me, planLeave[1], requested) });
+    return;
+  }
+
+  const planShare = matchPath(pathname, /^\/api\/plans\/([^/]+)\/share$/);
+  if (planShare && method === "POST") {
+    const circle = requireCircle(deps, me.id, requested);
+    const plan = getPlan(deps.db, parseId(planShare[1]));
+    if (!plan || plan.circle_id !== circle.id) throw new HttpError(404, "plan not found");
+    if (!isOpenPlan(plan, isoDate(deps.now(), deps.config.tz))) throw new HttpError(410, "That plan has ended.");
+    const shareId = ensureShareId(deps.db, plan.id);
+    sendJson(res, 200, { shareId, url: `${requestOrigin(req, deps.config)}/p/${shareId}` });
     return;
   }
 
@@ -1129,6 +1157,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     time: plan.at_time,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
+    shareId: plan.share_id ?? null,
     creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color) },
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
     joined: listPlanJoins(db, plan.id).map((join) => ({
@@ -1671,6 +1700,32 @@ async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, 
     else res.end(data);
   } catch {
     sendJson(res, 404, { error: "not found" });
+  }
+}
+
+/** index.html with Open Graph tags: the note, then day and time. Nothing else about the plan. */
+async function serveSharePage(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, rawId: string): Promise<void> {
+  const shareId = safeDecode(rawId);
+  const today = isoDate(deps.now(), deps.config.tz);
+  const plan = openSharedPlan(deps.db, shareId, today);
+  const origin = requestOrigin(req, deps.config);
+  const template = await fs.promises.readFile(path.join(PUBLIC_DIR, "index.html"), "utf8");
+  const html = shareHtml(template, shareMeta(plan, today), `${origin}/p/${encodeURIComponent(shareId)}`, origin);
+  const data = Buffer.from(html, "utf8");
+  res.writeHead(200, {
+    ...staticHeaders(".html", data.length),
+    "cache-control": "no-store",
+    "x-robots-tag": "noindex",
+  });
+  if (req.method === "HEAD") res.end();
+  else res.end(data);
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
   }
 }
 
