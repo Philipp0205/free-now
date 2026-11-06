@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-06-remind-friends",
+    "date": "2026-11-06",
+    "title": "Nudge your friends",
+    "bullets": [
+      "Tap ⋯ on a plan and choose Remind friends to send the notification again to people who have not answered yet or said maybe.",
+      "You can remind once an hour per plan."
+    ]
+  },
+  {
     "id": "2026-11-06-maybe",
     "date": "2026-11-06",
     "title": "Say maybe",

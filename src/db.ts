@@ -80,6 +80,7 @@ export type PlanRow = {
   ended_at: number | null;
   share_id: string | null;
   description: string | null;
+  reminded_at: number | null;
 };
 
 export type PushSubRow = {
@@ -378,6 +379,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "share_id", "share_id TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_share ON plans(share_id)");
   ensureColumn(db, "plans", "description", "description TEXT");
+  ensureColumn(db, "plans", "reminded_at", "reminded_at INTEGER");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -1240,6 +1242,14 @@ export function clearPlanShareId(db: DatabaseSync, planId: string): void {
   db.prepare("UPDATE plans SET share_id = NULL WHERE id = ?").run(planId);
 }
 
+/** Starts a plan's remind cooldown unless another reminder went out after `since`. True when this call got it. */
+export function claimPlanReminder(db: DatabaseSync, planId: string, now: number, since: number): boolean {
+  const result = db.prepare(
+    "UPDATE plans SET reminded_at = ? WHERE id = ? AND (reminded_at IS NULL OR reminded_at <= ?)",
+  ).run(now, planId, since);
+  return Number(result.changes) > 0;
+}
+
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,
@@ -1609,7 +1619,7 @@ const SOCIAL_SELECT = `
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description
+         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
