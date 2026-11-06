@@ -7,7 +7,9 @@ export function scheduleReplyPush(key: string, fire: () => Promise<void>): void 
   cancelReplyPush(key);
   const timer = setTimeout(() => {
     pending.delete(key);
-    void fire();
+    void fire().catch((error: unknown) => {
+      console.error("reply push failed", error instanceof Error ? error.message : error);
+    });
   }, REPLY_PUSH_WAIT_MS);
   timer.unref?.();
   pending.set(key, timer);
