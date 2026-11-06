@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v33";
+const APP_VERSION = "hangry-v34";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -778,6 +778,7 @@ async function api(path, options = {}) {
     }
     const error = new Error(friendlyMessage(data?.error, response.status));
     error.status = response.status;
+    error.data = data;
     throw error;
   }
   return data;
@@ -2124,6 +2125,13 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
       text: "Share link",
       action: () => { state.cardMenu = null; void sharePlan(item); },
     });
+    if (!item.removedBy && planOpen(item)) {
+      items.push({
+        text: "Remind friends",
+        muted: remindCooling(item),
+        action: () => { state.cardMenu = null; void remindFriends(item); },
+      });
+    }
   }
   if (!isHost && !item.removedBy) {
     items.push({
@@ -2181,7 +2189,9 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
     }, items.map((row) => el("button", {
       type: "button",
       role: "menuitem",
-      class: [row.danger ? "danger" : "", row.on ? "on" : ""].filter(Boolean).join(" "),
+      class: [row.danger ? "danger" : "", row.on ? "on" : "", row.muted ? "muted" : ""].filter(Boolean).join(" "),
+      // Still tappable while muted, so a tap can say when it works again.
+      "aria-disabled": row.muted ? "true" : null,
       text: row.text,
       onclick: (event) => {
         event.stopPropagation();
@@ -3563,6 +3573,58 @@ async function shareInvite() {
   await copyText(circle.inviteUrl, "Invite link copied");
 }
 
+/** Not on a past day. Ended plans leave the list, so a stale copy past midnight is the case to catch. */
+function planOpen(plan) {
+  return Boolean(plan.forDate) && plan.forDate >= zonedParts(Date.now(), appTz()).day;
+}
+
+/** True while the plan's one-reminder-an-hour window is still running. */
+function remindCooling(plan) {
+  return Boolean(plan.remindAgainAt) && plan.remindAgainAt > Date.now();
+}
+
+function remindLaterText(at) {
+  return `Already reminded. You can remind again at ${clock(at)}`;
+}
+
+function friendsText(count) {
+  return count === 1 ? "Reminded 1 friend" : `Reminded ${count} friends`;
+}
+
+function adoptPlan(plan) {
+  if (!plan?.id) return;
+  state.plans = state.plans.map((row) => row.id === plan.id ? plan : row);
+}
+
+async function remindFriends(plan) {
+  if (remindCooling(plan)) {
+    state.error = remindLaterText(plan.remindAgainAt);
+    render();
+    scheduleErrorClear();
+    return;
+  }
+  let message = "";
+  await run(async () => {
+    try {
+      const data = await api(`/api/plans/${plan.id}/remind`, { method: "POST", body: {} });
+      adoptPlan(data.plan);
+      message = data.reminded > 0 ? friendsText(data.reminded) : "Everyone has already answered";
+    } catch (error) {
+      if (error.status === 429 && error.data?.retryAt) {
+        adoptPlan({ ...plan, remindAgainAt: error.data.retryAt });
+        message = remindLaterText(error.data.retryAt);
+        return;
+      }
+      throw error;
+    }
+  });
+  if (message) {
+    state.error = message;
+    render();
+    scheduleErrorClear();
+  }
+}
+
 async function sharePlan(plan) {
   let url = plan.shareId ? `${state.meta?.publicBaseUrl || location.origin}/p/${plan.shareId}` : "";
   if (!url) {
@@ -4172,7 +4234,7 @@ function openNotification(note) {
     render();
     return;
   }
-  if (item || note.kind === "social" || note.kind === "plan" || note.kind === "plan-reply" || note.kind === "reply" || note.kind === "join") {
+  if (item || note.kind === "social" || note.kind === "plan" || note.kind === "plan-reply" || note.kind === "plan-remind" || note.kind === "reply" || note.kind === "join") {
     state.tab = "map";
     state.sheet = null;
     state.focusSocial = "";

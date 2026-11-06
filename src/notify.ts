@@ -22,6 +22,8 @@ export type Notice = {
   tag: string;
   url?: string;
   skipAlert?: boolean;
+  /** Alert row only. The person already got this push through another circle. */
+  skipPush?: boolean;
   /** The body already says which circle, so no " · circle" suffix. */
   namesCircle?: boolean;
 };
@@ -76,6 +78,12 @@ export function planReplyBody(name: string, note: string, reply: string): string
   return `${name} is in for ${label}`;
 }
 
+/** "Alex reminds you: Board games, Tomorrow · 19:00". Day and time read like the new-plan push. */
+export function planRemindTitle(name: string, note: string, day: string, time: string | null): string {
+  const when = time ? `${day} · ${time}` : day;
+  return `${name} reminds you: ${note.trim() || "the plan"}, ${when}`;
+}
+
 export function replyPushBody(name: string, reply: string, etaMin: number | null, arriveLabel = ""): string {
   if (reply === "declined") return `${name} can't make it`;
   if (arriveLabel) return `${name} is in, arriving ${arriveLabel}`;
@@ -118,7 +126,7 @@ export async function notifyUsers(
         });
       }
       const track = Boolean(circle && notice.refId && TRACKED_KINDS.has(notice.kind));
-      for (const sub of listPushSubs(db, notice.userId)) {
+      for (const sub of notice.skipPush ? [] : listPushSubs(db, notice.userId)) {
         const deliveryId = crypto.randomUUID();
         let tracked = false;
         if (track && circle && notice.refId) {
