@@ -73,11 +73,13 @@ export function startingNowBody(name: string, place: string): string {
 export function planReplyBody(name: string, note: string, reply: string): string {
   const label = note.trim() || "the plan";
   if (reply === "declined") return `${name} can't make it to ${label}`;
+  if (reply === "maybe") return `${name} is maybe for ${label}`;
   return `${name} is in for ${label}`;
 }
 
 export function replyPushBody(name: string, reply: string, etaMin: number | null, arriveLabel = ""): string {
   if (reply === "declined") return `${name} can't make it`;
+  if (reply === "maybe") return `${name} is maybe`;
   if (arriveLabel) return `${name} is in, arriving ${arriveLabel}`;
   if (reply === "coming" || reply === "join" || reply === "in") {
     return etaMin ? `${name} is there in ${etaMin} min` : `${name} is in`;

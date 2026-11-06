@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-06-maybe",
+    "date": "2026-11-06",
+    "title": "Say maybe",
+    "bullets": [
+      "Not sure yet? Open ⋯ on a plan and tap Maybe.",
+      "Friends see you're a maybe in Who's in."
+    ]
+  },
+  {
     "id": "2026-11-06-parity-tests",
     "date": "2026-11-06",
     "title": "More checks behind the scenes",
