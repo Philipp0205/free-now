@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-06-cleanup-ui-helpers",
+    "date": "2026-11-06",
+    "title": "Behind-the-scenes tidy-up",
+    "bullets": [
+      "We removed old unused code from the app. Nothing changes for you.",
+      "Your plans, chats, and settings stay the same."
+    ]
+  },
+  {
     "id": "2026-11-06-icon-maskable",
     "date": "2026-11-06",
     "title": "Sharper home-screen icon",
