@@ -61,6 +61,8 @@ import {
   listMembers,
   setCircleAdmin,
   listNotifications,
+  listPersonalNotifications,
+  markPersonalNotificationsRead,
   unreadNotificationsByCircle,
   listPlanJoins,
   listPushSubs,
@@ -712,8 +714,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "GET" && pathname === "/api/notifications") {
-    const circle = requireCircle(deps, me.id, requested);
-    const notifications = listNotifications(deps.db, me.id, circle.id).map((row) => ({
+    // Someone in no circle still reaches their own personal alerts. A named circle must still be theirs.
+    const circle = !requested && listCirclesForUser(deps.db, me.id).length === 0 ? null : requireCircle(deps, me.id, requested);
+    const rows = circle ? listNotifications(deps.db, me.id, circle.id) : listPersonalNotifications(deps.db, me.id);
+    const notifications = rows.map((row) => ({
       id: row.id,
       title: row.title,
       body: row.body,
@@ -728,8 +732,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "POST" && pathname === "/api/notifications/read") {
-    const circle = requireCircle(deps, me.id, requested);
-    markNotificationsRead(deps.db, me.id, circle.id, deps.now());
+    const circle = !requested && listCirclesForUser(deps.db, me.id).length === 0 ? null : requireCircle(deps, me.id, requested);
+    if (circle) markNotificationsRead(deps.db, me.id, circle.id, deps.now());
+    else markPersonalNotificationsRead(deps.db, me.id, deps.now());
     sendEmpty(res, 204);
     return;
   }
@@ -1545,8 +1550,9 @@ function updateFeedbackAsOperator(
     sendJson(res, 404, { error: "not found" });
     return;
   }
-  console.log(`admin feedback update ok id=${updated.id} status=${updated.status}`);
-  sendJson(res, 200, { feedback: updated });
+  const { doneAlert, ...feedback } = updated;
+  console.log(`admin feedback update ok id=${feedback.id} status=${feedback.status} alert=${doneAlert}`);
+  sendJson(res, 200, { feedback, doneAlert });
 }
 
 function deleteCircleAsOperator(res: http.ServerResponse, deps: AppDeps, pathname: string): void {

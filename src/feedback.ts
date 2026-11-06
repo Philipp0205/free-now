@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { withTx } from "./db.js";
 
 export const FEEDBACK_MAX = 2000;
 export const FEEDBACK_NOTE_MAX = 2000;
@@ -119,12 +120,39 @@ export function getFeedback(db: DatabaseSync, id: string): FeedbackView | undefi
   return row ? view(row) : undefined;
 }
 
+export const FEEDBACK_DONE_KIND = "feedback-done";
+export const FEEDBACK_DONE_TITLE = "Your suggestion is live";
+export const FEEDBACK_EXCERPT_MAX = 80;
+
+/**
+ * A short, single-line quote of the feedback for the submitter's own alert.
+ * Control, zero-width, and bidi characters go, whitespace collapses, and it is cut on a code point.
+ * The client renders it as text, never HTML.
+ */
+export function feedbackExcerpt(text: string, max = FEEDBACK_EXCERPT_MAX): string {
+  const flat = text
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = Array.from(flat);
+  if (chars.length <= max) return flat;
+  return `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}
+
+export function feedbackDoneBody(text: string): string {
+  const excerpt = feedbackExcerpt(text);
+  return excerpt ? `You suggested: "${excerpt}". It is in the app now. Thanks!` : "It is in the app now. Thanks!";
+}
+
+/** What the done transition did about the submitter's alert. Never shown to app users. */
+export type DoneAlert = "sent" | "already" | "no-user" | "none";
+
 export function updateFeedback(
   db: DatabaseSync,
   id: string,
   patch: { status?: FeedbackStatus; prUrl?: string | null; note?: string | null },
   at: number,
-): FeedbackView | undefined {
+): (FeedbackView & { doneAlert: DoneAlert }) | undefined {
   const sets: string[] = [];
   const params: Array<string | number | null> = [];
   if (patch.status !== undefined) {
@@ -141,9 +169,53 @@ export function updateFeedback(
   }
   sets.push("updated_at = ?");
   params.push(at);
-  const changed = db.prepare(`UPDATE feedback SET ${sets.join(", ")} WHERE id = ?`).run(...params, id).changes;
-  if (!Number(changed)) return undefined;
-  return getFeedback(db, id);
+  let found = false;
+  let alert: DoneAlert = "none";
+  // One transaction: the status write, the marker claim, and the alert insert land together or not at all.
+  withTx(db, () => {
+    const changed = db.prepare(`UPDATE feedback SET ${sets.join(", ")} WHERE id = ?`).run(...params, id).changes;
+    found = Number(changed) > 0;
+    if (found && patch.status === "done") alert = deliverDoneAlert(db, id, at);
+  });
+  if (!found) return undefined;
+  const updated = getFeedback(db, id);
+  return updated ? { ...updated, doneAlert: alert } : undefined;
+}
+
+/**
+ * Claims feedback.done_alert (NULL only) and inserts one personal alert for the submitter.
+ * The marker is never cleared, so reopening and marking done again does not send a second one,
+ * and rows marked "legacy" by the migration never send at all. Call inside a transaction.
+ */
+function deliverDoneAlert(db: DatabaseSync, feedbackId: string, at: number): DoneAlert {
+  const row = db
+    .prepare(
+      `SELECT f.text, f.done_alert, u.id AS user_id FROM feedback f
+       LEFT JOIN users u ON u.id = f.user_id
+       WHERE f.id = ? AND f.status = 'done'`,
+    )
+    .get(feedbackId);
+  if (!row) return "none";
+  const marker = row.done_alert;
+  if (marker !== null) return "already";
+  const userId = typeof row.user_id === "string" ? row.user_id : null;
+  const text = typeof row.text === "string" ? row.text : "";
+  if (!userId) {
+    db.prepare("UPDATE feedback SET done_alert = 'no-user' WHERE id = ? AND done_alert IS NULL").run(feedbackId);
+    return "no-user";
+  }
+  const noteId = crypto.randomUUID();
+  const claimed = db
+    .prepare("UPDATE feedback SET done_alert = ? WHERE id = ? AND done_alert IS NULL")
+    .run(noteId, feedbackId).changes;
+  if (!Number(claimed)) return "already";
+  const inserted = db
+    .prepare(
+      `INSERT OR IGNORE INTO notifications (id, user_id, title, body, kind, ref_id, circle_id, created_at, read_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
+    )
+    .run(noteId, userId, FEEDBACK_DONE_TITLE, feedbackDoneBody(text), FEEDBACK_DONE_KIND, feedbackId, at).changes;
+  return Number(inserted) ? "sent" : "already";
 }
 
 function view(row: FeedbackJoined): FeedbackView {

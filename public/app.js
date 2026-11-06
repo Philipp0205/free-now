@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v35";
+const APP_VERSION = "hangry-v37";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -4226,6 +4226,11 @@ function scheduleReverse(lat, lng, replace = false) {
 }
 
 function openNotification(note) {
+  if (note.kind === "feedback-done") {
+    // Your own shipped suggestion: the changelog is where it shows up for everyone.
+    void openWhatsNewList();
+    return;
+  }
   if (note.kind === "chat" && note.refId) {
     if (note.refId === "circle") void openChat({ kind: "circle" });
     else {

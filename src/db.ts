@@ -368,6 +368,8 @@ export function openDb(dbPath: string): DatabaseSync {
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
+  migrateFeedbackDoneAlert(db);
+  ensureFeedbackDoneIndex(db);
   db.prepare(
     "UPDATE circles SET invite_expires_at = created_at + ? WHERE invite_expires_at IS NULL",
   ).run(14 * 24 * 60 * 60 * 1000);
@@ -466,6 +468,33 @@ function migratePushDeliveryCascade(db: DatabaseSync): void {
   }
 }
 
+/**
+ * Alert kinds addressed to one person, not to a circle. Their rows keep circle_id NULL on purpose,
+ * show in every circle the person opens, and survive leaving or deleting the source circle.
+ */
+export const PERSONAL_ALERT_KINDS = ["feedback-done"] as const;
+const PERSONAL_KINDS_SQL = PERSONAL_ALERT_KINDS.map((kind) => `'${kind}'`).join(", ");
+
+/**
+ * feedback.done_alert is the delivery marker for "Your suggestion is live".
+ * NULL: not sent yet. "legacy": already done before this column existed, never sent.
+ * "no-user": the submitter was gone when it became done. Anything else: the notification id.
+ * Added and backfilled in one transaction, so a crash cannot leave old done rows unmarked.
+ */
+function migrateFeedbackDoneAlert(db: DatabaseSync): void {
+  const rows = db.prepare("PRAGMA table_info(feedback)").all() as Array<{ name?: string }>;
+  if (rows.some((row) => row.name === "done_alert")) return;
+  withTx(db, () => {
+    db.exec("ALTER TABLE feedback ADD COLUMN done_alert TEXT");
+    db.exec("UPDATE feedback SET done_alert = 'legacy' WHERE status = 'done'");
+  });
+}
+
+/** Second guard behind feedback.done_alert: one "live" alert per feedback row, ever. */
+function ensureFeedbackDoneIndex(db: DatabaseSync): void {
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_notifs_feedback_done ON notifications(ref_id) WHERE kind = 'feedback-done'");
+}
+
 function backfillNotificationCircles(db: DatabaseSync): void {
   db.exec(`
     UPDATE notifications
@@ -473,6 +502,7 @@ function backfillNotificationCircles(db: DatabaseSync): void {
       SELECT m.circle_id FROM memberships m WHERE m.user_id = notifications.user_id
     )
     WHERE circle_id IS NULL
+      AND kind NOT IN (${PERSONAL_KINDS_SQL})
       AND (SELECT COUNT(*) FROM memberships m WHERE m.user_id = notifications.user_id) = 1
   `);
 }
@@ -1522,14 +1552,36 @@ export function insertNotification(
   ).run(note.id, note.userId, note.title, note.body, note.kind, note.refId, note.circleId ?? null, note.createdAt);
 }
 
+/** This circle's alerts plus this person's own personal alerts (see PERSONAL_ALERT_KINDS). */
 export function listNotifications(db: DatabaseSync, userId: string, circleId: string, limit = 50): NotificationRow[] {
   return all<NotificationRow>(
     db,
-    `SELECT * FROM notifications WHERE user_id = ? AND circle_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    `SELECT * FROM notifications
+     WHERE user_id = ? AND (circle_id = ? OR (circle_id IS NULL AND kind IN (${PERSONAL_KINDS_SQL})))
+     ORDER BY created_at DESC, rowid DESC LIMIT ?`,
     userId,
     circleId,
     limit,
   );
+}
+
+/** Personal alerts only. For someone who is in no circle right now. */
+export function listPersonalNotifications(db: DatabaseSync, userId: string, limit = 50): NotificationRow[] {
+  return all<NotificationRow>(
+    db,
+    `SELECT * FROM notifications
+     WHERE user_id = ? AND circle_id IS NULL AND kind IN (${PERSONAL_KINDS_SQL})
+     ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    userId,
+    limit,
+  );
+}
+
+export function markPersonalNotificationsRead(db: DatabaseSync, userId: string, readAt: number): void {
+  db.prepare(
+    `UPDATE notifications SET read_at = ?
+     WHERE user_id = ? AND circle_id IS NULL AND kind IN (${PERSONAL_KINDS_SQL}) AND read_at IS NULL`,
+  ).run(readAt, userId);
 }
 
 export function countUnreadNotifications(db: DatabaseSync, userId: string, circleId: string): number {
@@ -1557,9 +1609,11 @@ export function unreadNotificationsByCircle(db: DatabaseSync, userId: string): R
   return totals;
 }
 
+/** Reading a circle's alerts also reads personal ones, since that list shows them too. */
 export function markNotificationsRead(db: DatabaseSync, userId: string, circleId: string, readAt: number): void {
   db.prepare(
-    "UPDATE notifications SET read_at = ? WHERE user_id = ? AND circle_id = ? AND read_at IS NULL",
+    `UPDATE notifications SET read_at = ?
+     WHERE user_id = ? AND (circle_id = ? OR (circle_id IS NULL AND kind IN (${PERSONAL_KINDS_SQL}))) AND read_at IS NULL`,
   ).run(readAt, userId, circleId);
 }
 
