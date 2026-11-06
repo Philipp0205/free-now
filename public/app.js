@@ -43,7 +43,6 @@ const state = {
   error: "",
   banner: null,
   bannerTimer: 0,
-  iosHintOpen: false,
   confirm: null,
   latestNotifId: null,
   bootstrappedNotifs: false,
@@ -57,7 +56,6 @@ const state = {
   installPillHidden: false,
   onboarding: false,
   pushOn: false,
-  advanced: false,
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
   planTime: "",
@@ -85,7 +83,6 @@ const state = {
   inviteError: "",
   whenMode: "now",
   startChoice: "",
-  etaFor: "",
   chat: null,
   openDescriptions: new Set(),
   chatQueue: null,
@@ -1301,15 +1298,6 @@ function planCard(plan) {
   ]);
 }
 
-function shareChip(plan) {
-  return el("button", {
-    class: "chip chat-chip share-chip",
-    type: "button",
-    "aria-label": `Share ${plan.note}`,
-    onclick: () => { void sharePlan(plan); },
-  }, [icon("share"), el("span", { text: "Share" })]);
-}
-
 function planDescription(plan) {
   const text = (plan?.description || "").trim();
   if (!text) return null;
@@ -2088,21 +2076,9 @@ function adminOver(item) {
   return youAreAdmin() && (!home || home === state.me?.circle?.id);
 }
 
-function eventTools(kind, item) {
-  /* Host Edit/End moved into cardOverflow (⋯). */
-  return null;
-}
-
 function cardMenuKey(kind, item) {
   return `${kind}:${item.id}`;
 }
-
-function closeCardMenu() {
-  if (!state.cardMenu) return;
-  state.cardMenu = null;
-  render();
-}
-
 
 function placeOpenCardMenus() {
   const gap = 8;
@@ -2889,13 +2865,6 @@ function currentGuide() {
   return installGuide(currentSignals());
 }
 
-function notificationStatus() {
-  const guide = currentGuide();
-  if (guide.status === "on") return el("p", { class: "status-on", text: "Notifications on" });
-  if (guide.status === "denied") return el("p", { class: "status-off", text: "Notifications blocked" });
-  return null;
-}
-
 function openInstallGuide() {
   state.installOpen = true;
   state.error = "";
@@ -3423,17 +3392,6 @@ function whoRow(kind, item, lines) {
   ]);
 }
 
-function replyActions(social) {
-  return replyControls("social", social);
-}
-
-function replyControls(kind, item) {
-  /* Legacy row — cards now use inToggle + cardOverflow. Kept for any stray call sites. */
-  return el("div", { class: "reply-actions" }, [
-    inToggle(kind, item, { locked: false }),
-  ]);
-}
-
 function inToggle(kind, item, { locked = false } = {}) {
   const isHost = item.creator?.id === state.me.user.id;
   const mine = item.joined?.find((person) => person.id === state.me.user.id);
@@ -3515,20 +3473,6 @@ async function leaveEvent(kind, item) {
     }
     await refresh({ initial: true });
   });
-}
-
-function timeChip(kind, item, value, chosen) {
-  const label = chosen ? `Arriving ${value}` : "Pick time";
-  return el("label", { class: "chip time-chip" }, [
-    el("span", { text: label }),
-    el("input", {
-      type: "time",
-      step: "60",
-      value: /^\d{2}:\d{2}$/.test(value) ? value : "",
-      "aria-label": label,
-      onchange: (event) => chooseArrival(kind, item, event.target.value),
-    }),
-  ]);
 }
 
 function chooseArrival(kind, item, value) {
@@ -4389,23 +4333,9 @@ function confirmRemoveGuest(kind, event, person) {
   render();
 }
 
-function planReplyButtons(plan) {
-  return replyControls("plan", plan);
-}
-
 function removedNote(item) {
   if (!item?.removedBy) return null;
   return el("p", { class: "removed-note", text: `${item.removedBy} removed you from this.` });
-}
-
-function planPinActions(plan) {
-  if (plan.removedBy) return removedNote(plan);
-  const mine = plan.joined.find((person) => person.id === state.me.user.id);
-  return el("div", {}, [
-    mine && (mine.reply === "declined" || inReply(mine))
-      ? el("p", { class: "reply-line", text: planReplyLine(mine) })
-      : null,
-  ]);
 }
 
 function shareToggle(label) {
@@ -4492,20 +4422,6 @@ function showOnMap(kind, id) {
   state.tab = "map";
   state.sheet = null;
   render();
-}
-
-function mapsLink(lat, lng, label, text) {
-  return el("a", {
-    class: "map-link",
-    href: mapsHref(lat, lng, label),
-    target: mapsExternal() ? "_blank" : null,
-    rel: mapsExternal() ? "noreferrer" : null,
-    text,
-  });
-}
-
-function mapsExternal() {
-  return !/android/i.test(navigator.userAgent);
 }
 
 function mapsHref(lat, lng, label) {
@@ -5284,13 +5200,6 @@ async function onCreatePlan(event) {
   }, locationNote);
 }
 
-async function joinSocial(social) {
-  await run(async () => {
-    await api(`/api/socials/${social.id}/join`, { method: "POST", body: {} });
-    await refresh({ initial: true });
-  });
-}
-
 async function endSocial(social) {
   if (!social) return;
   state.confirm = {
@@ -5383,14 +5292,6 @@ function confirmSheet() {
       ]),
     ]),
   ]);
-}
-
-async function deletePlan(plan) {
-  if (!window.confirm("Delete this plan?")) return;
-  await run(async () => {
-    await api(`/api/plans/${plan.id}`, { method: "DELETE" });
-    await refresh({ initial: true });
-  });
 }
 
 async function onRename(event) {
@@ -5625,47 +5526,6 @@ function localSubscriptionEndpoint() {
   return Promise.race([ready, timeout]).then((subscription) => subscription?.endpoint || "").catch(() => "");
 }
 
-function pushReminderSheet() {
-  const reminder = state.pushReminder;
-  if (!reminder) return el("div");
-  const snooze = () => {
-    state.pushSnooze = true;
-    render();
-  };
-  const actions = [];
-  if (reminder.kind === "enable") {
-    actions.push(el("button", {
-      class: "btn",
-      type: "button",
-      text: state.pushBusy ? "Waiting…" : "Turn on notifications",
-      disabled: state.pushBusy,
-      onclick: () => onEnablePush(),
-    }));
-  } else if (reminder.kind === "guide") {
-    actions.push(el("button", {
-      class: "btn",
-      type: "button",
-      text: "Open the install guide",
-      onclick: openInstallGuide,
-    }));
-  }
-  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: snooze }));
-  return el("div", {}, [
-    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: snooze }),
-    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": reminder.title }, [
-      el("div", { class: "sheet-head" }, [
-        el("div", { class: "grabber" }),
-        el("h2", { text: reminder.title }),
-        el("p", { class: "help", text: reminder.lede }),
-      ]),
-      reminder.steps?.length
-        ? el("ol", { class: "guide-reenable" }, reminder.steps.map((line) => el("li", { text: line })))
-        : null,
-      el("div", { class: "stack" }, actions),
-    ]),
-  ]);
-}
-
 async function onInstall() {
   if (!state.installEvent) return;
   state.installEvent.prompt();
@@ -5677,73 +5537,6 @@ async function onInstall() {
   }
   render();
   void considerReminders();
-}
-
-function showInstallPill() {
-  const prompt = installPrompt(currentSignals(), { canPrompt: false });
-  return Boolean(state.me?.circle) && !state.pushOn && !isInstalled() && !state.installPillHidden && !prompt.quiet;
-}
-
-function installPill() {
-  return el("div", { class: "install-pill" }, [
-    el("button", {
-      class: "text",
-      type: "button",
-      text: "Add to home screen",
-      onclick: () => {
-        state.onboarding = true;
-        render();
-      },
-    }),
-    el("button", {
-      class: "ios-dismiss",
-      type: "button",
-      "aria-label": "Hide install reminder",
-      text: "×",
-      onclick: () => {
-        state.installPillHidden = true;
-        render();
-      },
-    }),
-  ]);
-}
-
-function dismissInstallSheet() {
-  localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
-  state.installSheet = false;
-  render();
-  void considerReminders();
-}
-
-function installSheetView() {
-  const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
-  const actions = [];
-  if (prompt.offerInstall) {
-    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: () => onInstall() }));
-  }
-  if (prompt.copyLink) {
-    actions.push(el("button", {
-      class: "btn",
-      type: "button",
-      text: "Copy link",
-      onclick: () => copyText(location.href, "Link copied. Open it in Chrome."),
-    }));
-  }
-  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: dismissInstallSheet }));
-  return el("div", {}, [
-    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissInstallSheet }),
-    el("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": prompt.title }, [
-      el("div", { class: "sheet-head" }, [
-        el("div", { class: "grabber" }),
-        el("h2", { text: prompt.title }),
-        el("p", { class: "help", text: prompt.lede }),
-      ]),
-      prompt.steps.length
-        ? el("ol", { class: "guide-reenable" }, prompt.steps.map((line) => el("li", { text: line })))
-        : null,
-      el("div", { class: "stack" }, actions),
-    ]),
-  ]);
 }
 
 async function onRotateBuzz() {
