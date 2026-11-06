@@ -174,6 +174,83 @@ test("when everyone has answered: reminded 0, nothing sent, and the cooldown doe
   }, { sent: "envelope" });
 });
 
+test("Maybe is tentative: Maybe people get the reminder, In and Can't are skipped", async () => {
+  await withApp(async ({ port, sent, db }) => {
+    const { alex, bea, cam, dan, kim, a, b } = await seed(port);
+    const plan = await makePlan(port, alex, a.id);
+    await api(port, "PATCH", `/api/plans/${plan.id}?circle=${a.id}`, { token: alex.token, body: { circleIds: [a.id, b.id] }, status: 200 });
+    // Bea said in, Cam said can't, Dan and Kim said maybe.
+    await api(port, "POST", `/api/plans/${plan.id}/reply?circle=${a.id}`, { token: bea.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", `/api/plans/${plan.id}/reply?circle=${b.id}`, { token: cam.token, body: { reply: "cant" }, status: 200 });
+    await api(port, "POST", `/api/plans/${plan.id}/reply?circle=${a.id}`, { token: dan.token, body: { reply: "maybe" }, status: 200 });
+    await api(port, "POST", `/api/plans/${plan.id}/reply?circle=${a.id}`, { token: kim.token, body: { reply: "maybe" }, status: 200 });
+    sent.length = 0;
+
+    const res = await api(port, "POST", `/api/plans/${plan.id}/remind?circle=${a.id}`, { token: alex.token, body: {}, status: 200 });
+    assert.equal(res.reminded, 2, "Dan and Kim, both maybe");
+    assert.equal(res.plan.remindAgainAt, START + REMIND_COOLDOWN_MS);
+    // Dan's phone rings once although he is in both circles. Kim has notifications off.
+    assert.deepEqual(endpoints(sent), [to(dan)]);
+    assert.deepEqual(alerts(db, dan.user.id).map((row) => row.circle_id).sort(), [a.id, b.id].sort());
+    assert.equal(alerts(db, kim.user.id).length, 1);
+    for (const person of [alex, bea, cam]) assert.deepEqual(alerts(db, person.user.id), [], person.user.name);
+    // Their Maybe stays as it was.
+    const joined = res.plan.joined as Array<{ id: string; reply: string }>;
+    assert.equal(joined.find((row) => row.id === dan.user.id)?.reply, "maybe");
+  }, { sent: "envelope" });
+});
+
+test("everyone In or Can't except one Maybe: that Maybe person is reminded", async () => {
+  await withApp(async ({ port, sent, db }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const circle = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Trio" }, status: 201 })).circle;
+    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: circle.inviteCode }, status: 201 });
+    const cam = await api(port, "POST", "/api/auth/start", { body: { name: "Cam", code: circle.inviteCode }, status: 201 });
+    const dee = await api(port, "POST", "/api/auth/start", { body: { name: "Dee", code: circle.inviteCode }, status: 201 });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: dee.token,
+      body: { endpoint: to(dee), keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const plan = (await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Lunch" }, status: 201 })).plan;
+    await api(port, "POST", `/api/plans/${plan.id}/reply`, { token: bea.token, body: { reply: "in" }, status: 200 });
+    await api(port, "POST", `/api/plans/${plan.id}/reply`, { token: cam.token, body: { reply: "declined" }, status: 200 });
+    await api(port, "POST", `/api/plans/${plan.id}/reply`, { token: dee.token, body: { reply: "maybe" }, status: 200 });
+    sent.length = 0;
+
+    const res = await api(port, "POST", `/api/plans/${plan.id}/remind`, { token: bea.token, body: {}, status: 200 });
+    assert.equal(res.reminded, 1, "not Everyone has already answered");
+    assert.notEqual(res.plan.remindAgainAt, null, "a real reminder starts the cooldown");
+    assert.deepEqual(endpoints(sent), [to(dee)]);
+    assert.equal(sent[0].payload.title, "Bea reminds you: Lunch, Tomorrow");
+    assert.equal(alerts(db, dee.user.id).length, 1);
+    for (const person of [alex, bea, cam]) assert.equal(alerts(db, person.user.id).length, 0, person.user.name);
+
+    // Dee moves to In: now everyone has answered, and the next window gives reminded 0.
+    await api(port, "POST", `/api/plans/${plan.id}/reply`, { token: dee.token, body: { reply: "in" }, status: 200 });
+    db.prepare("UPDATE plans SET reminded_at = NULL WHERE id = ?").run(plan.id);
+    const none = await api(port, "POST", `/api/plans/${plan.id}/remind`, { token: alex.token, body: {}, status: 200 });
+    assert.equal(none.reminded, 0);
+    assert.equal(none.plan.remindAgainAt, null);
+  }, { sent: "envelope" });
+});
+
+test("a removed guest is never reminded, even after picking Maybe", async () => {
+  await withApp(async ({ port, sent, db }) => {
+    const { alex, bea, dan, kim, a } = await seed(port);
+    const plan = await makePlan(port, alex, a.id);
+    await api(port, "DELETE", `/api/plans/${plan.id}/people/${bea.user.id}?circle=${a.id}`, { token: alex.token, status: 204 });
+    // The server still takes a Maybe from a removed guest; the row stays blocked.
+    await api({ port }, "POST", `/api/plans/${plan.id}/reply?circle=${a.id}`, { token: bea.token, body: { reply: "maybe" } });
+    sent.length = 0;
+    const res = await api(port, "POST", `/api/plans/${plan.id}/remind?circle=${a.id}`, { token: alex.token, body: {}, status: 200 });
+    assert.equal(res.reminded, 2, "Dan and Kim");
+    assert.deepEqual(endpoints(sent), [to(dan)]);
+    assert.equal(alerts(db, bea.user.id).length, 0);
+    assert.equal(alerts(db, kim.user.id).length, 1);
+  }, { sent: "envelope" });
+});
+
 test("ended and past plans cannot be reminded", async () => {
   await withApp(async ({ port, sent, at }) => {
     const { alex, bea, a } = await seed(port);

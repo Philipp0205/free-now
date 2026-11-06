@@ -112,10 +112,13 @@ function removedMessage(actor: string | null | undefined): string {
   return `${name} removed you from this.`;
 }
 
-export function normalizeReply(value: unknown): "coming" | "declined" {
+export type Reply = "coming" | "declined" | "maybe";
+
+export function normalizeReply(value: unknown): Reply {
   if (value === "declined" || value === "cant" || value === "can't") return "declined";
+  if (value === "maybe") return "maybe";
   if (value === "coming" || value === "join" || value === "in") return "coming";
-  throw new HttpError(400, "reply must be in or can't");
+  throw new HttpError(400, "reply must be in, maybe, or can't");
 }
 
 export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {

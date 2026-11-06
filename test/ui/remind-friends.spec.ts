@@ -137,3 +137,55 @@ test("everyone answered: the toast says so and the item stays available", { time
     await page.context().close();
   }
 });
+
+for (const [width, height] of SIZES) {
+  test(`at ${width}: a friend who said Maybe still gets reminded, next to the Maybe item in the menu`, { timeout: 60_000 }, async () => {
+    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const { circle } = await call("POST", "/api/circles", host.token, { name: `Maybe ${width}` });
+    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const sure = await call("POST", "/api/auth/start", undefined, { name: "Sami", code: circle.inviteCode });
+    await call("POST", "/api/push/subscribe", friend.token, { endpoint: `https://push.example/remind-maybe-${width}`, keys: { p256dh: "p", auth: "a" } });
+    const made = (await call("POST", "/api/plans", host.token, { note: `Karaoke ${width}` })).plan;
+    await call("POST", `/api/plans/${made.id}/reply`, friend.token, { reply: "maybe" });
+    await call("POST", `/api/plans/${made.id}/reply`, sure.token, { reply: "in" });
+    const before = sent.length;
+
+    // The friend's own menu shows Remind friends and Maybe (on) side by side.
+    const friendPage = await phone(width, height, friend.token);
+    try {
+      await friendPage.goto(hangry.baseUrl);
+      await dismiss(friendPage);
+      const card = friendPage.locator(".card-plan", { hasText: `Karaoke ${width}` });
+      await card.locator(".who-row", { hasText: "You're maybe" }).waitFor();
+      await card.locator(".card-more").click();
+      const rows = await friendPage.locator(".card-menu [role=menuitem]").evaluateAll((nodes) =>
+        nodes.map((node) => ({ text: (node.textContent || "").trim(), on: node.classList.contains("on") })));
+      const texts = rows.map((row) => row.text);
+      assert.ok(texts.includes("Remind friends"), texts.join(", "));
+      assert.ok(texts.indexOf("Remind friends") < texts.indexOf("Maybe"), texts.join(", "));
+      assert.equal(rows.find((row) => row.text === "Maybe")?.on, true);
+      const menuBox = await friendPage.locator(".card-menu").boundingBox();
+      assert.ok(menuBox && menuBox.x >= 0 && menuBox.x + menuBox.width <= width + 0.5, `menu fits at ${width}`);
+      await shot(friendPage, "remind-maybe-menu");
+    } finally {
+      await friendPage.context().close();
+    }
+
+    const page = await phone(width, height, host.token);
+    try {
+      await page.goto(hangry.baseUrl);
+      await dismiss(page);
+      const card = page.locator(".card-plan", { hasText: `Karaoke ${width}` });
+      await card.locator(".who-row", { hasText: "Finn is maybe" }).waitFor();
+      await card.locator(".card-more").click();
+      await page.getByRole("menuitem", { name: "Remind friends" }).click();
+      await toast(page, "Reminded 1 friend");
+      await shot(page, "remind-maybe-toast");
+      const mine = sent.slice(before);
+      assert.deepEqual(mine.map((row) => row.endpoint), [`https://push.example/remind-maybe-${width}`]);
+      assert.equal(mine[0].payload.title, `Hana reminds you: Karaoke ${width}, Tomorrow`);
+    } finally {
+      await page.context().close();
+    }
+  });
+}

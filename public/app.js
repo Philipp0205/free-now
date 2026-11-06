@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v34";
+const APP_VERSION = "hangry-v35";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -2113,8 +2113,9 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
   const open = state.cardMenu === key;
   const hostish = canManageEvent(item);
   const mine = item.joined?.find((person) => person.id === state.me.user.id);
-  const inNow = Boolean(mine) && inReply(mine) && mine.reply !== "declined";
+  const inNow = Boolean(mine) && inReply(mine);
   const declined = mine?.reply === "declined";
+  const maybe = mine?.reply === "maybe";
   const isHost = item.creator?.id === state.me.user.id;
   const chosen = arriveClock(mine);
   const preset = arrivalDefault(kind, item);
@@ -2140,6 +2141,11 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
         state.cardMenu = null;
         openArrivalPicker(kind, item, chosen || preset);
       },
+    });
+    items.push({
+      text: "Maybe",
+      action: () => { state.cardMenu = null; void sendReply(kind, item, "maybe"); },
+      on: maybe,
     });
     items.push({
       text: "Can't make it",
@@ -3376,13 +3382,23 @@ function replyLine(person, social) {
   const arriving = arriveClock(person);
   const mine = person.id === state.me.user.id;
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
+  if (person.reply === "maybe") return maybeLine(person, mine);
   if (arriving) return mine ? "You're in" : `${person.name} is in, arriving ${arriving}`;
   if (mine) return eta ? `You're in · ${eta} min` : "You're in";
   return eta ? `${person.name} · there in ${eta} min` : `${person.name} is in`;
 }
 
+function maybeLine(person, mine) {
+  return mine ? "You're maybe" : `${person.name} is maybe`;
+}
+
+/** Shown in the who-row: in, maybe, and can't. Only in counts as In. */
+function answered(person) {
+  return inReply(person) || person.reply === "maybe" || person.reply === "declined";
+}
+
 function replySummary(social) {
-  const people = social.joined.filter((person) => inReply(person) || person.reply === "declined");
+  const people = social.joined.filter(answered);
   return whoRow("social", social, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
 }
 
@@ -3405,7 +3421,7 @@ function whoRow(kind, item, lines) {
 function inToggle(kind, item, { locked = false } = {}) {
   const isHost = item.creator?.id === state.me.user.id;
   const mine = item.joined?.find((person) => person.id === state.me.user.id);
-  const inNow = isHost || (Boolean(mine) && inReply(mine) && mine.reply !== "declined");
+  const inNow = isHost || (Boolean(mine) && inReply(mine));
   const hostLocked = locked || isHost;
   const pop = inPopClass(kind, item, inNow);
   const node = el("button", {
@@ -4343,12 +4359,13 @@ function planReplyLine(person) {
   const mine = person.id === state.me.user.id;
   const arriving = arriveClock(person);
   if (person.reply === "declined") return mine ? "You can't make it" : `${person.name} can't`;
+  if (person.reply === "maybe") return maybeLine(person, mine);
   if (arriving) return mine ? "You're in" : `${person.name} is in, arriving ${arriving}`;
   return mine ? "You're in" : `${person.name} is in`;
 }
 
 function planReplySummary(plan) {
-  const people = plan.joined.filter((person) => person.reply === "declined" || inReply(person));
+  const people = plan.joined.filter(answered);
   return whoRow("plan", plan, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
 }
 

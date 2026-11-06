@@ -649,8 +649,9 @@ function all<T>(db: DatabaseSync, sql: string, ...params: Array<string | number 
   return db.prepare(sql).all(...params).map((row) => ({ ...row }) as T);
 }
 
-export function replyLogText(name: string, reply: "coming" | "declined", eta: number | null, arriveLabel: string, alreadyIn: boolean): string {
+export function replyLogText(name: string, reply: "coming" | "declined" | "maybe", eta: number | null, arriveLabel: string, alreadyIn: boolean): string {
   if (reply === "declined") return `${name} can't make it`;
+  if (reply === "maybe") return `${name} is maybe`;
   if (arriveLabel && alreadyIn) return `${name} is arriving ${arriveLabel}`;
   if (arriveLabel) return `${name} is in, arriving ${arriveLabel}`;
   if (eta) return `${name} is there in ${eta} min`;

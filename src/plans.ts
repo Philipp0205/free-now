@@ -17,7 +17,7 @@ import { audiencePlace, eventTitle, notifyUsers, planRemindTitle, planReplyBody,
 import { addDays, clockLabel, isCalendarDate, isoDate, noticeDay, zonedDateTime } from "./time.js";
 import { recordEventLine, replyLogText } from "./chat.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "./app.js";
-import { normalizeReply, readArriveAt } from "./socials.js";
+import { normalizeReply, readArriveAt, type Reply } from "./socials.js";
 import { ensureShareId } from "./plan-share.js";
 
 /** How far ahead a plan can go, in calendar days in APP_TZ. */
@@ -191,8 +191,8 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
     }
   } else {
     const previous = getPlanReply(deps.db, plan.id, user.id);
-    if (previous?.reply !== "declined") {
-      setPlanReply(deps.db, plan.id, user.id, now, "declined", null);
+    if (previous?.reply !== reply) {
+      setPlanReply(deps.db, plan.id, user.id, now, reply, null);
       recordEventLine(deps.db, {
         circleId: plan.circle_id,
         kind: "plan",
@@ -200,10 +200,10 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
         hostId: plan.creator_id,
         title: plan.note,
         actorId: user.id,
-        text: replyLogText(user.name, "declined", null, "", false),
+        text: replyLogText(user.name, reply, null, "", false),
         now,
       });
-      await notifyPlanReply(deps, user, plan, now, "declined");
+      await notifyPlanReply(deps, user, plan, now, reply);
     }
   }
   const fresh = getPlan(deps.db, plan.id);
@@ -216,7 +216,7 @@ async function notifyPlanReply(
   user: UserRow,
   plan: PlanRow,
   now: number,
-  reply: "coming" | "declined",
+  reply: Reply,
 ): Promise<void> {
   await notifyUsers(deps.db, deps.push, now, [
     {
@@ -240,7 +240,7 @@ export function remindAgainAt(plan: PlanRow): number | null {
 }
 
 /**
- * Sends the plan's push again, as a reminder, to everyone in its circles who has not answered.
+ * Sends the plan's push again, as a reminder, to everyone in its circles who has not answered or said Maybe.
  * One push per person. One Alert per person in each linked circle they are in.
  */
 export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -257,8 +257,12 @@ export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, re
   if (retryAt != null && retryAt > now) {
     throw new HttpError(429, "Already reminded.", { retryAt });
   }
-  // In, Can't and removed all leave a plan_joins row. The host is always in.
-  const answered = (userId: string) => userId === plan.creator_id || Boolean(getPlanReply(deps.db, plan.id, userId));
+  // In, Can't and removed count as answered. Maybe is tentative, so it still gets the reminder. The host is always in.
+  const answered = (userId: string) => {
+    if (userId === plan.creator_id) return true;
+    const row = getPlanReply(deps.db, plan.id, userId);
+    return Boolean(row) && (Boolean(row?.blocked) || row?.reply !== "maybe");
+  };
   const batches: Array<{ circle: NonNullable<ReturnType<typeof getCircleById>>; notices: Notice[] }> = [];
   const pushed = new Set<string>();
   for (const circleId of listPlanCircleIds(deps.db, plan.id)) {
