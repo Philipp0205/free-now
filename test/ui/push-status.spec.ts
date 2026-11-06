@@ -1,48 +1,17 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
+import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { useHangry } from "./harness.js";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
 const sent: Array<{ endpoint: string; payload: PushPayload }> = [];
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const push: PushSender = {
-    async send(subscription: PushSubscription, payload: PushPayload) {
-      sent.push({ endpoint: subscription.endpoint, payload });
-    },
-  };
-  const server = http.createServer(createApp({
-    db,
-    push,
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
+const push: PushSender = {
+  async send(subscription: PushSubscription, payload: PushPayload) {
+    sent.push({ endpoint: subscription.endpoint, payload });
+  },
+};
+const hangry = useHangry({ tz: "UTC", push });
 
 test("the host opens a delivery sheet and a friend does not see it", { timeout: 90_000 }, async () => {
   const alex = await post("/api/auth/start", { name: "Alex" });
@@ -62,7 +31,7 @@ test("the host opens a delivery sheet and a friend does not see it", { timeout: 
   await post("/api/plans", { note: "Dinner" }, alex.token);
   const social = sent.find((item) => item.payload.tag.startsWith("social:"));
   assert.ok(social?.payload.id);
-  const acked = await fetch(`${baseUrl}/api/push/ack`, {
+  const acked = await fetch(`${hangry.baseUrl}/api/push/ack`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: social?.payload.id }),
@@ -140,7 +109,7 @@ async function crowd(count: number, note: string) {
 }
 
 async function ack(id: string) {
-  const response = await fetch(`${baseUrl}/api/push/ack`, {
+  const response = await fetch(`${hangry.baseUrl}/api/push/ack`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id }),
@@ -280,7 +249,7 @@ test("a sheet opened from a plan card refreshes live and survives the plan endin
     await sheet.getByText("Picnic · Delivered to 1 of 2", { exact: true }).waitFor({ timeout: 10_000 });
     await sheet.locator(".row", { hasText: "Pia" }).getByText("Delivered", { exact: true }).waitFor();
 
-    const ended = await fetch(`${baseUrl}/api/plans/${plan.plan.id}`, {
+    const ended = await fetch(`${hangry.baseUrl}/api/plans/${plan.plan.id}`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${host.token}` },
     });
@@ -306,12 +275,12 @@ test("a sheet opened from a plan card refreshes live and survives the plan endin
 });
 
 async function get(pathname: string, token: string) {
-  const response = await fetch(`${baseUrl}${pathname}`, { headers: { authorization: `Bearer ${token}` } });
+  const response = await fetch(`${hangry.baseUrl}${pathname}`, { headers: { authorization: `Bearer ${token}` } });
   return response.json();
 }
 
 async function post(pathname: string, body: unknown, token?: string) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
+  const response = await fetch(`${hangry.baseUrl}${pathname}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -325,7 +294,7 @@ async function post(pathname: string, body: unknown, token?: string) {
 }
 
 async function openAs(token: string, viewport = { width: 360, height: 640 }): Promise<Page> {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport,
     isMobile: true,
     hasTouch: true,
@@ -337,6 +306,6 @@ async function openAs(token: string, viewport = { width: 360, height: 640 }): Pr
     localStorage.setItem("fn_install_later", String(Date.now()));
   }, token);
   const page = await context.newPage();
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   return page;
 }

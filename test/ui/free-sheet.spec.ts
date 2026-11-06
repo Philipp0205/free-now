@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Locator, type Page } from "playwright-core";
+import type { Locator, Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
 
@@ -29,13 +24,10 @@ const DENIED_NOTIFICATIONS = `(() => {
   });
 })();`;
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const FIREFOX_UA = "Mozilla/5.0 (Android 14; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0";
 const PLACE = "Near Schlossplatz, Stuttgart-Mitte";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: "UTC" });
 
 const vvMock = `(() => {
   const bucket = { height: null, offsetTop: 0 };
@@ -66,31 +58,6 @@ const vvMock = `(() => {
   };
   Object.defineProperty(window, "visualViewport", { configurable: true, get: () => fake });
 })();`;
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
 
 test("the free sheet reads as separate fields", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
@@ -245,18 +212,18 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
   try {
     await openFreeSheet(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const friend = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const friend = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
     });
-    const viewerContext = await browser.newContext({
+    const viewerContext = await hangry.browser.newContext({
       viewport: { width: 360, height: 640 },
       isMobile: true,
       hasTouch: true,
@@ -266,7 +233,7 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     await viewerContext.addInitScript(vvMock);
     await viewerContext.addInitScript((value) => localStorage.setItem("fn_token", value), friend.token);
     const viewer = await viewerContext.newPage();
-    await viewer.goto(baseUrl);
+    await viewer.goto(hangry.baseUrl);
     const later = viewer.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await viewer.getByRole("button", { name: "I'm in" }).click();
@@ -321,8 +288,8 @@ test("later and tomorrow replies keep I'm in on the card and Can't in the menu",
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const friend = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const friend = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
@@ -333,18 +300,18 @@ test("later and tomorrow replies keep I'm in on the card and Can't in the menu",
       ? `${String(ahead.getUTCHours()).padStart(2, "0")}:${String(ahead.getUTCMinutes()).padStart(2, "0")}`
       : null;
     if (laterClock) {
-      await fetch(`${baseUrl}/api/socials`, {
+      await fetch(`${hangry.baseUrl}/api/socials`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ note: "Dinner", startsAt: laterClock }),
       });
     }
-    await fetch(`${baseUrl}/api/plans`, {
+    await fetch(`${hangry.baseUrl}/api/plans`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Walk" }),
     });
-    const viewerContext = await browser.newContext({
+    const viewerContext = await hangry.browser.newContext({
       viewport: { width: 360, height: 640 },
       isMobile: true,
       hasTouch: true,
@@ -354,7 +321,7 @@ test("later and tomorrow replies keep I'm in on the card and Can't in the menu",
     await viewerContext.addInitScript(vvMock);
     await viewerContext.addInitScript((value) => localStorage.setItem("fn_token", value), friend.token);
     const viewer = await viewerContext.newPage();
-    await viewer.goto(baseUrl);
+    await viewer.goto(hangry.baseUrl);
     const sheet = viewer.locator(".sheet button", { hasText: "Not now" });
     if (await sheet.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await sheet.click();
     const labels = [...(laterClock ? ["Dinner"] : []), "Walk"];
@@ -424,7 +391,7 @@ test("a place line opens that pin and Back returns", { timeout: 90_000 }, async 
   try {
     await openFreeSheet(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
@@ -449,18 +416,18 @@ test("each place tap recentres on that pin", { timeout: 90_000 }, async () => {
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const bea = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const bea = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
     });
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${bea.token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Dinner", place: "Rathaus", lat: 48.78, lng: 9.19 }),
@@ -490,12 +457,12 @@ test("a plan link opens the map on that plan", { timeout: 90_000 }, async () => 
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const plan = await fetch(`${baseUrl}/api/plans`, {
+    const plan = await fetch(`${hangry.baseUrl}/api/plans`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Bouldering", place: "Gym", lat: 48.775, lng: 9.175 }),
     }).then((response) => response.json());
-    await page.goto(`${baseUrl}/?plan=${plan.plan.id}`);
+    await page.goto(`${hangry.baseUrl}/?plan=${plan.plan.id}`);
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.locator(".map-card").getByText("Bouldering").waitFor({ timeout: 8000 });
@@ -601,7 +568,7 @@ test("a failed address lookup still names the pin", { timeout: 90_000 }, async (
     await page.getByRole("button", { name: /^More for / }).click();
     await page.getByRole("menuitem", { name: "End" }).waitFor();
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const listed = await fetch(`${baseUrl}/api/socials`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const listed = await fetch(`${hangry.baseUrl}/api/socials`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
     assert.ok(listed.socials[0].place.length > 0, JSON.stringify(listed.socials[0]));
     assert.notEqual(listed.socials[0].place, "Finding address…");
   } finally {
@@ -614,13 +581,13 @@ test("a 5xx while the app is open shows the retry banner and a toast", { timeout
   try {
     await openFreeSheet(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const friend = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const friend = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${friend.token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
@@ -663,7 +630,7 @@ test("a 5xx while the app is open shows the retry banner and a toast", { timeout
 test("a fresh circle is named after you and drops a bad invite code", { timeout: 90_000 }, async () => {
   const page = await phonePage(CHROME_UA, false);
   try {
-    await page.goto(`${baseUrl}/join/NOTREAL`);
+    await page.goto(`${hangry.baseUrl}/join/NOTREAL`);
     await page.getByText("This invite isn't valid. Ask for a new link.").waitFor();
     await page.getByRole("button", { name: "Start my own circle" }).click();
     await page.locator("#name").fill("Philipp");
@@ -706,7 +673,7 @@ test("leaving the map removes it and closing the picker returns focus", { timeou
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee", place: "Schlossplatz", lat: 48.7784, lng: 9.18 }),
@@ -846,13 +813,13 @@ test("alert times sit on the right of the card", { timeout: 90_000 }, async () =
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
@@ -914,7 +881,7 @@ test("a confirm sheet closes when its content is dragged at 412", { timeout: 90_
     await page.setViewportSize({ width: 412, height: 700 });
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
@@ -1018,7 +985,7 @@ test("a confirm sheet closes when the gap between its buttons is dragged", { tim
     await page.setViewportSize({ width: 412, height: 700 });
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
@@ -1066,7 +1033,7 @@ test("a confirm sheet closes when the gap is touch-dragged in Chromium", { timeo
       await page.setViewportSize(size);
       await signIn(page, "Alex");
       const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-      await fetch(`${baseUrl}/api/socials`, {
+      await fetch(`${hangry.baseUrl}/api/socials`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ note: "Coffee" }),
@@ -1146,8 +1113,8 @@ test("an admin manages members from the circle list", { timeout: 90_000 }, async
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
@@ -1181,18 +1148,18 @@ test("the host can remove someone who is in", { timeout: 90_000 }, async () => {
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    const social = await fetch(`${baseUrl}/api/socials`, {
+    const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+    await fetch(`${hangry.baseUrl}/api/socials/${social.social.id}/reply`, {
       method: "POST",
       headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
       body: JSON.stringify({ reply: "in" }),
@@ -1221,23 +1188,23 @@ test("a removed guest sees a note instead of reply buttons", { timeout: 90_000 }
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const nia = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const nia = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Nia", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    const social = await fetch(`${baseUrl}/api/socials`, {
+    const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+    await fetch(`${hangry.baseUrl}/api/socials/${social.social.id}/reply`, {
       method: "POST",
       headers: { authorization: `Bearer ${nia.token}`, "content-type": "application/json" },
       body: JSON.stringify({ reply: "in" }),
     });
-    await fetch(`${baseUrl}/api/socials/${social.social.id}/people/${nia.user.id}`, {
+    await fetch(`${hangry.baseUrl}/api/socials/${social.social.id}/people/${nia.user.id}`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${token}` },
     });
@@ -1266,15 +1233,15 @@ test("an admin sees edit, end, and remove on someone else's cards", { timeout: 9
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const join = (name: string) => fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const join = (name: string) => fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const fritz = await join("Fritz");
     const sam = await join("Sam");
-    const postAs = (tokenValue: string, pathname: string, body: unknown) => fetch(`${baseUrl}${pathname}`, {
+    const postAs = (tokenValue: string, pathname: string, body: unknown) => fetch(`${hangry.baseUrl}${pathname}`, {
       method: "POST",
       headers: { authorization: `Bearer ${tokenValue}`, "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -1290,7 +1257,7 @@ test("an admin sees edit, end, and remove on someone else's cards", { timeout: 9
     const walk = laterClock
       ? await postAs(sam.token, "/api/socials", { note: "Walk", startsAt: laterClock })
       : null;
-    const replyAs = (tokenValue: string, pathname: string) => fetch(`${baseUrl}${pathname}`, {
+    const replyAs = (tokenValue: string, pathname: string) => fetch(`${hangry.baseUrl}${pathname}`, {
       method: "POST",
       headers: { authorization: `Bearer ${tokenValue}`, "content-type": "application/json" },
       body: JSON.stringify({ reply: "in" }),
@@ -1345,7 +1312,7 @@ test("editing a plan that has ended says so", { timeout: 90_000 }, async () => {
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/plans`, {
+    await fetch(`${hangry.baseUrl}/api/plans`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Bouldering" }),
@@ -1376,7 +1343,7 @@ test("plan tools do not cover the avatar", { timeout: 90_000 }, async () => {
       await page.setViewportSize(size);
       await signIn(page, "Alex");
       const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-      await fetch(`${baseUrl}/api/plans`, {
+      await fetch(`${hangry.baseUrl}/api/plans`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ note: "Bouldering", place: "Gym" }),
@@ -1417,7 +1384,7 @@ test("a failed chat send goes out again when the connection returns", { timeout:
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
@@ -1453,7 +1420,7 @@ test("text typed while a chat message retries stays in the composer", { timeout:
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    await fetch(`${baseUrl}/api/socials`, {
+    await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
@@ -1502,27 +1469,27 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const join = (name: string) => fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const join = (name: string) => fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const fritz = await join("Fritz");
     const nia = await join("Nia");
-    const post = (who: { token: string }, text: string) => fetch(`${baseUrl}/api/circles/chat`, {
+    const post = (who: { token: string }, text: string) => fetch(`${hangry.baseUrl}/api/circles/chat`, {
       method: "POST",
       headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" },
       body: JSON.stringify({ text }),
     });
     await post({ token }, "From Alex");
     await post(fritz, "From Fritz");
-    const social = await fetch(`${baseUrl}/api/socials`, {
+    const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee" }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+    await fetch(`${hangry.baseUrl}/api/socials/${social.social.id}/reply`, {
       method: "POST",
       headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
       body: JSON.stringify({ reply: "in" }),
@@ -1575,7 +1542,7 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     await page.locator("#chat-input").fill("From Nia");
     await page.getByRole("button", { name: "Send" }).click();
     await page.locator(".chat-msg.mine").waitFor();
-    const niaMe = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${nia.token}` } }).then((response) => response.json());
+    const niaMe = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${nia.token}` } }).then((response) => response.json());
     assert.equal(await page.locator(".chat-msg.mine").getAttribute("data-color"), niaMe.user.color);
     await page.getByRole("button", { name: "Back" }).click();
     await page.getByRole("button", { name: "Now", exact: true }).click();
@@ -1595,7 +1562,7 @@ test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => 
     try {
       await signIn(page, "Alex");
       const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-      await fetch(`${baseUrl}/api/socials`, {
+      await fetch(`${hangry.baseUrl}/api/socials`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ note: "Coffee" }),
@@ -1641,18 +1608,18 @@ test("Past events lists an ended hangout without reply buttons", { timeout: 90_0
   try {
     await signIn(page, "Alex");
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const fritz = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const fritz = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    const social = await fetch(`${baseUrl}/api/socials`, {
+    const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ note: "Coffee", place: "Cafe" }),
     }).then((response) => response.json());
-    await fetch(`${baseUrl}/api/socials/${social.social.id}/reply`, {
+    await fetch(`${hangry.baseUrl}/api/socials/${social.social.id}/reply`, {
       method: "POST",
       headers: { authorization: `Bearer ${fritz.token}`, "content-type": "application/json" },
       body: JSON.stringify({ reply: "in" }),
@@ -1710,18 +1677,18 @@ test("two circles stay separate when you switch, post, join, and leave", { timeo
     await page.getByRole("heading", { name: "Soup" }).waitFor();
 
     const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-    const me = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
-    const bea = await fetch(`${baseUrl}/api/auth/start`, {
+    const me = await fetch(`${hangry.baseUrl}/api/me`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+    const bea = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
     }).then((response) => response.json());
-    const beaContext = await browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
+    const beaContext = await hangry.browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
     await skipWhatsNew(beaContext);
     await beaContext.addInitScript(vvMock);
     const beaPage = await beaContext.newPage();
     await beaPage.addInitScript((value) => localStorage.setItem("fn_token", value), bea.token);
-    await beaPage.goto(baseUrl);
+    await beaPage.goto(hangry.baseUrl);
     const beaLater = beaPage.locator(".sheet button.btn.ghost", { hasText: "Not now" });
     if (await beaLater.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await beaLater.click();
     await beaPage.getByRole("button", { name: "Now", exact: true }).waitFor();
@@ -1739,7 +1706,7 @@ test("two circles stay separate when you switch, post, join, and leave", { timeo
 });
 
 async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width: 360, height: 640 },
     isMobile: true,
     hasTouch: true,
@@ -1760,7 +1727,7 @@ async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
 }
 
 async function signIn(page: Page, name: string) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
