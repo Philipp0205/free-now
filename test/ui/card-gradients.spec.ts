@@ -1,24 +1,16 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
 import { gradientClass } from "../../public/card-grad.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const NOTES = ["Sushi night", "Board games", "Morning run", "Rooftop drinks", "Museum trip"];
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: "UTC" });
 
 async function call(method: string, urlPath: string, token?: string, body?: Record<string, unknown>) {
-  const res = await fetch(`${baseUrl}${urlPath}`, {
+  const res = await fetch(`${hangry.baseUrl}${urlPath}`, {
     method,
     headers: {
       "content-type": "application/json",
@@ -36,7 +28,7 @@ function tomorrow(): string {
 }
 
 async function phone(width: number, height: number, token: string): Promise<Page> {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -71,31 +63,6 @@ async function backgrounds(page: Page): Promise<Record<string, { cls: string; im
   });
 }
 
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
 test("each plan card has its own gradient, kept after reload, on the map and in details", { timeout: 120_000 }, async () => {
   const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "Friends" });
@@ -110,7 +77,7 @@ test("each plan card has its own gradient, kept after reload, on the map and in 
   const page = await phone(360, 640, friend.token);
   try {
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await dismiss(page);
     await page.locator(".card-plan").nth(NOTES.length - 1).waitFor();
 

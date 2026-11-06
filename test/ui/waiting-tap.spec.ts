@@ -1,23 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Locator, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/waiting-tap/after";
 const SIZES: Array<[number, number]> = [[360, 740], [390, 844]];
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: "UTC" });
 
 function shot(name: string) {
   fs.mkdirSync(SHOT_DIR, { recursive: true });
@@ -25,7 +17,7 @@ function shot(name: string) {
 }
 
 async function call(method: string, urlPath: string, token?: string, body?: Record<string, unknown>) {
-  const res = await fetch(`${baseUrl}${urlPath}`, {
+  const res = await fetch(`${hangry.baseUrl}${urlPath}`, {
     method,
     headers: {
       "content-type": "application/json",
@@ -47,7 +39,7 @@ async function people() {
 }
 
 async function phone(width: number, height: number, colorScheme: "light" | "dark" = "light") {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -60,7 +52,7 @@ async function phone(width: number, height: number, colorScheme: "light" | "dark
 }
 
 async function asUser(page: Page, token: string) {
-  await page.goto(`${baseUrl}/robots.txt`);
+  await page.goto(`${hangry.baseUrl}/robots.txt`);
   await page.evaluate((value) => {
     localStorage.clear();
     localStorage.setItem("fn_token", value);
@@ -122,31 +114,6 @@ async function separated(card: Locator, width: number) {
   assert.ok(place.width < row.width - 40, `place line hugs its text (${place.width}px vs row ${row.width}px)`);
 }
 
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
 test("tapping Waiting for friends on an empty plan opens details, never the map", { timeout: 180_000 }, async () => {
   const { host } = await people();
   await call("POST", "/api/plans", host.token, {
@@ -162,7 +129,7 @@ test("tapping Waiting for friends on an empty plan opens details, never the map"
       const page = await phone(width, height, scheme);
       try {
         await asUser(page, host.token);
-        await page.goto(baseUrl);
+        await page.goto(hangry.baseUrl);
         await dismiss(page);
         const card = page.locator(".card-plan", { hasText: "Rooftop drinks" });
         await card.locator(".who-row", { hasText: "Waiting for friends" }).waitFor();
@@ -189,7 +156,7 @@ test("tapping Waiting for friends on an empty free-now opens details, never the 
     const page = await phone(width, height);
     try {
       await asUser(page, friend.token);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       const card = page.locator(".card-now", { hasText: "Coffee" });
       await card.locator(".who-row", { hasText: "Waiting for friends" }).waitFor();
@@ -219,7 +186,7 @@ test("with people in, the who row lists them and still opens details", { timeout
   const page = await phone(360, 740);
   try {
     await asUser(page, host.token);
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await dismiss(page);
     const card = page.locator(".card-plan", { hasText: "Board games" });
     const who = card.locator(".who-row", { hasText: "Finn is in" });
@@ -244,7 +211,7 @@ test("map card who row is a 44px row that opens details; cards hold at 320 and 4
     const page = await phone(width, height);
     try {
       await asUser(page, friend.token);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       const card = page.locator(".card-now", { hasText: "Ramen" });
       await card.locator(".who-row", { hasText: "Waiting for friends" }).waitFor();

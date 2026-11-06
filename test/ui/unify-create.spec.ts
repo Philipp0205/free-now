@@ -1,57 +1,23 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import type { DatabaseSync } from "node:sqlite";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { insertSocial, openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
+import { insertSocial } from "../../src/db.js";
 import { addDays, dayLabel, isoDate } from "../../src/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
 const SHOT_DIR = path.resolve(process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/unify-create/");
 const ORB = "Let friends know you're free now";
 
-let browser: Browser;
-let db: DatabaseSync;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: TZ });
 let seq = 0;
 
-test.before(async () => {
-  db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: TZ });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
 async function call(method: string, pathname: string, token?: string, body?: unknown, circleId?: string) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
+  const response = await fetch(`${hangry.baseUrl}${pathname}`, {
     method,
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
@@ -74,7 +40,7 @@ async function user(name = "Hana") {
 }
 
 async function phone(who: { token: string; circleId: string }, width = 390, height = 844) {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -96,7 +62,7 @@ async function phone(who: { token: string; circleId: string }, width = 390, heig
 }
 
 async function home(page: Page) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
   await page.getByRole("button", { name: ORB }).waitFor();
@@ -214,11 +180,11 @@ test("live social, later social, today plan and a far plan share one feed in ord
   const now = Date.now();
   const today = isoDate(now, TZ);
   // Inserted straight in the DB, so the later one works at any hour.
-  insertSocial(db, {
+  insertSocial(hangry.db, {
     id: crypto.randomUUID(), circleId: host.circleId, creatorId: ben.user.id, note: "Live coffee",
     createdAt: now - 60_000, expiresAt: now + 2 * 3600_000, lat: null, lng: null, startsAt: null,
   });
-  insertSocial(db, {
+  insertSocial(hangry.db, {
     id: crypto.randomUUID(), circleId: host.circleId, creatorId: cleo.user.id, note: "Later beers",
     createdAt: now, expiresAt: now + 4 * 3600_000, lat: null, lng: null, startsAt: now + 2 * 3600_000,
   });

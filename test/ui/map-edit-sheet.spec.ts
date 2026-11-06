@@ -1,17 +1,11 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const HITS = [
   { name: "jomi Bagel Deli", address: "Hasenbergsteige 5, Stuttgart", lat: 48.7705, lng: 9.1655, distanceM: 1100 },
   { name: "jomi Bagel Deli West", address: "Rotebühlstraße 120, 70197 Stuttgart-West, Baden-Württemberg, Deutschland", lat: 48.7712, lng: 9.159, distanceM: 1500 },
@@ -21,9 +15,7 @@ const SIZES: Array<[number, number]> = [[320, 568], [412, 915]];
 const MODES = ["visual-viewport", "resizes-content"] as const;
 type Mode = typeof MODES[number];
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry();
 
 const vvMock = `(() => {
   const bucket = { height: null, offsetTop: 0 };
@@ -55,31 +47,6 @@ const vvMock = `(() => {
   };
   Object.defineProperty(window, "visualViewport", { configurable: true, get: () => fake });
 })();`;
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "Europe/Berlin" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
 
 test("map card Edit and End sit clear of the host name and title", { timeout: 120_000 }, async () => {
   for (const [width, height] of [[320, 568], [360, 640], [412, 915]] as Array<[number, number]>) {
@@ -125,7 +92,7 @@ test("the edit sheet from the map card scrolls every field clear of the keyboard
       try {
         await signIn(page, "Alex");
         const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-        await fetch(`${baseUrl}/api/plans`, {
+        await fetch(`${hangry.baseUrl}/api/plans`, {
           method: "POST",
           headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
           body: JSON.stringify({ note: "Bagels for lunch??", place: "jomi Bagel Deli", lat: 48.7705, lng: 9.1655, precise: true, time: "12:45" }),
@@ -219,7 +186,7 @@ test("a pasted URL that is not a Maps link is never sent as search text", { time
 });
 
 async function phone(width: number, height: number, mockViewport: boolean) {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -243,7 +210,7 @@ async function dismiss(page: Page) {
 }
 
 async function signIn(page: Page, name: string) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);

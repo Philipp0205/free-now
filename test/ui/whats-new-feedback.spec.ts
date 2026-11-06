@@ -1,20 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import type { DatabaseSync } from "node:sqlite";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
 /** The build label app.js sends with feedback, so a version bump does not break this test. */
 const APP_VERSION = /const APP_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.resolve("public/app.js"), "utf8"))?.[1] ?? "";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const ENTRIES = JSON.parse(
   fs.readFileSync(new URL("../../public/whats-new.json", import.meta.url), "utf8"),
 ) as Array<{ id: string; title: string; bullets: string[] }>;
@@ -23,36 +16,11 @@ const LATEST = ENTRIES[0].id;
 const SHOT_DIR = process.env.WN_SHOT_DIR ? path.resolve(process.env.WN_SHOT_DIR) : "";
 const WIDTHS = [320, 360, 412];
 
-let browser: Browser;
-let baseUrl = "";
-let db: DatabaseSync;
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: "UTC" });
 let ip = 10;
 
-test.before(async () => {
-  db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
+test.before(() => {
   if (SHOT_DIR) fs.mkdirSync(SHOT_DIR, { recursive: true });
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
 });
 
 test("the popup shows unseen entries once, and Got it marks them seen on the phone and the account", { timeout: 90_000 }, async () => {
@@ -119,12 +87,12 @@ test("only entries newer than the last one seen are shown, and the account wins 
 });
 
 test("someone who signs up in the app starts with everything seen", { timeout: 90_000 }, async () => {
-  const context = await browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
+  const context = await hangry.browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
   await context.addInitScript(() => localStorage.setItem("fn_install_later", String(Date.now())));
   const page = await context.newPage();
   const errors = watchErrors(page);
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await page.locator("input").first().fill("Nia");
     await page.locator("form button[type=submit]").first().click();
     await page.waitForFunction(() => Boolean(localStorage.getItem("fn_token")));
@@ -194,7 +162,7 @@ test("Send feedback checks the text, sends it with the circle, and says thanks",
 
     const done = page.getByRole("dialog", { name: "Feedback sent" });
     await done.getByRole("heading", { name: "Thanks!" }).waitFor();
-    const row = db.prepare("SELECT * FROM feedback WHERE user_id = ?").get(eli.user.id) as Record<string, unknown>;
+    const row = hangry.db.prepare("SELECT * FROM feedback WHERE user_id = ?").get(eli.user.id) as Record<string, unknown>;
     assert.equal(row.text, "The map pins could be bigger.\nThanks!");
     assert.equal(row.circle_id, eli.circleId);
     assert.ok(APP_VERSION, "APP_VERSION found in public/app.js");
@@ -293,7 +261,7 @@ async function openAs(
   token: string,
   options: { viewport?: { width: number; height: number }; seen?: string } = {},
 ): Promise<Page> {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: options.viewport ?? { width: 360, height: 640 },
     isMobile: true,
     hasTouch: true,
@@ -308,7 +276,7 @@ async function openAs(
     if (seen) localStorage.setItem("fn_whats_new_seen", seen);
   }, { value: token, seen: options.seen ?? "" });
   const page = await context.newPage();
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   return page;
 }
 
@@ -374,12 +342,12 @@ async function shot(page: Page, name: string) {
 }
 
 async function get(pathname: string, token: string) {
-  const response = await fetch(`${baseUrl}${pathname}`, { headers: { authorization: `Bearer ${token}` } });
+  const response = await fetch(`${hangry.baseUrl}${pathname}`, { headers: { authorization: `Bearer ${token}` } });
   return response.json();
 }
 
 async function post(pathname: string, body: unknown, token?: string) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
+  const response = await fetch(`${hangry.baseUrl}${pathname}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",

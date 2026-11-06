@@ -1,51 +1,18 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
 import { addDays, dayLabel, isoDate } from "../../src/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example WN_SHOT_DIR=.oc/shots. */
 const SHOT_DIR = process.env.WN_SHOT_DIR ? path.resolve(process.env.WN_SHOT_DIR) : "";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: TZ });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
+const hangry = useHangry({ tz: TZ });
 
 function days() {
   const today = isoDate(Date.now(), TZ);
@@ -174,7 +141,7 @@ test("Now is one list: no section headings, no Plan button, plans in day order a
       await signIn(page, `Ida ${width}`);
       const token = await page.evaluate(() => localStorage.getItem("fn_token") as string);
       for (const [note, date] of [["Sushi night", d.nextWeek], ["Long walk by the river", d.tomorrow], ["Movie", addDays(d.today, 3)]]) {
-        const response = await fetch(`${baseUrl}/api/plans`, {
+        const response = await fetch(`${hangry.baseUrl}/api/plans`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
           body: JSON.stringify({ note, date, time: "19:00" }),
@@ -255,7 +222,7 @@ async function planLine(page: Page, note: string) {
 }
 
 async function phone(width = 390, height = 844) {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -272,7 +239,7 @@ async function dismiss(page: Page) {
 }
 
 async function signIn(page: Page, name: string) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);
