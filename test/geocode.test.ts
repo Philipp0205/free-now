@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isMapsLinkInput, looksLikeUrl, parseMapsLink, parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
+import { CACHE_MAX, isMapsLinkInput, looksLikeUrl, parseMapsLink, parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../src/geocode.js";
 import { api, withApp } from "./http.js";
 
 const STUTTGART = { lat: 48.7784, lng: 9.18 };
@@ -338,4 +338,18 @@ test("geocode logs the upstream status and not the query", async () => {
   assert.ok(logs.includes("geocode upstream photon status=503"));
   assert.ok(logs.includes("geocode upstream nominatim status=timeout"));
   assert.ok(logs.every((line) => !line.includes("Secret") && !line.includes("Cafe")));
+});
+
+test("place search cache drops the oldest query past CACHE_MAX", async () => {
+  let calls = 0;
+  const fetchJson = async () => {
+    calls += 1;
+    return null;
+  };
+  for (let i = 0; i <= CACHE_MAX; i += 1) await searchPlaces(`cap query ${i}`, null, fetchJson);
+  calls = 0;
+  await searchPlaces(`cap query ${CACHE_MAX}`, null, fetchJson);
+  assert.equal(calls, 0, "recent query is served from cache");
+  await searchPlaces("cap query 0", null, fetchJson);
+  assert.ok(calls > 0, "oldest query was evicted and fetched again");
 });
