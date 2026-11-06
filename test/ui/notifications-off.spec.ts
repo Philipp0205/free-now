@@ -1,24 +1,29 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
+import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA, useHangry } from "./harness.js";
 
-const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const SHOT_DIR = path.resolve(process.env.NOTIF_SHOT_DIR || ".oc/shots");
 const ENDPOINT = "https://push.example/fake";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
 const sent: Array<{ endpoint: string; payload: PushPayload }> = [];
+const push: PushSender = {
+  async send(subscription: PushSubscription, payload: PushPayload) {
+    sent.push({ endpoint: subscription.endpoint, payload });
+  },
+};
+const hangry = useHangry({
+  tz: "UTC",
+  push,
+  env: {
+    VAPID_PUBLIC_KEY: "BFakePublicKeyForTestsOnly_abcdefghijklmnopqrstuvwxyz0123456789",
+    VAPID_PRIVATE_KEY: "fake-private-key-for-tests",
+  },
+});
 
 /**
  * Headless Chrome cannot really subscribe to push. This fakes Notification permission and the
@@ -59,39 +64,8 @@ const FAKE_PUSH = `(() => {
   }
 })();`;
 
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({
-    PORT: "3000",
-    DB_PATH: ":memory:",
-    APP_TZ: "UTC",
-    VAPID_PUBLIC_KEY: "BFakePublicKeyForTestsOnly_abcdefghijklmnopqrstuvwxyz0123456789",
-    VAPID_PRIVATE_KEY: "fake-private-key-for-tests",
-  });
-  const push: PushSender = {
-    async send(subscription: PushSubscription, payload: PushPayload) {
-      sent.push({ endpoint: subscription.endpoint, payload });
-    },
-  };
-  const server = http.createServer(createApp({ db, push, config: { ...config, dbPath: ":memory:" }, now: () => Date.now() }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
 async function post(pathname: string, body: unknown, token?: string) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
+  const response = await fetch(`${hangry.baseUrl}${pathname}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
@@ -118,7 +92,7 @@ test("Settings → Notifications turns push off and back on at 393x852", { timeo
   const circle = await post("/api/circles", { name: "friends" }, alex.token);
   const bea = await post("/api/auth/start", { name: "Bea", code: circle.circle.inviteCode });
 
-  const context = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: UA });
+  const context = await hangry.browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: UA });
   await skipWhatsNew(context);
   await context.addInitScript((token) => {
     localStorage.setItem("fn_token", token);
@@ -136,7 +110,7 @@ test("Settings → Notifications turns push off and back on at 393x852", { timeo
   const row = page.locator("button.notif-row");
   const sheet = page.getByRole("dialog", { name: "Notifications" });
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await page.locator("nav.tabbar").getByRole("button", { name: "You", exact: true }).click();
     await row.getByText("Off", { exact: true }).waitFor();
 

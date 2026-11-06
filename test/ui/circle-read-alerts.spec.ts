@@ -1,65 +1,20 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
+import type { Page } from "playwright-core";
 import { flushChatNotices } from "../../src/chat.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { SIZES, UA, useHangry } from "./harness.js";
 
-const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 /** Screenshots go here. Override with CR_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.CR_SHOT_DIR || ".oc/shots/circle-read");
-const SIZES = [[320, 568], [360, 640], [412, 915]] as const;
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "Europe/Berlin" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    await flushChatNotices(true);
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
-async function call(method: string, pathname: string, token?: string, body?: unknown) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
-    headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${method} ${pathname} -> ${response.status} ${text}`);
-  return text ? JSON.parse(text) : null;
-}
+const hangry = useHangry({ beforeClose: () => flushChatNotices(true) });
+const { call } = hangry;
 
 async function phone(width: number, height: number, token: string, circleId: string) {
-  const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
   await skipWhatsNew(context);
   await context.addInitScript(([value, circle]) => {
     if (sessionStorage.getItem("cr_seeded")) return;
@@ -120,7 +75,7 @@ for (const [width, height] of SIZES) {
 
     const page = await phone(width, height, uma.token, b.id);
     try {
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       await page.getByRole("button", { name: "Switch circle" }).waitFor();
       await openMenu(page);

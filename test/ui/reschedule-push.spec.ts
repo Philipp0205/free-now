@@ -1,65 +1,27 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
+import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { addDays, isoDate, shortDate } from "../../src/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { SIZES, UA, useHangry } from "./harness.js";
 
-const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example RS_SHOT_DIR=/tmp/shots. */
 const SHOT_DIR = process.env.RS_SHOT_DIR ? path.resolve(process.env.RS_SHOT_DIR) : "";
-const SIZES = [[320, 568], [360, 640], [412, 915]] as const;
 
 const sent: Array<{ endpoint: string; payload: PushPayload }> = [];
 const fakePush: PushSender = {
   async send(subscription: PushSubscription, payload: PushPayload) { sent.push({ endpoint: subscription.endpoint, payload }); },
 };
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: TZ });
-  const server = http.createServer(createApp({ db, push: fakePush, config: { ...config, dbPath: ":memory:" }, now: () => Date.now() }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
-async function call(method: string, pathname: string, token?: string, body?: unknown) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
-    headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${method} ${pathname} -> ${response.status} ${text}`);
-  return text ? JSON.parse(text) : null;
-}
+const hangry = useHangry({ tz: TZ, push: fakePush });
+const { call } = hangry;
 
 async function phone(width = 360, height = 640, token: string | null = null) {
-  const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
   await skipWhatsNew(context);
   await context.addInitScript((value) => {
     localStorage.setItem("fn_install_later", String(Date.now()));
@@ -102,7 +64,7 @@ for (const [width, height] of SIZES) {
 
     const page = await phone(width, height, host.token);
     try {
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       await page.locator(".card-plan", { hasText: note }).locator(".card-more").click();
       await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
@@ -130,7 +92,7 @@ for (const [width, height] of SIZES) {
 
     const friendPage = await phone(width, height, friend.token);
     try {
-      await friendPage.goto(baseUrl);
+      await friendPage.goto(hangry.baseUrl);
       await dismiss(friendPage);
       await friendPage.getByRole("button", { name: /Alerts/ }).first().click();
       const alert = friendPage.locator(".alert-card", { hasText: "moved to" }).first();
@@ -138,7 +100,7 @@ for (const [width, height] of SIZES) {
       assert.ok((await alert.innerText()).includes(`${shortDate(target, today)} · 20:00`));
       await shot(friendPage, "friend-alert");
       // Tapping the push opens its url.
-      await friendPage.goto(`${baseUrl}${payload.url}`);
+      await friendPage.goto(`${hangry.baseUrl}${payload.url}`);
       await friendPage.locator(".card-plan, .map-card", { hasText: note }).first().waitFor();
       await shot(friendPage, "friend-opens-plan");
     } finally {
@@ -156,7 +118,7 @@ test("a title-only edit sends no push", { timeout: 60_000 }, async () => {
   const before = sent.length;
   const page = await phone(360, 640, host.token);
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await dismiss(page);
     await page.locator(".card-plan", { hasText: "Walk" }).getByRole("button", { name: /^More for / }).click();
     await page.getByRole("menuitem", { name: "Edit" }).click();

@@ -1,23 +1,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { SIZES, UA as CHROME_UA, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/card-a";
-const SIZES: Array<[number, number]> = [[320, 568], [360, 640], [412, 915]];
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: "UTC" });
 
 function shot(name: string) {
   fs.mkdirSync(SHOT_DIR, { recursive: true });
@@ -25,7 +16,7 @@ function shot(name: string) {
 }
 
 async function call(method: string, urlPath: string, token?: string, body?: Record<string, unknown>) {
-  const res = await fetch(`${baseUrl}${urlPath}`, {
+  const res = await fetch(`${hangry.baseUrl}${urlPath}`, {
     method,
     headers: {
       "content-type": "application/json",
@@ -47,7 +38,7 @@ async function people() {
 }
 
 async function phone(width: number, height: number) {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -59,7 +50,7 @@ async function phone(width: number, height: number) {
 }
 
 async function asUser(page: Page, token: string) {
-  await page.goto(`${baseUrl}/robots.txt`);
+  await page.goto(`${hangry.baseUrl}/robots.txt`);
   await page.evaluate((value) => {
     localStorage.clear();
     localStorage.setItem("fn_token", value);
@@ -95,31 +86,6 @@ async function noOverlap(page: Page, root: string) {
   }, root);
 }
 
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
 test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work", { timeout: 180_000 }, async () => {
   const { host, friend } = await people();
   await call("POST", "/api/plans", host.token, {
@@ -136,7 +102,7 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
     const page = await phone(360, 640);
     try {
       await asUser(page, friend.token);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       const card = page.locator(".card-plan", { hasText: "Rooftop drinks" });
       await card.locator(".in-toggle").waitFor();
@@ -182,7 +148,7 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
     const page = await phone(width, height);
     try {
       await asUser(page, friend.token);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       const card = page.locator(".card-plan", { hasText: "Rooftop drinks" });
       await card.locator(".in-toggle.on").waitFor();
@@ -198,7 +164,7 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
   const hostPage = await phone(360, 640);
   try {
     await asUser(hostPage, host.token);
-    await hostPage.goto(baseUrl);
+    await hostPage.goto(hangry.baseUrl);
     await dismiss(hostPage);
     const card = hostPage.locator(".card-plan", { hasText: "Rooftop drinks" });
     await card.locator(".in-toggle.on").waitFor();
@@ -239,7 +205,7 @@ test("chat row opens chat with badge; card body opens details with Remove and De
     const page = await phone(width, height);
     try {
       await asUser(page, host.token);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       const card = page.locator(".card-plan", { hasText: "Board games" });
       await card.locator(".chat-row .badge").waitFor({ timeout: 10_000 });
@@ -283,7 +249,7 @@ test("map card has the In toggle and ⋯ menu, and the menu stays on screen", { 
     const page = await phone(width, height);
     try {
       await asUser(page, friend.token);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
       const pin = page.locator(".leaflet-marker-icon.pin").first();
@@ -324,7 +290,7 @@ test("a plan shared with two circles shows Friends + Climbing on the redesigned 
     try {
       await asUser(page, host.token);
       await page.evaluate((id) => localStorage.setItem("fn_circle", id), circle.id);
-      await page.goto(baseUrl);
+      await page.goto(hangry.baseUrl);
       await dismiss(page);
       const card = page.locator(".card-plan", { hasText: "Crag day" });
       await card.locator(".card-body .plan-circles").waitFor();
@@ -344,7 +310,7 @@ test("Android Back closes the ⋯ menu and the Details sheet, and stays on home"
   const page = await phone(360, 640);
   try {
     await asUser(page, friend.token);
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await dismiss(page);
     const card = page.locator(".card-plan", { hasText: "Back test" });
     await card.locator(".in-toggle").waitFor();

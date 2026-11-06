@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const PLACE = "Secret Garden Bar";
 
 /** No navigator.share, and a clipboard that records what was copied. */
@@ -23,48 +17,8 @@ const CLIPBOARD = `(() => {
   });
 })();`;
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "Europe/Berlin" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
-async function call(method: string, pathname: string, token?: string, body?: unknown) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
-    headers: {
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${method} ${pathname} -> ${response.status} ${text}`);
-  return text ? JSON.parse(text) : null;
-}
+const hangry = useHangry();
+const { call } = hangry;
 
 /** A host with a circle, a friend in it, and an outsider in a circle of their own. */
 async function people(circleName = "Kreuzberg crew") {
@@ -81,7 +35,7 @@ async function makePlan(token: string, body: Record<string, unknown>) {
 }
 
 async function phone(width = 360, height = 640) {
-  const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
   await context.addInitScript(CLIPBOARD);
   await skipWhatsNew(context);
   await context.route("https://*.tile.openstreetmap.org/**", (route) => route.fulfill({ status: 204, body: "" }));
@@ -89,7 +43,7 @@ async function phone(width = 360, height = 640) {
 }
 
 async function asUser(page: Page, token: string | null, circleId = "") {
-  await page.goto(`${baseUrl}/robots.txt`);
+  await page.goto(`${hangry.baseUrl}/robots.txt`);
   await page.evaluate(([value, circle]) => {
     localStorage.clear();
     if (value) localStorage.setItem("fn_token", value);
@@ -117,7 +71,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
   hostPage.on("pageerror", (error) => errors.push(String(error)));
   try {
     await asUser(hostPage, host.token);
-    await hostPage.goto(baseUrl);
+    await hostPage.goto(hangry.baseUrl);
     await dismiss(hostPage);
     const card = hostPage.locator(".card-plan", { has: hostPage.getByRole("heading", { name: "Rooftop drinks" }) });
     await card.getByRole("button", { name: /^More for / }).click();
@@ -125,7 +79,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
     await hostPage.locator(".toast", { hasText: "Link copied" }).waitFor();
     const copied = await hostPage.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
     assert.equal(copied.length, 1);
-    assert.match(copied[0], new RegExp(`^${baseUrl}/p/[A-Za-z0-9_-]{24}$`));
+    assert.match(copied[0], new RegExp(`^${hangry.baseUrl}/p/[A-Za-z0-9_-]{24}$`));
     assert.ok(!copied[0].includes(plan.id));
     assert.deepEqual(errors, []);
 
@@ -165,7 +119,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
 
     // Ended: the same copy as an unknown link.
     await call("DELETE", `/api/plans/${plan.id}`, host.token);
-    for (const link of [copied[0], `${baseUrl}/p/AAAAAAAAAAAAAAAAAAAAAAAA`]) {
+    for (const link of [copied[0], `${hangry.baseUrl}/p/AAAAAAAAAAAAAAAAAAAAAAAA`]) {
       const visitor = await phone();
       try {
         await asUser(visitor, null);
@@ -187,7 +141,7 @@ test("a plan with no place opens on its card at home", { timeout: 90_000 }, asyn
   const friendPage = await phone();
   try {
     await asUser(friendPage, friend.token);
-    await friendPage.goto(`${baseUrl}/p/${plan.shareId}`);
+    await friendPage.goto(`${hangry.baseUrl}/p/${plan.shareId}`);
     await friendPage.locator(".card-plan.focused", { hasText: "Board games" }).waitFor({ timeout: 10_000 });
     assert.equal(await friendPage.locator(".screen-title").innerText(), "Now");
     assert.equal(new URL(friendPage.url()).pathname, "/");
@@ -202,7 +156,7 @@ test("at 320x568 the chat row, I'm in toggle and more menu fit the card", { time
   const page = await phone(320, 568);
   try {
     await asUser(page, host.token);
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await dismiss(page);
     const card = page.locator(".card-plan").first();
     await card.getByRole("button", { name: /^More for / }).waitFor();
@@ -242,7 +196,7 @@ test("at 320x568 the chat row, I'm in toggle and more menu fit the card", { time
     await noSideScroll(page);
 
     await asUser(page, null);
-    await page.goto(`${baseUrl}/p/${plan.shareId}`);
+    await page.goto(`${hangry.baseUrl}/p/${plan.shareId}`);
     await page.locator(".share-preview h2").waitFor();
     await noSideScroll(page);
     const button = await page.getByRole("button", { name: "Sign back in" }).boundingBox();
@@ -255,13 +209,13 @@ test("at 320x568 the chat row, I'm in toggle and more menu fit the card", { time
 test("the host stops sharing in Edit; the old link no longer works and Share makes a new one", { timeout: 120_000 }, async () => {
   const { host, friend } = await people("Revoke crew");
   const plan = await makePlan(host.token, { note: "Board games" });
-  const oldLink = `${baseUrl}/p/${plan.shareId}`;
+  const oldLink = `${hangry.baseUrl}/p/${plan.shareId}`;
 
   // A friend in the circle gets ⋯ (Share / Can't) but no host actions.
   const friendPage = await phone();
   try {
     await asUser(friendPage, friend.token);
-    await friendPage.goto(baseUrl);
+    await friendPage.goto(hangry.baseUrl);
     await dismiss(friendPage);
     const card = friendPage.locator(".card-plan", { hasText: "Board games" });
     await card.waitFor();
@@ -278,7 +232,7 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
   const hostPage = await phone(320, 568);
   try {
     await asUser(hostPage, host.token);
-    await hostPage.goto(baseUrl);
+    await hostPage.goto(hangry.baseUrl);
     await dismiss(hostPage);
     const card = hostPage.locator(".card-plan", { hasText: "Board games" });
     await card.getByRole("button", { name: /^More for / }).click();
@@ -300,13 +254,13 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
     }
 
     await hostPage.keyboard.press("Escape").catch(() => {});
-    await hostPage.goto(baseUrl);
+    await hostPage.goto(hangry.baseUrl);
     await dismiss(hostPage);
     await hostPage.locator(".card-plan", { hasText: "Board games" }).getByRole("button", { name: /^More for / }).click();
     await hostPage.getByRole("menuitem", { name: "Share link" }).click();
     await hostPage.locator(".toast", { hasText: "Link copied" }).waitFor();
     const copied = await hostPage.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
-    assert.match(copied.at(-1)!, new RegExp(`^${baseUrl}/p/[A-Za-z0-9_-]{24}$`));
+    assert.match(copied.at(-1)!, new RegExp(`^${hangry.baseUrl}/p/[A-Za-z0-9_-]{24}$`));
     assert.notEqual(copied.at(-1), oldLink);
   } finally {
     await hostPage.context().close();
