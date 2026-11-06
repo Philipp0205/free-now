@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-06-parity-tests",
+    "date": "2026-11-06",
+    "title": "More checks behind the scenes",
+    "bullets": [
+      "We added checks so dates and places read the same in the app and in notifications.",
+      "Nothing changes for you."
+    ]
+  },
+  {
     "id": "2026-11-06-cleanup-ui-helpers",
     "date": "2026-11-06",
     "title": "Behind-the-scenes tidy-up",
