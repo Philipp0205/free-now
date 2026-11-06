@@ -294,7 +294,9 @@ export async function flushChatNotices(force = false): Promise<void> {
 
 function armSlot(chatId: string, userId: string, delay: number): ReturnType<typeof setTimeout> {
   const timer = setTimeout(() => {
-    void fireSlot(chatId, userId, false);
+    void fireSlot(chatId, userId, false).catch((error: unknown) => {
+      console.error("chat push failed", error instanceof Error ? error.message : error);
+    });
   }, delay);
   timer.unref?.();
   return timer;
@@ -321,16 +323,20 @@ async function fireSlot(chatId: string, userId: string, force: boolean): Promise
   }
   clearTimeout(slot.timer);
   slot.busy = true;
-  const chat = one<ChatRow>(job.deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
-  if (!chat || !recipientStillEligible(job.deps.db, chat, userId)) {
-    slot.busy = false;
+  try {
+    const chat = one<ChatRow>(job.deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
+    if (!chat || !recipientStillEligible(job.deps.db, chat, userId)) {
+      slot.busy = false;
+      dropSlot(chatId, userId);
+      return;
+    }
+    const count = slot.count;
+    const body = count <= 1 ? slot.firstBody : `${count} new messages`;
     dropSlot(chatId, userId);
-    return;
+    await deliverChatPush(job.deps, chat, [userId], body);
+  } finally {
+    slot.busy = false;
   }
-  const count = slot.count;
-  const body = count <= 1 ? slot.firstBody : `${count} new messages`;
-  dropSlot(chatId, userId);
-  await deliverChatPush(job.deps, chat, [userId], body);
 }
 
 async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[], body: string): Promise<void> {
