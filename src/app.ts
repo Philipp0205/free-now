@@ -109,7 +109,7 @@ import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } f
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
-import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, replyPlan } from "./plans.js";
+import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
 import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
@@ -142,6 +142,8 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Extra fields for the JSON error body, for example retryAt on a 429. */
+    public extra: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -162,7 +164,11 @@ export function createApp(deps: AppDeps): http.RequestListener {
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
-      if (error instanceof HttpError || error instanceof ChatError) {
+      if (error instanceof HttpError) {
+        sendJson(res, error.status, { ...error.extra, error: error.message });
+        return;
+      }
+      if (error instanceof ChatError) {
         sendJson(res, error.status, { error: error.message });
         return;
       }
@@ -611,6 +617,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   const planLeave = matchPath(pathname, /^\/api\/plans\/([^/]+)\/leave$/);
   if (planLeave && method === "POST") {
     sendJson(res, 200, { plan: leavePlan(deps, me, planLeave[1], requested) });
+    return;
+  }
+
+  const planRemind = matchPath(pathname, /^\/api\/plans\/([^/]+)\/remind$/);
+  if (planRemind && method === "POST") {
+    sendJson(res, 200, await remindPlan(deps, me, planRemind[1], requested));
     return;
   }
 
@@ -1338,6 +1350,9 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
     shareId: plan.share_id ?? null,
+    // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
+    remindedAt: plan.reminded_at ?? null,
+    remindAgainAt: remindAgainAt(plan),
     creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null },
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
