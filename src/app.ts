@@ -348,11 +348,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
         return;
       }
       if (q.length > 80) throw new HttpError(400, "query is too long");
-      const nearLat = Number(url.searchParams.get("lat"));
-      const nearLng = Number(url.searchParams.get("lng"));
       const bias = url.searchParams.has("lat") && url.searchParams.has("lng")
-        && Number.isFinite(nearLat) && Number.isFinite(nearLng)
-        ? { lat: nearLat, lng: nearLng }
+        && Number.isFinite(lat) && Number.isFinite(lng)
+        ? { lat, lng }
         : null;
       sendJson(res, 200, { results: await searchPlaces(q, bias) });
       return;
@@ -1767,14 +1765,6 @@ function readPoint(body: Record<string, unknown>): { lat: number; lng: number } 
 }
 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-
-function liveInvite(db: DatabaseSync, code: string, now: number): CircleRow | undefined {
-  try {
-    return requireLiveInvite(db, code, now);
-  } catch {
-    return undefined;
-  }
-}
 
 function requireLiveInvite(db: DatabaseSync, code: string, now: number): CircleRow {
   const circle = getCircleByCode(db, cleanCode(code));
