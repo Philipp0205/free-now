@@ -1,22 +1,14 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
 import { openPlanSheet } from "./plan-sheet.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const LONG = "Meet at the side door, not the front. Bring a jacket because we sit outside until late. "
   + "Menu is at https://example.com/menu and we split the bill. Text me if you run late, I will save you a seat.";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry();
 
 const vvMock = `(() => {
   const bucket = { height: null, offsetTop: 0 };
@@ -48,31 +40,6 @@ const vvMock = `(() => {
   };
   Object.defineProperty(window, "visualViewport", { configurable: true, get: () => fake });
 })();`;
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "Europe/Berlin" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
 
 test("host adds a description in Edit, the card clamps it to two lines, and a tap opens it", { timeout: 120_000 }, async () => {
   const page = await phone(412, 915, false);
@@ -182,7 +149,7 @@ test("at 320 the Save button stays clear of the keyboard with the description fo
 });
 
 async function phone(width: number, height: number, mockViewport: boolean) {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: true,
     hasTouch: true,
@@ -200,7 +167,7 @@ async function dismiss(page: Page) {
 }
 
 async function signIn(page: Page, name: string) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);
@@ -212,7 +179,7 @@ async function signIn(page: Page, name: string) {
 
 async function addPlan(page: Page, note: string) {
   const token = await page.evaluate(() => localStorage.getItem("fn_token"));
-  const made = await fetch(`${baseUrl}/api/plans`, {
+  const made = await fetch(`${hangry.baseUrl}/api/plans`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ note, place: "jomi Bagel Deli", lat: 48.7705, lng: 9.1655, precise: true, time: "19:30" }),

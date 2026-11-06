@@ -1,18 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Locator, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
+import type { Locator, Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
+import { UA, useHangry } from "./harness.js";
 
-const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example MC_SHOT_DIR=/tmp/shots. */
 const SHOT_DIR = process.env.MC_SHOT_DIR ? path.resolve(process.env.MC_SHOT_DIR) : "";
@@ -23,42 +18,10 @@ const fakePush: PushSender = {
   async send(subscription: PushSubscription, payload: PushPayload) { sent.push({ endpoint: subscription.endpoint, payload }); },
 };
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: TZ });
-  const server = http.createServer(createApp({ db, push: fakePush, config: { ...config, dbPath: ":memory:" }, now: () => Date.now() }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
+const hangry = useHangry({ tz: TZ, push: fakePush });
+const { call } = hangry;
 
 type Person = { token: string; user: { id: string; name: string } };
-
-async function call(method: string, pathname: string, token?: string, body?: unknown) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
-    headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${method} ${pathname} -> ${response.status} ${text}`);
-  return text ? JSON.parse(text) : null;
-}
 
 /** Ana hosts Friends and Climbing. Ben is only in Friends, Cleo only in Climbing. All three have push on. */
 async function seed(tag: string) {
@@ -75,7 +38,7 @@ async function seed(tag: string) {
 }
 
 async function phone(width: number, height: number, token: string, circleId?: string) {
-  const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId: TZ });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId: TZ });
   await skipWhatsNew(context);
   await context.addInitScript(([value, circle]) => {
     localStorage.setItem("fn_install_later", String(Date.now()));
@@ -90,7 +53,7 @@ async function phone(width: number, height: number, token: string, circleId?: st
 }
 
 async function open(page: Page) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
 }

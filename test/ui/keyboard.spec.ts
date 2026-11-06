@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import path from "node:path";
 import test from "node:test";
-import { chromium, devices, type Browser, type Page } from "playwright-core";
+import { devices, type Page } from "playwright-core";
 import { FIELD_REVEAL_MS, keyboardOffset } from "../../public/keyboard.js";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
+import { useHangry } from "./harness.js";
 
 type Measure = {
   kb: number;
@@ -35,9 +30,7 @@ type Measure = {
 const shotsDir = path.resolve("test/ui/screenshots");
 const artifactsDir = "/opt/cursor/artifacts";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
+const hangry = useHangry({ tz: "UTC" });
 
 const vvMock = `(() => {
   const bucket = { height: null, offsetTop: 0 };
@@ -81,40 +74,12 @@ const vvMock = `(() => {
   };
 })();`;
 
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "UTC" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try {
-    browser = await chromium.launch({ channel: "chrome", headless: true });
-  } catch {
-    browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true });
-  }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
-
 test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, async () => {
   const page = await mobilePage(true);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await signUp(page, "Alex");
     assert.match(await viewportContent(page), /interactive-widget=resizes-content/);
     await createCircle(page);
@@ -200,7 +165,7 @@ test("mobile sheets stay above a reduced visual viewport", { timeout: 90_000 }, 
 
 test("join form clears a 280px keyboard on a 360x640 phone", { timeout: 90_000 }, async () => {
   const pixel = devices["Pixel 7"];
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width: 360, height: 640 },
     deviceScaleFactor: 1,
     isMobile: true,
@@ -212,7 +177,7 @@ test("join form clears a 280px keyboard on a 360x640 phone", { timeout: 90_000 }
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await signUp(page, "Jo");
     await page.locator("#invite-code").click();
     // Content-resize: a 280px keyboard shrinks the layout viewport from 640 to 360.
@@ -250,7 +215,7 @@ test("where search stays above the pinned I'm free bar", { timeout: 90_000 }, as
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await signUp(page, "Bea");
     await createCircle(page);
     await page.getByRole("button", { name: "Let friends know you're free now" }).click();
@@ -291,7 +256,7 @@ test("desktop sheet stays on the bottom edge", { timeout: 90_000 }, async () => 
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   try {
-    await page.goto(baseUrl);
+    await page.goto(hangry.baseUrl);
     await signUp(page, "Sam");
     await createCircle(page);
     const bar = await page.locator(".tabbar").boundingBox();
@@ -318,7 +283,7 @@ test("desktop sheet stays on the bottom edge", { timeout: 90_000 }, async () => 
 
 async function mobilePage(emulatePhone: boolean) {
   const pixel = devices["Pixel 7"];
-  const context = await browser.newContext(emulatePhone
+  const context = await hangry.browser.newContext(emulatePhone
     ? { ...pixel, deviceScaleFactor: 1 }
     : { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, hasTouch: false, isMobile: false });
   await skipWhatsNew(context);

@@ -1,16 +1,10 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Browser, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
+import { UA as CHROME_UA, launchChrome, startServer } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const HIT = { name: "RATTO Bistrobar", address: "Cottastraße 4", lat: 48.7674, lng: 9.1708, distanceM: 400 };
 
 let browser: Browser;
@@ -18,30 +12,16 @@ let baseUrl = "";
 let closeServer: () => Promise<void> = async () => {};
 
 test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "Europe/Berlin" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
+  const server = await startServer();
+  baseUrl = server.baseUrl;
+  closeServer = server.close;
   browser = await launch();
 });
 
 // The box shares memory with other Chrome jobs; if the OS kills our headless Chrome,
 // later tests must not inherit a dead browser. Log it and start a fresh one.
 async function launch(): Promise<Browser> {
-  let b: Browser;
-  try { b = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { b = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
+  const b = await launchChrome();
   b.on("disconnected", () => { if (b === browser) console.warn("plan-chat: headless Chrome disconnected"); });
   return b;
 }

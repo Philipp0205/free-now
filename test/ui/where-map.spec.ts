@@ -1,46 +1,13 @@
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { createApp } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { UA as CHROME_UA, useHangry } from "./harness.js";
 
-const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 const PLACE = "Near Alexanderplatz, Berlin";
 const NOTE = "Coffee nearby";
 
-let browser: Browser;
-let baseUrl = "";
-let closeServer: () => Promise<void> = async () => {};
-
-test.before(async () => {
-  const db = openDb(":memory:");
-  const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: "Europe/Berlin" });
-  const server = http.createServer(createApp({
-    db,
-    push: createNoopPushSender(),
-    config: { ...config, dbPath: ":memory:" },
-    now: () => Date.now(),
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  closeServer = async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
-  };
-  try { browser = await chromium.launch({ channel: "chrome", headless: true }); }
-  catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
-});
-
-test.after(async () => {
-  await browser?.close();
-  await closeServer();
-});
+const hangry = useHangry();
 
 test("current location while the where map is open does not throw", { timeout: 90_000 }, async () => {
   const page = await phonePage();
@@ -67,7 +34,7 @@ test("current location while the where map is open does not throw", { timeout: 9
 });
 
 async function phonePage() {
-  const context = await browser.newContext({
+  const context = await hangry.browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
@@ -85,7 +52,7 @@ async function phonePage() {
 }
 
 async function signIn(page: Page, name: string) {
-  await page.goto(baseUrl);
+  await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
