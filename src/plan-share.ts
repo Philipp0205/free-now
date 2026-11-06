@@ -31,12 +31,6 @@ export function isOpenPlan(plan: PlanRow, today: string): boolean {
   return plan.ended_at == null && plan.for_date >= today;
 }
 
-/** In any circle the plan is linked to. */
-export function isPlanMember(db: DatabaseSync, plan: PlanRow, userId: string | null | undefined): boolean {
-  if (!userId) return false;
-  return Boolean(planCircleForUser(db, plan.id, userId));
-}
-
 /** Gives the plan a share id on first use and keeps it after that. */
 export function ensureShareId(db: DatabaseSync, planId: string): string {
   for (let attempt = 0; attempt < 5; attempt += 1) {
