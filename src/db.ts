@@ -381,15 +381,6 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash TEXT NOT NULL UNIQUE,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-  `);
   const missing = db.prepare(
     "SELECT id, token_hash, created_at FROM users u WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.token_hash = u.token_hash)",
   ).all() as Array<{ id: string; token_hash: string; created_at: number }>;
@@ -623,10 +614,6 @@ export function countCirclesForUser(db: DatabaseSync, userId: string): number {
     userId,
   );
   return Number(row?.n ?? 0);
-}
-
-export function getCircleForUser(db: DatabaseSync, userId: string): CircleRow | undefined {
-  return listCirclesForUser(db, userId)[0];
 }
 
 export function listMembers(db: DatabaseSync, circleId: string): MemberRow[] {
@@ -1108,16 +1095,6 @@ export function removeSocialJoin(db: DatabaseSync, socialId: string, userId: str
   db.prepare("DELETE FROM social_joins WHERE social_id = ? AND user_id = ?").run(socialId, userId);
 }
 
-export function deleteSocial(db: DatabaseSync, id: string, creatorId: string): number {
-  const result = db.prepare("DELETE FROM socials WHERE id = ? AND creator_id = ?").run(id, creatorId);
-  return Number(result.changes);
-}
-
-export function deleteSocialById(db: DatabaseSync, id: string): number {
-  const result = db.prepare("DELETE FROM socials WHERE id = ?").run(id);
-  return Number(result.changes);
-}
-
 export function patchSocialDetails(
   db: DatabaseSync,
   id: string,
@@ -1275,10 +1252,6 @@ export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   );
 }
 
-export function hasPlanJoin(db: DatabaseSync, planId: string, userId: string): boolean {
-  return Boolean(one(db, "SELECT 1 AS ok FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId));
-}
-
 export function getPlanReply(db: DatabaseSync, planId: string, userId: string): { reply: string; arrive_at: number | null; blocked: number; removed_by: string | null } | undefined {
   return one(db, "SELECT reply, arrive_at, blocked, removed_by FROM plan_joins WHERE plan_id = ? AND user_id = ?", planId, userId);
 }
@@ -1312,12 +1285,6 @@ export function removePlanJoin(db: DatabaseSync, planId: string, userId: string)
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
   dropPlanLinks(db, "id = ? AND creator_id = ?", id, creatorId);
   const result = db.prepare("DELETE FROM plans WHERE id = ? AND creator_id = ?").run(id, creatorId);
-  return Number(result.changes);
-}
-
-export function deletePlanById(db: DatabaseSync, id: string): number {
-  dropPlanLinks(db, "id = ?", id);
-  const result = db.prepare("DELETE FROM plans WHERE id = ?").run(id);
   return Number(result.changes);
 }
 
