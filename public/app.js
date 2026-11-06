@@ -1,6 +1,6 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
-import { clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, zonedParts } from "./when.js";
+import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v32";
+const APP_VERSION = "hangry-v33";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -3106,7 +3106,7 @@ function enterPlanMode() {
   state.whenMode = "pick";
   state.sheet = "plan";
   state.planDay = "pick";
-  if (!state.planDate) state.planDate = addDaysIso(planDayRange(Date.now(), appTz()).today, PLAN_DEFAULT_DAYS);
+  if (!state.planDate) state.planDate = addDays(planDayRange(Date.now(), appTz()).today, PLAN_DEFAULT_DAYS);
 }
 
 function planDateField() {
@@ -3176,7 +3176,7 @@ function planDayBlock(bag, prefix) {
       text,
       onclick: () => {
         bag[dayKey] = value;
-        if (value === "pick" && !bag[dateKey]) bag[dateKey] = addDaysIso(range.today, 7);
+        if (value === "pick" && !bag[dateKey]) bag[dateKey] = addDays(range.today, 7);
         if (state.error === PICK_DATE_ERROR || state.error === TIME_LATER_ERROR) state.error = "";
         render();
       },
@@ -3205,11 +3205,6 @@ function planDayBlock(bag, prefix) {
         })
       : null,
   ]);
-}
-
-function addDaysIso(iso, days) {
-  const [year, month, day] = iso.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
 function planTimeError() {
