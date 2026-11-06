@@ -267,10 +267,13 @@ test("untrusted feedback text is stored as plain text and the client renders ale
   }, ENV);
   // The alert list and banner set note.title/body through textContent (el's "text"), never innerHTML.
   const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
-  assert.match(app, /el\("h3", \{ text: note\.title \}\)/);
-  assert.match(app, /el\("p", \{ text: note\.body \}\)/);
+  const card = /function alertCard\(note\) \{[\s\S]*?\n\}/.exec(app)?.[0] ?? "";
+  assert.match(card, /el\("h3", \{ text: note\.title \}\)/);
+  assert.match(card, /el\("p", \{ text: note\.body \}\)/);
+  assert.equal(/innerHTML|insertAdjacentHTML/.test(card), false);
+  assert.match(app, /state\.notifications\.map\(alertCard\)/);
   assert.match(app, /else if \(key === "text"\) node\.textContent = String\(value\);/);
-  assert.match(app, /if \(note\.kind === "feedback-done"\) \{\s*\/\/[^\n]*\n\s*void openWhatsNewList\(\);/);
+  assert.match(app, /function openNotification\(note\) \{\n  if \(note\.kind === "feedback-done"\) \{[^}]*void openWhatsNewList\(\);/);
 });
 
 test("only the operator token can mark done; app users and bad tokens send nothing", async () => {
@@ -292,4 +295,59 @@ test("only the operator token can mark done; app users and bad tokens send nothi
     assert.equal((await markDone(port, id)).status, 404);
     assert.equal(doneRows(db, id).length, 0);
   });
+});
+
+test("zero-circle submitter reads their alert with no circle named; unrelated people get nothing", async () => {
+  await withApp(async ({ port, db }) => {
+    const { alex, bea, circle } = await circleOfTwo(port);
+    const stranger = await api(port, "POST", "/api/auth/start", { body: { name: "Cam" }, status: 201 });
+    const elsewhere = await api(port, "POST", "/api/auth/start", { body: { name: "Dee" }, status: 201 });
+    const club = await api(port, "POST", "/api/circles", { token: elsewhere.token, body: { name: "Club" }, status: 201 });
+    const strangerOwn = await send(port, stranger.token, "Cam's own idea");
+    const id = await send(port, bea.token, "Shared calendar view", circle.id);
+    await api(port, "POST", `/api/circles/leave?circle=${circle.id}`, { token: bea.token, body: {}, status: 200 });
+    assert.equal((await markDone(port, id)).json.doneAlert, "sent");
+
+    // What the app sends when it has no circle: no x-circle header, no circle param.
+    const mine = await api(port, "GET", "/api/notifications", { token: bea.token });
+    assert.equal(mine.notifications.length, 1);
+    assert.equal(mine.notifications[0].kind, "feedback-done");
+    assert.equal(mine.notifications[0].title, "Your suggestion is live");
+    assert.equal(mine.notifications[0].readAt, null);
+    assert.match(mine.notifications[0].body, /Shared calendar view/);
+    // A stale remembered circle is still refused, which is why the client drops the header.
+    const stale = await fetch(`http://127.0.0.1:${port}/api/notifications`, {
+      headers: { authorization: `Bearer ${bea.token}`, "x-circle": circle.id },
+    });
+    assert.equal(stale.status, 404);
+
+    // Unrelated people: a zero-circle user with their own unfinished feedback, a member of another
+    // circle, and the member of the source circle. None get an alert or see the text.
+    const others: Array<[string, string]> = [
+      [stranger.token, "/api/notifications"],
+      [elsewhere.token, `/api/notifications?circle=${club.circle.id}`],
+      [alex.token, `/api/notifications?circle=${circle.id}`],
+    ];
+    for (const [token, url] of others) {
+      const got = await api(port, "GET", url, { token });
+      assert.deepEqual(got.notifications.filter((note: { kind: string }) => note.kind === "feedback-done"), []);
+      assert.equal(JSON.stringify(got).includes("Shared calendar"), false);
+    }
+    assert.equal(doneRows(db, strangerOwn).length, 0);
+
+    // Reading with no circle clears only Bea's personal alerts.
+    await api(port, "POST", "/api/notifications/read", { token: bea.token, body: {}, status: 204 });
+    const read = await api(port, "GET", "/api/notifications", { token: bea.token });
+    assert.ok(read.notifications[0].readAt);
+  }, ENV);
+});
+
+test("client: zero-circle refresh loads personal alerts, setup lists them, and the banner opens What's new", () => {
+  const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  // refresh() no longer bails out without a circle.
+  assert.match(app, /async function refresh\(\{ initial = false \} = \{\}\) \{\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(\);/);
+  assert.match(app, /api\("\/api\/notifications", \{ circle: null \}\)/);
+  assert.match(app, /root\.append\(setup\(\)\);\n    if \(state\.sheet === "whats-new"\) root\.append\(whatsNewSheet\(\)\);/);
+  assert.match(app, /personalAlerts\(\),\n  \]\);/);
+  assert.match(app, /if \(note\.kind === "feedback-done"\) \{\n      openNotification\(note\);/);
 });
