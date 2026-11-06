@@ -20,6 +20,7 @@ export type SearchBias = { lat: number; lng: number } | null;
 
 const USER_AGENT = "Hangry/1.0 (+https://github.com/Philipp0205/free-now)";
 const CACHE_MS = 10 * 60 * 1000;
+export const CACHE_MAX = 500;
 const PACE_MS = 1100;
 const LOCAL_KM = 30;
 const RESULT_CAP = 6;
@@ -32,6 +33,13 @@ const GERMANY_BBOX = "5.8663,47.2701,15.0419,55.0815";
 const cache = new Map<string, { at: number; results: PlaceHit[] }>();
 let chain: Promise<void> = Promise.resolve();
 let nextAt = 0;
+
+/** Store a cache entry. Drops the oldest entries past CACHE_MAX. */
+function remember(key: string, value: { at: number; results: PlaceHit[] }): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+}
 
 type JsonGetter = (url: string) => Promise<unknown>;
 
@@ -285,7 +293,7 @@ export async function searchPlaces(query: string, bias: SearchBias = null, fetch
     : `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}&countrycodes=de`;
   const nominatim = parseNominatim(await fetchJson(nominatimUrl).catch(() => null));
   const results = rankPlaces([...photon, ...nominatim], point, q);
-  cache.set(key, { at: Date.now(), results });
+  remember(key, { at: Date.now(), results });
   return results;
 }
 
@@ -368,7 +376,7 @@ export async function reverseLookup(lat: number, lng: number, fetchJson: JsonGet
   }
   const place = describeNearby(lat, lng, photon, nominatim);
   const area = areaFromPhoton(photon) || areaFromNominatim(nominatim);
-  cache.set(key, { at: Date.now(), results: [{ name: place, address: area, lat, lng, distanceM: null }] });
+  remember(key, { at: Date.now(), results: [{ name: place, address: area, lat, lng, distanceM: null }] });
   return { place, area };
 }
 
@@ -442,7 +450,7 @@ export async function resolveMapsLink(
   } else if (parsed && parsed.query) {
     results = await searchPlaces(parsed.query, null, fetchJson);
   }
-  cache.set(key, { at: Date.now(), results });
+  remember(key, { at: Date.now(), results });
   return results;
 }
 
