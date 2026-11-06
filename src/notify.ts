@@ -26,10 +26,6 @@ export type Notice = {
   namesCircle?: boolean;
 };
 
-export function socialTitle(note: string): string {
-  return note ? `"${note}"` : "Free now";
-}
-
 export function eventTitle(kind: "now" | "later" | "reply" | "time" | "start"): string {
   if (kind === "later") return "Free later";
   if (kind === "reply") return "Reply";
