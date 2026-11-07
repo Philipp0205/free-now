@@ -366,6 +366,10 @@ function friendlyMessage(raw, status) {
 }
 
 async function refresh({ initial = false } = {}) {
+  if (state.token && state.me && !state.me.circle) {
+    await refreshPersonalAlerts();
+    return;
+  }
   if (!state.token || !state.me?.circle) return;
   let socials;
   let plans;
@@ -403,20 +407,7 @@ async function refresh({ initial = false } = {}) {
   state.chatSummary = summary;
   if (state.chat) forgetOpenUnread(state.chat);
   if (thread?.chat) state.chatThread = thread.chat;
-  const newest = state.notifications[0];
-  if (!state.bootstrappedNotifs) {
-    state.latestNotifId = newest?.id ?? null;
-    state.bootstrappedNotifs = true;
-  } else if (newest && newest.id !== state.latestNotifId) {
-    state.banner = newest;
-    state.latestNotifId = newest.id;
-    clearTimeout(state.bannerTimer);
-    state.bannerTimer = setTimeout(() => {
-      state.banner = null;
-      state.signature = "";
-      render();
-    }, 6500);
-  }
+  noteNewestAlert();
   const signature = JSON.stringify({
     socials: state.socials,
     plans: state.plans,
@@ -478,8 +469,9 @@ async function releaseMissingCircle() {
   state.offline = false;
   state.statusMessage = "";
   if (!me.circle) useNamedCircleDefault();
+  state.bootstrappedNotifs = false;
   render();
-  if (me.circle) refresh({ initial: true }).catch(() => {});
+  refresh({ initial: true }).catch(() => {});
   return true;
 }
 
@@ -898,6 +890,7 @@ function view() {
     root.append(welcome());
   } else if (!state.me.circle) {
     root.append(setup());
+    if (state.sheet === "whats-new") root.append(whatsNewSheet());
   } else {
     root.append(shell());
   }
@@ -1014,6 +1007,17 @@ function setup() {
       }, { placeholder: "AB12CD34", maxlength: "12", autocapitalize: "characters", spellcheck: "false" }),
       el("button", { class: "btn secondary", type: "submit", text: "Join circle" }),
     ]),
+    personalAlerts(),
+  ]);
+}
+
+/** Without a circle there is no Alerts tab, so the person's own alerts sit under the setup forms. */
+function personalAlerts() {
+  if (!state.notifications.length) return null;
+  const unread = state.notifications.filter((note) => !note.readAt).length;
+  return el("section", { class: "personal-alerts", "aria-label": unread ? `Your alerts, ${unread} unread` : "Your alerts" }, [
+    el("h2", { class: "personal-alerts-title", text: "Your alerts" }),
+    el("div", { class: "list" }, state.notifications.map(alertCard)),
   ]);
 }
 
@@ -1428,9 +1432,65 @@ function anyCircleUnread() {
 }
 
 /** Copies fresh per-circle alert counts from /api/notifications onto the circle list. */
+/** Shows the banner once for an alert newer than the last one seen. The first load only remembers it. */
+function noteNewestAlert() {
+  const newest = state.notifications[0];
+  if (!state.bootstrappedNotifs) {
+    state.latestNotifId = newest?.id ?? null;
+    state.bootstrappedNotifs = true;
+  } else if (newest && newest.id !== state.latestNotifId) {
+    state.banner = newest;
+    state.latestNotifId = newest.id;
+    clearTimeout(state.bannerTimer);
+    state.bannerTimer = setTimeout(() => {
+      state.banner = null;
+      state.signature = "";
+      render();
+    }, 6500);
+  }
+}
+
+/**
+ * Someone in no circle still has their own alerts (for example "Your suggestion is live").
+ * The server answers with personal alerts only when no circle is named.
+ */
+async function refreshPersonalAlerts() {
+  let data;
+  try {
+    // No x-circle header: a stale remembered circle would turn this into a 404.
+    data = await api("/api/notifications", { circle: null });
+  } catch {
+    return;
+  }
+  if (state.me?.circle) return;
+  state.notifications = Array.isArray(data?.notifications) ? data.notifications : [];
+  noteNewestAlert();
+  const signature = JSON.stringify({
+    personal: state.notifications.map((note) => [note.id, note.readAt]),
+    banner: state.banner?.id ?? null,
+  });
+  if (signature === state.signature) return;
+  state.signature = signature;
+  if (state.sheet || isTyping()) return;
+  render();
+}
+
 function applyAlertUnread(totals) {
   if (!totals || !state.me?.circles) return;
   for (const circle of state.me.circles) circle.alertUnread = totals[circle.id] || 0;
+}
+
+/** No circle: reading means the person's own alerts. */
+async function markPersonalAlertsRead() {
+  try {
+    await api("/api/notifications/read", { method: "POST", body: {} });
+  } catch {
+    return;
+  }
+  const readAt = Date.now();
+  state.notifications = state.notifications.map((note) => ({ ...note, readAt: note.readAt ?? readAt }));
+  state.signature = "";
+  if (!state.sheet) render();
 }
 
 /** Marks this circle's alerts read, then clears the bell badge and the circle dot together. */
@@ -1685,24 +1745,27 @@ function chatRow(kind, item) {
   ]);
 }
 
+/** One alert row. Title and body are untrusted text and only ever go through textContent. */
+function alertCard(note) {
+  return el("button", {
+    class: "alert-card",
+    type: "button",
+    onclick: () => openNotification(note),
+  }, [
+    note.readAt ? null : el("span", { class: "unread", "aria-label": "Unread" }),
+    el("div", { class: "grow" }, [
+      el("div", { class: "alert-top" }, [
+        el("h3", { text: note.title }),
+        el("span", { class: "time", text: ago(note.createdAt) }),
+      ]),
+      el("p", { text: note.body }),
+    ]),
+  ]);
+}
+
 function alertsScreen() {
   const items = state.notifications.length
-    ? state.notifications.map((note) =>
-        el("button", {
-          class: "alert-card",
-          type: "button",
-          onclick: () => openNotification(note),
-        }, [
-          note.readAt ? null : el("span", { class: "unread", "aria-label": "Unread" }),
-          el("div", { class: "grow" }, [
-            el("div", { class: "alert-top" }, [
-              el("h3", { text: note.title }),
-              el("span", { class: "time", text: ago(note.createdAt) }),
-            ]),
-            el("p", { text: note.body }),
-          ]),
-        ]),
-      )
+    ? state.notifications.map(alertCard)
     : [el("p", { class: "help", style: "padding: 8px 20px", text: "When a friend is free, it shows up here." })];
   const dev = state.meta?.devMode
     ? el("p", {
@@ -3019,6 +3082,10 @@ function sheet() {
 function banner(note) {
   return el("button", { class: "banner", type: "button", onclick: () => {
     state.banner = null;
+    if (note.kind === "feedback-done") {
+      openNotification(note);
+      return;
+    }
     state.tab = "home";
     render();
   } }, [
@@ -4454,6 +4521,12 @@ function scheduleReverse(lat, lng, replace = false) {
 }
 
 function openNotification(note) {
+  if (note.kind === "feedback-done") {
+    // Your own shipped suggestion: the changelog is where it shows up for everyone.
+    if (!state.me?.circle && !note.readAt) void markPersonalAlertsRead();
+    void openWhatsNewList();
+    return;
+  }
   if (note.kind === "chat" && note.refId) {
     if (note.refId === "circle") void openChat({ kind: "circle" });
     else {
@@ -5901,7 +5974,9 @@ async function onLeave() {
     state.socials = [];
     state.plans = [];
     state.notifications = [];
-    if (state.me.circle) await refresh({ initial: true });
+    // Alerts start over: the next list only remembers its newest, it does not banner old ones.
+    state.bootstrappedNotifs = false;
+    await refresh({ initial: true });
   });
 }
 

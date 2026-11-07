@@ -160,6 +160,11 @@ button:disabled { cursor: default; opacity: 0.55; }
   padding: 12px 14px;
 }
 .alerts-pad { height: calc(var(--tab) + 24px); }
+.personal-alerts { margin-top: 28px; }
+.personal-alerts-title { font-size: 17px; margin: 0 0 10px; }
+.personal-alerts .list { padding: 0; }
+.personal-alerts .alert-card { width: 100%; margin: 0 0 10px; }
+.personal-alerts .alert-card p { overflow-wrap: anywhere; }
 .icon-btn.on { background: #2c2c2e; color: #fff; }
 .boot { min-height: 100dvh; display: grid; place-items: center; gap: 16px; }
 .icon-btn { width: 44px; height: 44px; position: relative; }

@@ -44,7 +44,7 @@ Sources:
 
 - Google Calendar, "Use a link to add a public calendar": https://support.google.com/calendar/answer/37100 ("To subscribe to a new calendar, you must use a computer web browser. You can't subscribe to a calendar in the Google Calendar app for Android, iPhone, or iPad.")
 - Apple, "Use multiple calendars on iPhone" (subscribed calendars): https://support.apple.com/guide/iphone/ipha0d932e96
-- Microsoft, "Import or subscribe to a calendar in Outlook.com or Outlook on the web": https://support.microsoft.com (search for that title)
+- Microsoft, "Import or subscribe to a calendar in Outlook.com or Outlook on the web": https://support.microsoft.com/en-us/outlook/import-or-subscribe-to-a-calendar-in-outlook-com-or-outlook-on-the-web
 - An unknown, revoked, or malformed token gets a bare `404` with an empty body. It does not say whether the token ever existed.
 - Response headers: `text/calendar; charset=utf-8`, `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `nosniff`. The service worker never caches `/cal/`.
 - Rate limit: 120 requests per minute per client address. This is loose on purpose, because Google and Apple fetch from shared addresses.

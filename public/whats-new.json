@@ -9,6 +9,15 @@
     ]
   },
   {
+    "id": "2026-11-07-feedback-live",
+    "date": "2026-11-07",
+    "title": "Hear when your idea ships",
+    "bullets": [
+      "Sent feedback that we built? You get an alert saying your suggestion is live, with a short quote of what you wrote.",
+      "Only you see it. It reaches you even if you have left the circle you sent it from."
+    ]
+  },
+  {
     "id": "2026-11-07-calendar",
     "date": "2026-11-07",
     "title": "Plans in your calendar",
