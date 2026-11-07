@@ -1883,7 +1883,8 @@ async function loadCalendarFeed() {
   } catch {
     state.calendarFeed = { loaded: true, active: false, createdAt: null };
   }
-  render();
+  // Swap only the feed section so the rest of the You tab stays attached.
+  document.querySelector(".calendar-feed")?.replaceWith(calendarFeedPanel());
 }
 
 async function onIssueCalendarFeed() {
