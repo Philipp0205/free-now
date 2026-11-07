@@ -112,9 +112,9 @@ test("the landing page leads with the button: tap, friends are told, whoever can
   const text = visibleText(WELCOME);
   const hero = /<section class="wl-hero"[\s\S]*?<\/section>/.exec(WELCOME)?.[0] ?? "";
   assert.match(WELCOME, /<h1 id="wl-title">Free right now\? Hit the buzzer\.<\/h1>/);
-  assert.match(visibleText(hero), /Hangry is a buzzer for your circle of friends\./);
+  assert.match(hero, /<p class="wl-lede">Tap the buzzer\. Your friends get notified\. See who’s up for meeting\.<\/p>/);
   assert.match(hero, /aria-label="Example of a spontaneous meetup, step by step"/);
-  assert.match(visibleText(hero), /your friends are told/);
+  assert.match(visibleText(hero), /your friends are told/i);
   assert.match(visibleText(hero), /You tap the buzzer.*Your friends are told.*Whoever can, comes/);
   assert.doesNotMatch(visibleText(hero), /\bplans?\b|calendar|schedul/i, "planning is not in the hero");
   assert.ok(text.indexOf("Hit the buzzer") < text.indexOf("Plans for any day"), "the buzzer comes before planning");
