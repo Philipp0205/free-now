@@ -541,6 +541,8 @@ button:disabled { cursor: default; opacity: 0.55; }
 .card-copy .plan-circles { color: rgba(255, 255, 255, 0.7); font-size: 12px; }
 .also-circles { display: flex; flex-wrap: wrap; gap: 8px; }
 .also-circles .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The home circle in Share with other circles: always in, not a button. */
+.also-circles .chip-fixed { display: inline-flex; align-items: center; background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--hairline); }
 .pill {
   position: absolute;
   top: 14px;

@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-07-share-circles-menu",
+    "date": "2026-11-07",
+    "title": "Share a plan with more circles",
+    "bullets": [
+      "Tap ⋯ on your plan and choose Share with other circles.",
+      "It stays one plan with one chat and guest list. Only the newly added circles get a notification."
+    ]
+  },
+  {
     "id": "2026-11-07-calendar-android",
     "date": "2026-11-07",
     "title": "Calendar feed on Android",

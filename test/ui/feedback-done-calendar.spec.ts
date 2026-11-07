@@ -74,7 +74,7 @@ for (const [width, height] of SIZES) {
       await dialog.waitFor();
       const titles = await dialog.locator(".whats-new-entry h3").allInnerTexts();
       assert.deepEqual(titles.slice(0, 2), [ENTRIES[0].title, ENTRIES[1].title]);
-      for (const title of ["Hear when your idea ships", "Plans in your calendar"]) assert.ok(titles.includes(title), `missing ${title}`);
+      for (const title of ["Share a plan with more circles", "Hear when your idea ships", "Plans in your calendar"]) assert.ok(titles.includes(title), `missing ${title}`);
       await shot(page, "2-whats-new-both-entries");
       await dialog.getByRole("button", { name: "Done" }).click();
       await dialog.waitFor({ state: "detached" });
