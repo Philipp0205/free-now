@@ -1289,6 +1289,15 @@ export function claimPlanReminder(db: DatabaseSync, planId: string, now: number,
   return Number(result.changes) > 0;
 }
 
+/** Everyone who has a "Remind friends" Alert for this plan, in any circle. */
+export function listPlanRemindedUserIds(db: DatabaseSync, planId: string): Set<string> {
+  return new Set(all<{ user_id: string }>(
+    db,
+    "SELECT DISTINCT user_id FROM notifications WHERE kind = 'plan-remind' AND ref_id = ?",
+    planId,
+  ).map((row) => row.user_id));
+}
+
 export function listPlanJoins(db: DatabaseSync, planId: string): JoinRow[] {
   return all<JoinRow>(
     db,

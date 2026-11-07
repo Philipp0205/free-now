@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import {
   claimPlanReminder,
   countUpcomingPlans,
@@ -9,6 +10,7 @@ import {
   listPlanCircleIds,
   planInCircle,
   listMembers,
+  listPlanRemindedUserIds,
   setPlanReply,
   type PlanRow,
   type UserRow,
@@ -231,12 +233,40 @@ async function notifyPlanReply(
   ], getCircleById(deps.db, plan.circle_id));
 }
 
-/** One "Remind friends" per plan per hour, whoever sends it. */
+/**
+ * One "Remind friends" per plan per hour, whoever sends it. Inside the hour a reminder still
+ * reaches people never reminded for this plan (someone who joined the circle later), and only them.
+ */
 export const REMIND_COOLDOWN_MS = 60 * 60 * 1000;
 
-/** When the next reminder is allowed, or null if none was sent yet. */
-export function remindAgainAt(plan: PlanRow): number | null {
-  return plan.reminded_at == null ? null : plan.reminded_at + REMIND_COOLDOWN_MS;
+/**
+ * When the next reminder is allowed, or null if one is allowed now: none sent yet, or someone
+ * the viewer could remind was never reminded for this plan.
+ */
+export function remindAgainAt(db: DatabaseSync, plan: PlanRow, viewerId: string | null = null): number | null {
+  if (plan.reminded_at == null) return null;
+  if (viewerId && remindTargets(db, plan, viewerId, listPlanRemindedUserIds(db, plan.id)).size > 0) return null;
+  return plan.reminded_at + REMIND_COOLDOWN_MS;
+}
+
+/**
+ * Who a reminder from `senderId` reaches, per linked circle, leaving out `skip`.
+ * In, Can't and removed count as answered. Maybe is tentative, so it still gets the reminder. The host is always in.
+ */
+function remindTargets(db: DatabaseSync, plan: PlanRow, senderId: string, skip: Set<string>): Map<string, string[]> {
+  const answered = (userId: string) => {
+    if (userId === plan.creator_id) return true;
+    const row = getPlanReply(db, plan.id, userId);
+    return Boolean(row) && (Boolean(row?.blocked) || row?.reply !== "maybe");
+  };
+  const byCircle = new Map<string, string[]>();
+  for (const circleId of listPlanCircleIds(db, plan.id)) {
+    const ids = listMembers(db, circleId)
+      .map((member) => member.id)
+      .filter((userId) => userId !== senderId && !skip.has(userId) && !answered(userId));
+    if (ids.length) byCircle.set(circleId, ids);
+  }
+  return byCircle;
 }
 
 /**
@@ -253,41 +283,33 @@ export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, re
   assertPlanOpen(plan, today);
   const block = getPlanReply(deps.db, plan.id, user.id);
   if (block?.blocked) throw new HttpError(403, removedMessage(block.removed_by));
-  const retryAt = remindAgainAt(plan);
-  if (retryAt != null && retryAt > now) {
-    throw new HttpError(429, "Already reminded.", { retryAt });
-  }
-  // In, Can't and removed count as answered. Maybe is tentative, so it still gets the reminder. The host is always in.
-  const answered = (userId: string) => {
-    if (userId === plan.creator_id) return true;
-    const row = getPlanReply(deps.db, plan.id, userId);
-    return Boolean(row) && (Boolean(row?.blocked) || row?.reply !== "maybe");
-  };
+  const retryAt = plan.reminded_at == null ? null : plan.reminded_at + REMIND_COOLDOWN_MS;
+  const cooling = retryAt != null && retryAt > now;
+  // Inside the hour, anyone already reminded for this plan is left alone.
+  const skip = cooling ? listPlanRemindedUserIds(deps.db, plan.id) : new Set<string>();
   const batches: Array<{ circle: NonNullable<ReturnType<typeof getCircleById>>; notices: Notice[] }> = [];
   const pushed = new Set<string>();
-  for (const circleId of listPlanCircleIds(deps.db, plan.id)) {
+  for (const [circleId, userIds] of remindTargets(deps.db, plan, user.id, skip)) {
     const target = getCircleById(deps.db, circleId);
     if (!target) continue;
-    const notices: Notice[] = [];
-    for (const member of listMembers(deps.db, circleId)) {
-      if (member.id === user.id || answered(member.id)) continue;
-      notices.push({
-        userId: member.id,
-        ...planRemindNotice(plan, user.name, today),
-        skipPush: pushed.has(member.id),
-      });
-      pushed.add(member.id);
-    }
-    if (notices.length) batches.push({ circle: target, notices });
+    const notices: Notice[] = userIds.map((userId) => ({
+      userId,
+      ...planRemindNotice(plan, user.name, today),
+      skipPush: pushed.has(userId),
+    }));
+    for (const userId of userIds) pushed.add(userId);
+    batches.push({ circle: target, notices });
   }
+  if (cooling && pushed.size === 0) throw new HttpError(429, "Already reminded.", { retryAt });
   // Nobody left to ask: no push, and the hour stays free for later.
   if (pushed.size === 0) return { reminded: 0, plan: planPayload(deps.db, plan, today, user.id) };
-  // Claimed before any await, so two taps at once send one reminder.
-  if (!claimPlanReminder(deps.db, plan.id, now, now - REMIND_COOLDOWN_MS)) {
+  // Claimed before any await, so two taps at once send one reminder. A newcomer-only reminder keeps the hour as it was.
+  if (!cooling && !claimPlanReminder(deps.db, plan.id, now, now - REMIND_COOLDOWN_MS)) {
     const fresh = getPlan(deps.db, plan.id);
-    throw new HttpError(429, "Already reminded.", { retryAt: (fresh && remindAgainAt(fresh)) ?? now + REMIND_COOLDOWN_MS });
+    throw new HttpError(429, "Already reminded.", { retryAt: fresh?.reminded_at != null ? fresh.reminded_at + REMIND_COOLDOWN_MS : now + REMIND_COOLDOWN_MS });
   }
-  for (const batch of batches) await notifyUsers(deps.db, deps.push, now, batch.notices, batch.circle);
+  // All batches start at once: each writes its Alert rows before its first await, so a second tap sees them.
+  await Promise.all(batches.map((batch) => notifyUsers(deps.db, deps.push, now, batch.notices, batch.circle)));
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   return { reminded: pushed.size, plan: planPayload(deps.db, fresh, today, user.id) };
