@@ -311,6 +311,12 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
   margin: 0 auto;
 }
 
+@media (max-width: 359px) {
+  .wl-hero { padding-top: 20px; }
+  .wl-orb { width: 80px; height: 80px; margin-bottom: 22px; }
+  .wl-orb-sm { width: 56px; height: 56px; }
+}
+
 @media (min-width: 560px) {
   .wl-features { grid-template-columns: 1fr 1fr; }
   .wl-ctas { flex-direction: row; max-width: none; justify-content: center; }
