@@ -155,80 +155,88 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
 .wl-btn-quiet { background: transparent; color: #fff; box-shadow: inset 0 0 0 1px var(--hairline); }
 .wl-fine { color: var(--faint); font-size: 13px; margin-top: 14px; text-wrap: balance; }
 
-/* Illustrative cards. Static markup, example data only. */
+/* Illustrative demo. Static markup, example data only. */
 .wl-demo {
-  display: grid;
-  gap: 14px;
+  position: relative;
   width: 100%;
   max-width: 400px;
   margin: 0 auto;
-}
-.wl-card {
-  position: relative;
-  border-radius: 28px;
   padding: 18px;
+  border-radius: 28px;
   overflow: hidden;
   isolation: isolate;
-  min-width: 0;
-}
-.wl-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-}
-.wl-card-now::before {
   background:
-    radial-gradient(circle at 18% 110%, rgba(255, 45, 120, 0.55), transparent 46%),
-    radial-gradient(circle at 90% 0%, rgba(255, 110, 40, 0.32), transparent 42%),
+    radial-gradient(circle at 18% 110%, rgba(255, 45, 120, 0.42), transparent 50%),
+    radial-gradient(circle at 90% 0%, rgba(255, 110, 40, 0.24), transparent 42%),
     linear-gradient(160deg, #1a0c12, #0c0c0e 70%);
-}
-.wl-card-plan::before {
-  background:
-    radial-gradient(circle at 100% 100%, rgba(191, 90, 242, 0.32), transparent 55%),
-    linear-gradient(150deg, #2b2045, #13101f 75%);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .wl-tag {
   position: absolute;
   top: 14px;
   right: 14px;
+  z-index: 2;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(0, 0, 0, 0.55);
   padding: 4px 8px;
   border-radius: 999px;
 }
-.wl-card-head { display: flex; align-items: center; gap: 12px; padding-right: 72px; }
-.wl-card-kicker {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.66);
-  letter-spacing: 0.01em;
-}
-.wl-card h2 { font-size: 22px; letter-spacing: -0.03em; line-height: 1.15; margin-top: 2px; }
-.wl-card-plan h2 { padding-right: 72px; }
-.wl-card-plan .wl-card-kicker { padding-right: 72px; }
-.wl-card-note { font-size: 16px; margin-top: 12px; color: rgba(255, 255, 255, 0.92); }
-.wl-card-meta { font-size: 14px; color: rgba(255, 255, 255, 0.6); margin-top: 4px; }
-
-.wl-avatar {
+.wl-flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.wl-flow-step { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.wl-flow-num {
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 13px;
   font-weight: 700;
-  font-size: 16px;
-  color: #000;
-  background: var(--c, #fff);
+  background: rgba(255, 255, 255, 0.12);
 }
-.wl-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.wl-flow-body { flex: 1; min-width: 0; }
+.wl-flow-label { font-size: 15px; font-weight: 650; margin: 3px 0 8px; }
+.wl-flow-step:first-child .wl-flow-label { padding-right: 72px; }
+.wl-flow-fine { font-size: 12px; color: rgba(255, 255, 255, 0.55); margin-top: 6px; }
+.wl-mini-sheet, .wl-push {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  min-width: 0;
+}
+.wl-mini-sheet > div, .wl-push > div { flex: 1; min-width: 0; }
+.wl-mini-orb {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 30%),
+    linear-gradient(145deg, #ff5ec8 0%, #ff2d78 42%, #ff3a3a 70%, #ff6a24 100%);
+  box-shadow: 0 0 12px 2px rgba(255, 50, 120, 0.45);
+}
+.wl-mini-title, .wl-push-title { font-size: 14px; font-weight: 650; }
+.wl-mini-note, .wl-push-body { font-size: 13px; color: rgba(255, 255, 255, 0.72); overflow-wrap: anywhere; }
+.wl-mini-btn {
+  flex: none;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+}
+.wl-push { background: rgba(245, 245, 247, 0.12); }
+.wl-push-icon { flex: none; width: 20px; height: 20px; border-radius: 5px; align-self: flex-start; margin-top: 2px; }
+.wl-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .wl-chip {
   font-size: 14px;
   font-weight: 600;
@@ -238,11 +246,103 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
   white-space: nowrap;
 }
 .wl-chip-on { background: #fff; color: #000; }
-.wl-card-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
-.wl-card-foot .wl-card-meta { margin-top: 0; }
-.wl-faces { display: inline-flex; }
-.wl-faces .wl-avatar { width: 30px; height: 30px; font-size: 13px; box-shadow: 0 0 0 2px #1a1530; }
-.wl-faces .wl-avatar + .wl-avatar { margin-left: -8px; }
+
+/* Example map: real OpenStreetMap tiles of central Stuttgart at zoom 16, with
+   pins placed on real coordinates. The canvas is 1280x768 (5x3 tiles, x 34437
+   to 34441, y 22567 to 22569); the point (530, 286) is the middle of the four
+   example spots. Tiles load lazily, only when the map is near the screen. */
+.wl-section-lede { max-width: 52ch; }
+.wl-map-fig { margin: 24px 0 0; }
+.wl-map {
+  --s: 1;
+  position: relative;
+  height: 380px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: #f2efe9;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  isolation: isolate;
+}
+.wl-map-canvas {
+  position: absolute;
+  width: 1280px;
+  height: 768px;
+  left: calc(50% - 530px);
+  top: calc(50% - 286px);
+  transform-origin: 530px 286px;
+  transform: scale(var(--s));
+  z-index: 0;
+}
+.wl-tile { position: absolute; width: 256px; height: 256px; max-width: none; display: block; user-select: none; }
+.wl-pin {
+  --pin: 36px;
+  position: absolute;
+  width: var(--pin);
+  height: var(--pin);
+  margin: calc(var(--pin) / -2) 0 0 calc(var(--pin) / -2);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+.wl-pin::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--person);
+  z-index: -1;
+}
+.wl-pin { isolation: isolate; }
+.wl-pin-social {
+  background: radial-gradient(circle at 32% 28%, #ffb0e4, #ff2d78 46%, #ff4d3a 78%, #ff7a2a);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 6px rgba(255, 45, 120, 0.28), 0 0 18px rgba(255, 70, 120, 0.65);
+}
+.wl-map-tag { top: 12px; right: auto; left: 12px; }
+.wl-attr {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 3px 7px;
+  border-radius: 8px 0 0 0;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1c1c1e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.wl-section .wl-attr { color: #1c1c1e; font-size: 11px; margin: 0; }
+.wl-attr a { color: #1c1c1e; }
+.wl-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.wl-map-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.wl-map-note { color: var(--faint); font-size: 13px; }
+.wl-key { width: 12px; height: 12px; border-radius: 50%; }
+.wl-key-social { background: #ff2d78; box-shadow: 0 0 6px rgba(255, 45, 120, 0.7); }
+.wl-privacy { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 10px; max-width: 64ch; }
+.wl-privacy li { position: relative; padding-left: 18px; color: var(--muted); font-size: 15px; }
+.wl-privacy li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4d8d;
+}
+.wl-aside { margin-top: 16px; max-width: 64ch; font-size: 14px; }
+.wl-section p.wl-aside { color: var(--faint); font-size: 14px; }
 
 .wl-section { padding: 48px 0; border-top: 1px solid var(--hairline); }
 .wl-eyebrow {
@@ -311,7 +411,12 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
   margin: 0 auto;
 }
 
+@media (max-width: 419px) {
+  .wl-map { --s: 0.8; height: 340px; }
+}
+
 @media (max-width: 359px) {
+  .wl-map { --s: 0.72; height: 330px; }
   .wl-hero { padding-top: 20px; }
   .wl-orb { width: 80px; height: 80px; margin-bottom: 22px; }
   .wl-orb-sm { width: 56px; height: 56px; }
@@ -338,5 +443,6 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
   .wl-section { padding: 72px 0; }
   .wl-steps { grid-template-columns: repeat(3, 1fr); }
   .wl-steps li { flex-direction: column; }
-  .wl-features { grid-template-columns: repeat(3, 1fr); }
+  .wl-features { grid-template-columns: repeat(4, 1fr); }
+  .wl-map { height: 440px; }
 }
