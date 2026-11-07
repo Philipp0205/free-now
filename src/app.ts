@@ -251,6 +251,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       await serveSharePage(req, res, deps, sharePage[1]);
       return;
     }
+    if (pathname === "/welcome" || pathname === "/welcome/") {
+      await serveWelcome(req, res);
+      return;
+    }
     const feed = matchPath(pathname, /^\/cal\/([^/]+)\.ics$/);
     if (feed) {
       if (!limits.feed.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
@@ -2097,6 +2101,14 @@ async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, 
   } catch {
     sendJson(res, 404, { error: "not found" });
   }
+}
+
+/** The public landing page. Static: same bytes for everyone, no session, no user data. */
+async function serveWelcome(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const data = await fs.promises.readFile(path.join(PUBLIC_DIR, "welcome.html"));
+  res.writeHead(200, staticHeaders(".html", data.length));
+  if (req.method === "HEAD") res.end();
+  else res.end(data);
 }
 
 /** index.html with Open Graph tags: the note, then day and time. Nothing else about the plan. */
