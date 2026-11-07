@@ -394,6 +394,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
+  ensurePlanReminders(db);
   const missing = db.prepare(
     "SELECT id, token_hash, created_at FROM users u WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.token_hash = u.token_hash)",
   ).all() as Array<{ id: string; token_hash: string; created_at: number }>;
@@ -401,6 +402,28 @@ export function openDb(dbPath: string): DatabaseSync {
   for (const user of missing) insert.run(crypto.randomUUID(), user.id, user.token_hash, user.created_at);
   db.prepare("UPDATE social_joins SET reply = 'coming' WHERE reply IN ('join', 'in')").run();
   return db;
+}
+
+/**
+ * Who a "Remind friends" reached, per plan. Alerts can be cleared or pruned; this cannot, so the hour holds.
+ * Goes with its plan. Created once, and seeded from the reminder Alerts sent before it existed.
+ */
+function ensurePlanReminders(db: DatabaseSync): void {
+  if (one(db, "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'plan_reminders'")) return;
+  withTx(db, () => {
+    db.exec(`
+      CREATE TABLE plan_reminders (
+        plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        reminded_at INTEGER NOT NULL,
+        PRIMARY KEY (plan_id, user_id)
+      );
+      INSERT INTO plan_reminders (plan_id, user_id, reminded_at)
+        SELECT n.ref_id, n.user_id, MIN(n.created_at) FROM notifications n
+        WHERE n.kind = 'plan-remind' AND n.ref_id IN (SELECT id FROM plans) AND n.user_id IN (SELECT id FROM users)
+        GROUP BY n.ref_id, n.user_id;
+    `);
+  });
 }
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
@@ -899,7 +922,7 @@ export type CircleDeleteResult = {
  *
  * Also removed in that same transaction (no circle_id column of their own;
  * they hang off the rows above): social_joins, plan_joins, messages,
- * chat_reads, chat_mutes.
+ * chat_reads, chat_mutes. plan_reminders goes with its plan (ON DELETE CASCADE).
  *
  * Accounts, sessions, and push subscriptions stay. Those belong to the person.
  */
@@ -1281,20 +1304,53 @@ export function clearPlanShareId(db: DatabaseSync, planId: string): void {
   db.prepare("UPDATE plans SET share_id = NULL WHERE id = ?").run(planId);
 }
 
-/** Starts a plan's remind cooldown unless another reminder went out after `since`. True when this call got it. */
-export function claimPlanReminder(db: DatabaseSync, planId: string, now: number, since: number): boolean {
-  const result = db.prepare(
-    "UPDATE plans SET reminded_at = ? WHERE id = ? AND (reminded_at IS NULL OR reminded_at <= ?)",
-  ).run(now, planId, since);
-  return Number(result.changes) > 0;
+/** Records a reminder for one person. Keeps the earlier time when they were already reminded at or after `since`. */
+const RECORD_REMINDER = `INSERT INTO plan_reminders (plan_id, user_id, reminded_at) VALUES (?, ?, ?)
+  ON CONFLICT(plan_id, user_id) DO UPDATE SET reminded_at = excluded.reminded_at
+  WHERE plan_reminders.reminded_at < ?`;
+
+/**
+ * A full "Remind friends": starts the plan's hour unless another reminder went out after `since`,
+ * and records `userIds` as reminded now, plus the sender, who knows already. One transaction.
+ * True when this call got the hour.
+ */
+export function claimPlanReminder(db: DatabaseSync, planId: string, senderId: string, userIds: string[], now: number, since: number): boolean {
+  let claimed = false;
+  withTx(db, () => {
+    const hour = db.prepare(
+      "UPDATE plans SET reminded_at = ? WHERE id = ? AND (reminded_at IS NULL OR reminded_at <= ?)",
+    ).run(now, planId, since);
+    if (Number(hour.changes) === 0) return;
+    const record = db.prepare(RECORD_REMINDER);
+    for (const userId of [...userIds, senderId]) record.run(planId, userId, now, now);
+    claimed = true;
+  });
+  return claimed;
 }
 
-/** Everyone who has a "Remind friends" Alert for this plan, in any circle. */
-export function listPlanRemindedUserIds(db: DatabaseSync, planId: string): Set<string> {
+/**
+ * A reminder inside the hour that started at `hourStart`: records only the people in `userIds` not
+ * reminded since then, and returns them. The sender is recorded too. The hour stays as it is. One transaction.
+ */
+export function claimLateReminders(db: DatabaseSync, planId: string, senderId: string, userIds: string[], now: number, hourStart: number): string[] {
+  const claimed: string[] = [];
+  withTx(db, () => {
+    const record = db.prepare(RECORD_REMINDER);
+    for (const userId of userIds) {
+      if (Number(record.run(planId, userId, now, hourStart).changes) > 0) claimed.push(userId);
+    }
+    if (claimed.length) record.run(planId, senderId, now, hourStart);
+  });
+  return claimed;
+}
+
+/** Everyone reminded for this plan at or after `since`. Kept apart from Alerts, which can be cleared or pruned. */
+export function listPlanRemindedUserIds(db: DatabaseSync, planId: string, since: number): Set<string> {
   return new Set(all<{ user_id: string }>(
     db,
-    "SELECT DISTINCT user_id FROM notifications WHERE kind = 'plan-remind' AND ref_id = ?",
+    "SELECT user_id FROM plan_reminders WHERE plan_id = ? AND reminded_at >= ?",
     planId,
+    since,
   ).map((row) => row.user_id));
 }
 
