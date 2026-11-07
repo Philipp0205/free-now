@@ -81,6 +81,8 @@ export type PlanRow = {
   share_id: string | null;
   description: string | null;
   reminded_at: number | null;
+  /** Last content change or end, for calendar SEQUENCE. Null until the first one. */
+  updated_at: number | null;
 };
 
 export type PushSubRow = {
@@ -311,6 +313,12 @@ CREATE TABLE IF NOT EXISTS chat_mutes (
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   PRIMARY KEY (user_id, chat_id)
 );
+
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -380,6 +388,7 @@ export function openDb(dbPath: string): DatabaseSync {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_share ON plans(share_id)");
   ensureColumn(db, "plans", "description", "description TEXT");
   ensureColumn(db, "plans", "reminded_at", "reminded_at INTEGER");
+  ensureColumn(db, "plans", "updated_at", "updated_at INTEGER");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -1307,9 +1316,11 @@ export function finishSocial(db: DatabaseSync, id: string, now: number): boolean
 }
 
 export function finishPlan(db: DatabaseSync, id: string, now: number): boolean {
+  // updated_at moves only on the first end, so a repeat end does not bump the calendar SEQUENCE.
   db.prepare(
-    "UPDATE plans SET ended_at = COALESCE(ended_at, ?), lat = NULL, lng = NULL WHERE id = ?",
-  ).run(now, id);
+    `UPDATE plans SET updated_at = CASE WHEN ended_at IS NULL THEN ? ELSE updated_at END,
+     ended_at = COALESCE(ended_at, ?), lat = NULL, lng = NULL WHERE id = ?`,
+  ).run(now, now, id);
   return Boolean(one(db, "SELECT 1 AS ok FROM plans WHERE id = ?", id));
 }
 
@@ -1341,10 +1352,61 @@ export function patchPlanDetails(
   atTime: string | null,
   forDate: string,
   description: string | null,
+  /** Set when the calendar copy changed. Null keeps the last value. */
+  updatedAt: number | null = null,
 ): void {
   db.prepare(
-    "UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ?, description = ? WHERE id = ?",
-  ).run(note, place, lat, lng, atTime, forDate, description, id);
+    `UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ?, description = ?,
+     updated_at = COALESCE(?, updated_at) WHERE id = ?`,
+  ).run(note, place, lat, lng, atTime, forDate, description, updatedAt, id);
+}
+
+/** The feed token hash for this person, if the feed is on. */
+export function getCalendarFeed(db: DatabaseSync, userId: string): { created_at: number } | undefined {
+  return one<{ created_at: number }>(db, "SELECT created_at FROM calendar_feeds WHERE user_id = ?", userId);
+}
+
+/** One feed per person. A new token replaces the old one, so the old link stops working. */
+export function setCalendarFeed(db: DatabaseSync, userId: string, tokenHash: string, now: number): void {
+  db.prepare(
+    `INSERT INTO calendar_feeds (user_id, token_hash, created_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET token_hash = excluded.token_hash, created_at = excluded.created_at`,
+  ).run(userId, tokenHash, now);
+}
+
+export function deleteCalendarFeed(db: DatabaseSync, userId: string): void {
+  db.prepare("DELETE FROM calendar_feeds WHERE user_id = ?").run(userId);
+}
+
+export function getUserByFeedHash(db: DatabaseSync, tokenHash: string): UserRow | undefined {
+  const row = one<{ user_id: string }>(db, "SELECT user_id FROM calendar_feeds WHERE token_hash = ?", tokenHash);
+  return row ? getUserById(db, row.user_id) : undefined;
+}
+
+/**
+ * Plans this person can see now (a member of a linked circle) and is part of:
+ * host, or a live coming/maybe reply. Blocked, removed, and declined are out.
+ * Upcoming first (soonest first), then recent past (newest first), within `limit`.
+ */
+export function listFeedPlans(db: DatabaseSync, userId: string, fromDate: string, today: string, limit: number): PlanRow[] {
+  const where = `p.for_date >= ? AND EXISTS (
+      SELECT 1 FROM plan_circles pc JOIN memberships m ON m.circle_id = pc.circle_id
+      WHERE pc.plan_id = p.id AND m.user_id = ?)
+    AND (p.creator_id = ? OR EXISTS (
+      SELECT 1 FROM plan_joins j WHERE j.plan_id = p.id AND j.user_id = ? AND j.blocked = 0 AND j.reply IN ('coming', 'maybe')))`;
+  const upcoming = all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE ${where} ORDER BY p.for_date ASC, COALESCE(p.at_time, '') ASC, p.created_at ASC LIMIT ?`,
+    today, userId, userId, userId, limit,
+  );
+  const room = limit - upcoming.length;
+  if (room <= 0) return upcoming;
+  const past = all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE ${where} AND p.for_date < ? ORDER BY p.for_date DESC, p.created_at DESC LIMIT ?`,
+    fromDate, userId, userId, userId, today, room,
+  );
+  return [...upcoming, ...past];
 }
 
 function backfillCircleAdmins(db: DatabaseSync): void {
@@ -1619,7 +1681,7 @@ const SOCIAL_SELECT = `
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at
+         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;

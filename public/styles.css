@@ -1671,3 +1671,19 @@ html.kb-open .sheet .help { margin-top: 0; }
   }
   .in-toggle.pop-on, .in-toggle.pop-off { animation: none; }
 }
+
+.calendar-feed .feed-url {
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #1c1c1e;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.calendar-feed .feed-link .help { margin: 0; }
+.calendar-feed .link-btn { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+.calendar-feed .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
+.calendar-feed .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }
