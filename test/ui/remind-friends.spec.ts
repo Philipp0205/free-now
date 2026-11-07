@@ -189,3 +189,60 @@ for (const [width, height] of SIZES) {
     }
   });
 }
+
+for (const [width, height] of SIZES) {
+  test(`at ${width}: after a reminder a newcomer joins, and the sender can remind just them`, { timeout: 120_000 }, async () => {
+    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const { circle } = await call("POST", "/api/circles", host.token, { name: `Newcomer ${width}` });
+    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const finnEnd = `https://push.example/remind-old-${width}`;
+    await call("POST", "/api/push/subscribe", friend.token, { endpoint: finnEnd, keys: { p256dh: "p", auth: "a" } });
+    const note = `Pizza ${width}`;
+    await call("POST", "/api/plans", host.token, { note, time: "20:00" });
+
+    const page = await phone(width, height, host.token);
+    try {
+      await page.goto(hangry.baseUrl);
+      await dismiss(page);
+      const card = page.locator(".card-plan", { hasText: note });
+      const item = page.getByRole("menuitem", { name: "Remind friends" });
+      let before = sent.length;
+      await card.locator(".card-more").click();
+      await item.click();
+      await toast(page, "Reminded 1 friend");
+      assert.deepEqual(sent.slice(before).map((row) => row.endpoint), [finnEnd]);
+
+      await card.locator(".card-more").click();
+      await item.waitFor();
+      assert.equal(await item.getAttribute("aria-disabled"), "true", "greyed after the reminder");
+      await page.keyboard.press("Escape");
+
+      // Nina joins the circle inside the hour.
+      const nina = await call("POST", "/api/auth/start", undefined, { name: "Nina", code: circle.inviteCode });
+      const ninaEnd = `https://push.example/remind-new-${width}`;
+      await call("POST", "/api/push/subscribe", nina.token, { endpoint: ninaEnd, keys: { p256dh: "p", auth: "a" } });
+
+      await page.reload();
+      await dismiss(page);
+      await card.locator(".card-more").click();
+      await item.waitFor();
+      assert.equal(await item.getAttribute("aria-disabled"), null, "open again for the newcomer");
+      await shot(page, "remind-newcomer-menu");
+      before = sent.length;
+      await item.click();
+      await toast(page, "Reminded 1 friend");
+      await shot(page, "remind-newcomer-toast");
+      const mine = sent.slice(before);
+      assert.deepEqual(mine.map((row) => row.endpoint), [ninaEnd], "only Nina, not Finn again");
+      assert.equal(mine[0].payload.title, `Hana reminds you: ${note}, Tomorrow · 20:00`);
+
+      await card.locator(".card-more").click();
+      await item.waitFor();
+      assert.equal(await item.getAttribute("aria-disabled"), "true", "greyed again");
+      await shot(page, "remind-newcomer-cooldown");
+      assert.equal(sent.length, before + 1);
+    } finally {
+      await page.context().close();
+    }
+  });
+}
