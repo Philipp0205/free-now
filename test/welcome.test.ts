@@ -102,3 +102,100 @@ test("the PWA still starts at / and the worker never caches /welcome as the shel
   assert.ok(JSON.parse(shell).includes("/"));
   assert.ok(!JSON.parse(shell).includes("/welcome"), "the landing page is not part of the app shell");
 });
+
+/** Visible text of the landing page, without tags or comments. */
+function visibleText(html: string): string {
+  return html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<head>[\s\S]*?<\/head>/, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+}
+
+test("the landing page leads with the button: tap, friends are told, whoever can comes", () => {
+  const text = visibleText(WELCOME);
+  const hero = /<section class="wl-hero"[\s\S]*?<\/section>/.exec(WELCOME)?.[0] ?? "";
+  assert.match(WELCOME, /<h1 id="wl-title">Free right now\? Hit the buzzer\.<\/h1>/);
+  assert.match(hero, /<p class="wl-lede">Tap the buzzer\. Your friends get notified\. See who’s up for meeting\.<\/p>/);
+  assert.match(hero, /aria-label="Example of a spontaneous meetup, step by step"/);
+  assert.match(visibleText(hero), /your friends are told/i);
+  assert.match(visibleText(hero), /You tap the buzzer.*Your friends are told.*Whoever can, comes/);
+  assert.doesNotMatch(visibleText(hero), /\bplans?\b|calendar|schedul/i, "planning is not in the hero");
+  assert.ok(text.indexOf("Hit the buzzer") < text.indexOf("Plans for any day"), "the buzzer comes before planning");
+  assert.match(text, /Also in Hangry/, "planning is presented as extra");
+  // Truthful about what the button does: it opens a sheet, then I'm free sends it.
+  assert.match(text, /press I'm free/);
+  assert.match(text, /Tap the buzzer Tap the glowing buzzer, add a note or a place if you like, and press I'm free/);
+  assert.doesNotMatch(text, /instantly|one press and|everyone gets a push/i);
+  // Push only reaches friends who turned it on; others see Alerts.
+  assert.match(text, /turned on notifications get a push\. Everyone else sees it under Alerts/);
+  // The example push uses the app's real wording.
+  assert.match(text, /Free now Alex is free – meet at Schlossplatz/);
+  assert.match(text, /Join On my way Can't make it/);
+});
+
+test("the landing page makes no tracking, count, or testimonial claims", () => {
+  const text = visibleText(WELCOME);
+  assert.doesNotMatch(text, /live location|real[- ]time location|track(s|ing)? (your )?friends|see where (your )?friends are|follow your friends|always on/i);
+  assert.match(text, /Pins are meetup spots, not people\./);
+  assert.match(text, /Hangry does not follow anyone's location in the background\./);
+  assert.match(text, /rounded to about 100 metres, only if they tap for it/);
+  assert.doesNotMatch(text, /\b\d[\d,]*\+?\s+(users|people|friends|circles|meetups|downloads)\b/i, "no made-up counts");
+  assert.doesNotMatch(text, /testimonial|★|rated|loved by|trusted by|best app/i);
+  assert.doesNotMatch(text, /\u2014/, "no em dashes");
+  assert.match(text, /Real places in central Stuttgart\. The friends and meetups are made up\./);
+  assert.match(text, /The map shows real Stuttgart places\. The friends and meetups on this page are made up\./);
+  assert.doesNotMatch(text, /made-up (spots|places)|places and the map above are examples/i, "the places are real; only the people are invented");
+});
+
+/** Zoom-16 world pixel of a coordinate (Web Mercator, 256 px tiles). */
+function z16(lat: number, lng: number) {
+  const size = 256 * 2 ** 16;
+  const rad = (lat * Math.PI) / 180;
+  return {
+    x: ((lng + 180) / 360) * size,
+    y: ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * size,
+  };
+}
+
+test("the example map is real OpenStreetMap tiles of central Stuttgart with honest attribution", () => {
+  const tiles = [...WELCOME.matchAll(/<img class="wl-tile" style="left:(\d+)px;top:(\d+)px" src="([^"]+)"([^>]*)>/g)];
+  assert.equal(tiles.length, 15, "5x3 tiles");
+  for (const [, left, top, src, rest] of tiles) {
+    const m = /^https:\/\/tile\.openstreetmap\.org\/16\/(\d+)\/(\d+)\.png$/.exec(src);
+    assert.ok(m, `standard OSM tile URL: ${src}`);
+    assert.equal(Number(left), (Number(m[1]) - 34437) * 256, `${src} sits in its column`);
+    assert.equal(Number(top), (Number(m[2]) - 22567) * 256, `${src} sits in its row`);
+    assert.match(rest, /referrerpolicy="strict-origin-when-cross-origin"/, "tiles send a Referer even though the page is no-referrer");
+    assert.match(rest, /loading="lazy"/, "no prefetching tiles nobody looks at");
+  }
+  assert.doesNotMatch(WELCOME, /arcgisonline|cartocdn|mapbox|google/i, "only OSM tiles, matching the attribution");
+  assert.match(WELCOME, /<p class="wl-attr">© <a href="https:\/\/www\.openstreetmap\.org\/copyright"[^>]*>OpenStreetMap<\/a> contributors<\/p>/);
+  assert.match(WELCOME, /<div class="wl-map" role="img" aria-label="Example map of central Stuttgart/);
+});
+
+test("example pins sit on the real Stuttgart spots they name", () => {
+  const spots: Record<string, [number, number]> = {
+    // The Jubiläumssäule, in the middle of Schlossplatz.
+    Schlossplatz: [48.7785664, 9.1798704],
+    Eckensee: [48.7797884, 9.1827333],
+    "Kleiner Schlossplatz": [48.77814, 9.1761817],
+    Marktplatz: [48.7751882, 9.1785179],
+  };
+  const pins = [...WELCOME.matchAll(/<span class="wl-pin wl-pin-(social)" data-spot="([^"]+)" style="left:(\d+)px;top:(\d+)px;--person:#[0-9a-f]{6}">([A-Z])<\/span>/g)];
+  assert.deepEqual(pins.map((pin) => pin[2]), Object.keys(spots));
+  assert.deepEqual(pins.map((pin) => pin[1]), ["social", "social", "social", "social"], "all pink free-now pins, like the app's social pins");
+  assert.doesNotMatch(WELCOME, /wl-pin-plan|wl-key-plan/, "the map example is about free now, not plans");
+  for (const [, , spot, left, top] of pins) {
+    const world = z16(...spots[spot]);
+    assert.ok(Math.abs(world.x - 34437 * 256 - Number(left)) <= 1, `${spot} x`);
+    assert.ok(Math.abs(world.y - 22567 * 256 - Number(top)) <= 1, `${spot} y`);
+  }
+});
+
+test("/welcome keeps its static, no-referrer headers while tiles opt in per image", async () => {
+  await withApp(async ({ port }) => {
+    const page = await get(port, "/welcome");
+    assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(page.headers.get("x-frame-options"), "DENY");
+    const css = await get(port, "/welcome.css");
+    assert.equal(css.status, 200);
+    assert.match(css.text, /\.wl-map-canvas/);
+  });
+});
