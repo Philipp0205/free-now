@@ -16,7 +16,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v38";
+const APP_VERSION = "hangry-v39";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -102,6 +102,7 @@ const state = {
   inPop: null,
   eventDetail: null,
   arrivalPick: null,
+  shareCircles: null,
   newCircleName: "",
   whatsNew: null,
   whatsNewView: null,
@@ -2349,6 +2350,12 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
       text: "Share link",
       action: () => { state.cardMenu = null; void sharePlan(item); },
     });
+    if (canShareCircles(item)) {
+      items.push({
+        text: "Share with other circles",
+        action: () => { state.cardMenu = null; openShareCircles(item); },
+      });
+    }
     if (!item.removedBy && planOpen(item)) {
       items.push({
         text: "Remind friends",
@@ -2517,11 +2524,6 @@ function openAdminEdit(kind, item) {
     day,
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
-    homeCircle: kind === "plan" ? (item.circles?.[0]?.id || "") : "",
-    alsoCircles: new Set(kind === "plan"
-      ? (item.circles || []).slice(1).map((circle) => circle.id).filter((id) => (state.me.circles || []).some((mine) => mine.id === id))
-      : []),
-    canShareCircles: kind === "plan" && item.creator?.id === state.me.user.id && (state.me.circles || []).length > 1 && Boolean(item.circles?.length),
     ...session,
   };
   state.sheet = "admin-edit";
@@ -2556,7 +2558,6 @@ function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           whereBlock(edit),
-          edit.canShareCircles ? alsoShareBlock(edit) : null,
           edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
         ]),
       ]),
@@ -2567,27 +2568,103 @@ function adminEditSheet() {
   ]);
 }
 
-/** Toggle chips for the host's other circles. The home circle always keeps the plan. */
-function alsoShareBlock(edit) {
-  const others = (state.me.circles || []).filter((circle) => circle.id !== edit.homeCircle);
-  if (!others.length) return null;
-  return el("div", { class: "sheet-group" }, [
-    el("span", { class: "sheet-label", id: "also-share-label", text: "Also share with" }),
-    el("div", { class: "also-circles", role: "group", "aria-labelledby": "also-share-label" }, others.map((circle) => {
-      const on = edit.alsoCircles.has(circle.id);
-      return el("button", {
-        type: "button",
-        class: on ? "chip on" : "chip",
-        "aria-pressed": on ? "true" : "false",
-        text: circle.name,
-        onclick: () => {
-          if (edit.alsoCircles.has(circle.id)) edit.alsoCircles.delete(circle.id);
-          else edit.alsoCircles.add(circle.id);
-          render();
-        },
-      });
-    })),
+/** Host of an open plan, in more than one circle. Same rule the server checks in readPlanCircles. */
+function canShareCircles(plan) {
+  return Boolean(plan?.creator?.id) && plan.creator.id === state.me?.user?.id
+    && (state.me.circles || []).length > 1
+    && Boolean(plan.circles?.length)
+    && !plan.removedBy
+    && planOpen(plan);
+}
+
+function openShareCircles(plan) {
+  const mine = new Set((state.me.circles || []).map((circle) => circle.id));
+  state.shareCircles = {
+    id: plan.id,
+    home: plan.circles[0],
+    picked: new Set(plan.circles.slice(1).map((circle) => circle.id).filter((id) => mine.has(id))),
+    busy: false,
+    error: "",
+  };
+  state.sheet = "share-circles";
+  render();
+}
+
+/** Home circle fixed, toggle chips for the host's other circles. Saves only the circle set. */
+function shareCirclesSheet() {
+  const share = state.shareCircles;
+  if (!share) return el("div");
+  const others = (state.me.circles || []).filter((circle) => circle.id !== share.home.id);
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Share with other circles", ...saveOnlyFromButton(saveShareCircles) }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Share with other circles" }),
+        el("p", { class: "help", text: "Same plan, same chat and guest list. New circles get one notification." }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        el("div", { class: "sheet-form" }, [
+          el("div", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", text: "Always in" }),
+            el("div", { class: "also-circles" }, [
+              el("span", { class: "chip chip-fixed", text: share.home.name }),
+            ]),
+          ]),
+          el("div", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", id: "share-circles-label", text: "Your other circles" }),
+            el("div", { class: "also-circles", role: "group", "aria-labelledby": "share-circles-label" }, others.map((circle) => {
+              const on = share.picked.has(circle.id);
+              return el("button", {
+                type: "button",
+                class: on ? "chip on" : "chip",
+                "aria-pressed": on ? "true" : "false",
+                text: circle.name,
+                onclick: () => {
+                  if (share.picked.has(circle.id)) share.picked.delete(circle.id);
+                  else share.picked.add(circle.id);
+                  share.error = "";
+                  render();
+                },
+              });
+            })),
+          ]),
+          share.error ? el("p", { class: "time-error", role: "alert", text: share.error }) : null,
+        ]),
+      ]),
+      el("div", { class: "sheet-dock stack" }, [
+        el("button", { class: "btn", type: "submit", text: share.busy ? "Saving…" : "Save", disabled: share.busy }),
+        el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: closeSheet }),
+      ]),
+    ]),
   ]);
+}
+
+async function saveShareCircles(event) {
+  event.preventDefault();
+  const share = state.shareCircles;
+  if (!share || share.busy) return;
+  const circleIds = [share.home.id, ...share.picked];
+  share.busy = true;
+  share.error = "";
+  render();
+  try {
+    // Circles only: the server keeps every other field, so this is never a move.
+    await api(`/api/plans/${share.id}`, { method: "PATCH", body: { circleIds } });
+  } catch (error) {
+    share.busy = false;
+    share.error = isNetworkFailure(error)
+      ? "You're offline. Try again."
+      : error.status >= 500 ? "Something went wrong. Try again." : (error.message || "Something went wrong. Try again.");
+    if (state.shareCircles === share) render();
+    return;
+  }
+  state.shareCircles = null;
+  state.sheet = null;
+  await refresh({ initial: true });
+  state.error = circleIds.length > 1 ? `Shared with ${circleIds.length} circles` : `Now only in ${share.home.name}`;
+  render();
+  scheduleErrorClear();
 }
 
 /** "Friends + Climbing" when a plan is in more than one circle. */
@@ -2642,7 +2719,6 @@ async function saveAdminEdit(event) {
       ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
       : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
-    if (edit.canShareCircles) body.circleIds = [edit.homeCircle, ...edit.alsoCircles];
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
     await refresh({ initial: true });
@@ -2996,6 +3072,7 @@ function sheet() {
   if (state.sheet === "admin-edit") return adminEditSheet();
   if (state.sheet === "event-detail") return eventDetailSheet();
   if (state.sheet === "arrival") return arrivalSheet();
+  if (state.sheet === "share-circles") return shareCirclesSheet();
   if (state.sheet === "push") return pushSheet();
   if (state.sheet === "whats-new") return whatsNewSheet();
   if (state.sheet === "feedback") return feedbackSheet();
@@ -5094,6 +5171,7 @@ function closeSheet() {
   if (state.sheet === "whats-new") state.whatsNewView = null;
   if (state.sheet === "event-detail") state.eventDetail = null;
   if (state.sheet === "arrival") state.arrivalPick = null;
+  if (state.sheet === "share-circles") state.shareCircles = null;
   state.cardMenu = null;
   state.sheet = null;
   state.whereMap = false;

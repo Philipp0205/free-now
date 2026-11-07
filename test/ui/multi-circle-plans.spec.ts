@@ -90,6 +90,11 @@ async function openEdit(page: Page, note: string) {
   await planCard(page, note).locator(".card-more").click();
   await page.getByRole("menu").getByRole("menuitem", { name: "Edit", exact: true }).click();
 }
+async function openShare(page: Page, note: string) {
+  await planCard(page, note).locator(".card-more").click();
+  await page.getByRole("menu").getByRole("menuitem", { name: "Share with other circles", exact: true }).click();
+  return page.getByRole("dialog", { name: "Share with other circles" });
+}
 const newPlanPushes = (from: number, endpoint: string, planId: string) =>
   sent.slice(from).filter((item) => item.endpoint === endpoint && item.payload.tag === `plan:${planId}`);
 
@@ -99,7 +104,7 @@ for (const [width, height] of SIZES) {
     const note = `Bouldering ${width}`;
     const start = sent.length;
 
-    // Ana makes the plan in Friends, then shares it with Climbing from Edit.
+    // Ana makes the plan in Friends, then shares it with Climbing from the ⋯ menu.
     const anaPhone = await phone(width, height, ana.token, friends.id);
     let planId = "";
     try {
@@ -116,29 +121,27 @@ for (const [width, height] of SIZES) {
       assert.equal(newPlanPushes(start, ends.ben, planId).length, 1, "Ben hears about the new Friends plan once");
       assert.equal(newPlanPushes(start, ends.cleo, planId).length, 0, "Cleo is not in Friends");
 
-      await openEdit(page, note);
-      const sheet = page.locator(".sheet");
-      const label = sheet.getByText("Also share with", { exact: true });
-      await label.waitFor();
-      const group = sheet.getByRole("group", { name: "Also share with" });
+      const sheet = await openShare(page, note);
+      const group = sheet.getByRole("group", { name: "Your other circles" });
+      await group.waitFor();
       const chips = group.getByRole("button");
       assert.deepEqual(await chips.allInnerTexts(), ["Climbing"], "only the other circle is offered, not Friends");
       const chip = group.getByRole("button", { name: "Climbing" });
       assert.equal(await chip.getAttribute("aria-pressed"), "false");
       await inView(page, group, "chips row");
-      await noSideScroll(page, "edit sheet");
+      await noSideScroll(page, "share sheet");
       const sheetOverflow = await sheet.evaluate((node) => node.scrollWidth - node.clientWidth);
-      assert.ok(sheetOverflow <= 0, `edit sheet does not scroll sideways (${sheetOverflow})`);
+      assert.ok(sheetOverflow <= 0, `share sheet does not scroll sideways (${sheetOverflow})`);
       await chip.click();
       assert.equal(await chip.getAttribute("aria-pressed"), "true");
       await inView(page, chip, "picked chip");
-      await shot(page, "edit-also-share");
+      await shot(page, "share-circles");
 
       const before = sent.length;
       const patched = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes(`/api/plans/${planId}`));
       await sheet.getByRole("button", { name: "Save" }).click();
       const body = (await patched).request().postDataJSON();
-      assert.deepEqual(body.circleIds, [friends.id, climbing.id]);
+      assert.deepEqual(body, { circleIds: [friends.id, climbing.id] }, "circles only, no other field");
       await sheet.waitFor({ state: "detached" });
       await planCard(page, note).locator(".plan-circles", { hasText: "Friends + Climbing" }).waitFor();
 
@@ -216,8 +219,7 @@ for (const [width, height] of SIZES) {
     try {
       const page = anaAgain.page;
       await open(page);
-      await openEdit(page, note);
-      const chip = page.locator(".sheet").getByRole("group", { name: "Also share with" }).getByRole("button", { name: "Climbing" });
+      const chip = (await openShare(page, note)).getByRole("group", { name: "Your other circles" }).getByRole("button", { name: "Climbing" });
       assert.equal(await chip.getAttribute("aria-pressed"), "true", "the sheet shows it as shared");
       await chip.click();
       assert.equal(await chip.getAttribute("aria-pressed"), "false");
@@ -249,7 +251,7 @@ for (const [width, height] of SIZES) {
   });
 }
 
-test("a host in one circle sees no Also share with", { timeout: 60_000 }, async () => {
+test("a host in one circle sees no Share with other circles, and Edit has no circle chips", { timeout: 60_000 }, async () => {
   const { ben, ends } = await seed("solo");
   const note = "Ben's walk";
   const made = (await call("POST", "/api/plans", ben.token, { note, time: "19:00" })).plan;
@@ -257,6 +259,11 @@ test("a host in one circle sees no Also share with", { timeout: 60_000 }, async 
     const { page, errors } = await phone(width, height, ben.token);
     try {
       await open(page);
+      await planCard(page, note).locator(".card-more").click();
+      const menu = page.getByRole("menu");
+      await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: "Share with other circles" }).count(), 0);
+      await page.keyboard.press("Escape");
       await openEdit(page, note);
       const sheet = page.locator(".sheet");
       await sheet.getByRole("button", { name: "Save" }).waitFor();
