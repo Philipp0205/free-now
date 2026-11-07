@@ -43,6 +43,13 @@ test("the shipped changelog is newest first and every entry is well-formed", () 
   assert.equal(normalizeEntries(RAW).length, RAW.length);
 });
 
+test("the card Share entry is in the changelog, in plain words without an em dash", () => {
+  const share = RAW.find((item) => item.id === "2026-11-07-card-share");
+  assert.ok(share, "card Share entry");
+  assert.equal(share.title, "Share plans anywhere");
+  for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
+});
+
 test("unseen entries: nothing seen shows all, a known id shows what is newer, an unknown id shows none", () => {
   assert.deepEqual(unseenEntries(LIST, null).map((item) => item.id), ["c", "b", "a"]);
   assert.deepEqual(unseenEntries(LIST, "a").map((item) => item.id), ["c", "b"]);
