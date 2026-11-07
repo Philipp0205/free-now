@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-07-calendar-android",
+    "date": "2026-11-07",
+    "title": "Calendar feed on Android",
+    "bullets": [
+      "Open in calendar did nothing on Android phones. The feed now shows Copy link and Send link with steps for Google Calendar.",
+      "On iPhone and Mac, Open in Apple Calendar still opens the calendar app."
+    ]
+  },
+  {
     "id": "2026-11-07-calendar",
     "date": "2026-11-07",
     "title": "Plans in your calendar",

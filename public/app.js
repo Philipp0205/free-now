@@ -5,6 +5,7 @@ import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } fr
 import { bindMap } from "./map.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
+import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 
 const TOKEN_KEY = "fn_token";
@@ -15,7 +16,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v36";
+const APP_VERSION = "hangry-v38";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -1017,6 +1018,7 @@ function setup() {
 }
 
 function shell() {
+  forgetShownFeedLink();
   const phone = el("div", { class: "phone" });
   if (state.chat) {
     phone.append(chatScreen());
@@ -1852,7 +1854,9 @@ function calendarFeedPanel() {
   }
   return el("section", { class: "panel calendar-feed", "aria-label": "Calendar feed" }, [
     ...head,
-    feed.url ? calendarFeedLink(feed) : el("p", { class: "help", text: `On since ${feedDate(feed.createdAt)}. The link is shown only once. Reset it to get a new one.` }),
+    feed.url
+      ? calendarFeedLink(feed)
+      : el("p", { class: "help feed-once", text: `On since ${feedDate(feed.createdAt)}. The link is only shown once. To add it to another calendar, use Reset link (the old link stops working).` }),
     el("div", { class: "feed-manage" }, [
       el("button", { class: "text-btn", type: "button", text: "Reset link", disabled: feed.busy, onclick: onResetCalendarFeed }),
       el("button", { class: "text-btn danger", type: "button", text: "Turn off", disabled: feed.busy, onclick: onRevokeCalendarFeed }),
@@ -1861,12 +1865,74 @@ function calendarFeedPanel() {
 }
 
 function calendarFeedLink(feed) {
+  const platform = calendarPlatform(navigator.userAgent);
+  const copy = el("button", { class: platform === "apple" ? "btn ghost" : "btn secondary", type: "button", text: "Copy link", onclick: () => { void copyFeedLink(feed.url); } });
+  // Only Apple has a calendar app that opens webcal:// links. Elsewhere that link does nothing.
+  const actions = platform === "apple"
+    ? [el("a", { class: "btn secondary link-btn", href: feed.webcalUrl, text: "Open in Apple Calendar" }), copy]
+    : [copy, typeof navigator.share === "function" ? el("button", { class: "btn ghost", type: "button", text: "Send link", onclick: () => { void shareFeedLink(feed.url); } }) : null];
   return el("div", { class: "stack feed-link" }, [
     el("p", { class: "feed-url", text: feed.url }),
     el("p", { class: "help", text: "Keep this link private. Anyone with it can see these plans. It is shown only now." }),
-    el("button", { class: "btn secondary", type: "button", text: "Copy link", onclick: () => copyText(feed.url, "Calendar link copied") }),
-    el("a", { class: "btn ghost link-btn", href: feed.webcalUrl, text: "Open in calendar" }),
+    ...actions,
+    el("ul", { class: "feed-steps" }, calendarFeedSteps(platform).map((line) => el("li", { text: line }))),
   ]);
+}
+
+/** Copies inside the tap so an installed PWA still has permission; falls back to a hidden field. */
+async function copyFeedLink(url) {
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(url);
+    copied = true;
+  } catch {
+    copied = copyWithSelection(url);
+  }
+  state.error = copied ? "Link copied" : "Copy failed. Press and hold the link to copy it.";
+  render();
+  if (!copied) selectFeedUrl();
+  scheduleErrorClear();
+}
+
+function copyWithSelection(value) {
+  const field = el("textarea", { readonly: "", "aria-hidden": "true", class: "copy-buffer" });
+  field.value = value;
+  document.body.append(field);
+  try {
+    field.focus({ preventScroll: true });
+    field.select();
+    field.setSelectionRange(0, value.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+  }
+}
+
+function selectFeedUrl() {
+  const node = document.querySelector(".calendar-feed .feed-url");
+  const selection = window.getSelection();
+  if (!node || !selection) return;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+async function shareFeedLink(url) {
+  try {
+    await navigator.share({ title: "Hangry calendar", url });
+  } catch (error) {
+    if (error?.name !== "AbortError") await copyFeedLink(url);
+  }
+}
+
+/** The feed link shows once. Once the You screen is not on show, it is gone for good. */
+function forgetShownFeedLink() {
+  if (!state.calendarFeed?.url) return;
+  if (state.tab === "you" && !state.chat && !state.past) return;
+  state.calendarFeed = { ...state.calendarFeed, url: "", webcalUrl: "" };
 }
 
 function feedDate(ms) {
@@ -5240,8 +5306,6 @@ async function onTab(id) {
   state.focusPlan = "";
   state.mapHistory = false;
   state.cardMenu = null;
-  // The feed link shows once. Leaving the You tab hides it for good.
-  if (id !== "you" && state.calendarFeed?.url) state.calendarFeed = { ...state.calendarFeed, url: "", webcalUrl: "" };
   if (id === "alerts") {
     render();
     try {

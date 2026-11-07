@@ -1681,9 +1681,13 @@ html.kb-open .sheet .help { margin-top: 0; }
   border-radius: 14px;
   background: #1c1c1e;
   overflow-wrap: anywhere;
+  -webkit-user-select: all;
   user-select: all;
+  -webkit-touch-callout: default;
 }
 .calendar-feed .feed-link .help { margin: 0; }
+.calendar-feed .feed-steps { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; line-height: 1.4; display: grid; gap: 6px; }
+.copy-buffer { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; font-size: 16px; border: 0; padding: 0; }
 .calendar-feed .link-btn { display: flex; align-items: center; justify-content: center; text-decoration: none; }
 .calendar-feed .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
 .calendar-feed .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }

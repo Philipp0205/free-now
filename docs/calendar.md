@@ -25,7 +25,26 @@ Both use the same event shape and the same UID, so a plan does not show up twice
   - `DELETE /api/me/calendar-feed` revokes the feed and returns `204`.
 - Feed: `GET /cal/<token>.ics`. Public, no session, because calendar servers cannot send one.
 - Token: 32 random bytes, base64url (43 characters). Only its SHA-256 hash is stored (`calendar_feeds`: `user_id` primary key, `token_hash` unique, `created_at`). One feed per person.
-- UI: the link shows once, right after Turn on or Reset link, with Copy link and Open in calendar (`webcal://`). After you leave the You tab, only "On since <date>" is shown. Reset link (rotate) and Turn off (revoke) both ask for confirmation first.
+- UI: the link shows once, right after Turn on or Reset link. The buttons depend on the device (see "Adding the feed on each platform" below). As soon as the You screen is not on show (another tab, Back, Alerts, chat) or the page reloads, only "On since <date>. The link is only shown once. To add it to another calendar, use Reset link (the old link stops working)." is shown. The server never sends the link again. Reset link (rotate) and Turn off (revoke) both ask for confirmation first.
+- Copy link calls `navigator.clipboard.writeText` inside the tap. If that is missing or rejects, it selects the text in a hidden readonly textarea and runs `document.execCommand("copy")`. Toast: "Link copied", or "Copy failed. Press and hold the link to copy it." when both fail, and the link text is then selected so it can be copied by hand. The link is never logged or put in a toast.
+
+### Adding the feed on each platform
+
+`calendarPlatform(userAgent)` in `public/calendar-feed.js` picks `apple`, `android`, or `other`. iPadOS reports itself as a Mac, so "Macintosh" counts as Apple (a real Mac opens `webcal://` in Calendar too).
+
+| Platform | Buttons | Steps shown |
+| --- | --- | --- |
+| `apple` (iPhone, iPad, Mac) | Open in Apple Calendar (`webcal://`), Copy link | If nothing opens: Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar, paste the link. |
+| `android` | Copy link, plus Send link when `navigator.share` exists. No `webcal://` link. | Google Calendar only adds a feed on a computer: calendar.google.com, + next to Other calendars, From URL, paste. It then syncs to the phone. Other apps: look for Add calendar from URL or Subscribe. |
+| `other` (desktop, unknown) | Copy link, plus Send link when `navigator.share` exists. No `webcal://` link. | Google (computer, From URL), Outlook (Add calendar, Subscribe from web), Apple (Add Subscribed Calendar). |
+
+Why there is no `webcal://` button on Android: Android has no app for `webcal://` by default, so tapping the link did nothing at all (no navigation, no error). The Google Calendar app cannot subscribe to a URL either. Send link calls `navigator.share({ title: "Hangry calendar", url })` with the https link so it can be sent to a computer. Cancelling the share sheet does nothing.
+
+Sources:
+
+- Google Calendar, "Use a link to add a public calendar": https://support.google.com/calendar/answer/37100 ("To subscribe to a new calendar, you must use a computer web browser. You can't subscribe to a calendar in the Google Calendar app for Android, iPhone, or iPad.")
+- Apple, "Use multiple calendars on iPhone" (subscribed calendars): https://support.apple.com/guide/iphone/ipha0d932e96
+- Microsoft, "Import or subscribe to a calendar in Outlook.com or Outlook on the web": https://support.microsoft.com (search for that title)
 - An unknown, revoked, or malformed token gets a bare `404` with an empty body. It does not say whether the token ever existed.
 - Response headers: `text/calendar; charset=utf-8`, `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `nosniff`. The service worker never caches `/cal/`.
 - Rate limit: 120 requests per minute per client address. This is loose on purpose, because Google and Apple fetch from shared addresses.
