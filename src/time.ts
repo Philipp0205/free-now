@@ -47,7 +47,18 @@ export function clockLabel(ms: number, tz: string): string {
   return `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
 }
 
-/** UTC instant for a clock time on a calendar day in `tz`. */
+/** Local wall time minus UTC, in ms, at one instant. */
+function offsetAt(ms: number, tz: string): number {
+  const got = zonedParts(ms, tz);
+  const minuteStart = Math.floor(ms / 60_000) * 60_000;
+  return Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute) - minuteStart;
+}
+
+/**
+ * UTC instant for a clock time on a calendar day in `tz`. Same rule as RFC 5545:
+ * a time that happens twice (fall back) is the first one, and a time that does not
+ * exist (spring forward) uses the offset from before the gap, so 02:30 becomes 03:30.
+ */
 export function zonedDateTime(isoDay: string, hhmm: string, tz: string): number {
   const match = /^(\d{2}):(\d{2})$/.exec(hhmm);
   if (!match) throw new Error("bad time");
@@ -55,15 +66,14 @@ export function zonedDateTime(isoDay: string, hhmm: string, tz: string): number 
   const minute = Number(match[2]);
   if (hour > 23 || minute > 59) throw new Error("bad time");
   const [year, month, day] = isoDay.split("-").map(Number);
-  let utc = Date.UTC(year, month - 1, day, hour, minute);
-  for (let i = 0; i < 4; i += 1) {
-    const got = zonedParts(utc, tz);
-    const delta = Date.UTC(year, month - 1, day, hour, minute)
-      - Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute);
-    if (delta === 0) break;
-    utc += delta;
-  }
-  return utc;
+  const wall = Date.UTC(year, month - 1, day, hour, minute);
+  const DAY_MS = 86_400_000;
+  // The offsets a day either side. A zone changes at most once in that span.
+  const before = offsetAt(wall - DAY_MS, tz);
+  const after = offsetAt(wall + DAY_MS, tz);
+  const fits = [wall - before, wall - after].filter((utc) => utc + offsetAt(utc, tz) === wall);
+  if (fits.length) return Math.min(...fits);
+  return wall - before;
 }
 
 /** True for a real YYYY-MM-DD day. "2026-02-30" is not. */

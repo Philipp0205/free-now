@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-07-calendar",
+    "date": "2026-11-07",
+    "title": "Plans in your calendar",
+    "bullets": [
+      "Tap ⋯ on a plan and choose Add to calendar to save it as a calendar file. That copy does not update.",
+      "Want it to stay in sync? Turn on Calendar feed on the You tab and add the private link to your calendar app.",
+      "Reset the link or turn it off any time. Your calendar app decides how often it checks for changes, which can take hours."
+    ]
+  },
+  {
     "id": "2026-11-06-remind-friends",
     "date": "2026-11-06",
     "title": "Nudge your friends",
