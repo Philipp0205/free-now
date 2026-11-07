@@ -16,7 +16,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v42";
+const APP_VERSION = "hangry-v44";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -3411,15 +3411,27 @@ function clock(ms) {
   }).format(new Date(ms));
 }
 
-/** Now and Later make you free. Pick a date makes a plan on that day. */
+/** Now and Later make you free. Plan for another day, a quieter link, makes a plan on a date. */
 function whenBlock() {
+  const planning = state.whenMode === "pick";
   return el("div", { class: "sheet-group" }, [
     el("span", { class: "sheet-label", id: "when-label", text: "When" }),
-    el("div", { class: "segment segment-3", role: "group", "aria-labelledby": "when-label" }, [
+    el("div", { class: "segment", role: "group", "aria-labelledby": "when-label" }, [
       whenChoice("now", "Now"),
       whenChoice("later", offeringTomorrow() ? "Tomorrow" : "Later today"),
-      whenChoice("pick", "Pick a date"),
     ]),
+    el("button", {
+      id: "plan-another-day",
+      class: planning ? "when-other on" : "when-other",
+      type: "button",
+      "aria-pressed": planning ? "true" : "false",
+      text: "Plan for another day",
+      onclick: () => {
+        if (state.error === PICK_DATE_ERROR || state.error === TIME_LATER_ERROR) state.error = "";
+        enterPlanMode();
+        render();
+      },
+    }),
   ]);
 }
 
@@ -3461,12 +3473,6 @@ function whenChoice(mode, text) {
     text,
     onclick: () => {
       if (state.error === PICK_DATE_ERROR) state.error = "";
-      if (mode === "pick") {
-        if (state.error === TIME_LATER_ERROR) state.error = "";
-        enterPlanMode();
-        render();
-        return;
-      }
       state.sheet = "free";
       state.whenMode = mode;
       if (mode === "now") {

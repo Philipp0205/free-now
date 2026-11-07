@@ -32,7 +32,7 @@ test("a plan picked for next week is labelled, sorted, moved to tomorrow and bac
 
     await openPlanSheet(page);
     const sheet = page.locator(".sheet");
-    assert.equal(await sheet.getByRole("button", { name: "Pick a date" }).getAttribute("aria-pressed"), "true");
+    assert.equal(await sheet.getByRole("button", { name: "Plan for another day" }).getAttribute("aria-pressed"), "true");
     const date = page.locator("#plan-date");
     assert.equal(await date.inputValue(), addDays(d.today, 3));
     assert.equal(await date.getAttribute("min"), d.today);
@@ -120,7 +120,7 @@ test("at 320x568 the when choice, date input and time picker are visible and cle
     await signIn(page, "Hana");
     await openPlanSheet(page);
     await page.locator("#plan-date").fill(d.nextWeek);
-    await assertFieldsClear(page, [".sheet .segment-3", "#plan-date", "#plan-time"]);
+    await assertFieldsClear(page, [".sheet .segment", "#plan-date", "#plan-time"]);
     await page.locator("#sheet-note").fill("Tiny screen");
     await page.locator(".sheet-dock").getByRole("button", { name: "Add plan" }).click();
     await page.getByRole("heading", { name: "Tiny screen" }).waitFor();

@@ -94,7 +94,7 @@ test("Now has no section headings and no Plan button, Past events stays", { time
   }
 });
 
-test("red orb, Pick a date: defaults to three days out and adds a plan", { timeout: 90_000 }, async () => {
+test("red orb, Plan for another day: defaults to three days out and adds a plan", { timeout: 90_000 }, async () => {
   const who = await user();
   for (const [width, height] of [[320, 568], [360, 640], [412, 915]]) {
     const { page, errors } = await phone(who, width, height);
@@ -108,10 +108,11 @@ test("red orb, Pick a date: defaults to three days out and adds a plan", { timeo
       await segment.getByRole("button", { name: "Now", exact: true }).waitFor();
       await segment.getByRole("button", { name: /^(Later today|Tomorrow)$/ }).waitFor();
       assert.equal(await page.locator("#plan-date").count(), 0, "free mode has no date");
-      await segment.getByRole("button", { name: "Pick a date" }).click();
+      const other = page.locator("form.sheet").getByRole("button", { name: "Plan for another day" });
+      await other.click();
       const date = page.locator("#plan-date");
       await date.waitFor();
-      assert.equal(await segment.getByRole("button", { name: "Pick a date" }).getAttribute("aria-pressed"), "true");
+      assert.equal(await other.getAttribute("aria-pressed"), "true");
       assert.equal(await date.inputValue(), inThree);
       assert.equal(await date.getAttribute("min"), today);
       assert.equal(await date.getAttribute("max"), addDays(today, 365));
@@ -148,8 +149,8 @@ test("red orb, Now, I'm free: posts a social", { timeout: 60_000 }, async () => 
     await home(page);
     await page.getByRole("button", { name: ORB }).click();
     const segment = page.locator("form.sheet .segment");
-    // Visit Pick a date and come back: the free sheet is as it was.
-    await segment.getByRole("button", { name: "Pick a date" }).click();
+    // Visit Plan for another day and come back: the free sheet is as it was.
+    await page.locator("form.sheet").getByRole("button", { name: "Plan for another day" }).click();
     await page.locator("#plan-date").waitFor();
     await segment.getByRole("button", { name: "Now", exact: true }).click();
     await page.locator("#plan-date").waitFor({ state: "detached" });
