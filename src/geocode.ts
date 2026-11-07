@@ -14,6 +14,8 @@ export type PlaceCandidate = {
   osmKey: string;
   osmValue: string;
   osmId: string;
+  /** Provider address text (Nominatim display_name, Photon address fields), only used to match query words. */
+  context?: string;
 };
 
 export type SearchBias = { lat: number; lng: number } | null;
@@ -30,12 +32,15 @@ const DROP_M = 50_000;
 /** Germany extent for a search with no known point. minLon,minLat,maxLon,maxLat. */
 const GERMANY_BBOX = "5.8663,47.2701,15.0419,55.0815";
 
-const cache = new Map<string, { at: number; results: PlaceHit[] }>();
+/** strong[i] says whether results[i] matches every query word (national entries only). */
+type CacheEntry = { at: number; results: PlaceHit[]; strong?: boolean[] };
+
+const cache = new Map<string, CacheEntry>();
 let chain: Promise<void> = Promise.resolve();
 let nextAt = 0;
 
 /** Store a cache entry. Drops the oldest entries past CACHE_MAX. */
-function remember(key: string, value: { at: number; results: PlaceHit[] }): void {
+function remember(key: string, value: CacheEntry): void {
   cache.delete(key);
   cache.set(key, value);
   while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
@@ -81,6 +86,8 @@ export function parsePhoton(payload: unknown): PlaceCandidate[] {
       osmKey: text(props.osm_key),
       osmValue: text(props.osm_value),
       osmId: [text(props.osm_type), text(props.osm_id)].filter(Boolean).join(":"),
+      context: ["name", "street", "housenumber", "postcode", "district", "locality", "city", "county", "state"]
+        .map((field) => text(props[field])).filter(Boolean).join(" "),
     });
   }
   return hits;
@@ -118,6 +125,7 @@ export function parseNominatim(payload: unknown): PlaceCandidate[] {
       osmKey: text(item?.class),
       osmValue: text(item?.type),
       osmId: text(item?.osm_id),
+      context: display,
     });
   }
   return hits;
@@ -197,6 +205,40 @@ function preferCandidate(current: PlaceCandidate, next: PlaceCandidate, bias: Se
 }
 
 export function rankPlaces(candidates: PlaceCandidate[], bias: SearchBias, query: string): PlaceHit[] {
+  return rankCandidates(candidates, bias, query).map(toHit);
+}
+
+type Ranked = { hit: PlaceCandidate; distance: number | null };
+
+function toHit({ hit, distance }: Ranked): PlaceHit {
+  return {
+    name: hit.name,
+    address: hit.address,
+    lat: hit.lat,
+    lng: hit.lng,
+    distanceM: distance == null ? null : Math.round(distance),
+  };
+}
+
+/** Folded query words. "Böheimstraße 43, Stuttgart" gives boheimstrasse, 43, stuttgart. */
+function queryWords(value: string): string[] {
+  return foldName(value).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+/**
+ * Every query word starts a word of the candidate's name, address, provider address text or OSM
+ * type (so "bar" or "cafe" match a local bar or cafe). A number has to be the whole leading
+ * number of a word, so 4 does not match 43.
+ */
+function matchesQuery(hit: PlaceCandidate, words: string[]): boolean {
+  if (!words.length) return false;
+  const have = queryWords([hit.name, hit.address, hit.context ?? "", hit.osmValue].join(" "));
+  return words.every((word) => have.some((part) => (
+    /^\d+$/.test(word) ? /^\d+/.exec(part)?.[0] === word : part.startsWith(word)
+  )));
+}
+
+function rankCandidates(candidates: PlaceCandidate[], bias: SearchBias, query: string): Ranked[] {
   const pool = bias
     ? candidates.filter((hit) => haversineMeters(bias, hit) <= DROP_M)
     : candidates;
@@ -228,13 +270,7 @@ export function rankPlaces(candidates: PlaceCandidate[], bias: SearchBias, query
       if (a.distance != null && b.distance != null) return a.distance - b.distance;
       return 0;
     });
-  return ranked.slice(0, RESULT_CAP).map(({ hit, distance }) => ({
-    name: hit.name,
-    address: hit.address,
-    lat: hit.lat,
-    lng: hit.lng,
-    distanceM: distance == null ? null : Math.round(distance),
-  }));
+  return ranked.slice(0, RESULT_CAP);
 }
 
 function bboxAround(lat: number, lng: number, km: number): string {
@@ -271,30 +307,68 @@ async function getJson(url: string): Promise<unknown> {
   }
 }
 
+/**
+ * The origin orders results, it never hides a place. Rule:
+ * 1. Search around the origin (30 km box, 50 km drop) as before.
+ * 2. If some local result matches every query word (matchesQuery), return the local list. No extra requests.
+ * 3. Otherwise (no local results, or only weak ones) run the Germany-wide search, shared with the
+ *    no-origin path and its cache. Its strong matches go first, with distance from the origin, then
+ *    the weak local results. With no local results at all, the weak national hits follow too.
+ *    Capped at RESULT_CAP.
+ */
 export async function searchPlaces(query: string, bias: SearchBias = null, fetchJson: JsonGetter = getJson): Promise<PlaceHit[]> {
   const q = query.trim().slice(0, 80);
   if (q.length < 2) return [];
   const point = bias && Number.isFinite(bias.lat) && Number.isFinite(bias.lng) ? bias : null;
-  const key = `${q.toLocaleLowerCase()}|${point ? `${point.lat.toFixed(2)},${point.lng.toFixed(2)}` : "de"}`;
+  if (!point) return (await nationalSearch(q, fetchJson)).results;
+  const key = `${q.toLocaleLowerCase()}|${point.lat.toFixed(2)},${point.lng.toFixed(2)}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.results;
-  const local = point != null;
+  const words = queryWords(q);
+  const local = rankCandidates(await fetchCandidates(q, point, fetchJson), point, q);
+  let results = local.map(toHit);
+  if (!local.some(({ hit }) => matchesQuery(hit, words))) {
+    const national = await nationalSearch(q, fetchJson);
+    const strong = national.results.filter((_, idx) => national.strong?.[idx]);
+    // Nothing local at all: also keep the weak national hits (typos), as a search without an origin would.
+    const weak = local.length ? [] : national.results.filter((_, idx) => !national.strong?.[idx]);
+    const far = [...strong, ...weak].map((hit) => ({ ...hit, distanceM: Math.round(haversineMeters(point, hit)) }));
+    const near = results.filter((hit) => !far.some((other) => (
+      foldName(other.name) === foldName(hit.name) && haversineMeters(other, hit) <= MERGE_M
+    )));
+    results = [...far, ...near].slice(0, RESULT_CAP);
+  }
+  remember(key, { at: Date.now(), results });
+  return results;
+}
+
+/** The Germany-wide search with no origin. Cached with a strong-match flag per result for the fallback. */
+async function nationalSearch(q: string, fetchJson: JsonGetter): Promise<CacheEntry> {
+  const key = `${q.toLocaleLowerCase()}|de`;
+  const cached = cache.get(key);
+  if (cached?.strong && Date.now() - cached.at < CACHE_MS) return cached;
+  const words = queryWords(q);
+  const ranked = rankCandidates(await fetchCandidates(q, null, fetchJson), null, q);
+  const entry = { at: Date.now(), results: ranked.map(toHit), strong: ranked.map(({ hit }) => matchesQuery(hit, words)) };
+  remember(key, entry);
+  return entry;
+}
+
+async function fetchCandidates(q: string, point: SearchBias, fetchJson: JsonGetter): Promise<PlaceCandidate[]> {
   const paced = fetchJson === getJson;
   if (paced) await pace();
   // Documented Photon params only (q, limit, lat, lon, location_bias_scale, bbox).
   // getJson sends the User-Agent. A 403 or other non-OK is logged there, without the query.
-  const photonUrl = local
+  const photonUrl = point
     ? `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&lat=${point.lat}&lon=${point.lng}&location_bias_scale=0.6&bbox=${bboxAround(point.lat, point.lng, LOCAL_KM)}`
     : `https://photon.komoot.io/api/?limit=15&q=${encodeURIComponent(q)}&bbox=${GERMANY_BBOX}`;
   const photon = parsePhoton(await fetchJson(photonUrl).catch(() => null));
   if (paced) await pace();
-  const nominatimUrl = local
+  const nominatimUrl = point
     ? `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}&viewbox=${nominatimViewbox(point.lat, point.lng, LOCAL_KM)}&bounded=0`
     : `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}&countrycodes=de`;
   const nominatim = parseNominatim(await fetchJson(nominatimUrl).catch(() => null));
-  const results = rankPlaces([...photon, ...nominatim], point, q);
-  remember(key, { at: Date.now(), results });
-  return results;
+  return [...photon, ...nominatim];
 }
 
 const VENUE_KEYS = new Set(["amenity", "shop", "leisure", "tourism", "craft", "office"]);
