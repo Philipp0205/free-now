@@ -1121,6 +1121,8 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "That post has ended.");
   assertEventHost(deps, user, circle.id, social.creator_id);
+  // Only plans can live in more than one circle. Say so instead of silently dropping it.
+  if (body.circleIds !== undefined) throw new HttpError(400, "Only plans can be shared with other circles.");
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
   const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (social.place ?? "");
   let lat = social.lat;
