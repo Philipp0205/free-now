@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Client and server copies of the same rules. None of these modules opens a DB or starts a server on import.
-import { addDays as clientAddDays, dayLabel as clientDayLabel, PLAN_DAYS_AHEAD as CLIENT_DAYS_AHEAD } from "../public/when.js";
+import { addDays as clientAddDays, dayLabel as clientDayLabel, shortDate as clientShortDate, PLAN_DAYS_AHEAD as CLIENT_DAYS_AHEAD } from "../public/when.js";
 import { audiencePlace as clientAudiencePlace, isMapsLink, looksLikeUrl as clientLooksLikeUrl } from "../public/place.js";
-import { addDays as serverAddDays, dayLabel as serverDayLabel } from "../src/time.js";
+import { addDays as serverAddDays, dayLabel as serverDayLabel, shortDate as serverShortDate } from "../src/time.js";
 import { PLAN_DAYS_AHEAD as SERVER_DAYS_AHEAD } from "../src/plans.js";
 import { audiencePlace as serverAudiencePlace } from "../src/notify.js";
 import { isMapsLinkInput, looksLikeUrl as serverLooksLikeUrl } from "../src/geocode.js";
@@ -23,6 +23,15 @@ test("dayLabel matches on client and server", () => {
     for (let gap = -1; gap <= 400; gap += 1) {
       const iso = serverAddDays(today, gap);
       assert.equal(clientDayLabel(iso, today), serverDayLabel(iso, today), `${today} +${gap}`);
+    }
+  }
+});
+
+test("shortDate (shared plan text, link previews) matches on client and server", () => {
+  for (const today of ["2026-06-15", "2026-12-28", "2027-02-27"]) {
+    for (let gap = -1; gap <= 400; gap += 7) {
+      const iso = serverAddDays(today, gap);
+      assert.equal(clientShortDate(iso, today), serverShortDate(iso, today), `${today} +${gap}`);
     }
   }
 });

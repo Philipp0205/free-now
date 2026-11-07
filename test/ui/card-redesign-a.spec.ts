@@ -68,7 +68,7 @@ async function noOverlap(page: Page, root: string) {
     const card = document.querySelector(sel) as HTMLElement | null;
     if (!card) return ["missing card"];
     const box = card.getBoundingClientRect();
-    const nodes = [...card.querySelectorAll(".in-toggle, .chat-row, .card-more, .card-menu")];
+    const nodes = [...card.querySelectorAll(".in-toggle, .card-share, .chat-row, .card-more, .card-menu")];
     const out: string[] = [];
     for (const node of nodes) {
       const r = node.getBoundingClientRect();
@@ -118,8 +118,8 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
 
       await card.locator(".card-more").click();
       const menu = page.getByRole("menu");
-      await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
       await menu.getByRole("menuitem", { name: "Pick arrival time" }).waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: "Share link" }).count(), 0);
       await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
       await menu.getByRole("menuitem", { name: "Open in Maps" }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: "Edit" }).count(), 0);
@@ -137,8 +137,7 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
       await card.locator(".in-toggle.on").waitFor();
       await page.getByText(/arriving 20:15/i).waitFor();
 
-      await card.locator(".card-more").click();
-      await menu.getByRole("menuitem", { name: "Share link" }).click();
+      await card.getByRole("button", { name: "Share Rooftop drinks", exact: true }).click();
     } finally {
       await page.context().close();
     }
@@ -172,8 +171,8 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
     await hostPage.screenshot({ path: shot("host-in-w360.png") });
     await card.locator(".card-more").click();
     const menu = hostPage.getByRole("menu");
-    await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
     await menu.getByRole("menuitem", { name: "Edit" }).waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: "Share link" }).count(), 0);
     await menu.getByRole("menuitem", { name: "End plan" }).waitFor();
     assert.equal(await menu.getByRole("menuitem", { name: "Can't make it" }).count(), 0);
     await hostPage.screenshot({ path: shot("host-menu-w360.png") });
