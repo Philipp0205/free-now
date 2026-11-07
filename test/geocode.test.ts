@@ -147,6 +147,141 @@ test("Ratto with a Stuttgart centre comes back as the local bar", async () => {
   assert.ok(hits[0].lat > 48.7 && hits[0].lat < 48.8);
   assert.ok((hits[0].distanceM ?? 0) > 0 && (hits[0].distanceM ?? 99999) < 5000);
   assert.deepEqual(hits.map((hit) => hit.name), ["RATTO Bistrobar"]);
+  assert.equal(urls.length, 2, "a strong local match never runs the national search");
+});
+
+const BERLIN = { lat: 52.52, lng: 13.405 };
+const MUNICH = { lat: 48.137, lng: 11.575 };
+const KREIS = { lat: 48.7608, lng: 9.1619 };
+
+const kreisPhoton = {
+  geometry: { coordinates: [KREIS.lng, KREIS.lat] },
+  properties: {
+    name: "Weinhandlung Kreis", osm_key: "shop", osm_value: "wine", osm_type: "N", osm_id: 501,
+    street: "Böheimstraße", housenumber: "43", postcode: "70199", district: "Heslach", city: "Stuttgart",
+  },
+};
+const kreisNominatim = {
+  lat: String(KREIS.lat), lon: String(KREIS.lng), name: "Weinhandlung Kreis", class: "shop", type: "wine", osm_id: 501,
+  display_name: "Weinhandlung Kreis, 43, Böheimstraße, Heslach, Süd, Stuttgart, Baden-Württemberg, 70199, Deutschland",
+  address: { house_number: "43", road: "Böheimstraße", suburb: "Heslach", city: "Stuttgart" },
+};
+const housePhoton = {
+  geometry: { coordinates: [KREIS.lng, KREIS.lat] },
+  properties: { osm_key: "place", osm_value: "house", osm_type: "N", osm_id: 502, street: "Böheimstraße", housenumber: "43", postcode: "70199", district: "Heslach", city: "Stuttgart" },
+};
+
+/** Fake Photon and Nominatim. A URL with lat= (Photon) or viewbox= (Nominatim) is the local search. */
+function fakeProviders(payloads: { local: [unknown, unknown]; national: [unknown, unknown] }) {
+  const urls: string[] = [];
+  const fetchJson = async (url: string) => {
+    urls.push(url);
+    const scope = /[?&]lat=|viewbox=/.test(url) ? payloads.local : payloads.national;
+    return url.includes("photon.komoot.io") ? scope[0] : scope[1];
+  };
+  return { urls, fetchJson };
+}
+
+test("a far origin with no local hits falls back to the Germany-wide search", async () => {
+  const fake = fakeProviders({
+    local: [{ features: [] }, []],
+    national: [{ features: [kreisPhoton] }, [kreisNominatim]],
+  });
+  const hits = await searchPlaces("Weinhandlung Kreis", BERLIN, fake.fetchJson);
+  assert.equal(hits[0]?.name, "Weinhandlung Kreis");
+  assert.match(hits[0].address, /Böheimstraße 43/);
+  assert.equal(hits[0].lat, KREIS.lat);
+  assert.ok((hits[0].distanceM ?? 0) > 400_000, "distance is still measured from the origin");
+  assert.equal(fake.urls.length, 4);
+  assert.match(fake.urls[0], /lat=52\.52/);
+  assert.match(fake.urls[1], /viewbox=/);
+  assert.match(fake.urls[2], /bbox=5\.8663,47\.2701,15\.0419,55\.0815/);
+  assert.match(fake.urls[3], /countrycodes=de/);
+
+  fake.urls.length = 0;
+  assert.deepEqual(await searchPlaces("Weinhandlung Kreis", BERLIN, fake.fetchJson), hits);
+  assert.equal(fake.urls.length, 0, "the merged answer is cached per origin");
+  const unbiased = await searchPlaces("Weinhandlung Kreis", null, fake.fetchJson);
+  assert.equal(unbiased[0]?.name, "Weinhandlung Kreis");
+  assert.equal(unbiased[0].distanceM, null);
+  assert.equal(fake.urls.length, 0, "the fallback fills the shared Germany-wide cache");
+
+  const munich = await searchPlaces("Weinhandlung Kreis", MUNICH, fake.fetchJson);
+  assert.equal(munich[0]?.name, "Weinhandlung Kreis");
+  assert.equal(fake.urls.length, 2, "a second far origin reuses the cached national search");
+});
+
+test("a street address far from the origin is found, with or without the city", async () => {
+  for (const query of ["Böheimstraße 43", "Böheimstraße 43, Stuttgart", "boheimstrasse 43"]) {
+    const fake = fakeProviders({
+      local: [{ features: [] }, []],
+      national: [{ features: [housePhoton] }, [kreisNominatim]],
+    });
+    const hits = await searchPlaces(query, MUNICH, fake.fetchJson);
+    assert.ok(hits.length >= 1, query);
+    assert.ok(hits.every((hit) => Math.abs(hit.lat - KREIS.lat) < 0.001), query);
+    assert.ok(hits.some((hit) => hit.name === "Böheimstraße 43"), query);
+    assert.equal(fake.urls.length, 4, query);
+  }
+});
+
+test("an explicit far address outranks weak nearby matches", async () => {
+  const fake = fakeProviders({
+    local: [
+      { features: [{
+        geometry: { coordinates: [11.56, 48.14] },
+        properties: { name: "Stuttgarter Straße", osm_key: "highway", osm_value: "residential", city: "München", housenumber: "43" },
+      }] },
+      [],
+    ],
+    national: [{ features: [housePhoton] }, []],
+  });
+  const hits = await searchPlaces("Böheimstraße 43 Stuttgart", MUNICH, fake.fetchJson);
+  assert.deepEqual(hits.map((hit) => hit.name), ["Böheimstraße 43", "Stuttgarter Straße"]);
+  assert.ok((hits[0].distanceM ?? 0) > 150_000);
+  assert.ok((hits[1].distanceM ?? 99999) < 5_000);
+  assert.equal(fake.urls.length, 4);
+
+  const weak = fakeProviders({
+    local: [{ features: [{
+      geometry: { coordinates: [11.57, 48.135] },
+      properties: { name: "Weinhandlung am Markt", osm_key: "shop", osm_value: "wine", city: "München" },
+    }] }, []],
+    national: [{ features: [kreisPhoton] }, []],
+  });
+  const wine = await searchPlaces("Weinhandlung Kreis Heslach", MUNICH, weak.fetchJson);
+  assert.deepEqual(wine.map((hit) => hit.name), ["Weinhandlung Kreis", "Weinhandlung am Markt"]);
+});
+
+test("a near origin keeps the local ordering and never runs the national search", async () => {
+  const neighbour = {
+    geometry: { coordinates: [9.17, 48.77] },
+    properties: { name: "Weinhandlung Kreis Lager", osm_key: "building", osm_value: "yes", city: "Stuttgart" },
+  };
+  const fake = fakeProviders({
+    local: [{ features: [neighbour, kreisPhoton] }, [kreisNominatim]],
+    national: [{ features: [] }, []],
+  });
+  const near = { lat: 48.7616, lng: 9.163 };
+  const hits = await searchPlaces("Weinhandlung Kreis", near, fake.fetchJson);
+  assert.deepEqual(hits, rankPlaces([...parsePhoton({ features: [neighbour, kreisPhoton] }), ...parseNominatim([kreisNominatim])], near, "Weinhandlung Kreis"));
+  assert.deepEqual(hits.map((hit) => hit.name), ["Weinhandlung Kreis", "Weinhandlung Kreis Lager"]);
+  assert.ok((hits[0].distanceM ?? 99999) < 200);
+  assert.equal(fake.urls.length, 2);
+});
+
+test("the fallback keeps the result cap", async () => {
+  const many = Array.from({ length: 10 }, (_, idx) => ({
+    geometry: { coordinates: [9 + idx * 0.1, 50 + idx * 0.1] },
+    properties: { name: `Capstadt Weinhaus ${idx}`, osm_key: "shop", osm_value: "wine", city: `Ort ${idx}` },
+  }));
+  const fake = fakeProviders({ local: [{ features: [] }, []], national: [{ features: many }, []] });
+  const hits = await searchPlaces("Capstadt Weinhaus", BERLIN, fake.fetchJson);
+  assert.equal(hits.length, 6);
+
+  const typo = fakeProviders({ local: [{ features: [] }, []], national: [{ features: [kreisPhoton] }, []] });
+  const fuzzy = await searchPlaces("Weinhandlug Kreiss", BERLIN, typo.fetchJson);
+  assert.deepEqual(fuzzy.map((hit) => hit.name), ["Weinhandlung Kreis"], "with nothing local, weak national hits still show");
 });
 
 test("reverse geocoding keeps a Photon venue and falls back to Nominatim", async () => {
