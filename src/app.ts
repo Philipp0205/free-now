@@ -1441,7 +1441,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     shareId: plan.share_id ?? null,
     // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
     remindedAt: plan.reminded_at ?? null,
-    remindAgainAt: remindAgainAt(plan),
+    remindAgainAt: remindAgainAt(db, plan, viewerId),
     creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null },
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
