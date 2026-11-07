@@ -101,12 +101,12 @@ for (const [width, height] of SIZES) {
       const card = planCard(page, note);
       await card.waitFor();
 
-      // Menu: right after Share link.
+      // Menu: first item. The external Share link is a button on the card now, not in ⋯.
       await openMenu(page, card);
       const texts = await menuTexts(page);
-      const at = texts.indexOf("Share link");
-      assert.ok(at >= 0, `Share link in ${JSON.stringify(texts)}`);
-      assert.equal(texts[at + 1], "Share with other circles", JSON.stringify(texts));
+      assert.equal(texts[0], "Share with other circles", JSON.stringify(texts));
+      assert.equal(texts.includes("Share link"), false, JSON.stringify(texts));
+      assert.equal(await card.locator(".card-share").count(), 1, "card Share button stays separate");
       await fits(page, page.getByRole("menu"), "menu");
       await shot(page, "1-menu");
       await page.getByRole("menuitem", { name: "Share with other circles" }).click();
@@ -211,8 +211,9 @@ test("the item is hidden for a member, a one-circle host, and a free post", { ti
         await card.waitFor();
         await openMenu(page, card);
         const texts = await menuTexts(page);
-        assert.ok(texts.includes("Share link"), JSON.stringify(texts));
+        assert.equal(texts.includes("Share link"), false, JSON.stringify(texts));
         assert.equal(texts.includes("Share with other circles"), false, `${note}: ${JSON.stringify(texts)}`);
+        await card.getByRole("button", { name: `Share ${note}`, exact: true }).waitFor();
         await page.keyboard.press("Escape");
         await page.getByRole("menu").waitFor({ state: "detached" });
       }
@@ -251,7 +252,9 @@ test("the map card's ⋯ offers it to the host too", { timeout: 60_000 }, async 
     await card.waitFor();
     await openMenu(page, card);
     const texts = await menuTexts(page);
-    assert.equal(texts[texts.indexOf("Share link") + 1], "Share with other circles", JSON.stringify(texts));
+    assert.equal(texts[0], "Share with other circles", JSON.stringify(texts));
+    assert.equal(texts.includes("Share link"), false, JSON.stringify(texts));
+    await card.getByRole("button", { name: "Share Map crag", exact: true }).waitFor();
     await page.getByRole("menuitem", { name: "Share with other circles" }).click();
     await page.getByRole("dialog", { name: "Share with other circles" }).waitFor();
     assert.deepEqual(errors, []);
