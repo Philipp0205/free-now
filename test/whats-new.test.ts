@@ -43,6 +43,13 @@ test("the shipped changelog is newest first and every entry is well-formed", () 
   assert.equal(normalizeEntries(RAW).length, RAW.length);
 });
 
+test("the card Share entry is in the changelog, in plain words without an em dash", () => {
+  const share = RAW.find((item) => item.id === "2026-11-07-card-share");
+  assert.ok(share, "card Share entry");
+  assert.equal(share.title, "Share plans anywhere");
+  for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
+});
+
 test("unseen entries: nothing seen shows all, a known id shows what is newer, an unknown id shows none", () => {
   assert.deepEqual(unseenEntries(LIST, null).map((item) => item.id), ["c", "b", "a"]);
   assert.deepEqual(unseenEntries(LIST, "a").map((item) => item.id), ["c", "b"]);
@@ -90,7 +97,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v39");
+  assert.equal(cache?.[1], "hangry-v40");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
