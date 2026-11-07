@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-07-chat-alignment",
+    "date": "2026-11-07",
+    "title": "Tidier chat",
+    "bullets": [
+      "Everyone's messages now start on the same line, so friends' messages no longer sit further in than yours.",
+      "Back, the message box and the text share one left edge. Times, Mute and Send share one right edge."
+    ]
+  },
+  {
     "id": "2026-11-07-remind-newcomers",
     "date": "2026-11-07",
     "title": "Reminders reach people who just joined",

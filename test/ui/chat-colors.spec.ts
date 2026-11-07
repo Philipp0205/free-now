@@ -44,6 +44,10 @@ test("own messages carry the avatar color and a friend keeps one color in every 
       assert.equal(row.textLeft, row.rowLeft, "own text stays flush, the bar sits in the gutter");
       assert.ok(row.barLeft < row.rowLeft && row.barLeft >= row.logLeft, `bar inside the log gutter ${JSON.stringify(row)}`);
     }
+    for (const row of circleChat) {
+      assert.equal(row.textLeft, own[0].textLeft, `every message starts on the same edge ${JSON.stringify(row)}`);
+      assert.equal(row.barLeft, own[0].barLeft, `every bar sits in the same gutter ${JSON.stringify(row)}`);
+    }
     const beaCircle = circleChat.find((row) => row.text === "Anyone hungry?");
     const camCircle = circleChat.find((row) => row.text === "I'm in, see you there");
     assert.ok(beaCircle && camCircle);
@@ -89,7 +93,7 @@ function readChat(page: Page): Promise<ChatRow[]> {
     const logLeft = document.querySelector(".chat-log")?.getBoundingClientRect().left ?? 0;
     return rows.map((row) => {
       const mine = row.classList.contains("mine");
-      const bar = mine ? getComputedStyle(row, "::before").backgroundColor : getComputedStyle(row).borderLeftColor;
+      const bar = getComputedStyle(row, "::before").backgroundColor;
       return {
         text: row.querySelector("p")?.textContent || "",
         mine,
