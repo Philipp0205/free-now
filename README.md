@@ -207,7 +207,7 @@ railway.json    Dockerfile builder and health check
 
 `POST /api/buzz/<token>` is the only unauthenticated write, and the token is the credential. Everything else uses `Authorization: Bearer <device token>`.
 
-`/welcome` is a static public page about Hangry (`public/welcome.html`, `public/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it.
+`/welcome` is a static public page about Hangry (`public/welcome.html`, `public/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it. Its example map is 15 fixed OpenStreetMap tiles of central Stuttgart (`tile.openstreetmap.org`, loaded lazily by the visitor's browser, with OSM attribution) and four pink free-now pins for made-up friends at real squares. It does not use the app's map code or `MAP_TILE_URL`.
 
 ## Location
 
