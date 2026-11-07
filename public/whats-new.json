@@ -9,6 +9,24 @@
     ]
   },
   {
+    "id": "2026-11-07-remind-newcomers",
+    "date": "2026-11-07",
+    "title": "Reminders reach people who just joined",
+    "bullets": [
+      "Joined a circle after someone tapped Remind friends? You no longer miss out. Anyone in the plan can remind you right away.",
+      "Everyone already reminded that hour is left alone, even if they cleared their Alerts."
+    ]
+  },
+  {
+    "id": "2026-11-07-card-share",
+    "date": "2026-11-07",
+    "title": "Share plans anywhere",
+    "bullets": [
+      "Tap Share on a plan card to send it to any chat or app on your phone.",
+      "The link shows only the title, day and time. Friends outside the circle can't see who's going or where."
+    ]
+  },
+  {
     "id": "2026-11-07-share-circles-menu",
     "date": "2026-11-07",
     "title": "Share a plan with more circles",

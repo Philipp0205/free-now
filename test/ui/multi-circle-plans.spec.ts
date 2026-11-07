@@ -261,8 +261,9 @@ test("a host in one circle sees no Share with other circles, and Edit has no cir
       await open(page);
       await planCard(page, note).locator(".card-more").click();
       const menu = page.getByRole("menu");
-      await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
+      await menu.getByRole("menuitem", { name: "Remind friends" }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: "Share with other circles" }).count(), 0);
+      assert.equal(await menu.getByRole("menuitem", { name: "Share link" }).count(), 0);
       await page.keyboard.press("Escape");
       await openEdit(page, note);
       const sheet = page.locator(".sheet");

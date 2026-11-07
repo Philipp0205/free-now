@@ -74,8 +74,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
     await hostPage.goto(hangry.baseUrl);
     await dismiss(hostPage);
     const card = hostPage.locator(".card-plan", { has: hostPage.getByRole("heading", { name: "Rooftop drinks" }) });
-    await card.getByRole("button", { name: /^More for / }).click();
-    await hostPage.getByRole("menuitem", { name: "Share link" }).click();
+    await card.getByRole("button", { name: "Share Rooftop drinks", exact: true }).click();
     await hostPage.locator(".toast", { hasText: "Link copied" }).waitFor();
     const copied = await hostPage.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
     assert.equal(copied.length, 1);
@@ -150,7 +149,7 @@ test("a plan with no place opens on its card at home", { timeout: 90_000 }, asyn
   }
 });
 
-test("at 320x568 the chat row, I'm in toggle and more menu fit the card", { timeout: 90_000 }, async () => {
+test("at 320x568 the chat row, I'm in toggle, Share and more menu fit the card", { timeout: 90_000 }, async () => {
   const { host } = await people("A circle with a rather long name");
   const plan = await makePlan(host.token, { note: "A plan with a fairly long title for a tiny phone", place: PLACE, lat: 52.5, lng: 13.42 });
   const page = await phone(320, 568);
@@ -162,10 +161,11 @@ test("at 320x568 the chat row, I'm in toggle and more menu fit the card", { time
     await card.getByRole("button", { name: /^More for / }).waitFor();
     await card.getByRole("button", { name: "Chat" }).waitFor();
     await card.getByRole("button", { name: "In ✓" }).waitFor();
+    await card.locator(".card-share").waitFor();
     const fit = await card.evaluate((node) => {
       const box = node.getBoundingClientRect();
       const out: string[] = [];
-      const controls = [...node.querySelectorAll(".chat-row, .in-toggle, .card-more")].map((el) => {
+      const controls = [...node.querySelectorAll(".chat-row, .in-toggle, .card-share, .card-more")].map((el) => {
         const r = el.getBoundingClientRect();
         return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, width: r.width, cls: el.className };
       });
@@ -211,7 +211,7 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
   const plan = await makePlan(host.token, { note: "Board games" });
   const oldLink = `${hangry.baseUrl}/p/${plan.shareId}`;
 
-  // A friend in the circle gets ⋯ (Share / Can't) but no host actions.
+  // A friend in the circle gets Share on the card and ⋯ (Can't) but no host actions.
   const friendPage = await phone();
   try {
     await asUser(friendPage, friend.token);
@@ -219,9 +219,11 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
     await dismiss(friendPage);
     const card = friendPage.locator(".card-plan", { hasText: "Board games" });
     await card.waitFor();
+    await card.getByRole("button", { name: "Share Board games", exact: true }).waitFor();
     await card.getByRole("button", { name: /^More for / }).click();
     const menu = friendPage.getByRole("menu");
-    await menu.getByRole("menuitem", { name: "Share link" }).waitFor();
+    await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: "Share link" }).count(), 0, "Share lives on the card now");
     for (const name of ["Edit", "End plan", "Stop sharing"]) {
       assert.equal(await menu.getByRole("menuitem", { name, exact: true }).count(), 0, `friend should not see ${name}`);
     }
@@ -256,8 +258,8 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
     await hostPage.keyboard.press("Escape").catch(() => {});
     await hostPage.goto(hangry.baseUrl);
     await dismiss(hostPage);
-    await hostPage.locator(".card-plan", { hasText: "Board games" }).getByRole("button", { name: /^More for / }).click();
-    await hostPage.getByRole("menuitem", { name: "Share link" }).click();
+    // No link now and no share sheet in this browser: the tap makes a new link and copies it.
+    await hostPage.locator(".card-plan", { hasText: "Board games" }).getByRole("button", { name: "Share Board games", exact: true }).click();
     await hostPage.locator(".toast", { hasText: "Link copied" }).waitFor();
     const copied = await hostPage.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
     assert.match(copied.at(-1)!, new RegExp(`^${hangry.baseUrl}/p/[A-Za-z0-9_-]{24}$`));

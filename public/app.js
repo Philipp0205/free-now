@@ -1,6 +1,6 @@
 import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
-import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, zonedParts } from "./when.js";
+import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, shortDate, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
@@ -1304,7 +1304,7 @@ function planCard(plan) {
         removedNote(plan),
       ]),
       chatRow("plan", plan),
-      plan.removedBy ? null : inToggle("plan", plan, { locked: mine }),
+      cardActions("plan", plan, { locked: mine }),
     ]),
   ]);
 }
@@ -2346,10 +2346,6 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
   const label = item.note || (kind === "plan" ? "plan" : "free post");
   const items = [];
   if (kind === "plan") {
-    items.push({
-      text: "Share link",
-      action: () => { state.cardMenu = null; void sharePlan(item); },
-    });
     if (canShareCircles(item)) {
       items.push({
         text: "Share with other circles",
@@ -4013,27 +4009,152 @@ function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(href), 10_000);
 }
 
-async function sharePlan(plan) {
-  let url = plan.shareId ? `${state.meta?.publicBaseUrl || location.origin}/p/${plan.shareId}` : "";
+/** Plans whose link was just made: the next Share tap opens the sheet. id -> "share" | "copy". */
+const shareReady = new Map();
+/** Plans with a POST /share in flight, so a double tap makes one request. */
+const shareBusy = new Set();
+
+function planShareUrl(plan) {
+  return plan?.shareId ? `${state.meta?.publicBaseUrl || location.origin}/p/${plan.shareId}` : "";
+}
+
+/** Title, day and time only. Never the place, people, chat or circle. Absolute day: it is read later. */
+function planSharePayload(plan, url) {
+  const day = shortDate(plan.forDate, zonedParts(Date.now(), appTz()).day);
+  const when = [day, plan.time].filter(Boolean).join(" ");
+  return { title: plan.note, text: when ? `${plan.note}, ${when} on Hangry` : `${plan.note} on Hangry`, url };
+}
+
+function canSharePlanLink(kind, item) {
+  return kind === "plan" && Boolean(item?.creator) && !item.removedBy && planOpen(item);
+}
+
+function shareToast(message) {
+  state.error = message;
+  render();
+  scheduleErrorClear();
+}
+
+/** Starts the clipboard write inside the tap, then falls back to a hidden field. Never shows the link. */
+function copyShareLink(url) {
+  let pending;
+  try {
+    pending = navigator.clipboard?.writeText ? navigator.clipboard.writeText(url) : Promise.reject(new Error("no clipboard"));
+  } catch (error) {
+    pending = Promise.reject(error);
+  }
+  return pending.then(() => true, () => copyWithSelection(url));
+}
+
+async function copyPlanLink(plan, url) {
+  const copied = await copyShareLink(url);
+  if (copied) {
+    shareReady.delete(plan.id);
+    shareToast("Link copied");
+    return;
+  }
+  // Keep a copy button so the retry is a fresh tap.
+  shareReady.set(plan.id, "copy");
+  shareToast("Couldn't share. Try again.");
+}
+
+/**
+ * Card Share button. navigator.share needs the tap's user activation, so with a known link it is
+ * called right away, before any await. Without one, this tap only makes the link and the next tap shares.
+ */
+function onSharePlanTap(event, plan) {
+  event.stopPropagation();
+  event.preventDefault();
+  if (shareBusy.has(plan.id)) return;
+  const url = planShareUrl(plan);
   if (!url) {
-    try {
-      url = (await api(`/api/plans/${plan.id}/share`, { method: "POST", body: {} })).url;
-    } catch (error) {
-      state.error = error.message;
-      render();
-      scheduleErrorClear();
+    void makePlanLink(plan);
+    return;
+  }
+  const payload = planSharePayload(plan, url);
+  const canShare = shareReady.get(plan.id) !== "copy"
+    && typeof navigator.share === "function"
+    && (typeof navigator.canShare !== "function" || navigator.canShare(payload));
+  if (!canShare) {
+    void copyPlanLink(plan, url);
+    return;
+  }
+  let sharing;
+  try {
+    sharing = navigator.share(payload);
+  } catch (error) {
+    sharing = Promise.reject(error);
+  }
+  Promise.resolve(sharing).then(() => {
+    if (shareReady.delete(plan.id)) render();
+  }, (error) => {
+    if (error?.name === "AbortError") {
+      if (shareReady.delete(plan.id)) render();
       return;
     }
+    void copyPlanLink(plan, url);
+  });
+}
+
+/** First tap on a plan with no link yet: make it, then say so. Never opens the share sheet after the await. */
+async function makePlanLink(plan) {
+  shareBusy.add(plan.id);
+  render();
+  let shareId = "";
+  let message = "";
+  try {
+    shareId = (await api(`/api/plans/${plan.id}/share`, { method: "POST", body: {} })).shareId || "";
+    if (!shareId) message = "Couldn't get a link. Try again.";
+  } catch (error) {
+    message = error.status === 410 ? "That plan has ended." : isNetworkFailure(error) ? "You're offline. Try again." : "Couldn't get a link. Try again.";
   }
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: plan.note, text: `${plan.note} on Hangry`, url });
-      return;
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-    }
+  shareBusy.delete(plan.id);
+  if (!shareId) {
+    shareToast(message);
+    return;
   }
-  await copyText(url, "Link copied");
+  for (const row of state.plans) if (row.id === plan.id) row.shareId = shareId;
+  plan.shareId = shareId;
+  if (typeof navigator.share === "function") {
+    shareReady.set(plan.id, "share");
+    shareToast("Link ready. Tap Send link.");
+    return;
+  }
+  // No share sheet: copying may still be allowed this soon after the tap. If not, the next tap copies.
+  if (await copyShareLink(planShareUrl(plan))) {
+    shareReady.delete(plan.id);
+    shareToast("Link copied");
+    return;
+  }
+  shareReady.set(plan.id, "copy");
+  shareToast("Link ready. Tap Copy link.");
+}
+
+function shareButton(kind, item) {
+  if (!canSharePlanLink(kind, item)) return null;
+  const busy = shareBusy.has(item.id);
+  // A link stopped since then needs a new one, so the ready state only counts with a link.
+  const ready = planShareUrl(item) ? shareReady.get(item.id) : undefined;
+  const text = ready === "copy" ? "Copy link" : ready === "share" ? "Send link" : "Share";
+  const label = item.note || "plan";
+  return el("button", {
+    class: ["card-share", ready ? "ready" : "", busy ? "busy" : ""].filter(Boolean).join(" "),
+    // An id so render() gives focus back after the link is made.
+    id: `card-share-${item.id}`,
+    type: "button",
+    "aria-label": ready === "copy" ? `Copy link for ${label}` : ready === "share" ? `Send link for ${label}` : `Share ${label}`,
+    "aria-busy": busy ? "true" : null,
+    "aria-disabled": busy ? "true" : null,
+    onclick: (event) => onSharePlanTap(event, item),
+  }, [icon("share"), el("span", { text })]);
+}
+
+/** In toggle, and Share on an open plan, side by side under the chat row. */
+function cardActions(kind, item, opts) {
+  const toggle = item.removedBy ? null : inToggle(kind, item, opts);
+  const share = shareButton(kind, item);
+  if (!share) return toggle;
+  return el("div", { class: "card-cta" }, [toggle, share]);
 }
 
 /** A /p/ link: a member lands on the plan. Anyone else gets the small preview. */
@@ -4721,7 +4842,7 @@ function mapCard(pin) {
       )) : null,
     ]),
     item ? chatRow(kind, item) : null,
-    item && !item.removedBy ? inToggle(kind, item, { locked: own }) : null,
+    item ? cardActions(kind, item, { locked: own }) : null,
     pin.lat != null ? el("a", {
       class: "map-link quiet",
       href: mapsUrl(pin.lat, pin.lng, pin.note),
@@ -5423,6 +5544,8 @@ document.addEventListener("pointerdown", (event) => {
   if (!state.cardMenu) return;
   const target = event.target;
   if (target && target.closest && target.closest(".card-overflow")) return;
+  // Share leaves an open menu alone. A re-render here would also swallow the tap (and its user activation).
+  if (target && target.closest && target.closest(".card-share")) return;
   state.cardMenu = null;
   render();
 }, true);
