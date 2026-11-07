@@ -207,6 +207,8 @@ railway.json    Dockerfile builder and health check
 
 `POST /api/buzz/<token>` is the only unauthenticated write, and the token is the credential. Everything else uses `Authorization: Bearer <device token>`.
 
+`/welcome` is a static public page about Hangry (`public/welcome.html`, `public/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it.
+
 ## Location
 
 Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Hangry does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
