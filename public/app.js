@@ -15,7 +15,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v35";
+const APP_VERSION = "hangry-v36";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -108,6 +108,8 @@ const state = {
   feedbackDraft: "",
   feedbackError: "",
   feedbackBusy: false,
+  /** Calendar feed on the You tab: { loaded, active, createdAt, url, webcalUrl, busy }. url is set only right after making one. */
+  calendarFeed: null,
   feedbackSent: false,
 };
 
@@ -800,6 +802,7 @@ function clearSession() {
   state.bootstrappedNotifs = false;
   state.past = false;
   state.pastDays = null;
+  state.calendarFeed = null;
 }
 
 function render() {
@@ -1777,6 +1780,7 @@ function youScreen() {
         ? el("button", { class: "btn secondary", type: "button", text: "Install app", onclick: onInstall })
         : null,
     ]),
+    calendarFeedPanel(),
     el("div", { class: "panel panel-rows" }, [
       el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
         el("div", { class: "grow" }, [
@@ -1830,6 +1834,95 @@ function youScreen() {
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),
     ]),
   ]);
+}
+
+function calendarFeedPanel() {
+  if (!state.calendarFeed) void loadCalendarFeed();
+  const feed = state.calendarFeed || { loaded: false };
+  const head = [
+    el("h3", { text: "Calendar feed" }),
+    el("p", { text: "Your plans in your calendar app: ones you host or said in or maybe to. It updates when your calendar checks again." }),
+  ];
+  if (!feed.loaded) return el("section", { class: "panel calendar-feed", "aria-label": "Calendar feed" }, [...head, el("p", { class: "help", text: "Loading…" })]);
+  if (!feed.active) {
+    return el("section", { class: "panel calendar-feed", "aria-label": "Calendar feed" }, [
+      ...head,
+      el("button", { class: "btn secondary", type: "button", text: "Turn on calendar feed", disabled: feed.busy, onclick: () => { void onIssueCalendarFeed(); } }),
+    ]);
+  }
+  return el("section", { class: "panel calendar-feed", "aria-label": "Calendar feed" }, [
+    ...head,
+    feed.url ? calendarFeedLink(feed) : el("p", { class: "help", text: `On since ${feedDate(feed.createdAt)}. The link is shown only once. Reset it to get a new one.` }),
+    el("div", { class: "feed-manage" }, [
+      el("button", { class: "text-btn", type: "button", text: "Reset link", disabled: feed.busy, onclick: onResetCalendarFeed }),
+      el("button", { class: "text-btn danger", type: "button", text: "Turn off", disabled: feed.busy, onclick: onRevokeCalendarFeed }),
+    ]),
+  ]);
+}
+
+function calendarFeedLink(feed) {
+  return el("div", { class: "stack feed-link" }, [
+    el("p", { class: "feed-url", text: feed.url }),
+    el("p", { class: "help", text: "Keep this link private. Anyone with it can see these plans. It is shown only now." }),
+    el("button", { class: "btn secondary", type: "button", text: "Copy link", onclick: () => copyText(feed.url, "Calendar link copied") }),
+    el("a", { class: "btn ghost link-btn", href: feed.webcalUrl, text: "Open in calendar" }),
+  ]);
+}
+
+function feedDate(ms) {
+  if (!ms) return "today";
+  return new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: appTz() });
+}
+
+async function loadCalendarFeed() {
+  state.calendarFeed = { loaded: false };
+  try {
+    const data = await api("/api/me/calendar-feed", { circle: null });
+    if (!state.calendarFeed || state.calendarFeed.loaded) return;
+    state.calendarFeed = { loaded: true, active: data.active, createdAt: data.createdAt };
+  } catch {
+    state.calendarFeed = { loaded: true, active: false, createdAt: null };
+  }
+  render();
+}
+
+async function onIssueCalendarFeed() {
+  state.calendarFeed = { ...(state.calendarFeed || {}), busy: true };
+  render();
+  await run(async () => {
+    try {
+      const data = await api("/api/me/calendar-feed", { method: "POST", body: {}, circle: null });
+      state.calendarFeed = { loaded: true, active: true, createdAt: data.createdAt, url: data.url, webcalUrl: data.webcalUrl };
+    } finally {
+      if (state.calendarFeed) state.calendarFeed.busy = false;
+    }
+  });
+}
+
+function onResetCalendarFeed() {
+  state.confirm = {
+    title: "Reset calendar link?",
+    body: "The old link stops working. Calendars that use it stop updating until you add the new link.",
+    confirmLabel: "Reset link",
+    action: onIssueCalendarFeed,
+  };
+  render();
+}
+
+function onRevokeCalendarFeed() {
+  state.confirm = {
+    title: "Turn off calendar feed?",
+    body: "The link stops working. Calendars that use it stop updating, and may keep showing old plans until you remove the subscription there.",
+    confirmLabel: "Turn off",
+    action: async () => {
+      await run(async () => {
+        await api("/api/me/calendar-feed", { method: "DELETE", circle: null });
+        state.calendarFeed = { loaded: true, active: false, createdAt: null };
+        state.error = "Calendar feed is off";
+      });
+    },
+  };
+  render();
 }
 
 function tabbar() {
@@ -2131,6 +2224,10 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
         text: "Remind friends",
         muted: remindCooling(item),
         action: () => { state.cardMenu = null; void remindFriends(item); },
+      });
+      items.push({
+        text: "Add to calendar",
+        action: () => { state.cardMenu = null; void addPlanToCalendar(item); },
       });
     }
   }
@@ -3641,6 +3738,70 @@ async function remindFriends(plan) {
   }
 }
 
+const CALENDAR_SAVED = "Saved to your calendar file. It will not update if the plan changes.";
+
+/** A file name from the plan title, same rule as the server. */
+function calendarFileName(note) {
+  const slug = String(note || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/g, "");
+  return `${slug || "hangry-plan"}.ics`;
+}
+
+/** Fetches the .ics with the session header, then saves it as a file. The link itself is never shared. */
+async function addPlanToCalendar(plan) {
+  let saved = false;
+  await run(async () => {
+    let response;
+    try {
+      response = await fetch(`/api/plans/${plan.id}/calendar.ics`, {
+        headers: { authorization: `Bearer ${state.token}` },
+      });
+    } catch {
+      const error = new Error("You're offline. Try again.");
+      error.status = 0;
+      throw error;
+    }
+    if (!response.ok) {
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+      const error = new Error(friendlyMessage(data?.error, response.status));
+      error.status = response.status;
+      throw error;
+    }
+    const blob = new Blob([await response.text()], { type: "text/calendar;charset=utf-8" });
+    saveBlob(blob, calendarFileName(plan.note));
+    saved = true;
+  });
+  if (saved) {
+    state.error = CALENDAR_SAVED;
+    render();
+    scheduleErrorClear();
+  }
+}
+
+function saveBlob(blob, name) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = name;
+  link.rel = "noopener";
+  link.style.display = "none";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10_000);
+}
+
 async function sharePlan(plan) {
   let url = plan.shareId ? `${state.meta?.publicBaseUrl || location.origin}/p/${plan.shareId}` : "";
   if (!url) {
@@ -5078,6 +5239,8 @@ async function onTab(id) {
   state.focusPlan = "";
   state.mapHistory = false;
   state.cardMenu = null;
+  // The feed link shows once. Leaving the You tab hides it for good.
+  if (id !== "you" && state.calendarFeed?.url) state.calendarFeed = { ...state.calendarFeed, url: "", webcalUrl: "" };
   if (id === "alerts") {
     render();
     try {
