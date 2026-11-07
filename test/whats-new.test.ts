@@ -50,6 +50,16 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
+test("the newest entry is Plan for another day, in plain words without an em dash", () => {
+  const top = RAW[0];
+  assert.equal(top.id, "2026-11-07-plan-another-day");
+  assert.equal(top.title, "Now and later first");
+  assert.equal(top.bullets.length, 2);
+  assert.ok(top.bullets.some((bullet) => bullet.includes("Plan for another day")));
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  assert.ok(RAW.some((item) => item.id === "2026-11-07-chat-alignment"), "older entries are kept");
+});
+
 test("unseen entries: nothing seen shows all, a known id shows what is newer, an unknown id shows none", () => {
   assert.deepEqual(unseenEntries(LIST, null).map((item) => item.id), ["c", "b", "a"]);
   assert.deepEqual(unseenEntries(LIST, "a").map((item) => item.id), ["c", "b"]);
@@ -97,7 +107,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v42");
+  assert.equal(cache?.[1], "hangry-v44");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

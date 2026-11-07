@@ -1298,6 +1298,21 @@ input[type="date"].sheet-control::-webkit-date-and-time-value { text-align: left
 .segment button.on { background: #fff; color: #000; }
 .segment-3 { grid-template-columns: 1fr 1fr 1.25fr; }
 .segment-3 button { padding: 0 4px; white-space: nowrap; }
+/* Plan for another day: a quieter link under Now / Later. It turns into a filled chip while a date is being picked. */
+.when-other {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #ff7aa8;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.when-other.on { background: #fff; color: #000; text-decoration: none; }
 .sheet-summary {
   margin: 0;
   color: var(--muted);

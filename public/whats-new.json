@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-07-plan-another-day",
+    "date": "2026-11-07",
+    "title": "Now and later first",
+    "bullets": [
+      "Tap the red button and Now and Later today are the two main choices.",
+      "Pick a date is now the Plan for another day link below them. It works the same as before."
+    ]
+  },
+  {
     "id": "2026-11-07-chat-alignment",
     "date": "2026-11-07",
     "title": "Tidier chat",
