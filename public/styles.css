@@ -854,19 +854,23 @@ input[type="text"], input[type="url"], input[type="time"] {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 16px 8px;
 }
 .chat-head h1 { margin: 0; font-size: 20px; letter-spacing: -0.03em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-back { min-width: 44px; min-height: 44px; }
-.chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 16px; }
+.chat-back { min-width: 44px; min-height: 44px; text-align: left; }
+.chat-head .text-btn:last-child:not(.chat-back) { text-align: right; }
+/* Back, message text, system lines and the composer share the 16px edge; bars sit in the gutter. */
+.chat-log { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 16px 16px; }
 .chat-system { margin: 8px 0; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
-.chat-msg { margin: 0 0 12px; }
-.chat-msg[data-color] { border-left: 3px solid var(--person); padding-left: 10px; }
+.chat-system span { min-width: 0; overflow-wrap: anywhere; }
+.chat-system time { flex: none; }
+.chat-msg { position: relative; margin: 0 0 12px; }
+/* Same layout for everyone's messages, own or not; only the colour differs. */
+.chat-msg[data-color]::before { content: ""; position: absolute; top: 0; bottom: 0; left: -9px; width: 3px; border-radius: 2px; background: var(--person); }
 .chat-msg[data-color] strong { color: var(--person); }
-/* Own messages keep their flush text; the bar sits in the log's left gutter. */
-.chat-msg.mine[data-color] { position: relative; border-left: 0; padding-left: 0; }
-.chat-msg.mine[data-color]::before { content: ""; position: absolute; top: 0; bottom: 0; left: -9px; width: 3px; background: var(--person); }
-.chat-msg header { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 13px; }
+.chat-msg header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--muted); font-size: 13px; }
+.chat-msg header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-msg header time { flex: none; font-variant-numeric: tabular-nums; }
 .chat-msg p { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
 .chat-msg .text-btn { min-height: 44px; }
 .chat-closed { margin: 0; padding: 16px; text-align: center; color: var(--muted); }
@@ -874,11 +878,12 @@ input[type="text"], input[type="url"], input[type="time"] {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
   background: #000;
 }
-.chat-compose input { flex: 1; min-width: 0; min-height: 44px; }
-.chat-compose .chat-send { width: auto; min-width: 64px; min-height: 44px; padding: 0 16px; }
+/* input.sheet-control is 52px elsewhere; here input and Send match at 48px. */
+.chat-compose input.sheet-control { flex: 1; min-width: 0; height: 48px; min-height: 48px; }
+.chat-compose .chat-send { flex: none; width: auto; min-width: 64px; height: 48px; min-height: 48px; padding: 0 16px; }
 .chat-entry { min-height: 44px; min-width: 44px; padding: 0 4px; }
 .chat-chip {
   display: inline-flex;
