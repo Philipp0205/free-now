@@ -978,6 +978,9 @@ function welcome() {
               render();
             },
           }),
+          state.pendingCode || state.inviteError
+            ? null
+            : el("a", { class: "gate-about", href: "/welcome", text: "What is Hangry?" }),
         ]),
   ]);
 }
