@@ -234,6 +234,14 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json"
 
 `status` is one of `new`, `planned`, `in_progress`, `done`, `rejected`. A bad status is `400`, an unknown id is `404`, and like every operator route a missing or wrong token is also `404`. The list returns at most 500 rows, each with `id`, `userId`, `userName`, `circleId`, `circleName`, `text`, `appVersion`, `createdAt`, `status`, `prUrl`, `note`.
 
+### When feedback is marked done
+
+The first time a row moves to `done`, the server adds one in-app alert for the person who sent it, and only them: **Your suggestion is live**, with a short single-line quote of their text. Tapping it opens What's new. It is a personal alert (no circle), so it shows in whichever circle they open, and still reaches them after they leave the circle they sent it from. No phone push is sent for it in this version. The response carries `doneAlert`: `sent`, `already` (sent before, or the row was done before this feature), `no-user` (the sender no longer exists), or `none` (not a done write).
+
+It is sent at most once per row. `feedback.done_alert` records it in the same transaction as the status change, and it is never cleared, so retries, repeat `done` writes, and reopening then `done` again do not send a second one. Rows that were already `done` when this column was added are marked `legacy` and never send, not at startup and not after a reopen.
+
+**Operator rule:** the app cannot tell whether a change is deployed. Mark feedback `done` only after you have checked that the change is live in production. Not when the PR is opened, and not when it is merged.
+
 ## Changelog
 
 The changelog lives in [`public/whats-new.json`](public/whats-new.json). The app shows it as **What's new**: once as a popup after an update, and any time from the You tab.
