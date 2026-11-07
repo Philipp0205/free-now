@@ -73,7 +73,7 @@ test("the free sheet reads as separate fields", { timeout: 90_000 }, async () =>
       const sheet = getComputedStyle(document.querySelector("form.sheet")!);
       const note = document.getElementById("sheet-note")!;
       const noteLabel = [...document.querySelectorAll(".sheet-label")].find((node) => node.textContent === "Note (optional)")!;
-      const segment = document.querySelector(".segment")!.getBoundingClientRect();
+      const segment = document.getElementById("when-label")!.parentElement!.getBoundingClientRect();
       const labelBox = noteLabel.getBoundingClientRect();
       const noteBox = note.getBoundingClientRect();
       return {
