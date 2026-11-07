@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
-    <meta name="description" content="Hangry is a private circle for making plans with your friends." />
+    <meta name="description" content="Hangry is a buzzer for your circle of friends. Tap it when you're free, press I'm free, and your friends are told. Whoever can comes along." />
     <meta name="robots" content="noindex" />
-    <title>Hangry · Make plans with your friends</title>
+    <title>Hangry · The buzzer for spontaneous meetups</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
@@ -26,8 +26,8 @@
       <section class="wl-hero" aria-labelledby="wl-title">
         <div class="wl-hero-copy">
           <div class="wl-orb" aria-hidden="true"></div>
-          <h1 id="wl-title">Make plans with your friends.</h1>
-          <p class="wl-lede">A private circle for the people you actually see. Say when you're free, make a plan, and see who's in.</p>
+          <h1 id="wl-title">Free right now? Hit the buzzer.</h1>
+          <p class="wl-lede">Hangry is a buzzer for your circle of friends. Tap it whenever you're around, press I'm free, and your friends are told. Whoever can, comes along.</p>
           <div class="wl-ctas">
             <a class="wl-btn" href="/" data-cta="hero">Open Hangry</a>
             <a class="wl-btn wl-btn-quiet" href="#how">How it works</a>
@@ -35,40 +35,95 @@
           <p class="wl-fine">Runs in your browser. No password, no app store.</p>
         </div>
 
-        <div class="wl-demo" aria-label="Example of what a circle looks like">
-          <article class="wl-card wl-card-now">
-            <span class="wl-tag">Example</span>
-            <div class="wl-card-head">
-              <span class="wl-avatar" style="--c:#ff4d8d">A</span>
-              <div>
-                <p class="wl-card-kicker">Free now</p>
-                <h2>Alex is free</h2>
+        <div class="wl-demo">
+          <span class="wl-tag">Example</span>
+        <ol class="wl-flow" aria-label="Example of a spontaneous meetup, step by step">
+          <li class="wl-flow-step">
+            <span class="wl-flow-num" aria-hidden="true">1</span>
+            <div class="wl-flow-body">
+              <p class="wl-flow-label">You tap the buzzer</p>
+              <div class="wl-mini-sheet">
+                <span class="wl-mini-orb" aria-hidden="true"></span>
+                <div>
+                  <p class="wl-mini-title">Free now</p>
+                  <p class="wl-mini-note">Rooftop coffee? · Schlossplatz</p>
+                </div>
+                <span class="wl-mini-btn">I'm free</span>
               </div>
             </div>
-            <p class="wl-card-note">Rooftop coffee?</p>
-            <p class="wl-card-meta">Café on the corner · 0.4 km</p>
-            <div class="wl-card-actions" aria-hidden="true">
-              <span class="wl-chip wl-chip-on">Join</span>
-              <span class="wl-chip">On my way</span>
-              <span class="wl-chip">Can't</span>
+          </li>
+          <li class="wl-flow-step">
+            <span class="wl-flow-num" aria-hidden="true">2</span>
+            <div class="wl-flow-body">
+              <p class="wl-flow-label">Your friends are told</p>
+              <div class="wl-push">
+                <img class="wl-push-icon" src="/icons/icon-32.png" alt="" width="20" height="20" />
+                <div>
+                  <p class="wl-push-title">Free now</p>
+                  <p class="wl-push-body">Alex is free – meet at Schlossplatz</p>
+                </div>
+              </div>
+              <p class="wl-flow-fine">A push if they turned on notifications, otherwise under Alerts.</p>
             </div>
-          </article>
-
-          <article class="wl-card wl-card-plan">
-            <span class="wl-tag">Example</span>
-            <p class="wl-card-kicker">Saturday · 19:00</p>
-            <h2>Dinner at Mia's</h2>
-            <p class="wl-card-note">Bring something sweet.</p>
-            <div class="wl-card-foot">
-              <span class="wl-faces" aria-hidden="true">
-                <span class="wl-avatar" style="--c:#ffb340">M</span>
-                <span class="wl-avatar" style="--c:#5ac8fa">J</span>
-                <span class="wl-avatar" style="--c:#bf5af2">S</span>
-              </span>
-              <span class="wl-card-meta">3 in · 1 maybe</span>
+          </li>
+          <li class="wl-flow-step">
+            <span class="wl-flow-num" aria-hidden="true">3</span>
+            <div class="wl-flow-body">
+              <p class="wl-flow-label">Whoever can, comes</p>
+              <div class="wl-card-actions" aria-hidden="true">
+                <span class="wl-chip wl-chip-on">Join</span>
+                <span class="wl-chip">On my way</span>
+                <span class="wl-chip">Can't make it</span>
+              </div>
             </div>
-          </article>
+          </li>
+        </ol>
         </div>
+      </section>
+
+      <section class="wl-section" id="map" aria-labelledby="wl-map">
+        <p class="wl-eyebrow">Where to meet</p>
+        <h2 id="wl-map">Pins are meetup spots, not people.</h2>
+        <p class="wl-section-lede">Add a place when you say you're free, or leave it out. Friends see the spot on the map and can open it in their maps app.</p>
+
+        <figure class="wl-map-fig">
+          <div class="wl-map" role="img" aria-label="Example map of central Stuttgart with four made-up free-now meetups at real spots: Schlossplatz, Eckensee, Kleiner Schlossplatz and Marktplatz">
+            <span class="wl-tag wl-map-tag">Example</span>
+            <div class="wl-map-canvas" aria-hidden="true">
+              <img class="wl-tile" style="left:0px;top:0px" src="https://tile.openstreetmap.org/16/34437/22567.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:256px;top:0px" src="https://tile.openstreetmap.org/16/34438/22567.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:512px;top:0px" src="https://tile.openstreetmap.org/16/34439/22567.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:768px;top:0px" src="https://tile.openstreetmap.org/16/34440/22567.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:0px;top:256px" src="https://tile.openstreetmap.org/16/34437/22568.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:256px;top:256px" src="https://tile.openstreetmap.org/16/34438/22568.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:512px;top:256px" src="https://tile.openstreetmap.org/16/34439/22568.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:768px;top:256px" src="https://tile.openstreetmap.org/16/34440/22568.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:0px;top:512px" src="https://tile.openstreetmap.org/16/34437/22569.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:256px;top:512px" src="https://tile.openstreetmap.org/16/34438/22569.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:512px;top:512px" src="https://tile.openstreetmap.org/16/34439/22569.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:768px;top:512px" src="https://tile.openstreetmap.org/16/34440/22569.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:1024px;top:0px" src="https://tile.openstreetmap.org/16/34441/22567.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:1024px;top:256px" src="https://tile.openstreetmap.org/16/34441/22568.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <img class="wl-tile" style="left:1024px;top:512px" src="https://tile.openstreetmap.org/16/34441/22569.png" alt="" width="256" height="256" referrerpolicy="strict-origin-when-cross-origin" loading="lazy" decoding="async" />
+              <!-- Pins sit on real coordinates (zoom 16 pixels from tile 34437/22567): Schlossplatz (its Jubiläumssäule), Eckensee, Kleiner Schlossplatz, Marktplatz. -->
+              <span class="wl-pin wl-pin-social" data-spot="Schlossplatz" style="left:549px;top:210px;--person:#ff4d8d">A</span>
+              <span class="wl-pin wl-pin-social" data-spot="Eckensee" style="left:682px;top:123px;--person:#5ac8fa">S</span>
+              <span class="wl-pin wl-pin-social" data-spot="Kleiner Schlossplatz" style="left:377px;top:240px;--person:#bf5af2">J</span>
+              <span class="wl-pin wl-pin-social" data-spot="Marktplatz" style="left:486px;top:449px;--person:#ffb340">M</span>
+            </div>
+            <p class="wl-attr">© <a href="https://www.openstreetmap.org/copyright" rel="noopener" target="_blank">OpenStreetMap</a> contributors</p>
+          </div>
+          <figcaption class="wl-map-legend">
+            <span><span class="wl-key wl-key-social" aria-hidden="true"></span>Free now</span>
+            <span class="wl-map-note">Real places in central Stuttgart. The friends and meetups are made up.</span>
+          </figcaption>
+        </figure>
+
+        <ul class="wl-privacy">
+          <li>A pin is a place someone chose, or one reading of their phone's location rounded to about 100 metres, only if they tap for it.</li>
+          <li>Hangry does not follow anyone's location in the background.</li>
+          <li>A free-now pin is cleared when it ends. A plan's pin is cleared after its day.</li>
+        </ul>
       </section>
 
       <section class="wl-section" id="how" aria-labelledby="wl-how">
@@ -92,20 +147,21 @@
           <li>
             <span class="wl-num" aria-hidden="true">3</span>
             <div>
-              <h3>Say you're free</h3>
-              <p>Tap when you're free now, or make a plan for later. Friends tap to join.</p>
+              <h3>Tap the buzzer</h3>
+              <p>Tap the glowing buzzer, add a note or a place if you like, and press I'm free. Friends answer Join, On my way, or Can't make it.</p>
             </div>
           </li>
         </ol>
+        <p class="wl-aside">Friends who added Hangry to their home screen and turned on notifications get a push. Everyone else sees it under Alerts the next time they open the app.</p>
       </section>
 
       <section class="wl-section" aria-labelledby="wl-what">
-        <p class="wl-eyebrow">What you get</p>
-        <h2 id="wl-what">Small, private, quick.</h2>
+        <p class="wl-eyebrow">Also in Hangry</p>
+        <h2 id="wl-what">For when you want to plan ahead.</h2>
         <ul class="wl-features">
           <li>
-            <h3>Free now</h3>
-            <p>One tap tells your circle you're around. Friends answer Join, On my way, or Can't make it.</p>
+            <h3>Free later today</h3>
+            <p>Say you're free from 18:00. Friends hear now, and whoever joins gets a reminder when it starts.</p>
           </li>
           <li>
             <h3>Plans for any day</h3>
@@ -114,14 +170,6 @@
           <li>
             <h3>A chat for each plan</h3>
             <p>Sort out the details next to the plan, not in a group chat that scrolls away.</p>
-          </li>
-          <li>
-            <h3>Places, if you want</h3>
-            <p>Add a meetup spot and see it on the map. Hangry does not track your location in the background.</p>
-          </li>
-          <li>
-            <h3>Notifications</h3>
-            <p>On a phone, add Hangry to your home screen and turn on notifications to hear when friends are free.</p>
           </li>
           <li>
             <h3>Your calendar</h3>
@@ -141,7 +189,7 @@
     <footer class="wl-foot">
       <span>Hangry</span>
       <span aria-hidden="true">·</span>
-      <span>Cards above show example data.</span>
+      <span>The map shows real Stuttgart places. The friends and meetups on this page are made up.</span>
     </footer>
   </body>
 </html>
