@@ -33,7 +33,11 @@ test("steps are honest about where a feed can be added", () => {
   assert.match(android, /Google Calendar can only add a feed on a computer/);
   assert.match(android, /From URL/);
   assert.match(android, /Other calendar apps/);
-  assert.match(calendarFeedSteps("apple").join(" "), /Add Subscribed Calendar/);
+  const apple = calendarFeedSteps("apple");
+  assert.equal(apple.length, 2);
+  assert.match(apple[0], /^If nothing opens on iPhone or iPad: Settings, .*Add Subscribed Calendar/);
+  assert.match(apple[1], /^On a Mac: in Calendar choose File, New Calendar Subscription/);
+  assert.doesNotMatch(apple[1], /Settings/);
   const other = calendarFeedSteps("other").join(" ");
   assert.match(other, /From URL/);
   assert.match(other, /Subscribe from web/);

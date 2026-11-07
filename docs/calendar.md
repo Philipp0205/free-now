@@ -34,7 +34,7 @@ Both use the same event shape and the same UID, so a plan does not show up twice
 
 | Platform | Buttons | Steps shown |
 | --- | --- | --- |
-| `apple` (iPhone, iPad, Mac) | Open in Apple Calendar (`webcal://`), Copy link | If nothing opens: Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar, paste the link. |
+| `apple` (iPhone, iPad, Mac) | Open in Apple Calendar (`webcal://`), Copy link | If nothing opens on iPhone or iPad: Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar, paste the link. On a Mac: in Calendar, File, New Calendar Subscription, paste the link. |
 | `android` | Copy link, plus Send link when `navigator.share` exists. No `webcal://` link. | Google Calendar only adds a feed on a computer: calendar.google.com, + next to Other calendars, From URL, paste. It then syncs to the phone. Other apps: look for Add calendar from URL or Subscribe. |
 | `other` (desktop, unknown) | Copy link, plus Send link when `navigator.share` exists. No `webcal://` link. | Google (computer, From URL), Outlook (Add calendar, Subscribe from web), Apple (Add Subscribed Calendar). |
 
@@ -44,6 +44,7 @@ Sources:
 
 - Google Calendar, "Use a link to add a public calendar": https://support.google.com/calendar/answer/37100 ("To subscribe to a new calendar, you must use a computer web browser. You can't subscribe to a calendar in the Google Calendar app for Android, iPhone, or iPad.")
 - Apple, "Use multiple calendars on iPhone" (subscribed calendars): https://support.apple.com/guide/iphone/ipha0d932e96
+- Apple, "Subscribe to calendars on Mac" (File > New Calendar Subscription): https://support.apple.com/guide/calendar/subscribe-to-calendars-icl1022/mac
 - Microsoft, "Import or subscribe to a calendar in Outlook.com or Outlook on the web": https://support.microsoft.com/en-us/outlook/import-or-subscribe-to-a-calendar-in-outlook-com-or-outlook-on-the-web
 - An unknown, revoked, or malformed token gets a bare `404` with an empty body. It does not say whether the token ever existed.
 - Response headers: `text/calendar; charset=utf-8`, `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `nosniff`. The service worker never caches `/cal/`.

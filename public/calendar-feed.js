@@ -27,7 +27,8 @@ export function calendarPlatform(userAgent = "") {
 export function calendarFeedSteps(platform) {
   if (platform === "apple") {
     return [
-      "If nothing opens, go to Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar and paste the link.",
+      "If nothing opens on iPhone or iPad: Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar, then paste the link.",
+      "On a Mac: in Calendar choose File, New Calendar Subscription, then paste the link.",
     ];
   }
   if (platform === "android") {

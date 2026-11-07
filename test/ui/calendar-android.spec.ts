@@ -11,7 +11,10 @@ const SHOT_DIR = path.resolve(process.env.CAL_SHOT_DIR || "/workspace/hangry-cal
 const PIXEL = "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
 const GOOGLE_STEPS = "Google Calendar can only add a feed on a computer: open calendar.google.com, next to Other calendars tap +, choose From URL and paste the link.";
-const APPLE_STEPS = "If nothing opens, go to Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar and paste the link.";
+const APPLE_STEPS = [
+  "If nothing opens on iPhone or iPad: Settings, Apps, Calendar, Calendar Accounts, Add Account, Other, Add Subscribed Calendar, then paste the link.",
+  "On a Mac: in Calendar choose File, New Calendar Subscription, then paste the link.",
+];
 const ONCE = "The link is only shown once. To add it to another calendar, use Reset link (the old link stops working).";
 const COPY_FAILED = "Copy failed. Press and hold the link to copy it.";
 
@@ -181,7 +184,7 @@ test("iPhone: Open in Apple Calendar is the webcal link, plus Copy link and the 
     const href = await panel.getByRole("link", { name: "Open in Apple Calendar" }).getAttribute("href");
     check(href === url.replace(/^http:/, "webcal:"), "Open in Apple Calendar is the webcal link");
     await panel.getByRole("button", { name: "Copy link" }).waitFor();
-    await panel.getByText(APPLE_STEPS).waitFor();
+    for (const step of APPLE_STEPS) await panel.getByText(step).waitFor();
     assert.equal(await panel.locator('a[href^="webcal:"]').count(), 1);
     await noSideScroll(page);
     await panel.locator(".feed-manage").scrollIntoViewIfNeeded();
