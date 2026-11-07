@@ -93,9 +93,15 @@ export function dayLabel(iso, today) {
   if (gap === 0) return "Today";
   if (gap === 1) return "Tomorrow";
   if (gap > 1 && gap <= 6) return weekday(iso);
+  return shortDate(iso, today);
+}
+
+/** "Sat 14 Nov" (plus the year if not this year). For text read later, like a shared link. Same as the server. */
+export function shortDate(iso, today) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return "";
   const [year, month, day] = iso.split("-").map(Number);
   const base = `${weekday(iso).slice(0, 3)} ${day} ${MONTHS[month - 1]}`;
-  return iso.slice(0, 4) === today.slice(0, 4) ? base : `${base} ${year}`;
+  return iso.slice(0, 4) === String(today || "").slice(0, 4) ? base : `${base} ${year}`;
 }
 
 /** The days a plan can be on, from today in `tz`. */
