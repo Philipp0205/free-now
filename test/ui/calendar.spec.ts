@@ -117,8 +117,8 @@ for (const [width, height] of SIZES) {
       await panel.getByRole("button", { name: "Turn on calendar feed" }).click();
       const url = await panel.locator(".feed-url").innerText();
       check(/^http:\/\/127\.0\.0\.1:\d+\/cal\/[A-Za-z0-9_-]{43}\.ics$/.test(url), "the feed link is shown");
-      const href = await panel.getByRole("link", { name: "Open in calendar" }).getAttribute("href");
-      check(href === url.replace(/^http:/, "webcal:"), "Open in calendar is the webcal link");
+      // Android has no webcal:// handler, so the panel must not offer one (see calendar-android.spec.ts).
+      assert.equal(await panel.locator('a[href^="webcal:"]').count(), 0, "no webcal link on Android");
       await panel.getByRole("button", { name: "Copy link" }).waitFor();
       await noSideScroll(page);
       await fitsWidth(page, ".feed-url");
