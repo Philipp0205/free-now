@@ -44,6 +44,14 @@ async function fitsWidth(page: Page, selector: string) {
   assert.ok(box && box.x >= -0.5 && box.x + box.width <= width + 0.5, `${selector} fits at ${width}: ${JSON.stringify(box)}`);
 }
 
+/**
+ * The feed link is a secret. Node's test reporter prints actual and expected values
+ * on a failed assertion, so a link is only ever checked as a boolean.
+ */
+function check(ok: boolean, label: string): void {
+  assert.ok(ok, label);
+}
+
 async function noSideScroll(page: Page) {
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(wide <= 1, `page scrolls sideways by ${wide}px`);
@@ -84,6 +92,7 @@ for (const [width, height] of SIZES) {
       assert.match(text, /^BEGIN:VCALENDAR\r\n/);
       assert.ok(text.includes(`UID:${plan.id}@hangry\r\n`));
       assert.ok(text.includes("STATUS:TENTATIVE\r\n"));
+      assert.ok(text.replace(/\r\n /g, "").includes("Hangry plans have no end time\\, so this shows 2 hours."), "the 2 hour note");
       await page.locator(".toast", { hasText: SAVED }).waitFor();
       await fitsWidth(page, ".toast");
       await shot(page, "calendar-toast");
@@ -100,14 +109,16 @@ for (const [width, height] of SIZES) {
       await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
       const panel = page.getByRole("region", { name: "Calendar feed" });
       await panel.getByRole("button", { name: "Turn on calendar feed" }).waitFor();
+      await panel.getByText("Your calendar app decides how often it checks for changes, which can take hours.", { exact: false }).waitFor();
       await panel.scrollIntoViewIfNeeded();
       await fitsWidth(page, ".calendar-feed");
       await shot(page, "calendar-feed-off");
 
       await panel.getByRole("button", { name: "Turn on calendar feed" }).click();
       const url = await panel.locator(".feed-url").innerText();
-      assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/cal\/[A-Za-z0-9_-]{43}\.ics$/);
-      assert.equal(await panel.getByRole("link", { name: "Open in calendar" }).getAttribute("href"), url.replace(/^http:/, "webcal:"));
+      check(/^http:\/\/127\.0\.0\.1:\d+\/cal\/[A-Za-z0-9_-]{43}\.ics$/.test(url), "the feed link is shown");
+      const href = await panel.getByRole("link", { name: "Open in calendar" }).getAttribute("href");
+      check(href === url.replace(/^http:/, "webcal:"), "Open in calendar is the webcal link");
       await panel.getByRole("button", { name: "Copy link" }).waitFor();
       await noSideScroll(page);
       await fitsWidth(page, ".feed-url");
@@ -130,7 +141,7 @@ for (const [width, height] of SIZES) {
       await shot(page, "calendar-reset-confirm");
       await resetSheet.getByRole("button", { name: "Reset link" }).click();
       const fresh = await panel.locator(".feed-url").innerText();
-      assert.notEqual(fresh, url);
+      check(fresh !== url, "reset shows a new link");
       assert.equal((await fetch(url)).status, 404);
       assert.equal((await fetch(fresh)).status, 200);
 

@@ -47,7 +47,7 @@ Window: plans from 30 days ago and everything ahead. At most 200 events: upcomin
 | --- | --- |
 | `UID` | `<planId>@<host>`. The host is the hostname of `PUBLIC_BASE_URL`, or `hangry` when it is unset. The same UID is used in the file and the feed. |
 | `SUMMARY` | Plan title. |
-| `DESCRIPTION` | "Hosted by <host name>", the plan description if there is one, then "Hangry: <app link>". |
+| `DESCRIPTION` | "Hosted by <host name>", the plan description if there is one, then for a timed plan "Hangry plans have no end time, so this shows 2 hours." (plus a note when the time does not exist that day, see Time zones), then "Hangry: <app link>". |
 | `LOCATION` | The place text only. No coordinates. |
 | `URL` | `<origin>/?plan=<id>`, which opens the plan in the app. |
 | `DTSTART` / `DTEND` | With a time: UTC instants, start plus 2 hours. With no time (TBD): all day, `VALUE=DATE`, ending the next day. |
@@ -68,14 +68,18 @@ Never included: other guests' names, emails, attendees, chat, invite codes, shar
 
 Plan times are wall-clock times in `APP_TZ`. They are turned into UTC instants with the same rule the app uses, so they are correct across daylight saving changes without a `VTIMEZONE` block. `X-WR-TIMEZONE` is only a display hint.
 
-Edge case: a time that does not exist on the spring-forward day (for example 02:30 on the last Sunday of March in Europe/Berlin) comes out as the same instant as 03:30. Hangry has no way to tell what the host meant.
+Daylight saving edge cases follow RFC 5545 (section 3.3.5), and the app's own clock rule (`zonedDateTime` in `src/time.ts`) gives the same instant:
+
+- **Time that does not exist** (spring forward, for example 02:30 on 2026-03-29 in Europe/Berlin): it is read with the offset from before the gap, so it lands at 03:30 local (`DTSTART:20260329T013000Z`). Because that is not what the host typed, `DESCRIPTION` adds: "Planned for 02:30, a time that does not exist on this day because clocks move forward. Shown at 03:30." The note is added whenever the start, turned back into wall time in `APP_TZ`, differs from the plan's time.
+- **Time that happens twice** (fall back, for example 02:30 on 2026-10-25 in Europe/Berlin): the first occurrence is used, which is still summer time (`DTSTART:20261025T003000Z`, 02:30 CEST). No note is added, since the wall time is what the host typed.
 
 ## Limitations
 
-- **Refresh is up to the calendar app.** Google Calendar can take 12 to 24 hours or more to fetch a subscribed feed again. Apple Calendar and Outlook let you pick an interval. Hangry cannot push updates.
+- **Refresh is up to the calendar app.** Your calendar app decides how often it checks for changes, which can take hours. Hangry cannot push updates.
 - **The one-time file never updates.** Use the feed for that.
 - **Revoking does not wipe copies.** After Reset link or Turn off, calendars keep showing what they last fetched until the subscription is removed there. The old link just returns 404.
 - **Removed plans just disappear.** A plan you lose access to is dropped, not sent as `CANCELLED`. Some clients only notice on their next full refresh.
-- **Fixed length.** Hangry has no end time, so every timed plan is 2 hours.
+- **Fixed length.** Hangry plans have no end time, so every timed plan shows 2 hours. Each timed event says so in its description.
 - **Anyone with the link can read the feed.** Treat it like a password. Reset it if it leaks.
+- **The token is in the URL path.** Calendar servers cannot send a header, so the secret is part of `/cal/<token>.ics`. That means the hosting platform's HTTP access logs (for example Railway's request logs) and the calendar provider that fetches the feed both see it. Hangry itself never logs the feed URL: an error while serving `/cal/` is logged as "feed error" with the token replaced by `[token]`. If the link may have leaked, use Reset link (or Turn off). The old token stops working at once.
 - **Plans older than the 90-day history are deleted from Hangry,** and they are already outside the 30-day window anyway.

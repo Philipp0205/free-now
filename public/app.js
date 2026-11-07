@@ -1841,7 +1841,7 @@ function calendarFeedPanel() {
   const feed = state.calendarFeed || { loaded: false };
   const head = [
     el("h3", { text: "Calendar feed" }),
-    el("p", { text: "Your plans in your calendar app: ones you host or said in or maybe to. It updates when your calendar checks again." }),
+    el("p", { text: "Your plans in your calendar app: ones you host or said in or maybe to. Your calendar app decides how often it checks for changes, which can take hours." }),
   ];
   if (!feed.loaded) return el("section", { class: "panel calendar-feed", "aria-label": "Calendar feed" }, [...head, el("p", { class: "help", text: "Loading…" })]);
   if (!feed.active) {

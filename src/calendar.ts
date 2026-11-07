@@ -13,7 +13,7 @@ import {
   type UserRow,
 } from "./db.js";
 import { buildCalendar, type IcsEvent, type IcsStatus, type IcsWhen } from "./ics.js";
-import { addDays, isoDate, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, isoDate, zonedDateTime } from "./time.js";
 import { HttpError, parseId } from "./app.js";
 import { isOpenPlan } from "./plan-share.js";
 
@@ -64,7 +64,11 @@ export function planStatus(plan: Pick<PlanRow, "ended_at" | "creator_id">, viewe
   return "TENTATIVE";
 }
 
-/** A time is a UTC start in APP_TZ plus the default length. No time (TBD) is an all-day event. */
+/**
+ * A time is a UTC start in APP_TZ plus the default length. No time (TBD) is an all-day event.
+ * Uses the app's own zonedDateTime: a fall-back time is the first occurrence, a
+ * spring-forward time that does not exist moves ahead by the gap (02:30 to 03:30).
+ */
 export function planWhen(plan: Pick<PlanRow, "for_date" | "at_time">, tz: string): IcsWhen {
   if (!plan.at_time) return { kind: "day", day: plan.for_date };
   const startMs = zonedDateTime(plan.for_date, plan.at_time, tz);
@@ -75,11 +79,36 @@ export function planAppUrl(origin: string, planId: string): string {
   return `${origin}/?plan=${planId}`;
 }
 
-/** Host, the plan's own description, then the app link. No other names, chat, or share links. */
-export function planDescription(plan: Pick<PlanRow, "creator_name" | "description">, link: string): string {
+export const DURATION_NOTE = "Hangry plans have no end time, so this shows 2 hours.";
+
+/**
+ * A note when the plan's clock time does not exist on that day (spring forward).
+ * Found by turning the start back into a wall time in APP_TZ and comparing.
+ */
+export function gapNote(plan: Pick<PlanRow, "at_time">, when: IcsWhen, tz: string): string | null {
+  if (!plan.at_time || when.kind !== "timed") return null;
+  const shown = clockLabel(when.startMs, tz);
+  if (shown === plan.at_time) return null;
+  return `Planned for ${plan.at_time}, a time that does not exist on this day because clocks move forward. Shown at ${shown}.`;
+}
+
+/**
+ * Host, the plan's own description, time notes, then the app link.
+ * No other names, chat, or share links.
+ */
+export function planDescription(
+  plan: Pick<PlanRow, "creator_name" | "description" | "for_date" | "at_time">,
+  link: string,
+  tz: string,
+): string {
   const parts = [`Hosted by ${plan.creator_name}`];
   const text = (plan.description ?? "").trim();
   if (text) parts.push(text);
+  const when = planWhen(plan, tz);
+  if (when.kind === "timed") {
+    const gap = gapNote(plan, when, tz);
+    parts.push(gap ? `${gap}\n${DURATION_NOTE}` : DURATION_NOTE);
+  }
   parts.push(`Hangry: ${link}`);
   return parts.join("\n\n");
 }
@@ -92,7 +121,7 @@ export function planEvent(ctx: CalendarContext, plan: PlanRow, viewerId: string,
     sequence: planSequence(plan),
     lastModified: plan.updated_at ?? plan.created_at,
     summary: plan.note,
-    description: planDescription(plan, link),
+    description: planDescription(plan, link, ctx.tz),
     location: (plan.place ?? "").trim(),
     url: link,
     status: planStatus(plan, viewerId, reply),

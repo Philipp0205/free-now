@@ -185,10 +185,43 @@ export function createApp(deps: AppDeps): http.RequestListener {
         sendJson(res, error.status, { error: error.message });
         return;
       }
-      console.error(error);
+      if (isFeedPath(req.url)) console.error("feed error", redactFeedToken(errorText(error), req.url));
+      else console.error(error);
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
     });
   };
+}
+
+function feedSegment(rawUrl: string | undefined): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(rawUrl ?? "/", "http://localhost").pathname;
+  } catch {
+    return null;
+  }
+  const match = /^\/cal\/(.*)$/i.exec(pathname);
+  return match ? match[1].replace(/\.ics$/i, "") : null;
+}
+
+function isFeedPath(rawUrl: string | undefined): boolean {
+  return feedSegment(rawUrl) !== null;
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.stack || error.message;
+  return String(error);
+}
+
+/** Drops the feed token (raw, normalized, or decoded, or as any /cal/ path) from a log line. */
+export function redactFeedToken(text: string, rawUrl: string | undefined): string {
+  let out = text;
+  const raw = /^\/cal\/([^?#]*)/i.exec(rawUrl ?? "")?.[1]?.replace(/\.ics$/i, "") ?? "";
+  const parsed = feedSegment(rawUrl) ?? "";
+  const secrets = new Set([raw, parsed, safeDecode(raw), safeDecode(parsed)]);
+  for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
+    if (secret.length >= 8) out = out.split(secret).join("[token]");
+  }
+  return out.replace(/\/cal\/[^\s/?#"'<>]+/gi, "/cal/[token]");
 }
 
 const LEGACY_HOST = "hangry-production-64c4.up.railway.app";

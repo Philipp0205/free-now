@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
-import { FEED_MAX_EVENTS } from "../src/calendar.js";
+import { DURATION_NOTE, FEED_MAX_EVENTS } from "../src/calendar.js";
+import { escapeText } from "../src/ics.js";
 import { api, START, withApp } from "./http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
@@ -67,17 +68,26 @@ function field(event: string[] | undefined, name: string): string | undefined {
   return event?.find((row) => row.startsWith(`${name}:`) || row.startsWith(`${name};`))?.replace(/^[^:]*:/, "");
 }
 
+/** Not api(): its status error prints the body, and this body holds the feed link. */
 async function turnOnFeed(port: number, person: Person) {
-  return api(port, "POST", "/api/me/calendar-feed", { token: person.token, body: {}, status: 201 }) as Promise<{
-    active: boolean;
-    createdAt: number;
-    url: string;
-    webcalUrl: string;
-  }>;
+  const response = await fetch(`http://127.0.0.1:${port}/api/me/calendar-feed`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${person.token}` },
+    body: "{}",
+  });
+  assert.equal(response.status, 201, "turn on calendar feed");
+  return (await response.json()) as { active: boolean; createdAt: number; url: string; webcalUrl: string };
 }
 
 function feedPath(url: string): string {
   return new URL(url).pathname;
+}
+
+// Feed links are secrets. Node's test reporter prints an assertion's actual and
+// expected values even with a custom message, so anything that holds a link is
+// only ever compared as a boolean.
+function check(ok: boolean, label: string): void {
+  assert.ok(ok, label);
 }
 
 test("GET /api/plans/:id/calendar.ics is one event for people who can see the plan", async () => {
@@ -110,7 +120,10 @@ test("GET /api/plans/:id/calendar.ics is one event for people who can see the pl
     assert.equal(field(event, "DTEND"), "20260602T190000Z");
     assert.equal(field(event, "STATUS"), "CONFIRMED");
     assert.equal(field(event, "LOCATION"), "Sushi Bar\\, Main St\\; 2nd floor");
-    assert.equal(field(event, "DESCRIPTION"), `Hosted by Alex\\n\\nBring cash\\; table for 6\\n\\nHangry: http://127.0.0.1:${port}/?plan=${plan.id}`);
+    assert.equal(
+      field(event, "DESCRIPTION"),
+      `Hosted by Alex\\n\\nBring cash\\; table for 6\\n\\n${escapeText(DURATION_NOTE)}\\n\\nHangry: http://127.0.0.1:${port}/?plan=${plan.id}`,
+    );
     assert.equal(field(event, "SEQUENCE"), "1", "the description edit counts as a change");
     assert.equal(field(event, "DTSTAMP"), "20260601T150000Z");
 
@@ -138,6 +151,7 @@ test("single export: removed and unlinked people get 404, ended plans 410, no ti
     const event = events(text).get(`${plan.id}@hangry`);
     assert.ok(event?.includes("DTSTART;VALUE=DATE:20260602"));
     assert.ok(event?.includes("DTEND;VALUE=DATE:20260603"));
+    assert.equal(text.includes("no end time"), false, "an all-day plan has no 2 hour note");
 
     await api(port, "PATCH", `/api/plans/${plan.id}?circle=${a.id}`, { token: alex.token, body: { circleIds: [a.id, b.id] }, status: 200 });
     assert.equal((await raw(port, `/api/plans/${plan.id}/calendar.ics`, cam.token)).status, 200, "linked circle");
@@ -166,7 +180,7 @@ test("feed management: shown once, only the hash is stored, reset and turn off k
     assert.equal(first.createdAt, START);
     const token = /\/cal\/([A-Za-z0-9_-]+)\.ics$/.exec(first.url)?.[1] ?? "";
     assert.equal(token.length, 43, "32 random bytes as base64url");
-    assert.equal(first.webcalUrl, first.url.replace(/^http:\/\//, "webcal://"));
+    check(first.webcalUrl === first.url.replace(/^http:\/\//, "webcal://"), "webcal link is the same link");
     assert.deepEqual(await api(port, "GET", "/api/me/calendar-feed", { token: alex.token, status: 200 }), { active: true, createdAt: START });
     assertNoPlainToken(db, token);
 
@@ -180,7 +194,7 @@ test("feed management: shown once, only the hash is stored, reset and turn off k
     assert.equal((await raw(port, feedPath(first.url), undefined, "HEAD")).status, 200);
 
     const second = await turnOnFeed(port, alex);
-    assert.notEqual(second.url, first.url);
+    check(second.url !== first.url, "reset makes a new link");
     const gone = await raw(port, feedPath(first.url));
     assert.equal(gone.status, 404);
     assert.equal(gone.text, "", "a dead link says nothing");
@@ -323,8 +337,8 @@ test("with PUBLIC_BASE_URL the UID host and links use it, the same UID in file a
     const { alex, a } = await seed(port);
     const plan = await makePlan(port, alex, a.id);
     const feed = await turnOnFeed(port, alex);
-    assert.match(feed.url, /^https:\/\/hangry\.example\.com\/cal\/[A-Za-z0-9_-]{43}\.ics$/);
-    assert.match(feed.webcalUrl, /^webcal:\/\/hangry\.example\.com\/cal\//);
+    check(/^https:\/\/hangry\.example\.com\/cal\/[A-Za-z0-9_-]{43}\.ics$/.test(feed.url), "feed link uses PUBLIC_BASE_URL");
+    check(/^webcal:\/\/hangry\.example\.com\/cal\//.test(feed.webcalUrl), "webcal link uses PUBLIC_BASE_URL");
     const uid = `${plan.id}@hangry.example.com`;
     const file = events((await raw(port, `/api/plans/${plan.id}/calendar.ics`, alex.token)).text).get(uid);
     const sub = events((await raw(port, feedPath(feed.url))).text).get(uid);
@@ -332,4 +346,78 @@ test("with PUBLIC_BASE_URL the UID host and links use it, the same UID in file a
     assert.equal(field(file, "URL"), `https://hangry.example.com/?plan=${plan.id}`);
     assert.equal(field(sub, "URL"), field(file, "URL"));
   }, { env: { PUBLIC_BASE_URL: "https://hangry.example.com" } });
+});
+
+test("the feed keeps DST times: a missing spring time moves to 03:30 with a note, a repeated fall time is the first one", async () => {
+  await withApp(async ({ port, db, at }) => {
+    const { alex, a } = await seed(port);
+    const insert = db.prepare(
+      "INSERT INTO plans (id, circle_id, creator_id, note, for_date, at_time, created_at, place) VALUES (?, ?, ?, ?, ?, ?, ?, '')",
+    );
+    const link = db.prepare("INSERT INTO plan_circles (plan_id, circle_id, added_at) VALUES (?, ?, ?)");
+    const spring = "00000000-0000-4000-8000-000000000001";
+    const fall = "00000000-0000-4000-8000-000000000002";
+    insert.run(spring, a.id, alex.user.id, "Night owls", "2027-03-28", "02:30", START);
+    insert.run(fall, a.id, alex.user.id, "Extra hour", "2026-10-25", "02:30", START);
+    link.run(spring, a.id, START);
+    link.run(fall, a.id, START);
+    at(Date.parse("2026-10-01T12:00:00Z"));
+    const { url } = await turnOnFeed(port, alex);
+    const feed = events((await raw(port, feedPath(url))).text);
+
+    const gap = feed.get(`${spring}@hangry`);
+    assert.equal(field(gap, "DTSTART"), "20270328T013000Z", "02:30 CET read before the gap is 03:30 CEST");
+    assert.equal(field(gap, "DTEND"), "20270328T033000Z");
+    assert.ok(field(gap, "DESCRIPTION")?.includes(
+      escapeText("Planned for 02:30, a time that does not exist on this day because clocks move forward. Shown at 03:30."),
+    ));
+    assert.ok(field(gap, "DESCRIPTION")?.includes(escapeText(DURATION_NOTE)));
+
+    const twice = feed.get(`${fall}@hangry`);
+    assert.equal(field(twice, "DTSTART"), "20261025T003000Z", "the first 02:30, still CEST");
+    assert.equal(field(twice, "DESCRIPTION")?.includes("does not exist"), false);
+  }, { tz: "Europe/Berlin" });
+});
+
+test("a feed fetch that throws logs a redacted line, never the token", async () => {
+  await withApp(async ({ port, db }) => {
+    const { alex, a } = await seed(port);
+    await makePlan(port, alex, a.id);
+    const { url } = await turnOnFeed(port, alex);
+    const path = feedPath(url);
+    const token = /\/cal\/([^/]+)\.ics$/.exec(path)?.[1] ?? "";
+    check(token.length === 43, "got a token");
+
+    // Fail inside the feed query with an error that carries the path and token, as a careless one might.
+    const prepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => {
+      if (sql.includes("plan_circles pc JOIN memberships")) throw new Error(`boom while serving ${path} (token ${token})`);
+      return prepare(sql);
+    }) as typeof db.prepare;
+
+    const printed: string[] = [];
+    const saved = { error: console.error, log: console.log, warn: console.warn, info: console.info };
+    const capture = (...args: unknown[]) => {
+      printed.push(args.map((arg) => (arg instanceof Error ? `${arg.stack} ${arg.message}` : String(arg))).join(" "));
+    };
+    console.error = capture;
+    console.log = capture;
+    console.warn = capture;
+    console.info = capture;
+    let status = 0;
+    try {
+      status = (await raw(port, path)).status;
+      // A percent-encoded copy of the same path must not leak either.
+      await raw(port, `/cal/${encodeURIComponent(token).replace(/A/g, "%41")}.ics`);
+    } finally {
+      Object.assign(console, saved);
+      db.prepare = prepare;
+    }
+    assert.equal(status, 500);
+    check(printed.length >= 1, "the failure was logged");
+    check(printed.every((line) => line.startsWith("feed error")), "logged as a feed error");
+    check(printed.every((line) => !line.includes(token)), "no log line holds the token");
+    check(printed.some((line) => line.includes("/cal/[token]")), "the path is redacted, not dropped");
+    assert.equal((await raw(port, path)).status, 200, "back to normal once the fault is gone");
+  });
 });
