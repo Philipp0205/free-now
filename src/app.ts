@@ -115,6 +115,18 @@ import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan,
 import { clearPlanShareId } from "./db.js";
 import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
+import {
+  calendarFileName,
+  FEED_LIMIT,
+  feedCalendar,
+  feedOwner,
+  feedStatus,
+  issueFeed,
+  planCalendarFile,
+  revokeFeed,
+  uidHost,
+  type CalendarContext,
+} from "./calendar.js";
 
 export type AppDeps = {
   db: DatabaseSync;
@@ -156,13 +168,14 @@ export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
 /** Plan share links per client. Enough for a chat full of previews, not for guessing. */
 export const SHARE_LIMIT = { limit: 60, windowMs: 60_000 };
 
-type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter };
+type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter; feed: RateLimiter };
 
 export function createApp(deps: AppDeps): http.RequestListener {
   const limits: Limits = {
     ack: createRateLimiter(ACK_LIMIT),
     feedback: createRateLimiter(FEEDBACK_LIMIT),
     share: createRateLimiter(SHARE_LIMIT),
+    feed: createRateLimiter(FEED_LIMIT),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
@@ -174,10 +187,43 @@ export function createApp(deps: AppDeps): http.RequestListener {
         sendJson(res, error.status, { error: error.message });
         return;
       }
-      console.error(error);
+      if (isFeedPath(req.url)) console.error("feed error", redactFeedToken(errorText(error), req.url));
+      else console.error(error);
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
     });
   };
+}
+
+function feedSegment(rawUrl: string | undefined): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(rawUrl ?? "/", "http://localhost").pathname;
+  } catch {
+    return null;
+  }
+  const match = /^\/cal\/(.*)$/i.exec(pathname);
+  return match ? match[1].replace(/\.ics$/i, "") : null;
+}
+
+function isFeedPath(rawUrl: string | undefined): boolean {
+  return feedSegment(rawUrl) !== null;
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.stack || error.message;
+  return String(error);
+}
+
+/** Drops the feed token (raw, normalized, or decoded, or as any /cal/ path) from a log line. */
+export function redactFeedToken(text: string, rawUrl: string | undefined): string {
+  let out = text;
+  const raw = /^\/cal\/([^?#]*)/i.exec(rawUrl ?? "")?.[1]?.replace(/\.ics$/i, "") ?? "";
+  const parsed = feedSegment(rawUrl) ?? "";
+  const secrets = new Set([raw, parsed, safeDecode(raw), safeDecode(parsed)]);
+  for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
+    if (secret.length >= 8) out = out.split(secret).join("[token]");
+  }
+  return out.replace(/\/cal\/[^\s/?#"'<>]+/gi, "/cal/[token]");
 }
 
 const LEGACY_HOST = "hangry-production-64c4.up.railway.app";
@@ -203,6 +249,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (sharePage) {
       if (!limits.share.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
       await serveSharePage(req, res, deps, sharePage[1]);
+      return;
+    }
+    const feed = matchPath(pathname, /^\/cal\/([^/]+)\.ics$/);
+    if (feed) {
+      if (!limits.feed.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
+      serveFeed(req, res, deps, feed[1]);
       return;
     }
     await serveStatic(req, res, pathname);
@@ -626,6 +678,30 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (planRemind && method === "POST") {
     sendJson(res, 200, await remindPlan(deps, me, planRemind[1], requested));
     return;
+  }
+
+  const planIcs = matchPath(pathname, /^\/api\/plans\/([^/]+)\/calendar\.ics$/);
+  if (planIcs && method === "GET") {
+    const file = planCalendarFile(calendarContext(req, deps), me, planIcs[1]);
+    sendCalendar(res, file.body, calendarFileName(file.plan.note));
+    return;
+  }
+
+  if (pathname === "/api/me/calendar-feed") {
+    if (method === "GET") {
+      sendJson(res, 200, feedStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "POST") {
+      sendJson(res, 201, issueFeed(deps.db, me.id, requestOrigin(req, deps.config), deps.now()));
+      return;
+    }
+    if (method === "DELETE") {
+      revokeFeed(deps.db, me.id);
+      sendEmpty(res, 204);
+      return;
+    }
+    throw new HttpError(405, "method not allowed");
   }
 
   const planShare = matchPath(pathname, /^\/api\/plans\/([^/]+)\/share$/);
@@ -1150,7 +1226,9 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
     ? cleanDescription(body.description)
     : (plan.description ?? "");
   const wantedCircles = body.circleIds === undefined ? null : readPlanCircles(deps, user, plan, body.circleIds);
-  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null);
+  const contentChanged = dateChanged || timeChanged || note !== plan.note || place !== (plan.place ?? "")
+    || (description || null) !== (plan.description || null);
+  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null);
   // Unlinked circles go first, so a move in the same save does not ping them.
   const kept = wantedCircles ? unlinkDropped(deps, plan.id, wantedCircles) : [];
   // Only a move (day, time, or place) pings people. Note or description edits stay quiet.
@@ -2034,6 +2112,41 @@ async function serveSharePage(req: http.IncomingMessage, res: http.ServerRespons
     "x-robots-tag": "noindex",
   });
   if (req.method === "HEAD") res.end();
+  else res.end(data);
+}
+
+function calendarContext(req: http.IncomingMessage, deps: AppDeps): CalendarContext {
+  return {
+    db: deps.db,
+    tz: deps.config.tz,
+    now: deps.now(),
+    origin: requestOrigin(req, deps.config),
+    uidHost: uidHost(deps.config.publicBaseUrl),
+  };
+}
+
+/** The subscribed feed. An unknown or revoked token is a bare 404 that says nothing about why. */
+function serveFeed(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, rawToken: string): void {
+  const owner = feedOwner(deps.db, safeDecode(rawToken));
+  if (!owner) {
+    sendEmpty(res, 404);
+    return;
+  }
+  sendCalendar(res, feedCalendar(calendarContext(req, deps), owner), null, req.method === "HEAD");
+}
+
+function sendCalendar(res: http.ServerResponse, body: string, fileName: string | null, headOnly = false): void {
+  const data = Buffer.from(body, "utf8");
+  res.writeHead(200, {
+    "content-type": "text/calendar; charset=utf-8",
+    "content-length": data.length,
+    ...(fileName ? { "content-disposition": `attachment; filename="${fileName}"` } : {}),
+    "cache-control": "private, no-store",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "x-robots-tag": "noindex",
+  });
+  if (headOnly) res.end();
   else res.end(data);
 }
 

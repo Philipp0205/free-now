@@ -19,6 +19,8 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/") || event.request.method !== "GET") return;
+  // Calendar feeds carry a private token and plan details: never cache them.
+  if (url.pathname.startsWith("/cal/")) return;
   // Share pages carry a plan title: never keep them, fall back to the app shell offline.
   if (url.pathname.startsWith("/p/")) {
     event.respondWith(fetch(event.request).catch(() => caches.match("/")));
