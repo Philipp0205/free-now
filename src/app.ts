@@ -92,7 +92,7 @@ import { isMapsLinkInput, looksLikeUrl, resolveMapsLink, reverseLookup, searchPl
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
-import { pushSummaryForViewer, reachForCircle } from "./push-status.js";
+import { pushSummaryForPlan, pushSummaryForViewer, reachForCircle, type PushSummary } from "./push-status.js";
 import { clientKey } from "./client-key.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import {
@@ -1455,7 +1455,8 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,
     })),
-    ...pushField(db, plan.circle_id, "plan", plan.id, plan.creator_id, viewerId),
+    // Every linked circle, so people reached by "Share with other circles" show too.
+    ...optionalPush(pushSummaryForPlan(db, plan.id, plan.creator_id, viewerId)),
   };
 }
 
@@ -1467,7 +1468,10 @@ function pushField(
   hostId: string,
   viewerId: string | null,
 ): { push: ReturnType<typeof pushSummaryForViewer> } | Record<string, never> {
-  const push = pushSummaryForViewer(db, circleId, kind, refId, hostId, viewerId);
+  return optionalPush(pushSummaryForViewer(db, circleId, kind, refId, hostId, viewerId));
+}
+
+function optionalPush(push: PushSummary | undefined): { push: PushSummary } | Record<string, never> {
   return push ? { push } : {};
 }
 
