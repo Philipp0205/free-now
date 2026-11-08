@@ -50,9 +50,21 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is the menu and tab polish, in plain words without an em dash", () => {
+test("the newest entry is the dark map, and it does not claim the map is live everywhere", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-08-menu-tab-polish");
+  assert.equal(top.id, "2026-11-08-dark-map-ready");
+  assert.equal(top.title, "A dark map, where we have one");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /only for an area the server has a map file for/);
+  assert.match(text, /usual map/);
+  assert.doesNotMatch(text, /\b(now live|everywhere|worldwide|all over)\b/i);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the menu and tab polish entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-08-menu-tab-polish");
+  assert.ok(top, "menu and tab polish entry");
   assert.equal(top.title, "Smoother menus and tabs");
   assert.equal(top.bullets.length, 2);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
@@ -128,7 +140,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v46");
+  assert.equal(cache?.[1], "hangry-v47");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

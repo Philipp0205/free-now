@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { configuredAdminToken } from "./admin-query.js";
+import { readPmtilesHeader, type PmtilesInfo } from "./pmtiles.js";
 import { assertTimeZone } from "./time.js";
 
 export type VapidConfig = {
@@ -22,6 +24,8 @@ export type Config = {
   renotifyMs: number;
   mapTileUrl: string;
   mapTileAttribution: string;
+  /** A local PMTiles v3 basemap and its coverage. Null keeps the raster basemap everywhere. */
+  mapPmtiles: PmtilesInfo | null;
   /** Set only when ADMIN_TOKEN is at least 32 characters. Otherwise the admin routes stay hidden. */
   adminToken: string | null;
 };
@@ -33,6 +37,9 @@ const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 // zoom 19 here; 20+ is the "Map data not yet available" placeholder.
 const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const DEFAULT_MAP_TILE_ATTRIBUTION = "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
+export const MAP_PMTILES_URL = "/tiles/basemap.pmtiles";
+export const MAP_PMTILES_ATTRIBUTION =
+  '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Config {
   const port = readPort(env.PORT);
@@ -55,6 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     renotifyMs: 30_000,
     mapTileUrl: readTileUrl(env.MAP_TILE_URL),
     mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
+    mapPmtiles: readPmtiles(env.MAP_PMTILES_PATH),
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
   };
 }
@@ -113,6 +121,24 @@ function readAttribution(value: string | undefined): string {
   const raw = value?.trim() || DEFAULT_MAP_TILE_ATTRIBUTION;
   if (raw.length > 240) throw new Error("MAP_TILE_ATTRIBUTION is too long");
   return raw;
+}
+
+/**
+ * Unset: null. Set to a missing file, a directory, or anything that is not a PMTiles v3
+ * archive with sane bounds: null with a warning, so the raster map keeps working.
+ */
+function readPmtiles(value: string | undefined): PmtilesInfo | null {
+  const raw = value?.trim() ?? "";
+  if (!raw) return null;
+  if (!path.isAbsolute(raw)) throw new Error("MAP_PMTILES_PATH must be an absolute path");
+  try {
+    if (!fs.statSync(raw).isFile()) throw new Error("not a file");
+    return readPmtilesHeader(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`MAP_PMTILES_PATH disabled (${reason}), keeping the raster basemap: ${raw}`);
+    return null;
+  }
 }
 
 function readVapid(env: NodeJS.ProcessEnv): VapidConfig | null {
