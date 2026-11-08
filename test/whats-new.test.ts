@@ -50,14 +50,25 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is Plan for another day, in plain words without an em dash", () => {
+test("Plan for another day is in the changelog, in plain words without an em dash", () => {
+  const entry = RAW.find((item) => item.id === "2026-11-07-plan-another-day");
+  assert.ok(entry, "Plan for another day entry");
+  assert.equal(entry.title, "Now and later first");
+  assert.equal(entry.bullets.length, 2);
+  assert.ok(entry.bullets.some((bullet) => bullet.includes("Plan for another day")));
+  for (const text of [entry.title, ...entry.bullets]) assert.ok(!text.includes("\u2014"), text);
+});
+
+test("the newest entry is the map pins one, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-07-plan-another-day");
-  assert.equal(top.title, "Now and later first");
-  assert.equal(top.bullets.length, 2);
-  assert.ok(top.bullets.some((bullet) => bullet.includes("Plan for another day")));
+  assert.equal(top.id, "2026-11-08-map-dates-buzz");
+  assert.equal(top.title, "Livelier map pins");
+  assert.equal(top.bullets.length, 3);
+  assert.ok(top.bullets.some((bullet) => bullet.includes("Later today 19:00")));
+  assert.ok(top.bullets.some((bullet) => bullet.includes("buzz")));
+  assert.ok(top.bullets.some((bullet) => bullet.includes("crowd")));
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
-  assert.ok(RAW.some((item) => item.id === "2026-11-07-chat-alignment"), "older entries are kept");
+  assert.ok(RAW.some((item) => item.id === "2026-11-07-plan-another-day"), "older entries are kept");
 });
 
 test("unseen entries: nothing seen shows all, a known id shows what is newer, an unknown id shows none", () => {
@@ -107,11 +118,12 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v44");
+  assert.equal(cache?.[1], "hangry-v45");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
   assert.ok(paths.includes("/whats-new.json"));
+  assert.ok(paths.includes("/map-pin.js"));
   const app = read("../public/app.js");
   assert.equal(/const APP_VERSION = "([^"]+)"/.exec(app)?.[1], cache?.[1]);
 });

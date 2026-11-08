@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-08-map-dates-buzz",
+    "date": "2026-11-08",
+    "title": "Livelier map pins",
+    "bullets": [
+      "Plans on the map show their day under the pin, like Later today 19:00, Tomorrow or Sat 14 Nov.",
+      "Friends who are free right now buzz on the map so you spot them first.",
+      "Pins show profile photos, and a plan pin shows a small crowd of who is in."
+    ]
+  },
+  {
     "id": "2026-11-07-plan-another-day",
     "date": "2026-11-07",
     "title": "Now and later first",

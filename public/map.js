@@ -23,6 +23,8 @@ export function bindMap({
   let whereMapTimer = 0;
   const TILE_MAX_ZOOM = 19;
   const PIN_PX = 36;
+  /** Photo URLs that did not decode. Those pins keep their initials on every repaint. */
+  const brokenPhotos = new Set();
 
   function rememberMapCenter(map) {
     const center = map.getCenter();
@@ -93,23 +95,63 @@ export function bindMap({
     return `${pin.kind}:${pin.id}`;
   }
 
-  function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, (char) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    })[char]);
+  function node(tag, cls, text) {
+    const item = document.createElement(tag);
+    item.className = cls;
+    if (text) item.textContent = text;
+    return item;
   }
 
+  /** Initials stay underneath. A photo that fails to load is removed and the initials show. */
+  function face(cls, person) {
+    const item = node("span", cls, person.initial || "");
+    item.style.setProperty("--person", person.color || "");
+    if (person.id) item.dataset.person = person.id;
+    if (person.photo && !brokenPhotos.has(person.photo)) {
+      const img = node("img", "pin-photo");
+      img.alt = "";
+      img.addEventListener("error", () => {
+        brokenPhotos.add(person.photo);
+        img.remove();
+      }, { once: true });
+      img.src = person.photo;
+      item.append(img);
+    }
+    return item;
+  }
+
+  /**
+   * One marker per pin. The tap target is still the 36px circle. The crowd and the day
+   * label hang outside it and let taps through, so they never cover another pin.
+   */
   function pinIcon(L, pin) {
+    const wrap = node("span", "pin-body");
+    wrap.append(face("pin-letter", { id: pin.personId, initial: pin.initial, color: pin.color, photo: pin.photo }));
+    if (pin.faces?.length || pin.more) {
+      const crowd = node("span", "pin-crowd");
+      for (const person of pin.faces || []) crowd.append(face("pin-face", person));
+      if (pin.more) crowd.append(node("span", "pin-more", `+${pin.more}`));
+      wrap.append(crowd);
+    }
+    if (pin.label) wrap.append(node("span", "pin-when", pin.label));
+    const classes = ["pin", `pin-${pin.kind}`];
+    if (pin.now) classes.push("pin-now");
     return L.divIcon({
-      className: `pin pin-${pin.kind}`,
-      html: `<span class="pin-letter" style="--person:${escapeHtml(pin.color || "")}">${escapeHtml(pin.initial || "")}</span>`,
+      className: classes.join(" "),
+      html: wrap,
       iconSize: [PIN_PX, PIN_PX],
       iconAnchor: [PIN_PX / 2, PIN_PX / 2],
     });
+  }
+
+  function pinSig(pin) {
+    const faces = (pin.faces || []).map((person) => `${person.id}:${person.initial}:${person.color}:${person.photo || ""}`).join("|");
+    return `${pin.lat},${pin.lng},${pin.initial},${pin.kind},${pin.color},${pin.photo || ""},${pin.now ? 1 : 0},${pin.label || ""},${faces},${pin.more || 0}`;
+  }
+
+  /** Live buzzers stay above everything else on the map. */
+  function pinZ(pin) {
+    return pin.now ? 10000 : 0;
   }
 
   function syncMapMarkers(L, pins) {
@@ -117,19 +159,20 @@ export function bindMap({
     for (const pin of pins) {
       const key = pinKey(pin);
       next.add(key);
-      const sig = `${pin.lat},${pin.lng},${pin.initial},${pin.kind},${pin.color}`;
+      const sig = pinSig(pin);
       const existing = liveMarkers.get(key);
       if (existing) {
         if (existing.sig !== sig) {
           existing.marker.setLatLng([pin.lat, pin.lng]);
           existing.marker.setIcon(pinIcon(L, pin));
+          existing.marker.setZIndexOffset(pinZ(pin));
           existing.sig = sig;
         }
         existing.marker.off("click");
         existing.marker.on("click", () => showMapCard(pin));
         continue;
       }
-      const marker = L.marker([pin.lat, pin.lng], { icon: pinIcon(L, pin) });
+      const marker = L.marker([pin.lat, pin.lng], { icon: pinIcon(L, pin), zIndexOffset: pinZ(pin) });
       marker.on("click", () => showMapCard(pin));
       marker.addTo(liveMap);
       liveMarkers.set(key, { marker, sig });
@@ -143,6 +186,16 @@ export function bindMap({
         document.getElementById("map-card-host")?.replaceChildren();
       }
     }
+  }
+
+  /** Repaint pins only (a buzzer that just started, a photo that just loaded). The open card is left alone. */
+  function refreshPins() {
+    if (!liveMap || !window.L || state.tab !== "map") return;
+    const container = liveMap.getContainer();
+    if (!container || !container.isConnected) return;
+    const pins = collectPins();
+    if (!pins.length) return;
+    syncMapMarkers(window.L, pins);
   }
 
   function refreshOpenCard(pins) {
@@ -305,5 +358,5 @@ export function bindMap({
     reserveAttribution();
   }
 
-  return { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap };
+  return { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins };
 }
