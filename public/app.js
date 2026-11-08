@@ -21,8 +21,8 @@ const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
 let overlayHistoryDepth = 0;
-/** Tab shown by the last shell render, so only a real switch plays the page entrance. */
-let shownTab = null;
+/** Set by a tab bar tap that changes the page; the next render fades that page in once, then clears it. */
+let pageEntrance = false;
 /** Card menu opened by the latest ⋯ tap; its next render plays the open animation once. */
 let menuJustOpened = null;
 /** Pops we caused ourselves via history.go() and must not treat as Back. */
@@ -813,6 +813,7 @@ function render() {
   const chatNearEnd = chatLog ? chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 48 : true;
   document.getElementById("app").replaceChildren(view());
   menuJustOpened = null;
+  pageEntrance = false;
   const sheetScroll = document.querySelector(".sheet-scroll");
   if (sheetScroll) sheetScroll.scrollTop = sheetY;
   const nextLog = document.querySelector(".chat-log");
@@ -1042,9 +1043,8 @@ function shell() {
     return phone;
   }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
-  // Only the first render of a newly picked tab animates; the 3s refresh renders must not replay it.
-  const freshTab = shownTab !== null && shownTab !== state.tab;
-  shownTab = state.tab;
+  // Only an explicit tab bar switch fades in; sheet closes, Back and the 3s refresh renders never do.
+  const freshTab = pageEntrance;
   const screens = { home, map: mapScreen, circle: circleScreen, alerts: alertsScreen, you: youScreen };
   const page = screens[state.tab]?.();
   if (page) {
@@ -2089,7 +2089,11 @@ function tabbar(fresh = false) {
       type: "button",
       "aria-label": name,
       "aria-current": current ? "page" : null,
-      onclick: () => onTab(id),
+      onclick: () => {
+        // Chat is its own screen, not a page. A tap on the page already showing is not a switch.
+        if (id !== "chat" && (id !== state.tab || state.chat)) pageEntrance = true;
+        void onTab(id);
+      },
     }, [
       icon(glyph),
       el("span", { class: "tab-label", text: label }),

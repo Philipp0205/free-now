@@ -57,12 +57,30 @@ async function openMenu(page: Page) {
   return menu;
 }
 
+/** Ana's circle with one free post from Ben, so Now has a card with a ⋯ menu. */
+async function seed(note: string) {
+  const ana = await call("POST", "/api/auth/start", undefined, { name: "Ana" });
+  const circle = (await call("POST", "/api/circles", ana.token, { name: "Friends" })).circle;
+  const ben = await call("POST", "/api/auth/start", undefined, { name: "Ben", code: circle.inviteCode });
+  await call("POST", "/api/socials", ben.token, { note });
+  return ana;
+}
+
+/** Page and title tops while the entrance is still running, then again once it has finished. */
+function topsAcrossEntrance(page: Page) {
+  return page.locator(".page").evaluate(async (node) => {
+    const title = node.querySelector(".screen-title") ?? node;
+    const running = node.getAnimations().some((animation) => animation.playState === "running");
+    const during = { page: node.getBoundingClientRect().top, title: title.getBoundingClientRect().top };
+    await Promise.all(node.getAnimations().map((animation) => animation.finished));
+    const after = { page: node.getBoundingClientRect().top, title: title.getBoundingClientRect().top };
+    return { running, during, after };
+  });
+}
+
 for (const [width, height] of SIZES) {
-  test(`at ${width}: ⋯ pops open, Escape returns focus, tabs land where tapped, reduced motion is still`, { timeout: 90_000 }, async () => {
-    const ana = await call("POST", "/api/auth/start", undefined, { name: "Ana" });
-    const circle = (await call("POST", "/api/circles", ana.token, { name: "Friends" })).circle;
-    const ben = await call("POST", "/api/auth/start", undefined, { name: "Ben", code: circle.inviteCode });
-    await call("POST", "/api/socials", ben.token, { note: `Coffee ${width}` });
+  test(`at ${width}: ⋯ pops open, Escape returns focus, the page fades in without moving, reduced motion is still`, { timeout: 90_000 }, async () => {
+    const ana = await seed(`Coffee ${width}`);
     const { page, errors } = await phone(width, height, ana.token);
     try {
       await page.locator("[data-social]").first().waitFor();
@@ -97,23 +115,27 @@ for (const [width, height] of SIZES) {
       await page.keyboard.press("Escape");
       await arrival.waitFor({ state: "detached" });
 
-      // Rapid taps: Now, Map, Chat, Now ends on Now with its page showing. Chat loads slowly, so Now lands first.
-      await page.route("**/api/circles/chat", async (route) => {
-        await new Promise((done) => setTimeout(done, 300));
-        await route.continue();
-      });
-      await tab(page, "Now").click();
-      await tab(page, "Map").click();
+      // Tab switch: fade only, so the page sits at the same place during and after the entrance.
+      await tab(page, "Circle").click();
+      await page.locator('.page[data-page="circle"]').waitFor();
+      const tops = await topsAcrossEntrance(page);
+      assert.ok(tops.running, "measured while the entrance runs");
+      assert.deepEqual(tops.during, tops.after, `page top is stable ${JSON.stringify(tops)}`);
       assert.equal(await animationOf(page, ".page"), "page-in", "page entrance on a tab switch");
-      assert.match((await tab(page, "Map").getAttribute("class")) ?? "", /tab-in/);
-      await tab(page, "Chat").click();
+      assert.match((await tab(page, "Circle").getAttribute("class")) ?? "", /tab-in/);
+      assert.equal(await page.locator(".page").evaluate((node) => getComputedStyle(node).transform), "none", "no transform on the page");
       await tab(page, "Now").click();
-      await page.waitForTimeout(600);
-      assert.equal(await tab(page, "Now").getAttribute("aria-current"), "page");
-      assert.equal(await page.locator(".tab[aria-current]").count(), 1);
-      assert.equal(await page.locator(".chat-screen").count(), 0, "a late chat load does not take over");
       await page.locator('.page[data-page="home"]').waitFor();
       await page.locator("[data-social]").first().waitFor();
+
+      // Closing a sheet or a poll render is not a tab switch.
+      await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+      await page.locator("#sheet-note").waitFor();
+      await page.keyboard.press("Escape");
+      await page.locator("form.sheet").waitFor({ state: "detached" });
+      assert.equal(await animationOf(page, ".page"), "none", "no entrance after a sheet closes");
+      await page.waitForTimeout(3500);
+      assert.equal(await animationOf(page, ".page"), "none", "no entrance on a poll render");
 
       // Reduced motion: same states, no animations.
       await page.emulateMedia({ reducedMotion: "reduce" });
@@ -135,3 +157,30 @@ for (const [width, height] of SIZES) {
     }
   });
 }
+
+test("rapid tab taps with a slow chat end on the last tab tapped", { timeout: 90_000 }, async () => {
+  const [width, height] = SIZES[0];
+  const ana = await seed("Coffee rapid");
+  const { page, errors } = await phone(width, height, ana.token);
+  try {
+    await page.locator("[data-social]").first().waitFor();
+    // Chat loads slowly, so the last Now tap lands before the chat answer does.
+    await page.route("**/api/circles/chat", async (route) => {
+      await new Promise((done) => setTimeout(done, 300));
+      await route.continue();
+    });
+    await tab(page, "Now").click();
+    await tab(page, "Map").click();
+    await tab(page, "Chat").click();
+    await tab(page, "Now").click();
+    await page.waitForTimeout(600);
+    assert.equal(await tab(page, "Now").getAttribute("aria-current"), "page");
+    assert.equal(await page.locator(".tab[aria-current]").count(), 1);
+    assert.equal(await page.locator(".chat-screen").count(), 0, "a late chat load does not take over");
+    await page.locator('.page[data-page="home"]').waitFor();
+    await page.locator("[data-social]").first().waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.context().close();
+  }
+});
