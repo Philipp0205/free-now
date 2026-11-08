@@ -16,11 +16,15 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v44";
+const APP_VERSION = "hangry-v46";
 const FEEDBACK_MAX = 2000;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
 let overlayHistoryDepth = 0;
+/** Tab shown by the last shell render, so only a real switch plays the page entrance. */
+let shownTab = null;
+/** Card menu opened by the latest ⋯ tap; its next render plays the open animation once. */
+let menuJustOpened = null;
 /** Pops we caused ourselves via history.go() and must not treat as Back. */
 let ignoreSheetPop = 0;
 let closingFromPop = false;
@@ -808,6 +812,7 @@ function render() {
   const chatY = chatLog?.scrollTop ?? 0;
   const chatNearEnd = chatLog ? chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 48 : true;
   document.getElementById("app").replaceChildren(view());
+  menuJustOpened = null;
   const sheetScroll = document.querySelector(".sheet-scroll");
   if (sheetScroll) sheetScroll.scrollTop = sheetY;
   const nextLog = document.querySelector(".chat-log");
@@ -1037,12 +1042,18 @@ function shell() {
     return phone;
   }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
-  if (state.tab === "home") phone.append(home());
-  if (state.tab === "map") phone.append(mapScreen());
-  if (state.tab === "circle") phone.append(circleScreen());
-  if (state.tab === "alerts") phone.append(alertsScreen());
-  if (state.tab === "you") phone.append(youScreen());
-  phone.append(tabbar());
+  // Only the first render of a newly picked tab animates; the 3s refresh renders must not replay it.
+  const freshTab = shownTab !== null && shownTab !== state.tab;
+  shownTab = state.tab;
+  const screens = { home, map: mapScreen, circle: circleScreen, alerts: alertsScreen, you: youScreen };
+  const page = screens[state.tab]?.();
+  if (page) {
+    page.classList.add("page");
+    if (freshTab) page.classList.add("page-in");
+    page.dataset.page = state.tab;
+    phone.append(page);
+  }
+  phone.append(tabbar(freshTab));
   if (state.sheet) phone.append(sheet());
   return phone;
 }
@@ -1540,7 +1551,9 @@ async function openChat(target) {
   state.chatStick = true;
   forgetOpenUnread(target);
   await run(async () => {
-    state.chatThread = (await api(chatTargetUrl(target))).chat;
+    const chat = (await api(chatTargetUrl(target))).chat;
+    // Another tab was tapped while this loaded; that tap wins.
+    if (state.chat === target) state.chatThread = chat;
   });
 }
 
@@ -2059,7 +2072,7 @@ function onRevokeCalendarFeed() {
   render();
 }
 
-function tabbar() {
+function tabbar(fresh = false) {
   const tabs = [
     ["home", "Now", "home"],
     ["map", "Map", "map"],
@@ -2072,7 +2085,7 @@ function tabbar() {
     const current = state.tab === id;
     const name = id === "chat" && unread ? `Chat, ${unread} unread` : label;
     return el("button", {
-      class: "tab",
+      class: current && fresh ? "tab tab-in" : "tab",
       type: "button",
       "aria-label": name,
       "aria-current": current ? "page" : null,
@@ -2329,8 +2342,9 @@ function placeOpenCardMenus() {
       room = above;
     }
     if (natural > room) menu.style.maxHeight = `${Math.max(88, Math.floor(room))}px`;
-    const rect = menu.getBoundingClientRect();
-    if (rect.left < gap) menu.style.right = `${Math.floor(rect.left - gap)}px`;
+    // The open animation scales from the right edge, so measure the left from there at full width.
+    const left = menu.getBoundingClientRect().right - menu.offsetWidth;
+    if (left < gap) menu.style.right = `${Math.floor(left - gap)}px`;
   });
 }
 
@@ -2412,17 +2426,19 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
     el("button", {
       class: "card-more",
       type: "button",
+      "data-menu": key,
       "aria-label": `More for ${label}`,
       "aria-expanded": String(open),
       "aria-haspopup": "menu",
       onclick: (event) => {
         event.stopPropagation();
         state.cardMenu = open ? null : key;
+        menuJustOpened = state.cardMenu;
         render();
       },
     }, [icon("more")]),
     open ? el("div", {
-      class: "card-menu",
+      class: menuJustOpened === key ? "card-menu menu-in" : "card-menu",
       role: "menu",
       onclick: (event) => event.stopPropagation(),
     }, items.map((row) => el("button", {
@@ -5361,8 +5377,11 @@ function dismissTopOverlay() {
     return;
   }
   if (state.cardMenu) {
+    const key = state.cardMenu;
     state.cardMenu = null;
     render();
+    // Back on the ⋯ that opened it, so the keyboard user keeps their place.
+    document.querySelector(`.card-more[data-menu="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
     return;
   }
   if (state.installOpen) {
@@ -5580,6 +5599,11 @@ async function onTab(id) {
     state.sheet = null;
     await openChat({ kind: "circle" });
     return;
+  }
+  if (state.chat) {
+    // Chat was tapped and is still loading, so the tab bar is still on screen. Drop it for this tab.
+    state.chat = null;
+    state.chatThread = null;
   }
   if (id === "alerts" && state.tab !== "alerts") {
     state.alertsReturn = ALERTS_RETURN_TABS.includes(state.tab) ? state.tab : "home";

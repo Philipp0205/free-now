@@ -50,8 +50,17 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is Plan for another day, in plain words without an em dash", () => {
+test("the newest entry is the menu and tab polish, in plain words without an em dash", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-08-menu-tab-polish");
+  assert.equal(top.title, "Smoother menus and tabs");
+  assert.equal(top.bullets.length, 2);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  assert.ok(RAW.some((item) => item.id === "2026-11-07-plan-another-day"), "older entries are kept");
+});
+
+test("the Plan for another day entry stays, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-07-plan-another-day")!;
   assert.equal(top.id, "2026-11-07-plan-another-day");
   assert.equal(top.title, "Now and later first");
   assert.equal(top.bullets.length, 2);
@@ -107,7 +116,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v44");
+  assert.equal(cache?.[1], "hangry-v46");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
