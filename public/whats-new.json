@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-08-menu-tab-polish",
+    "date": "2026-11-08",
+    "title": "Smoother menus and tabs",
+    "bullets": [
+      "The ⋯ menu on cards now opens with a quick, soft pop, and its items react when you press them.",
+      "Switching tabs fades the new page in gently. With Reduce motion on, both stay instant."
+    ]
+  },
+  {
     "id": "2026-11-08-map-dates-buzz",
     "date": "2026-11-08",
     "title": "Livelier map pins",
