@@ -85,6 +85,18 @@ A wrong admin token is counted per client, eight failures in 60 seconds, and fur
 
 See `.env.example`. Real environment variables override a `.env` file — this server does not load `.env` itself. Export them, or use Docker / Railway.
 
+### Map data credits
+
+For the dark vector map (`MAP_PMTILES_PATH`):
+
+- Protomaps basemap: code BSD-3-Clause, style design CC0. The renderer, protomaps-leaflet (BSD-3-Clause), is vendored in `public/vendor/protomaps-leaflet/` with its `LICENSE`.
+- Data © OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright). Full builds also contain Natural Earth (public domain) at z0–5 and Daylight landcover at z0–7 (source: https://docs.protomaps.com/basemaps/layers).
+- The in-map attribution reads "Protomaps © OpenStreetMap".
+- The 1.2 MB test fixture is z12–15 and OSM-only; see `test/fixtures/README.md`.
+- No fonts are bundled. Labels are drawn on canvas with system fonts.
+
+The 16 MiB cap on a single range is our own defensive limit, not a PMTiles rule. The PMTiles spec only guarantees that the header and root directory fit in the first 16 KiB; metadata, leaf directories, and tiles have no size bound in the spec. A request over the cap gets 416, and the client falls back to the raster map.
+
 ## Generate VAPID keys
 
 ```bash
