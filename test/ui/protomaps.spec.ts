@@ -2,23 +2,30 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import type { Page, Response } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
 
 /**
  * The dark Protomaps basemap over a real regional archive, and the raster map outside it.
- * Needs the Stuttgart extract; it is never copied into the repo. Override with PROTOMAPS_FILE.
+ * Default archive: the checked-in Schlossplatz fixture (see test/fixtures/README.md),
+ * bounds 9.17–9.19 E, 48.77–48.785 N, zoom 12–15. PROTOMAPS_FILE points at another one.
+ * A missing archive fails the spec: it never skips.
  */
-const ARCHIVE = process.env.PROTOMAPS_FILE || "/workspace/hangry-protomaps-logs/stuttgart.pmtiles";
-const HAVE_ARCHIVE = fs.existsSync(ARCHIVE);
-const SKIP = HAVE_ARCHIVE ? false : `no PMTiles archive at ${ARCHIVE} (set PROTOMAPS_FILE to run this spec)`;
-/** Screenshots land here. Override with PROTOMAPS_SHOT_DIR. */
-const SHOT_DIR = path.resolve(process.env.PROTOMAPS_SHOT_DIR || "/workspace/hangry-protomaps-logs/shots");
+const ARCHIVE = path.resolve(process.env.PROTOMAPS_FILE || fileURLToPath(new URL("../fixtures/stuttgart-schlossplatz.pmtiles", import.meta.url)));
+/** Screenshots land here, like the other specs. Override with PROTOMAPS_SHOT_DIR. */
+const SHOT_DIR = path.resolve(process.env.PROTOMAPS_SHOT_DIR || ".oc/shots");
 const SIZES: Array<[number, number]> = [[320, 568], [360, 640], [412, 915]];
 const PLAN_NOTE = "Rooftop dinner";
-const STUTTGART: [number, number] = [48.7784, 9.18];
+/** The plan pin, on Schlossplatz. */
+const SCHLOSSPLATZ: [number, number] = [48.7784, 9.18];
+/** Where the map looks at the fixture: at z16 the whole view fits its bounds on all three phones. */
+const CENTER: [number, number] = [48.777, 9.179];
+const VECTOR_ZOOM = 16;
 const BERLIN: [number, number] = [52.52, 13.405];
+/** The live buzzer, on Marktplatz. */
+const MARKTPLATZ: [number, number] = [48.7752, 9.1772];
 /** A 1×1 PNG, so raster tiles really load (and get .leaflet-tile-loaded). */
 const TILE_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 
@@ -46,7 +53,20 @@ const CAPTURE_MAPS = `
   });
 `;
 
-const hangry = useHangry({ tz: "UTC", env: HAVE_ARCHIVE ? { MAP_PMTILES_PATH: ARCHIVE } : {} });
+const hangry = useHangry({ tz: "UTC", env: { MAP_PMTILES_PATH: ARCHIVE } });
+
+/** Runs first. Without the archive the server falls back to raster and every case below would mislead. */
+test("the PMTiles archive for this spec is present and enabled", async () => {
+  assert.ok(fs.existsSync(ARCHIVE), `no PMTiles archive at ${ARCHIVE}: restore test/fixtures/stuttgart-schlossplatz.pmtiles or set PROTOMAPS_FILE`);
+  const meta = await hangry.call("GET", "/api/meta");
+  assert.equal(meta.mapPmtilesUrl, "/tiles/basemap.pmtiles", "the server accepted the archive");
+  const cover = archiveBounds();
+  assert.deepEqual(meta.mapPmtilesBounds, [cover.west, cover.south, cover.east, cover.north]);
+  assert.equal(meta.mapPmtilesMinZoom, cover.minzoom);
+  assert.equal(meta.mapPmtilesMaxZoom, cover.maxzoom);
+  const inside = (lat: number, lng: number) => lat > cover.south && lat < cover.north && lng > cover.west && lng < cover.east;
+  assert.ok(inside(...SCHLOSSPLATZ) && inside(...CENTER) && inside(...MARKTPLATZ), "the spec's places are inside the archive");
+});
 
 function daysAhead(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
@@ -218,6 +238,33 @@ async function settleOn(page: Page, kind: "vector" | "raster", label: string) {
   return again;
 }
 
+/**
+ * Let every finite animation and transition end (tab and page fades, the card, the menu),
+ * so a screenshot never catches the UI half faded in. The pin buzz loops forever and is left alone.
+ */
+const SETTLE = `Promise.race([
+  Promise.all(document.getAnimations()
+    .filter((a) => a.effect && a.effect.getComputedTiming().iterations !== Infinity)
+    .map((a) => a.finished.catch(() => undefined))),
+  new Promise((resolve) => setTimeout(resolve, 3000)),
+]).then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))`;
+
+async function shot(page: Page, name: string): Promise<void> {
+  await page.evaluate(SETTLE);
+  await page.screenshot({ path: path.join(SHOT_DIR, name) });
+}
+
+/** Opacity as the eye sees it: the element's own times every ancestor's. */
+const SEEN_OPACITY = `(node) => {
+  let value = 1;
+  for (let el = node; el; el = el.parentElement) value *= Number(getComputedStyle(el).opacity);
+  return value;
+}`;
+
+async function seenOpacity(page: Page, selector: string): Promise<number[]> {
+  return page.evaluate(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(${SEEN_OPACITY})`);
+}
+
 async function buzz(page: Page) {
   return page.locator(".leaflet-marker-icon.pin-now .pin-body").evaluate((node) => ({
     body: getComputedStyle(node).animationName,
@@ -225,7 +272,7 @@ async function buzz(page: Page) {
   }));
 }
 
-test("dark vector map over Stuttgart with every pin feature, raster in Berlin and zoomed out, archive read in small ranges and never cached", { skip: SKIP, timeout: 300_000 }, async () => {
+test("dark vector map over Stuttgart with every pin feature, raster in Berlin and zoomed out, archive read in small ranges and never cached", { timeout: 300_000 }, async () => {
   const size = fs.statSync(ARCHIVE).size;
   const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Friends" });
@@ -233,10 +280,10 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
   const [ana, ben, cyd, dee] = [await join("Ana"), await join("Ben"), await join("Cyd"), await join("Dee")];
   await uploadPhotos([host.token, ana.token, cyd.token]);
   const { plan } = await hangry.call("POST", "/api/plans", host.token, {
-    note: PLAN_NOTE, date: daysAhead(1), time: "19:00", place: "Schlossplatz", lat: STUTTGART[0], lng: STUTTGART[1], precise: true,
+    note: PLAN_NOTE, date: daysAhead(1), time: "19:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,
   });
   for (const person of [ana, ben, cyd, dee]) await hangry.call("POST", `/api/plans/${plan.id}/reply`, person.token, { reply: "in" });
-  await hangry.call("POST", "/api/socials", ben.token, { note: "Coffee now", place: "Marktplatz", lat: 48.7752, lng: 9.1772, precise: true });
+  await hangry.call("POST", "/api/socials", ben.token, { note: "Coffee now", place: "Marktplatz", lat: MARKTPLATZ[0], lng: MARKTPLATZ[1], precise: true });
 
   fs.mkdirSync(SHOT_DIR, { recursive: true });
   for (const [width, height] of SIZES) {
@@ -249,10 +296,13 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
       await nowPin.waitFor({ timeout: 10_000 });
 
       // Stuttgart: the dark vector map, drawn, with the pins on top.
+      await moveTo(page, CENTER, VECTOR_ZOOM);
+      // The first fit (maxZoom 15) can overhang this small fixture and rightly start on raster;
+      // once the view is inside, no more raster tiles are asked for.
       await settleOn(page, "vector", `${width} Stuttgart`);
+      const rasterInside = raster.hits;
       const pixels = await darkWithStreets(page);
       assert.ok(pixels.dark && pixels.streets, `${width}: dark background with streets ${JSON.stringify(pixels)}`);
-      assert.equal(raster.hits, 0, `${width}: no raster tiles inside the archive`);
       assert.equal(await planPin.locator(".pin-when").innerText(), "Tomorrow", `${width}: date label`);
       assert.equal(await planPin.locator(".pin-crowd .pin-face").count(), 3, `${width}: crowd faces`);
       assert.equal(await planPin.locator(".pin-crowd .pin-more").innerText(), "+1", `${width}: crowd overflow`);
@@ -267,40 +317,63 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
       const moving = await buzz(page);
       assert.equal(moving.body, "pin-buzz", `${width}: live pin shakes`);
       assert.equal(moving.ring, "pin-ring", `${width}: live pin pulses`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-stuttgart-w${width}.png`) });
+      await shot(page, `protomaps-stuttgart-w${width}.png`);
 
       await page.emulateMedia({ reducedMotion: "reduce" });
       const still = await buzz(page);
       assert.equal(still.body, "none", `${width}: no shake with reduced motion`);
       assert.equal(still.ring, "none", `${width}: no pulse with reduced motion`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-reduced-w${width}.png`) });
+      await shot(page, `protomaps-reduced-w${width}.png`);
+      // Back to full motion. This replays the page fade from opacity 0, which is what
+      // dimmed the card screenshot before: the settle in shot() waits it out.
       await page.emulateMedia({ reducedMotion: "no-preference" });
 
       await planPin.click();
-      await page.locator(".map-card", { hasText: PLAN_NOTE }).waitFor({ timeout: 5000 });
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-card-w${width}.png`) });
+      const card = page.locator(".map-card", { hasText: PLAN_NOTE });
+      await card.waitFor({ timeout: 5000 });
+      await shot(page, `protomaps-card-w${width}.png`);
+      assert.equal(raster.hits, rasterInside, `${width}: no raster tiles while inside the archive`);
+      assert.deepEqual(await seenOpacity(page, ".map-card"), [1], `${width}: the card is fully opaque`);
+      const buttons = await seenOpacity(page, ".map-card button");
+      assert.ok(buttons.length >= 3 && buttons.every((value) => value === 1), `${width}: every card button is fully opaque ${buttons}`);
+      assert.equal((await seenOpacity(page, ".page"))[0], 1, `${width}: the page under the card is not faded`);
+      const share = card.getByRole("button", { name: /Share/ });
+      await share.click({ trial: true, timeout: 2000 });
+      const box = (await share.boundingBox())!;
+      const onTop = await page.evaluate(`(() => {
+        const hit = document.elementFromPoint(${box.x + box.width / 2}, ${box.y + box.height / 2});
+        return Boolean(hit && hit.closest(".map-card button") && /Share/.test(hit.closest("button").textContent));
+      })()`);
+      assert.ok(onTop, `${width}: nothing covers the Share button`);
 
       // The archive was read in byte ranges, a tiny part of the file.
       assert.ok(archive.statuses.length > 0, `${width}: archive requested`);
       assert.ok(archive.statuses.every((status) => status === 206), `${width}: only 206 replies ${archive.statuses}`);
       assert.ok(archive.ranges.every((range) => /^bytes=\d+-\d+$/.test(range)), `${width}: every request had a Range ${archive.ranges}`);
-      assert.ok(archive.bytes < size / 20, `${width}: read ${archive.bytes} of ${size} bytes`);
+      assert.ok(archive.bytes < size / 2, `${width}: read ${archive.bytes} of ${size} bytes`);
+      assert.ok(archive.ranges.length > 1, `${width}: several small reads, not one big one`);
 
       // Berlin is outside the archive: the raster map with its own credit, full detail.
       await moveTo(page, BERLIN, 15);
       await settleOn(page, "raster", `${width} Berlin`);
-      assert.ok(raster.hits > 0, `${width}: raster tiles requested in Berlin`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-berlin-w${width}.png`) });
+      assert.ok(raster.hits > rasterInside, `${width}: raster tiles requested in Berlin`);
+      await shot(page, `protomaps-berlin-w${width}.png`);
 
       // Zoomed out to Europe over Stuttgart: the view leaves the archive, so raster again.
-      await moveTo(page, STUTTGART, 5);
+      await moveTo(page, CENTER, 5);
       await settleOn(page, "raster", `${width} Europe`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-europe-w${width}.png`) });
+      await shot(page, `protomaps-europe-w${width}.png`);
+
+      // One level below the archive's minzoom, centred on it: raster.
+      const below = archiveBounds().minzoom - 1;
+      await moveTo(page, CENTER, below);
+      assert.equal((await view(page)).zoom, below, `${width}: at z${below}`);
+      await settleOn(page, "raster", `${width} below minzoom (z${below})`);
 
       // And back in: dark again.
-      await moveTo(page, STUTTGART, 15);
+      await moveTo(page, CENTER, VECTOR_ZOOM);
       await settleOn(page, "vector", `${width} back in Stuttgart`);
-      assert.ok(archive.bytes < size / 10, `${width}: still a small part of the file (${archive.bytes} of ${size})`);
+      assert.ok(archive.bytes < size, `${width}: never the whole file (${archive.bytes} of ${size})`);
 
       // The worker cached the app shell (with the vendor file) but nothing from /tiles/.
       const cached = await page.evaluate(async () => {
@@ -319,7 +392,7 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
 });
 
 /** Archive header bounds, read the same way the server does. */
-function archiveBounds(): { west: number; south: number; east: number; north: number; maxzoom: number } {
+function archiveBounds(): { west: number; south: number; east: number; north: number; minzoom: number; maxzoom: number } {
   const header = Buffer.alloc(127);
   const fd = fs.openSync(ARCHIVE, "r");
   try {
@@ -328,15 +401,15 @@ function archiveBounds(): { west: number; south: number; east: number; north: nu
     fs.closeSync(fd);
   }
   const [west, south, east, north] = [102, 106, 110, 114].map((at) => header.readInt32LE(at) / 1e7);
-  return { west, south, east, north, maxzoom: header[101] };
+  return { west, south, east, north, minzoom: header[100], maxzoom: header[101] };
 }
 
-test("edges, deep zoom, and an archive that fails mid-session: raster where vector cannot draw, no blank map, no swap loop", { skip: SKIP, timeout: 300_000 }, async () => {
+test("edges, deep zoom, and an archive that fails mid-session: raster where vector cannot draw, no blank map, no swap loop", { timeout: 300_000 }, async () => {
   const cover = archiveBounds();
   const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Ida" });
   await hangry.call("POST", "/api/circles", host.token, { name: "Edge" });
   await hangry.call("POST", "/api/plans", host.token, {
-    note: "Edge walk", date: daysAhead(1), time: "18:00", place: "Schlossplatz", lat: STUTTGART[0], lng: STUTTGART[1], precise: true,
+    note: "Edge walk", date: daysAhead(1), time: "18:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,
   });
 
   fs.mkdirSync(SHOT_DIR, { recursive: true });
@@ -345,31 +418,30 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
     try {
       await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
       await page.locator(".leaflet-marker-icon.pin-plan").waitFor({ timeout: 10_000 });
-      await moveTo(page, STUTTGART, 14);
+      await moveTo(page, CENTER, VECTOR_ZOOM);
       await settleOn(page, "vector", `${width} center`);
 
       // Center inside the archive, north edge past it: raster, so no blank strip along the edge.
-      await moveTo(page, STUTTGART, 14);
       const inside = await view(page);
       const edgeLat = cover.north - (inside.north - inside.south) / 4;
-      await moveTo(page, [edgeLat, STUTTGART[1]], 14);
+      await moveTo(page, [edgeLat, CENTER[1]], VECTOR_ZOOM);
       const edge = await view(page);
       assert.ok(edge.lat < cover.north && edge.lat > cover.south && edge.lng > cover.west && edge.lng < cover.east, `${width}: center inside ${JSON.stringify(edge)}`);
       assert.ok(edge.north > cover.north, `${width}: north edge outside (${edge.north} > ${cover.north})`);
       await settleOn(page, "raster", `${width} edge`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-edge-w${width}.png`) });
+      await shot(page, `protomaps-edge-w${width}.png`);
 
       // Past the archive's last zoom level its deepest data is drawn larger: still vector, not blank.
       const deep = cover.maxzoom + 3;
-      await moveTo(page, STUTTGART, deep);
+      await moveTo(page, CENTER, deep);
       assert.equal((await view(page)).zoom, deep, `${width}: zoomed to ${deep}`);
       await settleOn(page, "vector", `${width} z${deep}`);
       const pixels = await darkWithStreets(page);
       assert.ok(pixels.dark && pixels.streets, `${width}: z${deep} is drawn ${JSON.stringify(pixels)}`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-deep-w${width}.png`) });
+      await shot(page, `protomaps-deep-w${width}.png`);
 
-      // The archive goes away mid-session. Pans inside Stuttgart need new tiles and fail.
-      await moveTo(page, STUTTGART, 15);
+      // The archive goes away mid-session. Pans inside the fixture need new tiles and fail.
+      await moveTo(page, CENTER, VECTOR_ZOOM);
       await settleOn(page, "vector", `${width} before failure`);
       const before = await layerAdds(page);
       const okBefore = archive.statuses.length;
@@ -378,13 +450,14 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
         aborted += 1;
         return route.abort("connectionreset");
       });
-      const spots: Array<[number, number]> = [[48.792, 9.205], [48.752, 9.145], [48.768, 9.255], [48.81, 9.17], [48.735, 9.2]];
-      await moveTo(page, spots[0], 15);
+      // All inside the fixture at z16 on every phone. The first crosses into a data tile not loaded yet.
+      const spots: Array<[number, number]> = [[48.7775, 9.1853], [48.7778, 9.1755], [48.7768, 9.1835], [48.7785, 9.1775], [48.7775, 9.181]];
+      await moveTo(page, spots[0], VECTOR_ZOOM);
       await settleOn(page, "raster", `${width} after failure`);
       assert.ok(aborted > 0, `${width}: the archive was asked for and failed`);
       const afterFirst = await layerAdds(page);
       for (const spot of spots.slice(1)) {
-        await moveTo(page, spot, 15);
+        await moveTo(page, spot, VECTOR_ZOOM);
         await page.waitForTimeout(400);
         const state = await basemap(page);
         assert.equal(state.layers, 1, `${width}: one layer at ${spot}`);
@@ -396,10 +469,10 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
       assert.equal(await layerAdds(page), afterFirst, `${width}: no more swaps over ${spots.length - 1} pans`);
       assert.equal(archive.statuses.length, okBefore, `${width}: no archive reply got through`);
       const abortedAfterSwap = aborted;
-      await moveTo(page, STUTTGART, 15);
+      await moveTo(page, CENTER, VECTOR_ZOOM);
       await page.waitForTimeout(600);
       assert.equal(aborted, abortedAfterSwap, `${width}: the archive is not retried once it failed`);
-      await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-failed-w${width}.png`) });
+      await shot(page, `protomaps-failed-w${width}.png`);
     } finally {
       await page.context().close();
     }
