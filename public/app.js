@@ -3,6 +3,7 @@ import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, t
 import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, shortDate, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
+import { goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
@@ -18,6 +19,8 @@ const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
 const APP_VERSION = "hangry-v46";
 const FEEDBACK_MAX = 2000;
+/** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
+const MAP_CROWD_FACES = 4;
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
 let overlayHistoryDepth = 0;
@@ -176,7 +179,7 @@ if ("serviceWorker" in navigator) {
 
 const FINDING_PLACE = "Finding address…";
 const URL_HINT = "Paste a Google Maps link or type a place";
-const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap } = bindMap({
+const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins } = bindMap({
   state,
   whereTarget: () => whereBag(),
   collectPins,
@@ -189,6 +192,8 @@ const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap } = bindMap({
 
 boot();
 setInterval(() => {
+  // A later buzzer turns live, and a live one ends, without a new answer from the server.
+  if (!document.hidden && state.me?.user) refreshPins();
   if (!document.hidden && state.token) {
     refresh().catch((error) => {
       if (error?.status === 401) return;
@@ -3330,12 +3335,17 @@ function collectPins() {
         : (social.note || "Free now"),
       time: remaining(social.expiresAt),
       own: mine,
+      personId: social.creator.id,
+      photo: pinPhoto(social.creator),
+      now: socialPinState(social) === "now",
+      label: pinLabel("social", social, Date.now(), appTz()),
     });
   }
   for (const plan of state.plans) {
     if (!plan.location) continue;
     const mine = plan.creator.id === state.me.user.id;
     const place = audiencePlace(plan.place);
+    const crowd = goingCrowd(plan.creator, plan.joined, MAP_CROWD_FACES);
     pins.push({
       kind: "plan",
       id: plan.id,
@@ -3347,9 +3357,31 @@ function collectPins() {
       note: place ? `${plan.note} · ${place}` : plan.note,
       time: plan.time ? `${plan.whenLabel} · ${plan.time}` : plan.whenLabel,
       own: mine,
+      personId: plan.creator.id,
+      photo: pinPhoto(plan.creator),
+      now: false,
+      label: pinLabel("plan", plan, Date.now(), appTz()),
+      // The host is the pin itself, so the crowd is everyone else who is In.
+      faces: crowd.faces.slice(1).map((person) => ({
+        id: person.id,
+        initial: initial(person.name),
+        color: colorFor(person),
+        photo: pinPhoto(person),
+      })),
+      more: crowd.more,
     });
   }
   return pins;
+}
+
+/** A photo already fetched for this person, or "". Fetches once, then repaints the pins. */
+function pinPhoto(person) {
+  const key = avatarKey(person);
+  if (!key) return "";
+  const cached = avatarUrls.get(key);
+  if (typeof cached === "string") return cached;
+  if (cached === undefined) void Promise.resolve(loadAvatar(person)).then((url) => { if (url) refreshPins(); });
+  return "";
 }
 
 let mapWrap = null;
