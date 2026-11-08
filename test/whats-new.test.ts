@@ -50,6 +50,15 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
+test("the newest entry is the menu and tab polish, in plain words without an em dash", () => {
+  const top = RAW[0];
+  assert.equal(top.id, "2026-11-08-menu-tab-polish");
+  assert.equal(top.title, "Smoother menus and tabs");
+  assert.equal(top.bullets.length, 2);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  assert.ok(RAW.some((item) => item.id === "2026-11-07-plan-another-day"), "older entries are kept");
+});
+
 test("Plan for another day is in the changelog, in plain words without an em dash", () => {
   const entry = RAW.find((item) => item.id === "2026-11-07-plan-another-day");
   assert.ok(entry, "Plan for another day entry");
@@ -59,8 +68,9 @@ test("Plan for another day is in the changelog, in plain words without an em das
   for (const text of [entry.title, ...entry.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is the map pins one, in plain words without an em dash", () => {
-  const top = RAW[0];
+test("the map pins entry is in the changelog, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-08-map-dates-buzz");
+  assert.ok(top, "map pins entry");
   assert.equal(top.id, "2026-11-08-map-dates-buzz");
   assert.equal(top.title, "Livelier map pins");
   assert.equal(top.bullets.length, 3);
@@ -118,7 +128,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v45");
+  assert.equal(cache?.[1], "hangry-v46");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

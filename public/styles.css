@@ -1812,11 +1812,55 @@ html.kb-open .sheet .help { margin-top: 0; }
   100% { transform: scale(1); }
 }
 
+/* ⋯ button and its menu. Same press timing as the other buttons, plus a lit state while open.
+ * app.js adds .menu-in only on the render that opens the menu, so a refresh does not replay it.
+ * Only transform and opacity animate, and nothing blocks taps while it runs. */
+.card-more {
+  transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 120ms ease-out;
+}
+.card-more[aria-expanded="true"] { background: rgba(72, 72, 74, 0.9); }
+.map-card .card-more[aria-expanded="true"] { background: #48484a; }
+.card-menu { transform-origin: top right; }
+.card-menu.drop-up { transform-origin: bottom right; }
+.card-menu button { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 80ms ease-out; }
+.card-menu button:active { background: rgba(255, 255, 255, 0.12); transform: scale(0.98); }
+
+/* Tabs: the icon dips while held. The tab you land on gets .tab-in and its page .page-in, once per switch. */
+.tab .icon { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1); }
+.tab:active .icon { transform: scale(0.9); transition-duration: 80ms; transition-timing-function: ease-out; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .card-menu.menu-in { animation: menu-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+  .tab.tab-in { animation: tab-in 180ms ease-out; }
+  .tab.tab-in .icon { animation: tab-icon-in 220ms cubic-bezier(0.3, 1.45, 0.6, 1); }
+  .page-in { animation: page-in 160ms ease-out; }
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes tab-in {
+  from { color: var(--muted); }
+  to { color: #fff; }
+}
+@keyframes tab-icon-in {
+  0% { transform: scale(0.86); }
+  100% { transform: scale(1); }
+}
+/* Opacity only: page content never moves, so measurements (Leaflet, scroll) match during and after. */
+@keyframes page-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :where(button, [role="button"], [role="menuitem"], a.map-link, label.chip):where(:not(.scrim, .leaflet-container *)),
   .card {
     transition: filter 100ms ease-out;
   }
+  .card-more, .card-menu button { transition: filter 100ms ease-out, background-color 100ms ease-out; }
+  .card-menu button:active, .tab:active .icon { transform: none; }
+  .tab .icon { transition: none; }
   :where(button, [role="button"], a.map-link, label.chip):where(:not(.scrim, .card-body, :disabled, .leaflet-container *)):where(:active),
   .card:has(> .card-bg:active),
   .card:has(.card-body:active):not(:has(.card-body :is(button, a, [role="button"]):active)),
