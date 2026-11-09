@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-09-dark-map-sticks",
+    "date": "2026-11-09",
+    "title": "The dark map stays put",
+    "bullets": [
+      "Dark map sticks while you look at the covered area, even if the edges stick out a little; zoom out past it and the usual map returns.",
+      "Pins, cards and the live buzz are unchanged."
+    ]
+  },
+  {
     "id": "2026-11-08-dark-map-ready",
     "date": "2026-11-08",
     "title": "A dark map, where we have one",

@@ -24,6 +24,8 @@ const SCHLOSSPLATZ: [number, number] = [48.7784, 9.18];
 const CENTER: [number, number] = [48.777, 9.179];
 const VECTOR_ZOOM = 16;
 const BERLIN: [number, number] = [52.52, 13.405];
+/** Roughly the middle of Germany, far outside the fixture. */
+const EUROPE: [number, number] = [51.1657, 10.4515];
 /** The live buzzer, on Marktplatz. */
 const MARKTPLATZ: [number, number] = [48.7752, 9.1772];
 /** A 1×1 PNG, so raster tiles really load (and get .leaflet-tile-loaded). */
@@ -297,8 +299,7 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
 
       // Stuttgart: the dark vector map, drawn, with the pins on top.
       await moveTo(page, CENTER, VECTOR_ZOOM);
-      // The first fit (maxZoom 15) can overhang this small fixture and rightly start on raster;
-      // once the view is inside, no more raster tiles are asked for.
+      // Once the view is centered inside, no more raster tiles are asked for.
       await settleOn(page, "vector", `${width} Stuttgart`);
       const rasterInside = raster.hits;
       const pixels = await darkWithStreets(page);
@@ -359,7 +360,7 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
       assert.ok(raster.hits > rasterInside, `${width}: raster tiles requested in Berlin`);
       await shot(page, `protomaps-berlin-w${width}.png`);
 
-      // Zoomed out to Europe over Stuttgart: the view leaves the archive, so raster again.
+      // Zoomed out to Europe over Stuttgart: below the archive's zoom range, so raster again.
       await moveTo(page, CENTER, 5);
       await settleOn(page, "raster", `${width} Europe`);
       await shot(page, `protomaps-europe-w${width}.png`);
@@ -421,15 +422,35 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
       await moveTo(page, CENTER, VECTOR_ZOOM);
       await settleOn(page, "vector", `${width} center`);
 
-      // Center inside the archive, north edge past it: raster, so no blank strip along the edge.
+      // Center inside the archive, north edge past it: still vector, the dark map sticks.
       const inside = await view(page);
       const edgeLat = cover.north - (inside.north - inside.south) / 4;
       await moveTo(page, [edgeLat, CENTER[1]], VECTOR_ZOOM);
       const edge = await view(page);
       assert.ok(edge.lat < cover.north && edge.lat > cover.south && edge.lng > cover.west && edge.lng < cover.east, `${width}: center inside ${JSON.stringify(edge)}`);
       assert.ok(edge.north > cover.north, `${width}: north edge outside (${edge.north} > ${cover.north})`);
-      await settleOn(page, "raster", `${width} edge`);
+      await settleOn(page, "vector", `${width} edge`);
       await shot(page, `protomaps-edge-w${width}.png`);
+
+      // Zoomed out to the archive's minzoom over Stuttgart: every edge sticks out, center inside, still vector.
+      await moveTo(page, CENTER, cover.minzoom);
+      const wide = await view(page);
+      assert.equal(wide.zoom, cover.minzoom, `${width}: at z${cover.minzoom}`);
+      assert.ok(wide.west < cover.west && wide.east > cover.east && wide.south < cover.south && wide.north > cover.north, `${width}: view overhangs on all sides ${JSON.stringify(wide)}`);
+      await settleOn(page, "vector", `${width} wide z${cover.minzoom}`);
+      await shot(page, `protomaps-wide-w${width}.png`);
+
+      // Center just past the north edge, edges still overlapping the archive: raster.
+      const outLat = cover.north + (inside.north - inside.south) / 4;
+      await moveTo(page, [outLat, CENTER[1]], VECTOR_ZOOM);
+      const out = await view(page);
+      assert.ok(out.lat > cover.north && out.south < cover.north, `${width}: center outside, view overlaps ${JSON.stringify(out)}`);
+      await settleOn(page, "raster", `${width} center outside`);
+      // A zoomed-out view centered on central Europe, in the archive's zoom range: raster.
+      await moveTo(page, EUROPE, cover.minzoom);
+      await settleOn(page, "raster", `${width} Europe center z${cover.minzoom}`);
+      await moveTo(page, CENTER, VECTOR_ZOOM);
+      await settleOn(page, "vector", `${width} back in after edge`);
 
       // Past the archive's last zoom level its deepest data is drawn larger: still vector, not blank.
       const deep = cover.maxzoom + 3;
