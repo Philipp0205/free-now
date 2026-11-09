@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-09-map-card-close",
+    "date": "2026-11-09",
+    "title": "Close the map card",
+    "bullets": [
+      "A pin's card on the map now has an X in its corner to close it and get the whole map back.",
+      "Tapping an empty spot on the map or pressing Escape closes it too."
+    ]
+  },
+  {
     "id": "2026-11-09-dark-map-sticks",
     "date": "2026-11-09",
     "title": "The dark map stays put",

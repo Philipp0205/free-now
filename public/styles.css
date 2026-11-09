@@ -512,8 +512,30 @@ button:disabled { cursor: default; opacity: 0.55; }
 .card-share.ready { background: #fff; color: #9f1239; box-shadow: inset 0 0 0 2px #e0115f; }
 .card-share.busy { opacity: 0.7; cursor: progress; }
 .card-share:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; }
-.map-card .card-overflow { position: relative; top: auto; right: auto; }
+/* The ⋯ host is static, so its menu anchors to .map-card-head and right: 0 is the card's inner edge, past Close. */
+.map-card .card-overflow { position: static; top: auto; right: auto; }
 .map-card .card-more { background: #2c2c2e; }
+/* Close: same 44px round button as ⋯, a little quieter, always the top-right corner of the card. */
+.map-card-close {
+  appearance: none;
+  border: 0;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-right: -4px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  color: #d1d1d6;
+  cursor: pointer;
+  transition: background-color 100ms ease-out, color 100ms ease-out;
+}
+.map-card-close .icon, .map-card-close .icon svg { width: 20px; height: 20px; display: block; }
+.map-card-close:hover, .map-card-close:active { background: #2c2c2e; color: #fff; }
+.map-card.card-grad .map-card-close { color: rgba(255, 255, 255, 0.82); }
+.map-card.card-grad .map-card-close:hover, .map-card.card-grad .map-card-close:active { background: rgba(0, 0, 0, 0.22); color: #fff; }
 .map-card.menu-open { overflow: visible; z-index: 1100; }
 .map-card .chat-row { background: #2c2c2e; }
 .map-card .in-toggle { margin-top: 10px; }
@@ -1453,7 +1475,7 @@ html.kb-open .sheet .help { margin-top: 0; }
 .map-card .who-row { margin-top: 6px; color: #d1d1d6; }
 .map-card .who-row .reply-line { margin: 0; }
 .map-card strong { display: block; font-size: 16px; }
-.map-card-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.map-card-head { position: relative; display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .map-card-head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .map-card .card-tools { position: static; flex: none; }
 .map-card .card-tools .event-tool { background: #2c2c2e; }

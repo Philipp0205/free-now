@@ -17,7 +17,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v48";
+const APP_VERSION = "hangry-v49";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -158,6 +158,7 @@ const ICONS = {
   chat: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.2 16.2 5 19.2c-.3.4.1 1 .6.8l3.2-.9A7.2 7.2 0 1 0 7.2 16.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 14.5V4.5M8.2 8 12 4.2 15.8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11H6.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1H16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
 };
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -179,7 +180,7 @@ if ("serviceWorker" in navigator) {
 
 const FINDING_PLACE = "Finding address…";
 const URL_HINT = "Paste a Google Maps link or type a place";
-const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins } = bindMap({
+const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins, closeMapCard, mapCardOpen } = bindMap({
   state,
   whereTarget: () => whereBag(),
   collectPins,
@@ -187,6 +188,7 @@ const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins } 
   paintSummary,
   scheduleReverse,
   recentPlace,
+  keepCardOnMapTap: () => tapClosedMenu,
   FINDING_PLACE,
 });
 
@@ -4882,6 +4884,15 @@ function mapCard(pin) {
         onclick: () => item && openEventDetail(kind, item),
       }),
       item ? cardOverflow(kind, item, { onMap: true }) : null,
+      el("button", {
+        class: "map-card-close",
+        type: "button",
+        "aria-label": "Close",
+        onclick: (event) => {
+          event.stopPropagation();
+          closeMapCard();
+        },
+      }, [icon("close")]),
     ]),
     el("div", {
       class: "map-card-body",
@@ -5604,21 +5615,39 @@ window.addEventListener("popstate", () => {
   overlayHistoryDepth = 0;
 });
 
+/** This tap only put a ⋯ menu away, so a tap on the map leaves the pin card open. */
+let tapClosedMenu = false;
+
 document.addEventListener("pointerdown", (event) => {
+  tapClosedMenu = false;
   if (!state.cardMenu) return;
   const target = event.target;
   if (target && target.closest && target.closest(".card-overflow")) return;
   // Share leaves an open menu alone. A re-render here would also swallow the tap (and its user activation).
   if (target && target.closest && target.closest(".card-share")) return;
+  tapClosedMenu = true;
   state.cardMenu = null;
   render();
 }, true);
 
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || currentOverlayDepth() === 0) return;
+  if (event.key !== "Escape") return;
+  // An open pin card sits above the Map tab but below every sheet, menu and chat.
+  if (mapCardOnTop()) {
+    event.preventDefault();
+    closeMapCard();
+    return;
+  }
+  if (currentOverlayDepth() === 0) return;
   event.preventDefault();
   dismissTopOverlay();
 });
+
+/** The pin card is the topmost thing on screen: nothing above the Map tab is open. */
+function mapCardOnTop() {
+  if (state.tab !== "map" || !shellShown() || !mapCardOpen()) return false;
+  return currentOverlayDepth() === tabLayers();
+}
 
 const ALERTS_RETURN_TABS = ["home", "map", "circle", "you"];
 
