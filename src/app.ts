@@ -16,7 +16,7 @@ import {
   readSchema,
   runReadQuery,
 } from "./admin-query.js";
-import type { Config } from "./config.js";
+import { MAP_PMTILES_ATTRIBUTION, MAP_PMTILES_URL, type Config } from "./config.js";
 import {
   addMember,
   addSocialJoin,
@@ -94,6 +94,8 @@ import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
 import type { PushSender } from "./push.js";
 import { pushSummaryForPlan, pushSummaryForViewer, reachForCircle, type PushSummary } from "./push-status.js";
 import { clientKey } from "./client-key.js";
+import { MAX_RANGE_BYTES, serveRangeFile } from "./range-file.js";
+import { createArchiveCheck, type PmtilesInfo } from "./pmtiles.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import {
   FEEDBACK_LIMIT,
@@ -226,6 +228,18 @@ export function redactFeedToken(text: string, rawUrl: string | undefined): strin
   return out.replace(/\/cal\/[^\s/?#"'<>]+/gi, "/cal/[token]");
 }
 
+const archiveChecks = new WeakMap<PmtilesInfo, ReturnType<typeof createArchiveCheck>>();
+
+/** One cached check per configured archive, so the header is re-read only after the file changed. */
+function archiveCheckFor(info: PmtilesInfo): ReturnType<typeof createArchiveCheck> {
+  let check = archiveChecks.get(info);
+  if (!check) {
+    check = createArchiveCheck(info);
+    archiveChecks.set(info, check);
+  }
+  return check;
+}
+
 const LEGACY_HOST = "hangry-production-64c4.up.railway.app";
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, limits: Limits): Promise<void> {
@@ -261,6 +275,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       serveFeed(req, res, deps, feed[1]);
       return;
     }
+    // Fixed route, path only from env: no part of the request reaches the filesystem here.
+    if (pathname === MAP_PMTILES_URL && deps.config.mapPmtiles) {
+      await serveRangeFile(req, res, deps.config.mapPmtiles.path, {
+        contentType: "application/vnd.pmtiles",
+        maxRangeBytes: MAX_RANGE_BYTES,
+        check: archiveCheckFor(deps.config.mapPmtiles),
+      });
+      return;
+    }
+    if (pathname.startsWith("/tiles/")) {
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
     await serveStatic(req, res, pathname);
     return;
   }
@@ -291,6 +318,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       devMode: !deps.config.vapid,
       mapTileUrl: deps.config.mapTileUrl,
       mapTileAttribution: deps.config.mapTileAttribution,
+      ...(deps.config.mapPmtiles
+        ? {
+            mapPmtilesUrl: MAP_PMTILES_URL,
+            mapPmtilesAttribution: MAP_PMTILES_ATTRIBUTION,
+            mapPmtilesBounds: deps.config.mapPmtiles.bounds,
+            mapPmtilesMinZoom: deps.config.mapPmtiles.minzoom,
+            mapPmtilesMaxZoom: deps.config.mapPmtiles.maxzoom,
+          }
+        : {}),
     });
     return;
   }

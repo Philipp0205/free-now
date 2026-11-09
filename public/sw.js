@@ -1,7 +1,7 @@
-const CACHE = "hangry-v46";
+const CACHE = "hangry-v47";
 /** Wait before each ack retry. One first try, then up to three more. */
 const ACK_DELAYS = [1000, 3000, 9000];
-const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/calendar-feed.js", "/whats-new.json", "/map.js", "/map-pin.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
+const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/calendar-feed.js", "/whats-new.json", "/map.js", "/map-pin.js", "/vendor/protomaps-leaflet/protomaps-leaflet.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
@@ -21,6 +21,8 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || event.request.method !== "GET") return;
   // Calendar feeds carry a private token and plan details: never cache them.
   if (url.pathname.startsWith("/cal/")) return;
+  // Basemap archives are read in byte ranges: never cache them (a 206 cannot go in the Cache API).
+  if (url.pathname.startsWith("/tiles/") || event.request.headers.has("range")) return;
   // Share pages carry a plan title: never keep them, fall back to the app shell offline.
   if (url.pathname.startsWith("/p/")) {
     event.respondWith(fetch(event.request).catch(() => caches.match("/")));
