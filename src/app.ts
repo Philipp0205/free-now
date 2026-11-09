@@ -302,7 +302,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       ? await readJson(req)
       : {};
   // Feedback reads its own circle and ignores a bad one instead of failing the send.
-  const requested = pathname === "/api/feedback" ? null : readRequestedCircle(req, url, body);
+  // ?all=1 reads every circle the caller is in, so any requested circle is ignored.
+  const requested = pathname === "/api/feedback" || isAllCircles(method, pathname, url) ? null : readRequestedCircle(req, url, body);
 
   if (method === "GET" && pathname === "/api/health") {
     sendJson(res, 200, { ok: true });
@@ -620,6 +621,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  if (method === "GET" && pathname === "/api/socials" && isAllCircles(method, pathname, url)) {
+    const now = deps.now();
+    const merged = new Map<string, SocialRow>();
+    for (const circle of listCirclesForUser(deps.db, me.id)) {
+      for (const row of listActiveSocials(deps.db, circle.id, now)) merged.set(row.id, row);
+    }
+    const socials = [...merged.values()]
+      .sort((a, b) => b.created_at - a.created_at)
+      .map((row) => socialPayload(deps.db, row, me.id));
+    sendJson(res, 200, { socials });
+    return;
+  }
+
   if (method === "GET" && pathname === "/api/socials") {
     const circle = requireCircle(deps, me.id, requested);
     const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id));
@@ -667,6 +681,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (socialId && method === "DELETE") {
     await endSocial(deps, me, socialId[1], requested);
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/plans" && isAllCircles(method, pathname, url)) {
+    const today = isoDate(deps.now(), deps.config.tz);
+    const through = addDays(today, PLAN_DAYS_AHEAD);
+    const merged = new Map<string, PlanRow>();
+    for (const circle of listCirclesForUser(deps.db, me.id)) {
+      for (const row of listVisiblePlans(deps.db, circle.id, today, through)) if (!merged.has(row.id)) merged.set(row.id, row);
+    }
+    const plans = [...merged.values()]
+      .sort((a, b) =>
+        a.for_date.localeCompare(b.for_date) ||
+        Number(a.at_time == null) - Number(b.at_time == null) ||
+        (a.at_time ?? "").localeCompare(b.at_time ?? "") ||
+        a.created_at - b.created_at,
+      )
+      .map((row) => planPayload(deps.db, row, today, me.id));
+    sendJson(res, 200, { plans });
     return;
   }
 
@@ -1447,6 +1480,8 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
+    circleId: social.circle_id,
+    circleName: getCircleById(db, social.circle_id)?.name ?? "",
     creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
@@ -1474,6 +1509,9 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     time: plan.at_time,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
+    // Home circle. `circles` below still lists every linked circle.
+    circleId: plan.circle_id,
+    circleName: getCircleById(db, plan.circle_id)?.name ?? "",
     shareId: plan.share_id ?? null,
     // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
     remindedAt: plan.reminded_at ?? null,
@@ -1797,6 +1835,11 @@ async function notifyCircleDeleted(
 function requireUser(user: UserRow | undefined): UserRow {
   if (!user) throw new HttpError(401, "sign in required");
   return user;
+}
+
+/** GET /api/socials?all=1 and GET /api/plans?all=1 merge every circle the caller belongs to. */
+function isAllCircles(method: string, pathname: string, url: URL): boolean {
+  return method === "GET" && (pathname === "/api/socials" || pathname === "/api/plans") && url.searchParams.get("all") === "1";
 }
 
 function readRequestedCircle(req: http.IncomingMessage, url: URL, body: Record<string, unknown>): string | null {

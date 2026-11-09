@@ -1318,6 +1318,8 @@ input[type="date"].sheet-control::-webkit-date-and-time-value { text-align: left
   font-size: 16px;
 }
 .segment button.on { background: #fff; color: #000; }
+.map-scope { margin: 8px 12px 0; }
+.map-card-circle { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .segment-3 { grid-template-columns: 1fr 1fr 1.25fr; }
 .segment-3 button { padding: 0 4px; white-space: nowrap; }
 /* Plan for another day: a quieter link under Now / Later. It turns into a filled chip while a date is being picked. */

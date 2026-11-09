@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-09-map-all-circles",
+    "date": "2026-11-09",
+    "title": "One map for every circle",
+    "bullets": [
+      "If you are in more than one circle, the Map has a This circle / All circles switch at the top.",
+      "All circles puts every place from all your circles on one map, and remembers your pick.",
+      "A card on the All map names the circle it comes from, and In, chat and share go to that circle."
+    ]
+  },
+  {
     "id": "2026-11-09-glass-pins",
     "date": "2026-11-09",
     "title": "Nicer map pins",

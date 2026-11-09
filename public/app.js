@@ -11,13 +11,14 @@ import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unsee
 
 const TOKEN_KEY = "fn_token";
 const CIRCLE_KEY = "fn_circle";
+const MAP_ALL_KEY = "hangry-map-all";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v51";
+const APP_VERSION = "hangry-v54";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -39,6 +40,10 @@ const state = {
   me: null,
   socials: [],
   plans: [],
+  /** Map scope: true shows every circle's places, false only the selected circle. */
+  mapAllCircles: localStorage.getItem(MAP_ALL_KEY) === "1",
+  mapSocials: [],
+  mapPlans: [],
   notifications: [],
   tab: "home",
   sheet: null,
@@ -413,6 +418,7 @@ async function refresh({ initial = false } = {}) {
   }
   state.socials = socials.socials;
   state.plans = plans.plans;
+  if (state.tab === "map" && state.mapAllCircles) await refreshMapAll();
   state.notifications = notifications.notifications;
   state.me = me;
   applyAlertUnread(notifications.unreadByCircle);
@@ -423,6 +429,7 @@ async function refresh({ initial = false } = {}) {
   const signature = JSON.stringify({
     socials: state.socials,
     plans: state.plans,
+    mapAll: state.mapAllCircles ? [state.mapSocials, state.mapPlans] : null,
     notifications: state.notifications.map((note) => [note.id, note.readAt]),
     members: state.me?.circle?.members ?? null,
     circles: state.me?.circles ?? null,
@@ -468,6 +475,7 @@ async function releaseMissingCircle() {
   adoptCircle(me);
   state.socials = [];
   state.plans = [];
+  forgetMapAll();
   state.notifications = [];
   state.chat = null;
   state.chatThread = null;
@@ -740,9 +748,23 @@ function adoptCircle(me) {
 }
 
 function circleHeader(path, options) {
-  if (!state.circleId || options.circle === null || options.token === null) return {};
+  if (options.circle === null || options.token === null) return {};
+  if (typeof options.circle === "string" && options.circle) return { "x-circle": options.circle };
+  if (!state.circleId) return {};
   if (/^\/api\/(meta|auth\/|invites\/|buzz\/|plans\/share\/)/.test(path)) return {};
+  const owned = mapEventCircle(path);
+  if (owned) return { "x-circle": owned };
   return { "x-circle": state.circleId };
+}
+
+/** With All circles on, an event route goes to the circle the event lives in. */
+function mapEventCircle(path) {
+  if (!state.mapAllCircles) return "";
+  const match = /^\/api\/(socials|plans)\/([^/?]+)/.exec(path);
+  if (!match) return "";
+  const list = match[1] === "plans" ? state.mapPlans : state.mapSocials;
+  const item = list.find((row) => row.id === match[2]);
+  return item ? actingCircle(item) : "";
 }
 
 async function api(path, options = {}) {
@@ -803,6 +825,7 @@ function clearSession() {
   state.me = null;
   state.socials = [];
   state.plans = [];
+  forgetMapAll();
   state.notifications = [];
   state.bootstrappedNotifs = false;
   state.past = false;
@@ -2260,8 +2283,8 @@ function openEventDetail(kind, item) {
 function eventDetailItem() {
   const detail = state.eventDetail;
   if (!detail) return null;
-  if (detail.kind === "plan") return state.plans.find((row) => row.id === detail.id) || null;
-  return state.socials.find((row) => row.id === detail.id) || null;
+  if (detail.kind === "plan") return state.plans.find((row) => row.id === detail.id) || mapEvents().plans.find((row) => row.id === detail.id) || null;
+  return state.socials.find((row) => row.id === detail.id) || mapEvents().socials.find((row) => row.id === detail.id) || null;
 }
 
 function eventDetailSheet() {
@@ -3293,6 +3316,83 @@ function canEnableNotifications(signals, guide) {
   return false;
 }
 
+/** The events the map shows: every circle when All circles is on, else the selected one. */
+function mapEvents() {
+  if (state.mapAllCircles) return { socials: state.mapSocials, plans: state.mapPlans };
+  return { socials: state.socials, plans: state.plans };
+}
+
+function forgetMapAll() {
+  state.mapSocials = [];
+  state.mapPlans = [];
+}
+
+async function refreshMapAll() {
+  try {
+    const [socials, plans] = await Promise.all([
+      api("/api/socials?all=1", { circle: null }),
+      api("/api/plans?all=1", { circle: null }),
+    ]);
+    state.mapSocials = socials.socials || [];
+    state.mapPlans = plans.plans || [];
+  } catch (error) {
+    if (error.status === 401) return;
+    if (isNetworkFailure(error) || error.status >= 500) noteConnectionProblem(error);
+  }
+}
+
+/** The circle an event lives in, so In, chat and share hit its home circle from the All map. */
+function actingCircle(item) {
+  const mine = new Set((state.me?.circles || []).map((circle) => circle.id));
+  if (item?.circleId && (!mine.size || mine.has(item.circleId))) return item.circleId;
+  const shared = (item?.circles || []).find((circle) => mine.has(circle.id));
+  return shared?.id || state.circleId;
+}
+
+async function setMapAll(on) {
+  if (state.mapAllCircles === on) return;
+  state.mapAllCircles = on;
+  try {
+    localStorage.setItem(MAP_ALL_KEY, on ? "1" : "0");
+  } catch {
+    /* storage off */
+  }
+  if (on) await refreshMapAll();
+  // A fresh map fits to the new set of pins.
+  destroyLiveMap();
+  mapWrap = null;
+  render();
+  refreshPins();
+}
+
+function mapScopeControl() {
+  if ((state.me?.circles || []).length < 2) return null;
+  const all = state.mapAllCircles;
+  return el("div", { class: "map-scope segment", role: "group", "aria-label": "Map scope" }, [
+    el("button", {
+      type: "button",
+      class: all ? "" : "on",
+      "aria-pressed": all ? "false" : "true",
+      text: "This circle",
+      onclick: () => void setMapAll(false),
+    }),
+    el("button", {
+      type: "button",
+      class: all ? "on" : "",
+      "aria-pressed": all ? "true" : "false",
+      text: "All circles",
+      onclick: () => void setMapAll(true),
+    }),
+  ]);
+}
+
+function mapCircleLine(item) {
+  if (!state.mapAllCircles || !item) return null;
+  if (item.circles && item.circles.length >= 2) return null;
+  if (!item.circleName) return null;
+  return el("p", { class: "map-card-circle", text: item.circleName });
+}
+
 function mapScreen() {
   const pins = collectPins();
   if (!pins.length) {
@@ -3300,6 +3400,7 @@ function mapScreen() {
     mapWrap = null;
     return el("div", { class: "map-screen" }, [
       screenHeader("Map"),
+      mapScopeControl(),
       el("div", { class: "map-empty" }, [
         el("h2", { text: "No places yet" }),
         el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
@@ -3314,13 +3415,15 @@ function mapScreen() {
   }
   return el("div", { class: "map-screen" }, [
     screenHeader("Map"),
+    mapScopeControl(),
     mapWrap,
   ]);
 }
 
 function collectPins() {
   const pins = [];
-  for (const social of state.socials) {
+  const events = mapEvents();
+  for (const social of events.socials) {
     if (!social.location) continue;
     const mine = social.creator.id === state.me.user.id;
     const place = audiencePlace(social.place);
@@ -3343,7 +3446,7 @@ function collectPins() {
       label: pinLabel("social", social, Date.now(), appTz()),
     });
   }
-  for (const plan of state.plans) {
+  for (const plan of events.plans) {
     if (!plan.location) continue;
     const mine = plan.creator.id === state.me.user.id;
     const place = audiencePlace(plan.place);
@@ -4864,11 +4967,12 @@ function consumeDeepLink() {
 
 function mapCard(pin) {
   const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, pin)) : "";
+  const events = mapEvents();
   const social = pin.kind === "social"
-    ? state.socials.find((item) => item.id === pin.id) || { id: pin.id, startsAt: null, joined: [] }
+    ? events.socials.find((item) => item.id === pin.id) || { id: pin.id, startsAt: null, joined: [] }
     : null;
   const plan = pin.kind === "plan"
-    ? state.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
+    ? events.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
     : null;
   const item = social?.creator ? social : plan?.creator ? plan : null;
   const kind = social?.creator ? "social" : plan?.creator ? "plan" : pin.kind;
@@ -4902,6 +5006,7 @@ function mapCard(pin) {
     }, [
       el("p", { text: pin.note }),
       el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+      mapCircleLine(item),
       planCirclesLine(plan),
       plan ? planDescription(plan) : null,
       social && !own ? replySummary(social) : null,
@@ -5687,6 +5792,13 @@ async function onTab(id) {
     }
   }
   render();
+  if (id === "map" && state.mapAllCircles) {
+    await refreshMapAll();
+    if (state.tab === "map") {
+      render();
+      refreshPins();
+    }
+  }
 }
 
 function circleNameSheet() {
@@ -6251,6 +6363,7 @@ function onDeleteCircle() {
         state.chatThread = null;
         state.socials = [];
         state.plans = [];
+        forgetMapAll();
         state.notifications = [];
         state.past = false;
         state.pastDays = null;
@@ -6272,6 +6385,7 @@ async function onLeave() {
     state.tab = "home";
     state.socials = [];
     state.plans = [];
+    forgetMapAll();
     state.notifications = [];
     // Alerts start over: the next list only remembers its newest, it does not banner old ones.
     state.bootstrappedNotifs = false;
