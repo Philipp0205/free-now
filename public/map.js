@@ -86,17 +86,21 @@ export function bindMap({
     return { url: meta.mapPmtilesUrl, west, south, east, north, min, dataMax, max: dataMax >= 15 ? TILE_MAX_ZOOM : dataMax };
   }
 
-  /** The whole view, not just its center, has to sit inside the archive, so no part of it is blank. */
+  /**
+   * The archive is used while the map's center is inside its bounds and the zoom is in its range
+   * (max already allows overzoom). The edges of the view may stick out past the archive.
+   */
   function insideCoverage(map, cover) {
     const zoom = map.getZoom();
     if (!(zoom >= cover.min && zoom <= cover.max)) return false;
-    const view = map.getBounds();
-    return view.getWest() >= cover.west && view.getEast() <= cover.east
-      && view.getSouth() >= cover.south && view.getNorth() <= cover.north;
+    const center = map.getCenter();
+    if (!center) return false;
+    return center.lng >= cover.west && center.lng <= cover.east
+      && center.lat >= cover.south && center.lat <= cover.north;
   }
 
   /**
-   * Dark vector tiles where the archive covers the view, the raster tiles everywhere else.
+   * Dark vector tiles while the view is centered on the archive, the raster tiles everywhere else.
    * Decided once the view is set and again after every move or zoom. A swap adds the new layer
    * on top and drops the old one when the new one has drawn, so the map never goes blank.
    * The view never changes here, so a swap cannot trigger another one.
