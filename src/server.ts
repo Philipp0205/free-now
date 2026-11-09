@@ -2,6 +2,7 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { clearExpiredLocations, HISTORY_DAYS, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
+import { startPmtilesFetch } from "./pmtiles-fetch.js";
 import { createNoopPushSender, createWebPushSender } from "./push.js";
 import { sendStartReminders } from "./remind.js";
 import { addDays, isoDate } from "./time.js";
@@ -53,6 +54,8 @@ server.listen(config.port, "0.0.0.0", () => {
   if (config.publicBaseUrl) {
     console.log(`  public url  ${config.publicBaseUrl}`);
   }
+  // Checks (and if needed downloads) the vector basemap without holding up requests.
+  void startPmtilesFetch(config)?.catch(() => {});
 });
 
 function shutdown(): void {

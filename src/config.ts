@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { configuredAdminToken } from "./admin-query.js";
 import { readPmtilesHeader, type PmtilesInfo } from "./pmtiles.js";
+import { safeUrl, type PmtilesSource } from "./pmtiles-fetch.js";
 import { assertTimeZone } from "./time.js";
 
 export type VapidConfig = {
@@ -26,6 +27,11 @@ export type Config = {
   mapTileAttribution: string;
   /** A local PMTiles v3 basemap and its coverage. Null keeps the raster basemap everywhere. */
   mapPmtiles: PmtilesInfo | null;
+  /**
+   * Set with MAP_PMTILES_SHA256 (and optionally MAP_PMTILES_URL). The archive is then checked, and
+   * fetched if needed, in the background by startPmtilesFetch, which fills mapPmtiles when ready.
+   */
+  mapPmtilesSource: PmtilesSource | null;
   /** Set only when ADMIN_TOKEN is at least 32 characters. Otherwise the admin routes stay hidden. */
   adminToken: string | null;
 };
@@ -62,7 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     renotifyMs: 30_000,
     mapTileUrl: readTileUrl(env.MAP_TILE_URL),
     mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
-    mapPmtiles: readPmtiles(env.MAP_PMTILES_PATH),
+    ...readPmtilesConfig(env),
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
   };
 }
@@ -121,6 +127,44 @@ function readAttribution(value: string | undefined): string {
   const raw = value?.trim() || DEFAULT_MAP_TILE_ATTRIBUTION;
   if (raw.length > 240) throw new Error("MAP_TILE_ATTRIBUTION is too long");
   return raw;
+}
+
+/**
+ * MAP_PMTILES_PATH alone: checked right here, as before. With a valid MAP_PMTILES_SHA256 the
+ * file is hashed in the background instead (it can be large), and with MAP_PMTILES_URL as well a
+ * missing or wrong file is downloaded. Until then mapPmtiles stays null: raster only.
+ * A bad URL or sha is logged and ignored rather than stopping the server.
+ */
+function readPmtilesConfig(env: NodeJS.ProcessEnv): Pick<Config, "mapPmtiles" | "mapPmtilesSource"> {
+  const file = env.MAP_PMTILES_PATH?.trim() ?? "";
+  if (file && !path.isAbsolute(file)) throw new Error("MAP_PMTILES_PATH must be an absolute path");
+  let url = env.MAP_PMTILES_URL?.trim() || null;
+  let sha256 = env.MAP_PMTILES_SHA256?.trim().toLowerCase() || null;
+  if (url && !file) {
+    console.warn("MAP_PMTILES_URL ignored: MAP_PMTILES_PATH is not set");
+    url = null;
+  }
+  if (sha256 && !/^[0-9a-f]{64}$/.test(sha256)) {
+    console.warn("MAP_PMTILES_SHA256 ignored: not 64 hex characters");
+    sha256 = null;
+  }
+  if (url) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // Logged below.
+    }
+    if (!parsed || parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      console.warn(`MAP_PMTILES_URL ignored: must be a plain https URL (${parsed ? safeUrl(parsed) : "not a URL"})`);
+      url = null;
+    } else if (!sha256) {
+      console.warn("MAP_PMTILES_URL ignored: MAP_PMTILES_SHA256 is required with it");
+      url = null;
+    }
+  }
+  if (file && sha256) return { mapPmtiles: null, mapPmtilesSource: { path: file, sha256, url } };
+  return { mapPmtiles: readPmtiles(file), mapPmtilesSource: null };
 }
 
 /**
