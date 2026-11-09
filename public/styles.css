@@ -512,8 +512,30 @@ button:disabled { cursor: default; opacity: 0.55; }
 .card-share.ready { background: #fff; color: #9f1239; box-shadow: inset 0 0 0 2px #e0115f; }
 .card-share.busy { opacity: 0.7; cursor: progress; }
 .card-share:focus-visible { outline: 2px solid #ff4d8d; outline-offset: 2px; }
-.map-card .card-overflow { position: relative; top: auto; right: auto; }
+/* The ⋯ host is static, so its menu anchors to .map-card-head and right: 0 is the card's inner edge, past Close. */
+.map-card .card-overflow { position: static; top: auto; right: auto; }
 .map-card .card-more { background: #2c2c2e; }
+/* Close: same 44px round button as ⋯, a little quieter, always the top-right corner of the card. */
+.map-card-close {
+  appearance: none;
+  border: 0;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-right: -4px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  color: #d1d1d6;
+  cursor: pointer;
+  transition: background-color 100ms ease-out, color 100ms ease-out;
+}
+.map-card-close .icon, .map-card-close .icon svg { width: 20px; height: 20px; display: block; }
+.map-card-close:hover, .map-card-close:active { background: #2c2c2e; color: #fff; }
+.map-card.card-grad .map-card-close { color: rgba(255, 255, 255, 0.82); }
+.map-card.card-grad .map-card-close:hover, .map-card.card-grad .map-card-close:active { background: rgba(0, 0, 0, 0.22); color: #fff; }
 .map-card.menu-open { overflow: visible; z-index: 1100; }
 .map-card .chat-row { background: #2c2c2e; }
 .map-card .in-toggle { margin-top: 10px; }
@@ -1453,7 +1475,7 @@ html.kb-open .sheet .help { margin-top: 0; }
 .map-card .who-row { margin-top: 6px; color: #d1d1d6; }
 .map-card .who-row .reply-line { margin: 0; }
 .map-card strong { display: block; font-size: 16px; }
-.map-card-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.map-card-head { position: relative; display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .map-card-head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .map-card .card-tools { position: static; flex: none; }
 .map-card .card-tools .event-tool { background: #2c2c2e; }
@@ -1636,6 +1658,78 @@ html.kb-open .sheet .help { margin-top: 0; }
   .leaflet-marker-icon.pin-now .pin-body,
   .leaflet-marker-icon.pin-now .pin-body::before { animation: none; }
   .leaflet-marker-icon.pin-now .pin-body::before { box-shadow: 0 0 0 3px #fff, 0 0 0 7px #ff2d78; }
+}
+
+/*
+ * Map pins (.pin-styled, set by pinIcon): a dark glass pill. The avatar sits on the latlng,
+ * the crowd and the day label sit inside the pill to its right. The where-picker pin keeps
+ * the plain circle above.
+ */
+.leaflet-marker-icon.pin.pin-styled {
+  overflow: visible;
+  justify-items: start;
+  background: transparent;
+  box-shadow: none;
+}
+.leaflet-marker-icon.pin.pin-styled .pin-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: max-content;
+  height: var(--pin);
+  padding: 3px 10px 3px 3px;
+  border-radius: 999px;
+  background: rgba(28, 28, 30, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .leaflet-marker-icon.pin.pin-styled .pin-body {
+    background: rgba(28, 28, 30, 0.58);
+    -webkit-backdrop-filter: blur(12px) saturate(1.5);
+    backdrop-filter: blur(12px) saturate(1.5);
+  }
+}
+.leaflet-marker-icon.pin-social.pin-styled .pin-body {
+  box-shadow: inset 0 0 0 1px rgba(255, 45, 120, 0.55), 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.leaflet-marker-icon.pin-plan.pin-styled .pin-body {
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 10, 0.5), 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.leaflet-marker-icon.pin.pin-styled .pin-letter {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  line-height: 30px;
+  font-size: 13px;
+  transform: none;
+}
+.leaflet-marker-icon.pin.pin-styled .pin-crowd { position: static; }
+.leaflet-marker-icon.pin.pin-styled .pin-face,
+.leaflet-marker-icon.pin.pin-styled .pin-more {
+  min-width: 20px;
+  height: 20px;
+  border-width: 1.5px;
+  border-color: rgba(28, 28, 30, 0.9);
+  line-height: 17px;
+  box-shadow: none;
+}
+.leaflet-marker-icon.pin.pin-styled .pin-more { background: #3a3a3c; }
+.leaflet-marker-icon.pin.pin-styled .pin-when {
+  position: static;
+  transform: none;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 12px;
+  line-height: 16px;
+}
+/* The live ring hugs the 30px avatar, not the whole pill. */
+.leaflet-marker-icon.pin-now.pin-styled .pin-body::before {
+  inset: 3px auto auto 3px;
+  width: 30px;
+  height: 30px;
 }
 
 .guide-scrim {
