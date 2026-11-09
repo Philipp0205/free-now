@@ -12,6 +12,7 @@ export function bindMap({
   paintSummary,
   scheduleReverse,
   recentPlace,
+  keepCardOnMapTap = () => false,
   FINDING_PLACE,
 }) {
   let leafletPromise = null;
@@ -292,8 +293,8 @@ export function bindMap({
   }
 
   /**
-   * One marker per pin. The tap target is still the 36px circle. The crowd and the day
-   * label hang outside it and let taps through, so they never cover another pin.
+   * One marker per pin: a glass pill with the avatar on the latlng, then the crowd and the
+   * day label inside the pill. The crowd lets taps through to the pill.
    */
   function pinIcon(L, pin) {
     const wrap = node("span", "pin-body");
@@ -305,7 +306,7 @@ export function bindMap({
       wrap.append(crowd);
     }
     if (pin.label) wrap.append(node("span", "pin-when", pin.label));
-    const classes = ["pin", `pin-${pin.kind}`];
+    const classes = ["pin", "pin-styled", `pin-${pin.kind}`];
     if (pin.now) classes.push("pin-now");
     return L.divIcon({
       className: classes.join(" "),
@@ -352,10 +353,7 @@ export function bindMap({
       if (next.has(key)) continue;
       entry.marker.remove();
       liveMarkers.delete(key);
-      if (openMapPin === key) {
-        openMapPin = null;
-        document.getElementById("map-card-host")?.replaceChildren();
-      }
+      if (openMapPin === key) closeMapCard();
     }
   }
 
@@ -373,8 +371,7 @@ export function bindMap({
     if (!openMapPin) return;
     const pin = pins.find((item) => pinKey(item) === openMapPin);
     if (!pin) {
-      openMapPin = null;
-      document.getElementById("map-card-host")?.replaceChildren();
+      closeMapCard();
       return;
     }
     showMapCard(pin);
@@ -480,6 +477,8 @@ export function bindMap({
     else map.fitBounds(pins.map((pin) => [pin.lat, pin.lng]), { padding: [48, 48], maxZoom: 15 });
     rememberMapCenter(map);
     map.on("dragend", () => rememberMapCenter(map));
+    // A tap on the map itself, not a pin (markers do not bubble) and not a drag, puts the card away.
+    map.on("click", () => { if (!keepCardOnMapTap()) closeMapCard(); });
     liveMapTimer = scheduleInvalidate(map, () => liveMap === map);
   }
 
@@ -529,5 +528,19 @@ export function bindMap({
     reserveAttribution();
   }
 
-  return { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins };
+  /** Puts the pin card away. The map stays as it is. Focus inside the card goes back to the map. */
+  function closeMapCard() {
+    openMapPin = null;
+    const host = document.getElementById("map-card-host");
+    if (!host) return;
+    const hadFocus = host.contains(document.activeElement);
+    host.replaceChildren();
+    if (hadFocus) document.getElementById("hangry-map")?.focus({ preventScroll: true });
+  }
+
+  function mapCardOpen() {
+    return Boolean(openMapPin && document.querySelector("#map-card-host .map-card"));
+  }
+
+  return { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins, closeMapCard, mapCardOpen };
 }
