@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-08-dark-map-ready",
+    "date": "2026-11-08",
+    "title": "A dark map, where we have one",
+    "bullets": [
+      "The app can now draw a dark street map with German names, but only for an area the server has a map file for.",
+      "Until that file is set up you keep seeing the usual map, and outside its area you always do, with full detail.",
+      "Pins, cards and the live buzz work the same on both maps."
+    ]
+  },
+  {
     "id": "2026-11-08-menu-tab-polish",
     "date": "2026-11-08",
     "title": "Smoother menus and tabs",

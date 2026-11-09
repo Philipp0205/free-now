@@ -15,6 +15,10 @@ export function bindMap({
   FINDING_PLACE,
 }) {
   let leafletPromise = null;
+  let vectorPromise = null;
+  /** Once the archive fails (gone, cut short, unreachable) every map on this page stays raster. */
+  let vectorBroken = false;
+  const brokenListeners = new Set();
   let liveMap = null;
   let liveMapTimer = 0;
   let liveMarkers = new Map();
@@ -23,6 +27,8 @@ export function bindMap({
   let whereMapTimer = 0;
   const TILE_MAX_ZOOM = 19;
   const PIN_PX = 36;
+  const PMTILES_ATTRIBUTION =
+    '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
   /** Photo URLs that did not decode. Those pins keep their initials on every repaint. */
   const brokenPhotos = new Set();
 
@@ -51,18 +57,179 @@ export function bindMap({
     return { lat: 51.1657, lng: 10.4515, zoom: 6 };
   }
 
-  function addMapTiles(L, map) {
+  function rasterLayer(L) {
     const tileUrl = state.meta?.mapTileUrl
       || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
     const tileAttribution = state.meta?.mapTileAttribution
       || "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
-    L.tileLayer(tileUrl, {
+    return L.tileLayer(tileUrl, {
       attribution: tileAttribution,
       subdomains: tileUrl.includes("{s}") ? "abcd" : "abc",
       detectRetina: tileUrl.includes("{r}"),
       maxZoom: TILE_MAX_ZOOM,
       maxNativeZoom: TILE_MAX_ZOOM,
-    }).addTo(map);
+    });
+  }
+
+  /**
+   * Where the server's archive has data: its header bounds and zoom range. Null without one.
+   * A full-detail archive (data to z15) is drawn past its last level up to the map's max zoom;
+   * a shallower one stops where its data stops.
+   */
+  function vectorCoverage(meta) {
+    const bounds = meta?.mapPmtilesBounds;
+    if (!meta?.mapPmtilesUrl || !Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite)) return null;
+    const [west, south, east, north] = bounds;
+    if (!(west < east && south < north)) return null;
+    const min = Number.isFinite(meta.mapPmtilesMinZoom) ? meta.mapPmtilesMinZoom : 0;
+    const dataMax = Number.isFinite(meta.mapPmtilesMaxZoom) ? meta.mapPmtilesMaxZoom : 15;
+    return { url: meta.mapPmtilesUrl, west, south, east, north, min, dataMax, max: dataMax >= 15 ? TILE_MAX_ZOOM : dataMax };
+  }
+
+  /** The whole view, not just its center, has to sit inside the archive, so no part of it is blank. */
+  function insideCoverage(map, cover) {
+    const zoom = map.getZoom();
+    if (!(zoom >= cover.min && zoom <= cover.max)) return false;
+    const view = map.getBounds();
+    return view.getWest() >= cover.west && view.getEast() <= cover.east
+      && view.getSouth() >= cover.south && view.getNorth() <= cover.north;
+  }
+
+  /**
+   * Dark vector tiles where the archive covers the view, the raster tiles everywhere else.
+   * Decided once the view is set and again after every move or zoom. A swap adds the new layer
+   * on top and drops the old one when the new one has drawn, so the map never goes blank.
+   * The view never changes here, so a swap cannot trigger another one.
+   */
+  function addMapTiles(L, map) {
+    const cover = vectorCoverage(state.meta);
+    if (!cover) {
+      rasterLayer(L).addTo(map);
+      return;
+    }
+    let gone = false;
+    let archive = null;
+    let loading = false;
+    let shown = null;
+    let next = null;
+    let swapTimer = 0;
+    let waitTimer = 0;
+
+    const build = (mode) => (mode === "raster" ? rasterLayer(L) : window.protomapsL.leafletLayer({
+      url: archive,
+      flavor: "dark",
+      lang: "de",
+      attribution: state.meta?.mapPmtilesAttribution || PMTILES_ATTRIBUTION,
+      maxZoom: TILE_MAX_ZOOM,
+      maxDataZoom: cover.dataMax,
+      bounds: [[cover.south, cover.west], [cover.north, cover.east]],
+    }));
+
+    const finishSwap = (layer) => {
+      clearTimeout(swapTimer);
+      if (gone || next?.layer !== layer) return;
+      shown?.layer.remove();
+      shown = next;
+      next = null;
+    };
+
+    const show = (mode) => {
+      const layer = build(mode);
+      if (!shown) {
+        shown = { mode, layer };
+        layer.addTo(map);
+        return;
+      }
+      next = { mode, layer };
+      layer.once("load", () => finishSwap(layer));
+      // A vector tile that is skipped mid-zoom never reports back. Do not wait on it forever.
+      swapTimer = setTimeout(() => finishSwap(layer), 2500);
+      layer.addTo(map);
+    };
+
+    const settle = () => {
+      if (gone) return;
+      const mode = !vectorBroken && insideCoverage(map, cover) ? "vector" : "raster";
+      if (mode === "vector" && !archive) {
+        if (!loading) {
+          loading = true;
+          // A slow archive must not leave the map empty: raster first, vector once it is ready.
+          if (!shown) waitTimer = setTimeout(() => { if (!shown && !gone) show("raster"); }, 4000);
+          loadVectorArchive(cover.url).then(
+            (ready) => { archive = ready; },
+            (error) => markVectorBroken(error),
+          ).finally(() => {
+            loading = false;
+            clearTimeout(waitTimer);
+            settle();
+          });
+        }
+        return;
+      }
+      if ((next || shown)?.mode === mode) return;
+      if (next) {
+        clearTimeout(swapTimer);
+        next.layer.remove();
+        next = null;
+        if (shown?.mode === mode) return;
+      }
+      show(mode);
+    };
+
+    brokenListeners.add(settle);
+    map.once("unload", () => {
+      gone = true;
+      brokenListeners.delete(settle);
+      clearTimeout(swapTimer);
+      clearTimeout(waitTimer);
+    });
+    map.whenReady(settle);
+    map.on("moveend zoomend", settle);
+  }
+
+  function markVectorBroken(error) {
+    if (vectorBroken) return;
+    vectorBroken = true;
+    console.warn("vector basemap unavailable, using raster tiles", error);
+    for (const listener of [...brokenListeners]) listener();
+  }
+
+  /**
+   * The archive, header already read. Every later byte read is watched: a failure that is not our
+   * own cancel (a 404 or 503, a cut connection, offline) gives up on vector tiles for this page.
+   * A failed vector tile would otherwise stay an empty dark square.
+   */
+  function loadVectorArchive(url) {
+    if (!vectorPromise) {
+      vectorPromise = loadProtomaps().then(async (protomapsL) => {
+        const archive = new protomapsL.PmtilesSource(url, true).p;
+        await archive.getHeader();
+        const source = archive.source;
+        const getBytes = source.getBytes.bind(source);
+        source.getBytes = async (...args) => {
+          try {
+            return await getBytes(...args);
+          } catch (error) {
+            if (error?.name !== "AbortError") markVectorBroken(error);
+            throw error;
+          }
+        };
+        return archive;
+      });
+    }
+    return vectorPromise;
+  }
+
+  /** Same loading as Leaflet: one script tag from /vendor, after Leaflet itself. */
+  function loadProtomaps() {
+    if (window.protomapsL) return Promise.resolve(window.protomapsL);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "/vendor/protomaps-leaflet/protomaps-leaflet.js";
+      script.onload = () => (window.protomapsL ? resolve(window.protomapsL) : reject(new Error("vector map failed to load")));
+      script.onerror = () => reject(new Error("vector map failed to load"));
+      document.body.append(script);
+    });
   }
 
   function destroyLiveMap() {

@@ -1,6 +1,9 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { configuredAdminToken } from "./admin-query.js";
+import { readPmtilesHeader, type PmtilesInfo } from "./pmtiles.js";
+import { safeUrl, type PmtilesSource } from "./pmtiles-fetch.js";
 import { assertTimeZone } from "./time.js";
 
 export type VapidConfig = {
@@ -22,6 +25,13 @@ export type Config = {
   renotifyMs: number;
   mapTileUrl: string;
   mapTileAttribution: string;
+  /** A local PMTiles v3 basemap and its coverage. Null keeps the raster basemap everywhere. */
+  mapPmtiles: PmtilesInfo | null;
+  /**
+   * Set with MAP_PMTILES_SHA256 (and optionally MAP_PMTILES_URL). The archive is then checked, and
+   * fetched if needed, in the background by startPmtilesFetch, which fills mapPmtiles when ready.
+   */
+  mapPmtilesSource: PmtilesSource | null;
   /** Set only when ADMIN_TOKEN is at least 32 characters. Otherwise the admin routes stay hidden. */
   adminToken: string | null;
 };
@@ -33,6 +43,9 @@ const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 // zoom 19 here; 20+ is the "Map data not yet available" placeholder.
 const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const DEFAULT_MAP_TILE_ATTRIBUTION = "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
+export const MAP_PMTILES_URL = "/tiles/basemap.pmtiles";
+export const MAP_PMTILES_ATTRIBUTION =
+  '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Config {
   const port = readPort(env.PORT);
@@ -55,6 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     renotifyMs: 30_000,
     mapTileUrl: readTileUrl(env.MAP_TILE_URL),
     mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
+    ...readPmtilesConfig(env),
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
   };
 }
@@ -113,6 +127,72 @@ function readAttribution(value: string | undefined): string {
   const raw = value?.trim() || DEFAULT_MAP_TILE_ATTRIBUTION;
   if (raw.length > 240) throw new Error("MAP_TILE_ATTRIBUTION is too long");
   return raw;
+}
+
+/**
+ * MAP_PMTILES_PATH alone: checked right here, as before. With a valid MAP_PMTILES_SHA256 the
+ * file is hashed in the background instead (it can be large), and with MAP_PMTILES_URL as well a
+ * missing or wrong file is downloaded (with MAP_PMTILES_TOKEN as a bearer token). Until then mapPmtiles stays null: raster only.
+ * A bad URL or sha is logged and ignored rather than stopping the server.
+ */
+function readPmtilesConfig(env: NodeJS.ProcessEnv): Pick<Config, "mapPmtiles" | "mapPmtilesSource"> {
+  const file = env.MAP_PMTILES_PATH?.trim() ?? "";
+  if (file && !path.isAbsolute(file)) throw new Error("MAP_PMTILES_PATH must be an absolute path");
+  let url = env.MAP_PMTILES_URL?.trim() || null;
+  let sha256 = env.MAP_PMTILES_SHA256?.trim().toLowerCase() || null;
+  if (url && !file) {
+    console.warn("MAP_PMTILES_URL ignored: MAP_PMTILES_PATH is not set");
+    url = null;
+  }
+  if (sha256 && !/^[0-9a-f]{64}$/.test(sha256)) {
+    console.warn("MAP_PMTILES_SHA256 ignored: not 64 hex characters");
+    sha256 = null;
+  }
+  if (url) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // Logged below.
+    }
+    if (!parsed || parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      console.warn(`MAP_PMTILES_URL ignored: must be a plain https URL (${parsed ? safeUrl(parsed) : "not a URL"})`);
+      url = null;
+    } else if (!sha256) {
+      console.warn("MAP_PMTILES_URL ignored: MAP_PMTILES_SHA256 is required with it");
+      url = null;
+    }
+  }
+  // A secret: only its presence is ever logged.
+  let token = env.MAP_PMTILES_TOKEN?.trim() || null;
+  if (token && !/^[\x21-\x7e]+$/.test(token)) {
+    console.warn("MAP_PMTILES_TOKEN ignored: must be printable ASCII without spaces");
+    token = null;
+  }
+  if (token && !url) {
+    console.warn("MAP_PMTILES_TOKEN ignored: no usable MAP_PMTILES_URL");
+    token = null;
+  }
+  if (file && sha256) return { mapPmtiles: null, mapPmtilesSource: { path: file, sha256, url, token } };
+  return { mapPmtiles: readPmtiles(file), mapPmtilesSource: null };
+}
+
+/**
+ * Unset: null. Set to a missing file, a directory, or anything that is not a PMTiles v3
+ * archive with sane bounds: null with a warning, so the raster map keeps working.
+ */
+function readPmtiles(value: string | undefined): PmtilesInfo | null {
+  const raw = value?.trim() ?? "";
+  if (!raw) return null;
+  if (!path.isAbsolute(raw)) throw new Error("MAP_PMTILES_PATH must be an absolute path");
+  try {
+    if (!fs.statSync(raw).isFile()) throw new Error("not a file");
+    return readPmtilesHeader(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`MAP_PMTILES_PATH disabled (${reason}), keeping the raster basemap: ${raw}`);
+    return null;
+  }
 }
 
 function readVapid(env: NodeJS.ProcessEnv): VapidConfig | null {
