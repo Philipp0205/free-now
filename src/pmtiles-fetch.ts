@@ -13,8 +13,12 @@ export const PMTILES_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
-/** Where the archive should live, its expected sha256, and where to fetch it when it is not there. */
-export type PmtilesSource = { path: string; sha256: string; url: string | null };
+/**
+ * Where the archive should live, its expected sha256, where to fetch it when it is not there, and
+ * an optional bearer token for that URL (private GitHub release assets). The token is a secret:
+ * it only ever goes into an Authorization header, never into a URL or a log line.
+ */
+export type PmtilesSource = { path: string; sha256: string; url: string | null; token: string | null };
 
 export type PmtilesFetchTuning = {
   attempts: number;
@@ -50,6 +54,25 @@ export function safeUrl(url: URL | string): string {
   }
 }
 
+/** Headers for one hop. Authorization only when this hop may carry the token. */
+export function pmtilesRequestHeaders(url: URL, token: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    // GitHub's release asset API answers JSON metadata unless asked for the bytes.
+    accept: url.hostname.toLowerCase() === "api.github.com" ? "application/octet-stream" : "*/*",
+    "accept-encoding": "identity",
+    "user-agent": "hangry-pmtiles-fetch",
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
+  return headers;
+}
+
+/** Keeps the token out of every line, whatever a URL or an error message happens to contain. */
+function redactingLog(log: Pick<Console, "log" | "warn">, token: string | null): Pick<Console, "log" | "warn"> {
+  if (!token) return log;
+  const clean = (line: string): string => String(line).split(token).join("[redacted]");
+  return { log: (line: string) => log.log(clean(line)), warn: (line: string) => log.warn(clean(line)) };
+}
+
 function reasonOf(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const cause = (error as { cause?: unknown }).cause;
@@ -74,6 +97,7 @@ export async function ensurePmtiles(
   tuning: Partial<PmtilesFetchTuning> = {},
 ): Promise<PmtilesInfo | null> {
   const o = { ...DEFAULTS, ...tuning };
+  o.log = redactingLog(o.log, source.token);
   try {
     const present = await checkPresent(source.path, source.sha256);
     if (present.ok) {
@@ -142,7 +166,7 @@ async function download(
   for (let attempt = 1; attempt <= o.attempts; attempt++) {
     const tmp = path.join(path.dirname(target), `${tempPrefix(target)}${process.pid}-${crypto.randomBytes(4).toString("hex")}.download`);
     try {
-      const got = await downloadOnce(url, tmp, o);
+      const got = await downloadOnce(url, source.token, tmp, o);
       if (got !== source.sha256) throw new FatalError(`sha256 mismatch, got ${got}`);
       try {
         readPmtilesHeader(tmp);
@@ -175,7 +199,7 @@ function assertAllowed(url: URL, allowHttp: boolean): void {
 }
 
 /** Streams one attempt into tmp and returns the sha256 of what arrived. */
-async function downloadOnce(start: URL, tmp: string, o: PmtilesFetchTuning): Promise<string> {
+async function downloadOnce(start: URL, token: string | null, tmp: string, o: PmtilesFetchTuning): Promise<string> {
   const controller = new AbortController();
   let idle: NodeJS.Timeout | undefined;
   const arm = (): void => {
@@ -184,7 +208,7 @@ async function downloadOnce(start: URL, tmp: string, o: PmtilesFetchTuning): Pro
   };
   arm();
   try {
-    const response = await follow(start, controller.signal, o.allowHttp);
+    const response = await follow(start, token, controller.signal, o.allowHttp);
     const declared = Number(response.headers.get("content-length") ?? NaN);
     if (Number.isFinite(declared) && declared > o.maxBytes) {
       throw new FatalError(`file is ${declared} bytes, over the ${o.maxBytes} byte cap`);
@@ -213,21 +237,24 @@ async function downloadOnce(start: URL, tmp: string, o: PmtilesFetchTuning): Pro
   }
 }
 
-/** Follows redirects by hand so every hop is checked for https. No auth headers are sent. */
-async function follow(start: URL, signal: AbortSignal, allowHttp: boolean): Promise<Response> {
+/**
+ * Follows redirects by hand so every hop is checked for https. The token goes to the first host
+ * only: once a redirect leaves that host (GitHub sends asset downloads to a signed
+ * objects.githubusercontent.com URL) it is dropped for good, even if a later hop comes back.
+ */
+async function follow(start: URL, token: string | null, signal: AbortSignal, allowHttp: boolean): Promise<Response> {
   let current = start;
+  let auth = token;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     assertAllowed(current, allowHttp);
-    const response = await fetch(current, {
-      redirect: "manual",
-      signal,
-      headers: { accept: "application/octet-stream", "accept-encoding": "identity", "user-agent": "hangry-pmtiles-fetch" },
-    });
+    const response = await fetch(current, { redirect: "manual", signal, headers: pmtilesRequestHeaders(current, auth) });
     if (REDIRECTS.has(response.status)) {
       await response.body?.cancel().catch(() => {});
       const location = response.headers.get("location");
       if (!location) throw new Error(`HTTP ${response.status} redirect without Location`);
-      current = new URL(location, current);
+      const next = new URL(location, current);
+      if (next.host.toLowerCase() !== current.host.toLowerCase() || next.protocol !== current.protocol) auth = null;
+      current = next;
       continue;
     }
     if (!response.ok) {

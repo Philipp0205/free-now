@@ -132,7 +132,7 @@ function readAttribution(value: string | undefined): string {
 /**
  * MAP_PMTILES_PATH alone: checked right here, as before. With a valid MAP_PMTILES_SHA256 the
  * file is hashed in the background instead (it can be large), and with MAP_PMTILES_URL as well a
- * missing or wrong file is downloaded. Until then mapPmtiles stays null: raster only.
+ * missing or wrong file is downloaded (with MAP_PMTILES_TOKEN as a bearer token). Until then mapPmtiles stays null: raster only.
  * A bad URL or sha is logged and ignored rather than stopping the server.
  */
 function readPmtilesConfig(env: NodeJS.ProcessEnv): Pick<Config, "mapPmtiles" | "mapPmtilesSource"> {
@@ -163,7 +163,17 @@ function readPmtilesConfig(env: NodeJS.ProcessEnv): Pick<Config, "mapPmtiles" | 
       url = null;
     }
   }
-  if (file && sha256) return { mapPmtiles: null, mapPmtilesSource: { path: file, sha256, url } };
+  // A secret: only its presence is ever logged.
+  let token = env.MAP_PMTILES_TOKEN?.trim() || null;
+  if (token && !/^[\x21-\x7e]+$/.test(token)) {
+    console.warn("MAP_PMTILES_TOKEN ignored: must be printable ASCII without spaces");
+    token = null;
+  }
+  if (token && !url) {
+    console.warn("MAP_PMTILES_TOKEN ignored: no usable MAP_PMTILES_URL");
+    token = null;
+  }
+  if (file && sha256) return { mapPmtiles: null, mapPmtilesSource: { path: file, sha256, url, token } };
   return { mapPmtiles: readPmtiles(file), mapPmtilesSource: null };
 }
 
