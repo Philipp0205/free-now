@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+import zlib from "node:zlib";
 
 const SOURCE = fs.readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
 
@@ -134,4 +135,47 @@ test("a push without a row id shows the notification and sends no ack", async ()
 test("the service worker cache moved past v9", () => {
   const version = Number(/const CACHE = "hangry-v(\d+)"/.exec(SOURCE)?.[1]);
   assert.ok(version >= 10);
+});
+
+/** Reads an RGBA PNG written by scripts/generate-assets.mjs (8-bit, no interlace, filter 0 rows). */
+function readRgbaPng(file: URL) {
+  const data = fs.readFileSync(file);
+  assert.equal(data.subarray(1, 4).toString("latin1"), "PNG");
+  const width = data.readUInt32BE(16);
+  const height = data.readUInt32BE(20);
+  assert.equal(data[24], 8, "8-bit");
+  assert.equal(data[25], 6, "RGBA");
+  const parts: Buffer[] = [];
+  for (let at = 8; at < data.length; ) {
+    const length = data.readUInt32BE(at);
+    if (data.subarray(at + 4, at + 8).toString("latin1") === "IDAT") parts.push(data.subarray(at + 8, at + 8 + length));
+    at += length + 12;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(parts));
+  const stride = width * 4;
+  const pixels = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y += 1) {
+    assert.equal(raw[y * (stride + 1)], 0, "unfiltered rows");
+    raw.copy(pixels, y * stride, y * (stride + 1) + 1, (y + 1) * (stride + 1));
+  }
+  return { width, height, pixels };
+}
+
+test("the notification badge is a bold solid silhouette that fills most of the canvas", () => {
+  assert.match(SOURCE, /badge: "\/icons\/badge-96\.png"/);
+  const { width, height, pixels } = readRgbaPng(new URL("../public/icons/badge-96.png", import.meta.url));
+  assert.equal(width, 96);
+  assert.equal(height, 96);
+  let opaque = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] >= 250) {
+      opaque += 1;
+      assert.deepEqual([...pixels.subarray(i, i + 3)], [255, 255, 255], "opaque pixels are white");
+    }
+  }
+  // Android keeps only the alpha. A faint or tiny shape vanishes in the status bar.
+  assert.ok(opaque / (width * height) >= 0.5, `only ${opaque} of ${width * height} pixels are solid`);
+  const centre = (48 * width + 48) * 4;
+  assert.equal(pixels[centre + 3], 255, "solid in the middle");
+  assert.equal(pixels[3], 0, "clear in the corner");
 });
