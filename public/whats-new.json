@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-10-flic-button",
+    "date": "2026-11-10",
+    "title": "Say you're free with a Flic button",
+    "bullets": [
+      "The You tab has a new Set up a Flic button section, with your button link and the steps for the Flic app.",
+      "One press tells your circle you're free now.",
+      "Holding the button can end your hangout again."
+    ]
+  },
+  {
     "id": "2026-11-10-calendar-availability",
     "date": "2026-11-10",
     "title": "Share when you're free",
