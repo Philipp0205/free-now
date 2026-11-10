@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-10-circle-switch-alerts",
+    "date": "2026-11-10",
+    "title": "Alerts no longer repeat when you switch circles",
+    "bullets": [
+      "Switching circles no longer pops up alerts you have already seen.",
+      "A new alert now shows once, even right after a few switches.",
+      "The Alerts list and the circle name stay on the circle you picked."
+    ]
+  },
+  {
     "id": "2026-11-09-glass-pins",
     "date": "2026-11-09",
     "title": "Nicer map pins",
