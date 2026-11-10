@@ -25,7 +25,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v68";
+const APP_VERSION = "hangry-v69";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -39,6 +39,14 @@ let menuJustOpened = null;
 /** Pops we caused ourselves via history.go() and must not treat as Back. */
 let ignoreSheetPop = 0;
 let closingFromPop = false;
+/**
+ * Every refresh() is numbered when it starts. The 3s poll, a switch and an action can overlap, and their
+ * answers can land in any order. Only the newest answer for the circle on screen is applied, see refreshIsStale.
+ */
+let refreshSeq = 0;
+let refreshApplied = 0;
+/** Refreshes numbered below this were asked for a circle we have since left. */
+let refreshFloor = 0;
 
 const state = {
   booting: true,
@@ -407,8 +415,9 @@ function friendlyMessage(raw, status) {
 }
 
 async function refresh({ initial = false } = {}) {
+  const seq = ++refreshSeq;
   if (state.token && state.me && !state.me.circle) {
-    await refreshPersonalAlerts();
+    await refreshPersonalAlerts(seq);
     return;
   }
   if (!state.token || !state.me?.circle) return;
@@ -428,6 +437,7 @@ async function refresh({ initial = false } = {}) {
       state.chat ? api(chatTargetUrl(state.chat)) : Promise.resolve(null),
     ]);
   } catch (error) {
+    if (refreshIsStale(seq)) return;
     if (error.status === 401) return;
     if (error.status === 404 && state.circleId) {
       const moved = await releaseMissingCircle();
@@ -440,6 +450,10 @@ async function refresh({ initial = false } = {}) {
     }
     return;
   }
+  // A late answer for the circle we left, or one older than what is on screen, would repaint old data
+  // and banner alerts that were already seen.
+  if (refreshIsStale(seq)) return;
+  refreshApplied = seq;
   state.socials = socials.socials;
   state.plans = plans.plans;
   if (state.tab === "map" && state.eventsView === "calendar") await loadCalendar({ force: true });
@@ -479,6 +493,11 @@ async function refresh({ initial = false } = {}) {
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
+}
+
+/** True when refresh number `seq` was asked for a circle we have left, or a newer one already landed. */
+function refreshIsStale(seq) {
+  return seq < refreshFloor || seq < refreshApplied;
 }
 
 async function releaseMissingCircle() {
@@ -762,6 +781,7 @@ function bindKeyboard() {
 bindKeyboard();
 
 function rememberCircle(id) {
+  if ((id || "") !== state.circleId) refreshFloor = refreshSeq + 1;
   state.circleId = id || "";
   if (state.circleId) localStorage.setItem(CIRCLE_KEY, state.circleId);
   else localStorage.removeItem(CIRCLE_KEY);
@@ -1531,7 +1551,7 @@ function noteNewestAlert() {
  * Someone in no circle still has their own alerts (for example "Your suggestion is live").
  * The server answers with personal alerts only when no circle is named.
  */
-async function refreshPersonalAlerts() {
+async function refreshPersonalAlerts(seq) {
   let data;
   try {
     // No x-circle header: a stale remembered circle would turn this into a 404.
@@ -1539,7 +1559,8 @@ async function refreshPersonalAlerts() {
   } catch {
     return;
   }
-  if (state.me?.circle) return;
+  if (state.me?.circle || refreshIsStale(seq)) return;
+  refreshApplied = seq;
   state.notifications = Array.isArray(data?.notifications) ? data.notifications : [];
   noteNewestAlert();
   const signature = JSON.stringify({

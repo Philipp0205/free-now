@@ -218,3 +218,33 @@ test("sharing a plan into another circle creates its new-plan alert there and li
     assert.deepEqual(await alertUnread(ctx, cam.token), { [b.id]: 0 });
   });
 });
+
+test("switching circles back and forth sends no push and adds no alert, and one free post is one alert and one push", async () => {
+  await withApp(async (ctx) => {
+    const { alex, bea, a, b } = await twoCircles(ctx);
+    // Bea re-subscribes the same phone on each switch. The endpoint stays one subscription.
+    const sub = { endpoint: "https://push.example/bea-phone", keys: { p256dh: "p", auth: "a" } };
+    const before = ctx.db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ?").get(bea.user.id) as { n: number };
+    for (const circle of [a, b, a, b, a]) {
+      await api(ctx, "POST", `/api/push/subscribe?circle=${circle.id}`, { token: bea.token, body: sub, status: 204 });
+      for (const path of ["/api/me", "/api/socials", "/api/plans", "/api/notifications", "/api/chats"]) {
+        await api(ctx, "GET", `${path}?circle=${circle.id}`, { token: bea.token, status: 200 });
+      }
+    }
+    assert.equal(ctx.sent.length, 0, "switching is not news");
+    const after = ctx.db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ?").get(bea.user.id) as { n: number };
+    assert.equal(Number(after.n), Number(before.n));
+    assert.equal(Number((ctx.db.prepare("SELECT COUNT(*) AS n FROM push_subs WHERE user_id = ?").get(bea.user.id) as { n: number }).n), 1);
+
+    const social = await api(ctx, "POST", `/api/socials?circle=${a.id}`, { token: alex.token, body: { note: "Coffee" }, status: 201 });
+    const id = social.json.social.id as string;
+    assert.equal(ctx.sent.length, 1, "one push for one free post");
+    assert.equal(ctx.sent[0].tag, `social:${id}`, "a stable tag, so the phone replaces rather than stacks");
+    const rows = ctx.db.prepare("SELECT circle_id FROM notifications WHERE user_id = ? AND ref_id = ?").all(bea.user.id, id) as Array<{ circle_id: string }>;
+    assert.deepEqual(rows.map((row) => row.circle_id), [a.id], "one alert, in Home only");
+    const inHome = await api(ctx, "GET", `/api/notifications?circle=${a.id}`, { token: bea.token, status: 200 });
+    const inUni = await api(ctx, "GET", `/api/notifications?circle=${b.id}`, { token: bea.token, status: 200 });
+    assert.equal(inHome.json.notifications.filter((note: { refId: string }) => note.refId === id).length, 1);
+    assert.equal(inUni.json.notifications.filter((note: { refId: string }) => note.refId === id).length, 0);
+  });
+});
