@@ -605,6 +605,11 @@ export function clearAvatarRev(db: DatabaseSync, id: string): void {
   db.prepare("UPDATE users SET avatar_rev = NULL WHERE id = ?").run(id);
 }
 
+/** Every user id with its photo rev, for the admin avatar backup. No profile fields. */
+export function listUserAvatarRevs(db: DatabaseSync): Array<{ id: string; avatar_rev: number | null }> {
+  return all<{ id: string; avatar_rev: number | null }>(db, "SELECT id, avatar_rev FROM users ORDER BY created_at, id");
+}
+
 /** Same person, or someone in at least one circle with them. */
 export function sharesCircle(db: DatabaseSync, viewerId: string, userId: string): boolean {
   if (viewerId === userId) return true;

@@ -35,6 +35,7 @@ import {
   getUserById,
   bumpAvatarRev,
   clearAvatarRev,
+  listUserAvatarRevs,
   sharesCircle,
   listCirclesForUser,
   isCircleAdmin,
@@ -1555,6 +1556,14 @@ async function handleAdmin(
     updateFeedbackAsOperator(res, deps, pathname, body);
     return;
   }
+  if (method === "GET" && pathname === "/api/admin/avatars") {
+    await listAvatarsAsOperator(res, deps);
+    return;
+  }
+  if ((method === "GET" || method === "HEAD") && /^\/api\/admin\/avatars\/[^/]*$/.test(pathname)) {
+    await sendAvatarAsOperator(res, deps, method, pathname);
+    return;
+  }
   try {
     if (method === "POST" && pathname === "/api/admin/query") {
       const sql = body.sql;
@@ -1600,7 +1609,56 @@ function isOperatorPath(pathname: string): boolean {
     || /^\/api\/admin\/circles\/[^/]+\/delete$/.test(pathname)
     || /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname)
     || pathname === "/api/admin/feedback"
-    || /^\/api\/admin\/feedback\/[^/]+$/.test(pathname);
+    || /^\/api\/admin\/feedback\/[^/]+$/.test(pathname)
+    || pathname === "/api/admin/avatars"
+    || /^\/api\/admin\/avatars\/[^/]*$/.test(pathname);
+}
+
+/** Backup inventory: only users whose photo file is readable. Ids and file facts, no profile fields. */
+async function listAvatarsAsOperator(res: http.ServerResponse, deps: AppDeps): Promise<void> {
+  const avatars: Array<{ id: string; avatarRev: number | null; mime: string; bytes: number }> = [];
+  for (const row of listUserAvatarRevs(deps.db)) {
+    if (!UUID_RE.test(row.id)) continue;
+    const file = await avatarFile(deps.config.avatarDir, row.id);
+    if (!file) continue;
+    avatars.push({ id: row.id, avatarRev: row.avatar_rev ?? null, mime: file.mime, bytes: file.data.length });
+  }
+  console.log(`admin avatars ok rows=${avatars.length}`);
+  sendJson(res, 200, { avatars });
+}
+
+/** Raw photo bytes for a one-shot backup. Read only, never cached. */
+async function sendAvatarAsOperator(
+  res: http.ServerResponse,
+  deps: AppDeps,
+  method: string,
+  pathname: string,
+): Promise<void> {
+  const match = /^\/api\/admin\/avatars\/([^/]*)$/.exec(pathname);
+  let id = "";
+  try {
+    id = parseId(match?.[1] ?? "");
+  } catch {
+    console.log("admin avatar denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const file = getUserById(deps.db, id) ? await avatarFile(deps.config.avatarDir, id) : null;
+  if (!file) {
+    console.log("admin avatar denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  console.log(`admin avatar ok bytes=${file.data.length}`);
+  res.writeHead(200, {
+    "content-type": file.mime,
+    "content-length": file.data.length,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+  });
+  if (method === "HEAD") res.end();
+  else res.end(file.data);
 }
 
 function listFeedbackAsOperator(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps): void {
