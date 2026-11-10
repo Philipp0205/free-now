@@ -30,6 +30,8 @@ import {
   finishSocial,
   listPastPlans,
   listPastSocials,
+  listPlansOnDays,
+  listSocialsStartedBetween,
   getCircleByCode,
   getCircleById,
   getUserById,
@@ -112,7 +114,7 @@ import {
 } from "./feedback.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { colorHex } from "./chat-color.js";
-import { addDays, clockLabel, dayLabel, isoDate, shortDate, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
@@ -303,7 +305,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       ? await readJson(req)
       : {};
   // Feedback reads its own circle and ignores a bad one instead of failing the send.
-  const requested = pathname === "/api/feedback" ? null : readRequestedCircle(req, url, body);
+  // ?all=1 reads every circle the caller is in, so any requested circle is ignored.
+  const requested = pathname === "/api/feedback" || isAllCircles(method, pathname, url) ? null : readRequestedCircle(req, url, body);
 
   if (method === "GET" && pathname === "/api/health") {
     sendJson(res, 200, { ok: true });
@@ -621,6 +624,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  if (method === "GET" && pathname === "/api/calendar-month") {
+    const range = readCalendarRange(url);
+    const circles = isAllCircles(method, pathname, url)
+      ? listCirclesForUser(deps.db, me.id)
+      : [requireCircle(deps, me.id, requested)];
+    sendJson(res, 200, calendarMonth(deps, circles, range, me.id));
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/socials" && isAllCircles(method, pathname, url)) {
+    const now = deps.now();
+    const merged = new Map<string, SocialRow>();
+    for (const circle of listCirclesForUser(deps.db, me.id)) {
+      for (const row of listActiveSocials(deps.db, circle.id, now)) merged.set(row.id, row);
+    }
+    const socials = [...merged.values()]
+      .sort((a, b) => b.created_at - a.created_at)
+      .map((row) => socialPayload(deps.db, row, me.id));
+    sendJson(res, 200, { socials });
+    return;
+  }
+
   if (method === "GET" && pathname === "/api/socials") {
     const circle = requireCircle(deps, me.id, requested);
     const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id));
@@ -668,6 +693,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (socialId && method === "DELETE") {
     await endSocial(deps, me, socialId[1], requested);
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/plans" && isAllCircles(method, pathname, url)) {
+    const today = isoDate(deps.now(), deps.config.tz);
+    const through = addDays(today, PLAN_DAYS_AHEAD);
+    const merged = new Map<string, PlanRow>();
+    for (const circle of listCirclesForUser(deps.db, me.id)) {
+      for (const row of listVisiblePlans(deps.db, circle.id, today, through)) if (!merged.has(row.id)) merged.set(row.id, row);
+    }
+    const plans = [...merged.values()]
+      .sort((a, b) =>
+        a.for_date.localeCompare(b.for_date) ||
+        Number(a.at_time == null) - Number(b.at_time == null) ||
+        (a.at_time ?? "").localeCompare(b.at_time ?? "") ||
+        a.created_at - b.created_at,
+      )
+      .map((row) => planPayload(deps.db, row, today, me.id));
+    sendJson(res, 200, { plans });
     return;
   }
 
@@ -1448,6 +1492,8 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
+    circleId: social.circle_id,
+    circleName: getCircleById(db, social.circle_id)?.name ?? "",
     creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
@@ -1475,6 +1521,9 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     time: plan.at_time,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
+    // Home circle. `circles` below still lists every linked circle.
+    circleId: plan.circle_id,
+    circleName: getCircleById(db, plan.circle_id)?.name ?? "",
     shareId: plan.share_id ?? null,
     // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
     remindedAt: plan.reminded_at ?? null,
@@ -1855,6 +1904,64 @@ async function notifyCircleDeleted(
 function requireUser(user: UserRow | undefined): UserRow {
   if (!user) throw new HttpError(401, "sign in required");
   return user;
+}
+
+/** GET /api/socials, /api/plans and /api/calendar-month with ?all=1 merge every circle the caller belongs to. */
+function isAllCircles(method: string, pathname: string, url: URL): boolean {
+  return (
+    method === "GET" &&
+    (pathname === "/api/socials" || pathname === "/api/plans" || pathname === "/api/calendar-month") &&
+    url.searchParams.get("all") === "1"
+  );
+}
+
+/** A month grid is at most 6 weeks; a little slack, never a dump of every event. */
+export const CALENDAR_MAX_DAYS = 62;
+/** Per kind. A busy month is a few dozen, so this only stops a runaway answer. */
+export const CALENDAR_MAX_EVENTS = 500;
+
+function readCalendarRange(url: URL): { from: string; to: string } {
+  const from = url.searchParams.get("from") ?? "";
+  const to = url.searchParams.get("to") ?? "";
+  if (!isCalendarDate(from) || !isCalendarDate(to)) throw new HttpError(400, "from and to are required");
+  const span = daysBetween(from, to);
+  if (span < 0 || span >= CALENDAR_MAX_DAYS) throw new HttpError(400, "pick a shorter range");
+  return { from, to };
+}
+
+/**
+ * Every plan (by for_date) and social (by the app-timezone day it started) in [from, to],
+ * across `circles`, ended ones included. Each event once, with its home circle.
+ */
+function calendarMonth(deps: AppDeps, circles: CircleRow[], range: { from: string; to: string }, viewerId: string) {
+  const tz = deps.config.tz;
+  const today = isoDate(deps.now(), tz);
+  const plans = new Map<string, PlanRow>();
+  const socials = new Map<string, SocialRow>();
+  // A day of slack each side, then the exact day in the app timezone decides.
+  const fromMs = zonedDateTime(addDays(range.from, -1), "00:00", tz);
+  const toMs = zonedDateTime(addDays(range.to, 2), "00:00", tz);
+  for (const circle of circles) {
+    for (const row of listPlansOnDays(deps.db, circle.id, range.from, range.to)) if (!plans.has(row.id)) plans.set(row.id, row);
+    for (const row of listSocialsStartedBetween(deps.db, circle.id, fromMs, toMs)) {
+      const day = isoDate(row.starts_at ?? row.created_at, tz);
+      if (day >= range.from && day <= range.to && !socials.has(row.id)) socials.set(row.id, row);
+    }
+  }
+  const planList = [...plans.values()]
+    .sort((a, b) =>
+      a.for_date.localeCompare(b.for_date) ||
+      Number(a.at_time == null) - Number(b.at_time == null) ||
+      (a.at_time ?? "").localeCompare(b.at_time ?? "") ||
+      a.created_at - b.created_at,
+    )
+    .slice(0, CALENDAR_MAX_EVENTS)
+    .map((row) => ({ ...planPayload(deps.db, row, today, viewerId), endedAt: row.ended_at ?? null }));
+  const socialList = [...socials.values()]
+    .sort((a, b) => (a.starts_at ?? a.created_at) - (b.starts_at ?? b.created_at))
+    .slice(0, CALENDAR_MAX_EVENTS)
+    .map((row) => ({ ...socialPayload(deps.db, row, viewerId), day: isoDate(row.starts_at ?? row.created_at, tz) }));
+  return { from: range.from, to: range.to, today, plans: planList, socials: socialList };
 }
 
 function readRequestedCircle(req: http.IncomingMessage, url: URL, body: Record<string, unknown>): string | null {
