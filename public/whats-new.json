@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-10-calendar-availability",
+    "date": "2026-11-10",
+    "title": "Share when you're free",
+    "bullets": [
+      "Connect a private calendar link on the You tab.",
+      "Friends see only busy or free, never the names of your events.",
+      "You choose which circles see it. It stays off until you turn one on.",
+      "When you tap I'm in, you can check your own calendar for that day first."
+    ]
+  },
+  {
     "id": "2026-11-10-calendar-month",
     "date": "2026-11-10",
     "title": "Events: a monthly calendar and the map",

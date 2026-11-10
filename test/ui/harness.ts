@@ -6,6 +6,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
+import type { CalendarNet } from "../../src/freebusy.js";
 import { createNoopPushSender, type PushSender } from "../../src/push.js";
 
 /** Android Chrome on a Pixel 8. */
@@ -30,6 +31,8 @@ export type ServerOptions = {
   env?: Record<string, string>;
   /** Runs first on close(), before the server stops. */
   beforeClose?: () => Promise<void>;
+  /** Fake DNS and HTTP for the calendar availability import. */
+  calendarNet?: CalendarNet;
 };
 
 export type Server = { baseUrl: string; db: DatabaseSync; close: () => Promise<void> };
@@ -49,6 +52,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<Server> {
     push: opts.push ?? createNoopPushSender(),
     config: { ...config, dbPath: ":memory:" },
     now: opts.now ?? (() => Date.now()),
+    calendarNet: opts.calendarNet,
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

@@ -132,12 +132,26 @@ import {
   uidHost,
   type CalendarContext,
 } from "./calendar.js";
+import {
+  CalendarError,
+  circleAvailability,
+  connectCalendar,
+  disconnectCalendar,
+  isConnected,
+  ownDayEvents,
+  setSharedCircles,
+  syncStatus,
+  syncUser,
+  type CalendarNet,
+} from "./freebusy.js";
 
 export type AppDeps = {
   db: DatabaseSync;
   push: PushSender;
   config: Config;
   now: () => number;
+  /** Tests swap DNS and the HTTP client for the calendar availability import. */
+  calendarNet?: CalendarNet;
 };
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -173,7 +187,10 @@ export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
 /** Plan share links per client. Enough for a chat full of previews, not for guessing. */
 export const SHARE_LIMIT = { limit: 60, windowMs: 60_000 };
 
-type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter; feed: RateLimiter };
+/** Calendar link connects and refreshes per person. Each one fetches a remote file. */
+export const CALENDAR_SYNC_LIMIT = { limit: 10, windowMs: 60_000 };
+
+type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter; feed: RateLimiter; calendarSync: RateLimiter };
 
 export function createApp(deps: AppDeps): http.RequestListener {
   const limits: Limits = {
@@ -181,6 +198,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
     feedback: createRateLimiter(FEEDBACK_LIMIT),
     share: createRateLimiter(SHARE_LIMIT),
     feed: createRateLimiter(FEED_LIMIT),
+    calendarSync: createRateLimiter(CALENDAR_SYNC_LIMIT),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
@@ -789,6 +807,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     throw new HttpError(405, "method not allowed");
   }
 
+  if (pathname.startsWith("/api/me/calendar-sync")) {
+    await handleCalendarSync(req, res, deps, limits, method, pathname, url, body, me);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/circles/availability") {
+    const circle = requireCircle(deps, me.id, requested);
+    const now = deps.now();
+    const raw = url.searchParams.get("at");
+    const at = raw == null || raw === "" ? now : Number(raw);
+    if (!Number.isFinite(at) || at < now - 60 * 60 * 1000 || at > now + 30 * 24 * 60 * 60 * 1000) {
+      throw new HttpError(400, "at must be a time in the next 30 days");
+    }
+    const seen = circleAvailability(deps.db, circle.id, me.id, Math.round(at), now);
+    const people = [...seen].filter(([id, value]) => id !== me.id && value).map(([id, value]) => ({ id, ...value! }));
+    sendJson(res, 200, { at: Math.round(at), people });
+    return;
+  }
+
   const planShare = matchPath(pathname, /^\/api\/plans\/([^/]+)\/share$/);
   if (planShare && method === "POST") {
     const circle = requireCircle(deps, me.id, requested);
@@ -1044,6 +1081,7 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
       avatarRev: row?.avatar_rev || null,
       buzzToken: user.buzz_token,
       whatsNewSeen: user.whats_new_seen ?? null,
+      calendarConnected: isConnected(deps.db, user.id),
     },
     circles: circles.map((circle) => ({
       id: circle.id,
@@ -1461,6 +1499,9 @@ function pastDayLabel(day: string, today: string): string {
 function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow, viewerId: string | null = null) {
   const members = listMembers(deps.db, circle.id);
   const reach = reachForCircle(deps.db, circle.id);
+  const now = deps.now();
+  // Busy or free only, never a title. Only people who shared their calendar with this circle.
+  const availability = viewerId ? circleAvailability(deps.db, circle.id, viewerId, now, now) : new Map();
   return {
     id: circle.id,
     name: circle.name,
@@ -1474,8 +1515,79 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
       avatarRev: member.avatar_rev || null,
       admin: Boolean(member.is_admin),
       reach: reach.get(member.id) ?? "off",
+      availability: member.id === viewerId ? null : availability.get(member.id) ?? null,
     })),
   };
+}
+
+/**
+ * /api/me/calendar-sync: the availability import for the signed-in person.
+ * GET status, PUT or POST {url} to connect or replace, PATCH {sharedCircleIds}, DELETE to remove,
+ * POST /refresh to sync now, GET /day?date=YYYY-MM-DD for their own titles (owner only).
+ */
+async function handleCalendarSync(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  deps: AppDeps,
+  limits: Limits,
+  method: string,
+  pathname: string,
+  url: URL,
+  body: Record<string, unknown>,
+  me: UserRow,
+): Promise<void> {
+  const fb = { db: deps.db, config: deps.config, now: deps.now, calendarNet: deps.calendarNet };
+  const limit = () => {
+    if (!limits.calendarSync.hit(`calendar-sync:${me.id}`, deps.now())) throw new HttpError(429, "Too many tries. Wait a minute.");
+  };
+  const asHttp = (error: unknown): never => {
+    if (error instanceof CalendarError) throw new HttpError(400, error.message);
+    throw error;
+  };
+  if (pathname === "/api/me/calendar-sync") {
+    if (method === "GET") {
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "PUT" || method === "POST") {
+      limit();
+      await connectCalendar(fb, me.id, body.url).catch(asHttp);
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "PATCH") {
+      if (!isConnected(deps.db, me.id)) throw new HttpError(409, "Connect a calendar first.");
+      try {
+        setSharedCircles(deps.db, me.id, body.sharedCircleIds);
+      } catch (error) {
+        asHttp(error);
+      }
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "DELETE") {
+      disconnectCalendar(deps.db, me.id);
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    throw new HttpError(405, "method not allowed");
+  }
+  if (pathname === "/api/me/calendar-sync/refresh" && method === "POST") {
+    if (!isConnected(deps.db, me.id)) throw new HttpError(409, "Connect a calendar first.");
+    limit();
+    await syncUser(fb, me.id);
+    sendJson(res, 200, syncStatus(deps.db, me.id));
+    return;
+  }
+  if (pathname === "/api/me/calendar-sync/day" && method === "GET") {
+    const day = url.searchParams.get("date") ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !isCalendarDate(day)) throw new HttpError(400, "date must be YYYY-MM-DD");
+    const connected = isConnected(deps.db, me.id);
+    // Titles for the signed-in owner only. sendJson already sends cache-control: no-store.
+    sendJson(res, 200, { connected, date: day, events: connected ? ownDayEvents(deps.db, deps.config, me.id, day) : [] });
+    return;
+  }
+  throw new HttpError(404, "not found");
 }
 
 function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {
