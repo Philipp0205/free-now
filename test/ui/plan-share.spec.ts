@@ -88,7 +88,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
       await asUser(friendPage, friend.token);
       await friendPage.goto(copied[0]);
       await friendPage.locator(".map-card").getByText("Rooftop drinks").waitFor({ timeout: 10_000 });
-      assert.equal(await friendPage.locator(".screen-title").innerText(), "Map");
+      assert.equal(await friendPage.locator(".screen-title").innerText(), "Events");
       assert.equal(new URL(friendPage.url()).pathname, "/");
       await friendPage.locator(".map-card").getByRole("button", { name: /^More for / }).waitFor();
     } finally {

@@ -466,7 +466,7 @@ test("a plan link opens the map on that plan", { timeout: 90_000 }, async () => 
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.locator(".map-card").getByText("Bouldering").waitFor({ timeout: 8000 });
-    assert.equal(await page.locator(".screen-title").innerText(), "Map");
+    assert.equal(await page.locator(".screen-title").innerText(), "Events");
     assert.equal(new URL(page.url()).search, "");
     await page.evaluate(() => history.back());
     await page.getByRole("button", { name: "Let friends know you're free now" }).waitFor();
@@ -697,9 +697,10 @@ test("leaving the map removes it and closing the picker returns focus", { timeou
       const card = document.querySelector(".map-card")!.getBoundingClientRect();
       return Math.max(30, Math.min(200, card.top - map.top - 12));
     });
+    // Start beside the pin: the focused pin sits mid-strip, and grabbing it would focus the pin, not the map.
     await page.locator("#hangry-map").dragTo(page.locator("#hangry-map"), {
-      sourcePosition: { x: 180, y: clear },
-      targetPosition: { x: 40, y: Math.max(4, clear - 120) },
+      sourcePosition: { x: 40, y: clear },
+      targetPosition: { x: 200, y: Math.max(4, clear - 120) },
     });
     const panned = await page.evaluate(() => {
       const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();
@@ -725,7 +726,8 @@ test("leaving the map removes it and closing the picker returns focus", { timeou
     }));
     assert.deepEqual(left, { containers: 0, hangry: false, cards: 0, focus: "BODY", inLeaflet: false });
     assert.deepEqual(errors, [], "after leave");
-    await page.getByRole("button", { name: "Map", exact: true }).click();
+    // Back to the Events tab: the pin focus put it on the map for this visit, so the map comes back.
+    await page.locator(".tabbar").getByRole("button", { name: "Events", exact: true }).click();
     await page.locator(".map-card").getByText("Coffee").waitFor({ timeout: 8000 });
     const returned = await page.evaluate(() => {
       const pin = document.querySelector("#hangry-map .leaflet-marker-icon")?.getBoundingClientRect();

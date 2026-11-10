@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-10-calendar-month",
+    "date": "2026-11-10",
+    "title": "Events: a monthly calendar and the map",
+    "bullets": [
+      "The bottom tab is now called Events, with a calendar icon and a Map / Calendar switch at the top.",
+      "Calendar is the first view you see. After that, Events remembers whether you last picked Map or Calendar.",
+      "The month shows plans and hangouts, past days too, with the faces of who is in. Tap a day, then an event.",
+      "This circle / All circles works on the calendar the same way it works on the map, each circle in its own colour."
+    ]
+  },
+  {
     "id": "2026-11-10-notification-icon",
     "date": "2026-11-10",
     "title": "A clearer notification icon",
@@ -7,6 +18,16 @@
       "On Android, the small Hangry icon in the status bar and on each notification is now a big solid dot, like the button in the app.",
       "It was a faint blur before, so it is much easier to spot now.",
       "Android draws that small icon in one colour. The pink Hangry dot still shows as the big picture inside each notification."
+    ]
+  },
+  {
+    "id": "2026-11-09-map-all-circles",
+    "date": "2026-11-09",
+    "title": "One map for every circle",
+    "bullets": [
+      "If you are in more than one circle, the Map has a This circle / All circles switch at the top.",
+      "All circles puts every place from all your circles on one map, and remembers your pick.",
+      "A card on the All map names the circle it comes from, and In, chat and share go to that circle."
     ]
   },
   {
