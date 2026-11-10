@@ -52,6 +52,7 @@ type MessageRow = {
   created_at: number;
   name: string;
   color: number | null;
+  reply_to: string | null;
 };
 
 const TEXT_MAX = 1000;
@@ -102,7 +103,7 @@ export async function routeChat(
   }
   if (pathname === "/api/circles/chat") {
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "", requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo) } };
   }
   const mute = /^\/api\/chats\/([^/]+)\/mute$/.exec(pathname);
   if (mute && method === "POST") {
@@ -124,13 +125,13 @@ export async function routeChat(
   if (social) {
     const id = decodeURIComponent(social[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo) } };
   }
   const plan = /^\/api\/plans\/([^/]+)\/chat$/.exec(pathname);
   if (plan) {
     const id = decodeURIComponent(plan[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo) } };
   }
   return null;
 }
@@ -205,18 +206,35 @@ export async function postThread(
   refId: string,
   raw: unknown,
   requestedCircle: string | null = null,
+  replyRaw: unknown = null,
 ): Promise<ReturnType<typeof threadPayload>> {
   const text = cleanText(raw);
   const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
+  const parent = replyTarget(deps.db, access.chat.id, replyRaw);
   const now = deps.now();
   const id = crypto.randomUUID();
   deps.db.prepare(
-    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at) VALUES (?, ?, ?, ?, 'text', ?)",
-  ).run(id, access.chat.id, userId, text, now);
+    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, reply_to) VALUES (?, ?, ?, ?, 'text', ?, ?)",
+  ).run(id, access.chat.id, userId, text, now, parent?.id ?? null);
   markRead(deps.db, access.chat.id, userId, now);
-  const mentioned = await notifyMentions(deps, access.chat, id, userId, userName, text);
-  scheduleChatNotice(deps, access.chat.id, userId, userName, text, mentioned);
+  const pinged = await notifyMentions(deps, access.chat, id, userId, userName, text);
+  if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, text, parent.user_id, pinged)) pinged.add(author);
+  scheduleChatNotice(deps, access.chat.id, userId, userName, text, pinged);
   return threadPayload(deps, access, userId);
+}
+
+/** The message a new one replies to: a live text message in the same chat. Nothing set is no reply. */
+function replyTarget(db: DatabaseSync, chatId: string, raw: unknown): { id: string; user_id: string } | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") throw new ChatError(400, "You can't reply to that.");
+  const row = one<{ id: string; chat_id: string; user_id: string; kind: string; deleted_at: number | null }>(
+    db,
+    "SELECT id, chat_id, user_id, kind, deleted_at FROM messages WHERE id = ?",
+    raw,
+  );
+  if (!row || row.chat_id !== chatId || row.deleted_at != null) throw new ChatError(404, "message not found");
+  if (row.kind !== "text") throw new ChatError(400, "You can't reply to that.");
+  return { id: row.id, user_id: row.user_id };
 }
 
 /** Where `@` starts a mention: the text start, or after anything that is not a letter, digit or underscore. */
@@ -259,11 +277,33 @@ async function notifyMentions(deps: ChatDeps, chat: ChatRow, messageId: string, 
   const recipients = audience
     .filter((member) => named.has(member.name.trim().toLowerCase()) && member.id !== senderId && !isMuted(deps.db, chat.id, member.id))
     .map((member) => member.id);
-  const pinged = new Set(recipients);
-  if (recipients.length === 0) return pinged;
+  await pingNow(deps, chat, recipients, `${senderName} mentioned you: ${text}`, `chat-mention:${messageId}`);
+  return new Set(recipients);
+}
+
+/** Pings the author of the message replied to, right away, unless a mention already did. Returns who was pinged. */
+async function notifyReply(
+  deps: ChatDeps,
+  chat: ChatRow,
+  messageId: string,
+  senderId: string,
+  senderName: string,
+  text: string,
+  authorId: string,
+  already: Set<string>,
+): Promise<string[]> {
+  if (authorId === senderId || already.has(authorId) || isMuted(deps.db, chat.id, authorId)) return [];
+  if (!chatAudience(deps.db, chat).some((member) => member.id === authorId)) return [];
+  await pingNow(deps, chat, [authorId], `${senderName} replied to you: ${text}`, `chat-reply:${messageId}`);
+  return [authorId];
+}
+
+/** One immediate chat push plus alert per person, deep-linked into the chat. Never throws. */
+async function pingNow(deps: ChatDeps, chat: ChatRow, recipients: string[], text: string, tag: string): Promise<void> {
+  if (recipients.length === 0) return;
   const title = chatTitle(chat);
   const ref = chatRef(chat);
-  const body = `${senderName} mentioned you: ${text}`.slice(0, MENTION_BODY_MAX);
+  const body = text.slice(0, MENTION_BODY_MAX);
   try {
     for (const [circleId, userIds] of byReaderCircle(deps.db, chat, recipients)) {
       const circle = one<{ name: string }>(deps.db, "SELECT name FROM circles WHERE id = ?", circleId);
@@ -273,15 +313,14 @@ async function notifyMentions(deps: ChatDeps, chat: ChatRow, messageId: string, 
         body,
         kind: "chat",
         refId: ref,
-        tag: `chat-mention:${messageId}`,
+        tag,
         url: `/?chat=${encodeURIComponent(ref)}`,
       })), circle ? { id: circleId, name: circle.name } : null);
     }
   } catch (error) {
     // The message is already saved. A failed ping must not fail the post.
-    console.error("mention push failed", error instanceof Error ? error.message : error);
+    console.error("chat ping failed", error instanceof Error ? error.message : error);
   }
-  return pinged;
 }
 
 /** Adds or removes your emoji on a message. `on` null flips it; true or false sets it, so a repeat is a no-op. */
@@ -583,7 +622,7 @@ export function chatAudience(db: DatabaseSync, chat: ChatRow): MemberRow[] {
 function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   const messages = all<MessageRow>(
     deps.db,
-    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color
+    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color, m.reply_to
      FROM messages m JOIN users u ON u.id = m.user_id
      WHERE m.chat_id = ? AND m.deleted_at IS NULL
      ORDER BY m.created_at ASC
@@ -593,6 +632,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
   const reactions = reactionsFor(deps.db, messages.filter((message) => message.kind === "text").map((message) => message.id), userId);
+  const quotes = quotesFor(deps.db, access.chat.id, messages, userId);
   return {
     id: access.chat.id,
     kind: access.chat.kind,
@@ -611,6 +651,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       color: message.kind === "text" ? colorHex(message.user_id, message.color) : null,
       canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
       reactions: reactions.get(message.id) ?? [],
+      replyTo: message.reply_to ? quotes.get(message.reply_to) ?? goneQuote(message.reply_to) : null,
     })),
     participants: chatAudience(deps.db, access.chat).map((member) => ({
       id: member.id,
@@ -618,6 +659,40 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       color: colorHex(member.id, member.color),
     })),
   };
+}
+
+type Quote = { id: string; name: string; text: string; mine: boolean; deleted: boolean; color: string | null };
+
+const QUOTE_MAX = 120;
+
+function goneQuote(id: string): Quote {
+  return { id, name: "", text: "", mine: false, deleted: true, color: null };
+}
+
+/** The one message each reply quotes, even if it was deleted since. A deleted one never carries its text. */
+function quotesFor(db: DatabaseSync, chatId: string, messages: MessageRow[], userId: string): Map<string, Quote> {
+  const out = new Map<string, Quote>();
+  const ids = [...new Set(messages.map((message) => message.reply_to).filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return out;
+  const rows = all<{ id: string; user_id: string; body: string; deleted_at: number | null; name: string | null; color: number | null }>(
+    db,
+    `SELECT m.id, m.user_id, m.body, m.deleted_at, u.name, u.color FROM messages m LEFT JOIN users u ON u.id = m.user_id
+     WHERE m.chat_id = ? AND m.id IN (${ids.map(() => "?").join(", ")})`,
+    chatId,
+    ...ids,
+  );
+  for (const row of rows) {
+    const deleted = row.deleted_at != null;
+    out.set(row.id, {
+      id: row.id,
+      name: row.name || "",
+      text: deleted ? "" : row.body.replace(/\s+/g, " ").trim().slice(0, QUOTE_MAX),
+      mine: row.user_id === userId,
+      deleted,
+      color: deleted ? null : colorHex(row.user_id, row.color),
+    });
+  }
+  return out;
 }
 
 type Access = { chat: ChatRow; title: string; closed: boolean; blocked: boolean };

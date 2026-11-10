@@ -50,16 +50,21 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is chat mentions and reactions, in plain words without an em dash", () => {
+test("the newest entry is chat mentions, reactions and replies, in plain words without an em dash", () => {
   const top = RAW[0];
   assert.equal(top.id, "2026-11-09-chat-mentions-reactions");
   assert.equal(top.date, "2026-11-09");
-  assert.equal(top.title, "Mentions and reactions in chat");
-  assert.equal(top.bullets.length, 3);
+  assert.equal(top.title, "Mentions, reactions and replies in chat");
+  assert.equal(top.bullets.length, 4);
   const text = [top.title, ...top.bullets].join(" ");
   assert.match(text, /Type @/);
   assert.match(text, /hold a message/);
   assert.match(text, /Reaction counts/);
+  assert.match(text, /Swipe a message to the right to reply/);
+  assert.match(text, /tap Reply/);
+  assert.match(text, /quote/);
+  assert.match(text, /person you replied to gets a notification/);
+  assert.equal(RAW.filter((item) => item.id.includes("repl")).length, 0, "replies ride on the same entry, not a new one");
   for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
 });
 

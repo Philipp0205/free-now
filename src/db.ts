@@ -296,7 +296,8 @@ CREATE TABLE IF NOT EXISTS messages (
   body TEXT NOT NULL,
   kind TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  deleted_at INTEGER
+  deleted_at INTEGER,
+  reply_to TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
@@ -372,6 +373,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "circles", "invite_expires_at", "invite_expires_at INTEGER");
   ensureColumn(db, "memberships", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "memberships", "chat_color", "chat_color INTEGER");
+  // The message this one replies to. Checked by the app, so no REFERENCES (ALTER cannot add one).
+  ensureColumn(db, "messages", "reply_to", "reply_to TEXT");
   migrateMembershipKey(db);
   migratePushDeliveryCascade(db);
   backfillCircleAdmins(db);
