@@ -32,7 +32,43 @@ export type RangeFileOptions = {
   maxRangeBytes?: number;
   /** Runs on every request after stat. "broken" answers 503 instead of serving the file. */
   check?: (stat: fs.Stats) => "ok" | "broken";
+  /**
+   * Keep the first `head` bytes in memory and answer any range inside them from there.
+   * Refilled when the file's size or mtime moves. Longer ranges still stream from disk.
+   */
+  head?: number;
 };
+
+type Head = { key: string; bytes: Promise<Buffer | null> };
+/** One head per file path. */
+const heads = new Map<string, Head>();
+
+/** The first `length` bytes, read once per file version. Null when the file came up short. */
+function headOf(filePath: string, key: string, length: number): Promise<Buffer | null> {
+  const cached = heads.get(filePath);
+  if (cached?.key === key) return cached.bytes;
+  const bytes = (async () => {
+    const handle = await fs.promises.open(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      let filled = 0;
+      while (filled < length) {
+        const { bytesRead } = await handle.read(buffer, filled, length - filled, filled);
+        if (bytesRead === 0) return null;
+        filled += bytesRead;
+      }
+      return buffer;
+    } finally {
+      await handle.close();
+    }
+  })().catch(() => null);
+  heads.set(filePath, { key, bytes });
+  // A short or failed read is not kept: the next request tries again.
+  void bytes.then((buffer) => {
+    if (!buffer && heads.get(filePath)?.bytes === bytes) heads.delete(filePath);
+  });
+  return bytes;
+}
 
 const BASE_HEADERS: http.OutgoingHttpHeaders = {
   "x-content-type-options": "nosniff",
@@ -87,6 +123,14 @@ export async function serveRangeFile(
   if (req.method === "HEAD" || length === 0) {
     res.end();
     return;
+  }
+  const headLength = Math.min(options.head ?? 0, size);
+  if (end < headLength) {
+    const head = await headOf(filePath, `${size}:${stat.mtimeMs}:${stat.ino}:${headLength}`, headLength);
+    if (head) {
+      res.end(head.subarray(start, end + 1));
+      return;
+    }
   }
   await new Promise<void>((resolve) => {
     const stream = fs.createReadStream(filePath, { start, end });

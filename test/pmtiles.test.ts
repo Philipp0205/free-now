@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { loadConfig } from "../src/config.js";
-import { parsePmtilesHeader } from "../src/pmtiles.js";
+import { parsePmtilesHeader, pmtilesHeadBytes, type PmtilesInfo } from "../src/pmtiles.js";
 import { MAX_RANGE_BYTES, parseRange, serveRangeFile } from "../src/range-file.js";
 import { api, withApp } from "./http.js";
 
@@ -164,7 +164,7 @@ test("MAP_PMTILES_PATH is optional, absolute, and ignored when the file is missi
   assert.equal(loadConfig({}).mapPmtiles, null);
   assert.equal(loadConfig({ MAP_PMTILES_PATH: "  " }).mapPmtiles, null);
   assert.deepEqual(loadConfig({ MAP_PMTILES_PATH: ARCHIVE }).mapPmtiles, {
-    path: ARCHIVE, bounds: [9, 48.69, 9.32, 48.86], minzoom: 0, maxzoom: 15, bytes: 200,
+    path: ARCHIVE, bounds: [9, 48.69, 9.32, 48.86], minzoom: 0, maxzoom: 15, bytes: 200, dataOffset: 127,
   });
   assert.equal(quietly(() => loadConfig({ MAP_PMTILES_PATH: DIR }).mapPmtiles), null);
   assert.equal(quietly(() => loadConfig({ MAP_PMTILES_PATH: path.join(DIR, "gone.pmtiles") }).mapPmtiles), null);
@@ -279,6 +279,7 @@ test("with MAP_PMTILES_PATH the app serves the archive and names it in /api/meta
     assert.deepEqual(meta.mapPmtilesBounds, [9, 48.69, 9.32, 48.86]);
     assert.equal(meta.mapPmtilesMinZoom, 0);
     assert.equal(meta.mapPmtilesMaxZoom, 15);
+    assert.equal(meta.mapPmtilesHead, 200, "the head the app reads ahead: the whole 200-byte archive here");
     assert.ok(meta.mapTileUrl, "the raster template stays for everywhere outside the archive");
     const response = await fetch(`http://127.0.0.1:${port}/tiles/basemap.pmtiles`, { headers: { range: "bytes=0-6" } });
     assert.equal(response.status, 206);
@@ -307,6 +308,8 @@ test("the service worker leaves /tiles/ and range requests alone and keeps the v
   const sw = fs.readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
   const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(sw)?.[1] ?? "[]") as string[];
   assert.ok(shell.includes("/vendor/protomaps-leaflet/protomaps-leaflet.js"));
+  assert.ok(shell.includes("/vendor/leaflet/leaflet.js"));
+  assert.ok(shell.includes("/vendor/leaflet/leaflet.css"));
   assert.ok(sw.includes('url.pathname.startsWith("/tiles/")'));
   assert.ok(sw.includes('headers.has("range")'));
   assert.ok(fs.existsSync(new URL("../public/vendor/protomaps-leaflet/LICENSE", import.meta.url)));
@@ -435,4 +438,137 @@ test("a file that shrinks while a range is streaming is cut off, not left hangin
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("the archive head is header and directories, at least 16 KiB, at most 512 KiB, never past the file", () => {
+  const info = (dataOffset: number, bytes = 200 * 1024 * 1024): PmtilesInfo => ({
+    path: "", bounds: [9, 48, 10, 49], minzoom: 0, maxzoom: 15, bytes, dataOffset,
+  });
+  assert.equal(pmtilesHeadBytes(info(39180)), 39180, "the Stuttgart region archive");
+  assert.equal(pmtilesHeadBytes(info(1425)), 16384, "small directories: the first 16 KiB read");
+  assert.equal(pmtilesHeadBytes(info(40 * 1024 * 1024)), 512 * 1024, "huge directories are capped");
+  assert.equal(pmtilesHeadBytes(info(127, 200)), 200, "a tiny archive: the whole file");
+  assert.equal(parsePmtilesHeader(pmtilesHeader()).dataOffset, 127);
+});
+
+/** Range server with a memory head of `head` bytes, counting the file reads that reach the disk. */
+async function withHeadServer(filePath: string, head: number, fn: (url: string, reads: () => number) => Promise<void>): Promise<void> {
+  let reads = 0;
+  const real = fs.createReadStream;
+  (fs as { createReadStream: typeof fs.createReadStream }).createReadStream = ((...args: Parameters<typeof fs.createReadStream>) => {
+    if (args[0] === filePath) reads += 1;
+    return real(...args);
+  }) as typeof fs.createReadStream;
+  const server = http.createServer((req, res) => void serveRangeFile(req, res, filePath, { contentType: "application/vnd.pmtiles", head }));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  try {
+    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}/tiles/basemap.pmtiles`, () => reads);
+  } finally {
+    (fs as { createReadStream: typeof fs.createReadStream }).createReadStream = real;
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test("ranges inside the head are answered from memory with the same headers; longer ones stream from disk", async () => {
+  const file = path.join(DIR, "head.bin");
+  fs.writeFileSync(file, BYTES);
+  await withHeadServer(file, 40, async (url, reads) => {
+    let plain: Headers | undefined;
+    await withFileServer(file, async (other) => {
+      const response = await fetch(other, { headers: { range: "bytes=0-39" } });
+      await response.arrayBuffer();
+      plain = response.headers;
+    });
+    const before = reads();
+    for (const [range, from, to] of [["bytes=0-39", 0, 40], ["bytes=5-9", 5, 10], ["bytes=0-0", 0, 1], ["bytes=39-39", 39, 40]] as const) {
+      const response = await fetch(url, { headers: { range } });
+      assert.equal(response.status, 206, range);
+      assert.equal(response.headers.get("content-range"), `bytes ${from}-${to - 1}/100`, range);
+      assert.equal(response.headers.get("content-length"), String(to - from), range);
+      assert.deepEqual(await bytes(response), [...BYTES.subarray(from, to)], range);
+    }
+    assert.equal(reads() - before, 0, "no stream opened for ranges inside the head");
+    const first = await fetch(url, { headers: { range: "bytes=0-39" } });
+    await first.arrayBuffer();
+    for (const name of ["etag", "last-modified", "cache-control", "accept-ranges", "content-type"]) {
+      assert.equal(first.headers.get(name), plain?.get(name), name);
+    }
+    const across = await fetch(url, { headers: { range: "bytes=30-49" } });
+    assert.deepEqual(await bytes(across), [...BYTES.subarray(30, 50)]);
+    const tail = await fetch(url, { headers: { range: "bytes=60-99" } });
+    assert.deepEqual(await bytes(tail), [...BYTES.subarray(60, 100)]);
+    const whole = await fetch(url);
+    assert.equal(whole.status, 200);
+    assert.deepEqual(await bytes(whole), [...BYTES]);
+    assert.equal(reads() - before, 3, "ranges past the head read the disk");
+    for (const range of ["bytes=100-", "bytes=0-1,2-3"]) {
+      const bad = await fetch(url, { headers: { range } });
+      assert.equal(bad.status, 416, range);
+      assert.equal(bad.headers.get("content-range"), "bytes */100", range);
+    }
+    const head = await fetch(url, { method: "HEAD", headers: { range: "bytes=0-9" } });
+    assert.equal(head.status, 206);
+    assert.equal((await head.arrayBuffer()).byteLength, 0);
+  });
+});
+
+test("a rewritten file refills the head, and a head bigger than the file is the file", async () => {
+  const file = path.join(DIR, "head-swap.bin");
+  fs.writeFileSync(file, BYTES);
+  await withHeadServer(file, 40, async (url) => {
+    assert.deepEqual(await bytes(await fetch(url, { headers: { range: "bytes=0-3" } })), [0, 1, 2, 3]);
+    const next = Buffer.from(Array.from({ length: 100 }, (_, i) => 255 - i));
+    fs.writeFileSync(file, next);
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(file, later, later);
+    const fresh = await fetch(url, { headers: { range: "bytes=0-3" } });
+    assert.deepEqual(await bytes(fresh), [255, 254, 253, 252]);
+  });
+  const small = path.join(DIR, "head-small.bin");
+  fs.writeFileSync(small, BYTES.subarray(0, 10));
+  await withHeadServer(small, 64, async (url, reads) => {
+    const all = await fetch(url, { headers: { range: "bytes=0-9" } });
+    assert.equal(all.headers.get("content-range"), "bytes 0-9/10");
+    assert.deepEqual(await bytes(all), [...BYTES.subarray(0, 10)]);
+    assert.equal(reads(), 0);
+  });
+});
+
+test("through the app the archive head comes from memory and a cut archive still answers 503", async () => {
+  await withOwnArchive(async ({ file, url }) => {
+    const first = await soon(url, { headers: { range: "bytes=0-126" } });
+    assert.equal(first.status, 206);
+    assert.deepEqual(await bytes(first), [...ARCHIVE_BYTES.subarray(0, 127)]);
+    const whole = await soon(url, { headers: { range: "bytes=0-199" } });
+    assert.deepEqual(await bytes(whole), [...ARCHIVE_BYTES]);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      fs.truncateSync(file, 150);
+      const cut = await soon(url, { headers: { range: "bytes=0-6" } });
+      assert.equal(cut.status, 503);
+      await cut.arrayBuffer();
+    } finally {
+      console.warn = warn;
+    }
+  });
+});
+
+test("/vendor files are cached for a week; the app shell is still checked every time", async () => {
+  await withApp(async ({ port }) => {
+    for (const file of ["/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js"]) {
+      for (const method of ["GET", "HEAD"]) {
+        const response = await fetch(`http://127.0.0.1:${port}${file}`, { method });
+        assert.equal(response.status, 200, `${method} ${file}`);
+        assert.equal(response.headers.get("cache-control"), "public, max-age=604800", `${method} ${file}`);
+        await response.arrayBuffer();
+      }
+    }
+    for (const file of ["/", "/app.js", "/map.js", "/styles.css", "/sw.js", "/whats-new.json"]) {
+      const response = await fetch(`http://127.0.0.1:${port}${file}`);
+      assert.equal(response.headers.get("cache-control"), "no-cache", file);
+      await response.arrayBuffer();
+    }
+  });
 });

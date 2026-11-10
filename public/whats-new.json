@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-09-faster-map",
+    "date": "2026-11-09",
+    "title": "Faster map",
+    "bullets": [
+      "The map shows up right away when you open it, and the dark map fills in as soon as it is ready.",
+      "The app gets the map ready in the background, so opening it again feels snappier.",
+      "Pins, cards and the live buzz work just like before."
+    ]
+  },
+  {
     "id": "2026-11-09-glass-pins",
     "date": "2026-11-09",
     "title": "Nicer map pins",

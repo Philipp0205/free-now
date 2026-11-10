@@ -95,7 +95,7 @@ import type { PushSender } from "./push.js";
 import { pushSummaryForPlan, pushSummaryForViewer, reachForCircle, type PushSummary } from "./push-status.js";
 import { clientKey } from "./client-key.js";
 import { MAX_RANGE_BYTES, serveRangeFile } from "./range-file.js";
-import { createArchiveCheck, type PmtilesInfo } from "./pmtiles.js";
+import { createArchiveCheck, pmtilesHeadBytes, type PmtilesInfo } from "./pmtiles.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import {
   FEEDBACK_LIMIT,
@@ -141,6 +141,9 @@ const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const WHATS_NEW_ID_RE = /^[a-z0-9-]{1,64}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Leaflet and protomaps-leaflet under /vendor: a week, then checked again. */
+const VENDOR_CACHE = "public, max-age=604800";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -281,6 +284,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
         contentType: "application/vnd.pmtiles",
         maxRangeBytes: MAX_RANGE_BYTES,
         check: archiveCheckFor(deps.config.mapPmtiles),
+        head: pmtilesHeadBytes(deps.config.mapPmtiles),
       });
       return;
     }
@@ -325,6 +329,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
             mapPmtilesBounds: deps.config.mapPmtiles.bounds,
             mapPmtilesMinZoom: deps.config.mapPmtiles.minzoom,
             mapPmtilesMaxZoom: deps.config.mapPmtiles.maxzoom,
+            mapPmtilesHead: pmtilesHeadBytes(deps.config.mapPmtiles),
           }
         : {}),
     });
@@ -2121,12 +2126,15 @@ async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, 
   if (ext) {
     try {
       const data = await fs.promises.readFile(filePath);
+      const headers = staticHeaders(ext, data.length);
+      // Third-party files at a fixed version. A new version gets a new path.
+      if (relative.startsWith(`vendor${path.sep}`)) headers["cache-control"] = VENDOR_CACHE;
       if (req.method === "HEAD") {
-        res.writeHead(200, staticHeaders(ext, data.length));
+        res.writeHead(200, headers);
         res.end();
         return;
       }
-      res.writeHead(200, staticHeaders(ext, data.length));
+      res.writeHead(200, headers);
       res.end(data);
     } catch {
       sendJson(res, 404, { error: "not found" });
