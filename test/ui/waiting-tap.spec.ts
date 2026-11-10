@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/waiting-tap/after";
 const SIZES: Array<[number, number]> = [[360, 740], [390, 844]];
@@ -66,7 +66,7 @@ async function dismiss(page: Page) {
 }
 
 async function onMap(page: Page) {
-  const mapTab = page.locator(".tabbar .tab[aria-label='Map']");
+  const mapTab = page.locator(".tabbar .tab[aria-label='Events']");
   const current = await mapTab.getAttribute("aria-current");
   return current === "page" || (await page.locator(".map-screen").count()) > 0;
 }
@@ -219,7 +219,7 @@ test("map card who row is a 44px row that opens details; cards hold at 320 and 4
       await separated(card, width);
       await page.screenshot({ path: shot(`social-light-w${width}.png`) });
 
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       const pin = page.locator(".leaflet-marker-icon.pin").first();
       await pin.waitFor({ timeout: 10_000 });
       await page.waitForTimeout(400);

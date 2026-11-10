@@ -50,7 +50,7 @@ Losing both the browser data and the recovery code means that user cannot be rec
 
 ## Buzzer
 
-Each user has a secret URL. An ESP32 (or `curl`) can hit it. No session header.
+Each user has a secret URL. A Flic button, an ESP32, or `curl` can hit it. No session header.
 
 ```bash
 curl -X POST http://localhost:3000/api/buzz/YOUR_TOKEN \
@@ -61,6 +61,19 @@ curl -X POST http://localhost:3000/api/buzz/YOUR_TOKEN \
 A POST with an empty body is also fine — the note is optional. The token is on the You tab. Pressing it again refreshes the two-hour timer. The same note will not push more than once every 30 seconds, so a bouncy button does not spam the circle. Changing the note can notify again after 15 seconds.
 
 One circle needs no extra argument. With more than one circle, a buzz that does not name a circle posts to the circle you joined last. The You tab shows a link for the circle you are looking at: `/api/buzz/<token>?circle=<id>`.
+
+`DELETE` on the same URL ends the live social in the circle a POST would post to. It answers 204 even when nothing is live.
+
+### Flic button
+
+The full link is on the You tab, under **Set up a Flic button**.
+
+1. In the Flic app, open the button and choose **Push**.
+2. Add the **Internet Request** action.
+3. Paste the link as the URL, set the method to POST, and save. Leave the body empty, or send `{"note":"Rooftop coffee??"}` with content type `application/json`.
+4. Optional: under **Hold**, add the same link with the method DELETE. Holding the button then ends the social.
+
+Without a Flic Hub, the request is sent by the phone the button is paired with, so that phone has to be in Bluetooth range and online.
 
 The token is a bearer secret. Anyone with it can start a social as that user. It is stored in SQLite so the You tab can show it again; keep the database file private.
 
@@ -233,7 +246,7 @@ The push says who is free and, when there is a meetup, where: `Alex is free – 
 
 A card with a place does not embed a map. It shows a short line — the place name, or "nearby" — plus the distance when this phone has already allowed location, and an Open in Maps action.
 
-The Map tab (not a switch on Now) shows the same places on a Leaflet map. The default basemap is Esri World Street Map: labelled streets and districts, no API key, readable at city zoom on a phone. CARTO Voyager and CARTO Dark Matter (`rastertiles/voyager` and `dark_all`) currently answer with an API-key watermark, so they are not the default. Set `MAP_TILE_URL` and `MAP_TILE_ATTRIBUTION` together to switch later. The attribution has to match the tiles. The map stops at zoom 19, which is the last level that still has street tiles here. Pink pins are friends who are free. Yellow pins are plans. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
+The Events tab (formerly Map) opens on a month calendar of plans and hangouts; its Map / Calendar switch remembers your last pick (`hangry-events-view-v2`). Map shows the same places on a Leaflet map. The default basemap is Esri World Street Map: labelled streets and districts, no API key, readable at city zoom on a phone. CARTO Voyager and CARTO Dark Matter (`rastertiles/voyager` and `dark_all`) currently answer with an API-key watermark, so they are not the default. Set `MAP_TILE_URL` and `MAP_TILE_ATTRIBUTION` together to switch later. The attribution has to match the tiles. The map stops at zoom 19, which is the last level that still has street tiles here. Pink pins are friends who are free. Yellow pins are plans. Tap a pin for the name, note, time, Join, and Open in Maps. The map centers on you only if this device has already allowed location; otherwise it fits the pins. With no pins, the tab just says there is nothing to show. Open in Maps uses Apple Maps on iPhone and a `geo:` link on Android.
 
 Place search goes through the server to Photon, then Nominatim, with a Hangry user-agent and about one request a second. When this phone has a location, or the map has been moved, results prefer places within about 30 km and put bars, cafés, and other meeting spots ahead of streets and regions. Each hit shows the distance and a short address.
 

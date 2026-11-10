@@ -34,6 +34,11 @@ export type Config = {
   mapPmtilesSource: PmtilesSource | null;
   /** Set only when ADMIN_TOKEN is at least 32 characters. Otherwise the admin routes stay hidden. */
   adminToken: string | null;
+  /**
+   * CALENDAR_SYNC_KEY: 32 bytes for AES-256-GCM over imported calendar links and titles.
+   * Null: a random key is made once and kept in the database (app_meta).
+   */
+  calendarSyncKey: Buffer | null;
 };
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
@@ -70,6 +75,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     mapTileAttribution: readAttribution(env.MAP_TILE_ATTRIBUTION),
     ...readPmtilesConfig(env),
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
+    calendarSyncKey: readCalendarSyncKey(env.CALENDAR_SYNC_KEY),
   };
 }
 
@@ -207,4 +213,16 @@ function readVapid(env: NodeJS.ProcessEnv): VapidConfig | null {
     throw new Error("VAPID_SUBJECT must be a mailto: or https: URL");
   }
   return { publicKey, privateKey, subject };
+}
+
+/** 64 hex characters or base64 of 32 bytes. The value is a secret and never echoed. */
+export function readCalendarSyncKey(value: string | undefined): Buffer | null {
+  const raw = value?.trim() ?? "";
+  if (!raw) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, "hex");
+  if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(raw)) {
+    const key = Buffer.from(raw.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    if (key.length === 32) return key;
+  }
+  throw new Error("CALENDAR_SYNC_KEY must be 64 hex characters or base64 of 32 bytes");
 }
