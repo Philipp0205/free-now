@@ -56,7 +56,8 @@ test("the newest entry is the faster map, in plain words", () => {
   assert.equal(top.title, "Faster map");
   assert.equal(top.bullets.length, 3);
   const text = [top.title, ...top.bullets].join(" ");
-  assert.match(text, /right away/);
+  assert.match(text, /stays dark until the dark map is ready/);
+  assert.doesNotMatch(text, /right away|fills in/, "no street map first");
   assert.match(text, /snappier/);
   assert.doesNotMatch(text, /PMTiles|cache|prefetch|archive/i, "no jargon");
   for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);

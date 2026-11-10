@@ -1457,6 +1457,8 @@ html.kb-open .sheet .help { margin-top: 0; }
 /* Own stacking context, so Leaflet's 400+ z-indexes stay under the sheets and scrim. */
 .map-wrap { position: relative; isolation: isolate; margin: 4px 12px 0; --attr-h: 64px; }
 .hangry-map { height: calc(100dvh - 132px - var(--tab)); border-radius: 24px; overflow: hidden; background: #141416; }
+/* Leaflet's own css loads later and paints the map light grey: stay dark until the tiles draw. */
+.hangry-map.leaflet-container, .where-map.leaflet-container { background: #141416; }
 .map-empty { margin: 28px 22px; }
 .map-empty h2 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.04em; }
 .map-empty p { margin: 0; color: var(--muted); line-height: 1.4; }

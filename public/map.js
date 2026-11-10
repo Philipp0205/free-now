@@ -33,8 +33,6 @@ export function bindMap({
   let whereMapTimer = 0;
   const TILE_MAX_ZOOM = 19;
   const PIN_PX = 36;
-  /** How long a new map waits for an archive that is not ready before it shows raster tiles. */
-  const RASTER_GRACE_MS = 100;
   const PMTILES_ATTRIBUTION =
     '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
   /** Photo URLs that did not decode. Those pins keep their initials on every repaint. */
@@ -112,7 +110,7 @@ export function bindMap({
    * Decided once the view is set and again after every move or zoom. A swap adds the new layer
    * on top and drops the old one when the new one has drawn, so the map never goes blank.
    * The view never changes here, so a swap cannot trigger another one.
-   * An archive that is not ready yet gets RASTER_GRACE_MS, then raster shows until it is.
+   * While the archive is not ready yet the map stays on its dark background, no tiles.
    */
   function addMapTiles(L, map) {
     const cover = vectorCoverage(state.meta);
@@ -126,7 +124,6 @@ export function bindMap({
     let shown = null;
     let next = null;
     let swapTimer = 0;
-    let waitTimer = 0;
 
     const build = (mode) => (mode === "raster" ? rasterLayer(L) : window.protomapsL.leafletLayer({
       url: archive,
@@ -166,14 +163,12 @@ export function bindMap({
       if (mode === "vector" && !archive) {
         if (!loading) {
           loading = true;
-          // A slow archive must not leave the map empty: raster first, vector once it is ready.
-          if (!shown) waitTimer = setTimeout(() => { if (!shown && !gone) show("raster"); }, RASTER_GRACE_MS);
+          // No light raster tiles in the meantime: they would flash before the dark map.
           loadVectorArchive(cover.url).then(
             (ready) => { archive = ready; },
             (error) => markVectorBroken(error),
           ).finally(() => {
             loading = false;
-            clearTimeout(waitTimer);
             settle();
           });
         }
@@ -194,7 +189,6 @@ export function bindMap({
       gone = true;
       brokenListeners.delete(settle);
       clearTimeout(swapTimer);
-      clearTimeout(waitTimer);
     });
     map.whenReady(settle);
     map.on("moveend zoomend", settle);

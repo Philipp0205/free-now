@@ -507,13 +507,19 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
   }
 });
 
-/** Raster tiles are drawn and no vector canvas is in the map. */
-const RASTER_DRAWN = `(() => {
+/** The map while it waits: Leaflet is up, how many raster images and vector canvases it holds, its background. */
+const WAITING = `(() => {
   const map = document.getElementById("hangry-map");
-  return Boolean(map && map.querySelector("img.leaflet-tile.leaflet-tile-loaded") && !map.querySelector("canvas.leaflet-tile"));
+  if (!map || !map.classList.contains("leaflet-container")) return null;
+  const rgb = (getComputedStyle(map).backgroundColor.match(/\\d+/g) || []).slice(0, 3).map(Number);
+  return {
+    images: map.querySelectorAll("img.leaflet-tile").length,
+    canvases: map.querySelectorAll("canvas.leaflet-tile").length,
+    light: rgb.length === 3 ? (rgb[0] + rgb[1] + rgb[2]) / 3 : 255,
+  };
 })()`;
 
-test("a slow archive: raster tiles show right away, then the dark map takes over", { timeout: 300_000 }, async () => {
+test("a slow archive: the map stays dark with no raster tiles, then the dark map draws", { timeout: 300_000 }, async () => {
   const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Sol" });
   await hangry.call("POST", "/api/circles", host.token, { name: "Slow" });
   await hangry.call("POST", "/api/plans", host.token, {
@@ -525,16 +531,30 @@ test("a slow archive: raster tiles show right away, then the dark map takes over
     // Every archive read is held back, the head read ahead on the idle app too.
     const { page, raster, archive } = await phone(width, height, host.token, "nobody", { worker: false, archiveDelay: ARCHIVE_DELAY });
     try {
-      const clicked = Date.now();
       await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
-      await page.waitForFunction(RASTER_DRAWN, null, { timeout: 3000, polling: 50 });
-      const rasterAfter = Date.now() - clicked;
-      assert.ok(rasterAfter < 2000, `${width}: raster drawn ${rasterAfter} ms after the tap, not after the ${ARCHIVE_DELAY} ms archive`);
-      assert.ok(raster.hits > 0, `${width}: raster tiles fetched`);
-      await shot(page, `protomaps-slow-raster-w${width}.png`);
+      await page.waitForFunction(WAITING, null, { timeout: 10_000, polling: 50 });
+      // Watch the wait until the first vector tile is in: never a raster tile, always a dark background.
+      const samples: Array<{ images: number; canvases: number; light: number }> = [];
+      const until = Date.now() + 20_000;
+      let shotTaken = false;
+      while (Date.now() < until) {
+        const now = await page.evaluate(WAITING) as { images: number; canvases: number; light: number };
+        samples.push(now);
+        assert.equal(now.images, 0, `${width}: no raster tile while the archive loads ${JSON.stringify(now)}`);
+        assert.ok(now.light < 40, `${width}: dark background while waiting ${JSON.stringify(now)}`);
+        if (now.canvases > 0) break;
+        if (!shotTaken && samples.length >= 10) {
+          await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-slow-waiting-w${width}.png`) });
+          shotTaken = true;
+        }
+        await page.waitForTimeout(50);
+      }
+      assert.ok(samples.filter((sample) => sample.canvases === 0).length >= 10, `${width}: the wait was watched (${samples.length} samples)`);
+      assert.equal(raster.hits, 0, `${width}: no Esri tiles fetched while waiting`);
       await settleOn(page, "vector", `${width} slow archive ready`);
       assert.ok(archive.statuses.length > 0 && archive.statuses.every((status) => status === 206), `${width}: archive read ${archive.statuses}`);
-      assert.equal(await layerAdds(page), 2, `${width}: raster first, then one swap to vector`);
+      assert.equal(await layerAdds(page), 1, `${width}: straight to the dark map, no raster first`);
+      assert.equal(raster.hits, 0, `${width}: no Esri tiles at all`);
       // Tile reads are held back too: wait for the streets to be painted before the picture.
       const paintBy = Date.now() + 20_000;
       let pixels = await darkWithStreets(page);
