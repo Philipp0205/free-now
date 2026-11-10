@@ -28,13 +28,17 @@ import {
   deletePushSubForUser,
   finishPlan,
   finishSocial,
+  getActiveSocialByCreator,
   listPastPlans,
   listPastSocials,
+  listPlansOnDays,
+  listSocialsStartedBetween,
   getCircleByCode,
   getCircleById,
   getUserById,
   bumpAvatarRev,
   clearAvatarRev,
+  listUserAvatarRevs,
   sharesCircle,
   listCirclesForUser,
   isCircleAdmin,
@@ -111,7 +115,7 @@ import {
 } from "./feedback.js";
 import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
 import { colorHex } from "./chat-color.js";
-import { addDays, clockLabel, dayLabel, isoDate, shortDate, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
@@ -129,12 +133,26 @@ import {
   uidHost,
   type CalendarContext,
 } from "./calendar.js";
+import {
+  CalendarError,
+  circleAvailability,
+  connectCalendar,
+  disconnectCalendar,
+  isConnected,
+  ownDayEvents,
+  setSharedCircles,
+  syncStatus,
+  syncUser,
+  type CalendarNet,
+} from "./freebusy.js";
 
 export type AppDeps = {
   db: DatabaseSync;
   push: PushSender;
   config: Config;
   now: () => number;
+  /** Tests swap DNS and the HTTP client for the calendar availability import. */
+  calendarNet?: CalendarNet;
 };
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -170,7 +188,10 @@ export const ACK_LIMIT = { limit: 120, windowMs: 60_000 };
 /** Plan share links per client. Enough for a chat full of previews, not for guessing. */
 export const SHARE_LIMIT = { limit: 60, windowMs: 60_000 };
 
-type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter; feed: RateLimiter };
+/** Calendar link connects and refreshes per person. Each one fetches a remote file. */
+export const CALENDAR_SYNC_LIMIT = { limit: 10, windowMs: 60_000 };
+
+type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter; feed: RateLimiter; calendarSync: RateLimiter };
 
 export function createApp(deps: AppDeps): http.RequestListener {
   const limits: Limits = {
@@ -178,6 +199,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
     feedback: createRateLimiter(FEEDBACK_LIMIT),
     share: createRateLimiter(SHARE_LIMIT),
     feed: createRateLimiter(FEED_LIMIT),
+    calendarSync: createRateLimiter(CALENDAR_SYNC_LIMIT),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
@@ -302,7 +324,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       ? await readJson(req)
       : {};
   // Feedback reads its own circle and ignores a bad one instead of failing the send.
-  const requested = pathname === "/api/feedback" ? null : readRequestedCircle(req, url, body);
+  // ?all=1 reads every circle the caller is in, so any requested circle is ignored.
+  const requested = pathname === "/api/feedback" || isAllCircles(method, pathname, url) ? null : readRequestedCircle(req, url, body);
 
   if (method === "GET" && pathname === "/api/health") {
     sendJson(res, 200, { ok: true });
@@ -389,7 +412,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (pathname.startsWith("/api/buzz/")) {
-    if (method !== "POST") throw new HttpError(405, "method not allowed");
+    if (method !== "POST" && method !== "DELETE") throw new HttpError(405, "method not allowed");
     let token = pathname.slice("/api/buzz/".length);
     try {
       token = decodeURIComponent(token);
@@ -398,6 +421,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     }
     const buzzer = token ? getUserByBuzzToken(deps.db, token) : undefined;
     if (!buzzer) throw new HttpError(404, "unknown token");
+    if (method === "DELETE") {
+      // Ends the social in the circle a POST would post to.
+      // Ending with nothing live is still a success, so a second hold is harmless.
+      const circle = requireCircle(deps, buzzer.id, requested ?? buzzCircle(deps, buzzer.id));
+      const live = getActiveSocialByCreator(deps.db, buzzer.id, circle.id, deps.now());
+      if (live) await endSocial(deps, buzzer, live.id, circle.id);
+      sendEmpty(res, 204);
+      return;
+    }
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
     const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));
@@ -620,6 +652,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  if (method === "GET" && pathname === "/api/calendar-month") {
+    const range = readCalendarRange(url);
+    const circles = isAllCircles(method, pathname, url)
+      ? listCirclesForUser(deps.db, me.id)
+      : [requireCircle(deps, me.id, requested)];
+    sendJson(res, 200, calendarMonth(deps, circles, range, me.id));
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/socials" && isAllCircles(method, pathname, url)) {
+    const now = deps.now();
+    const merged = new Map<string, SocialRow>();
+    for (const circle of listCirclesForUser(deps.db, me.id)) {
+      for (const row of listActiveSocials(deps.db, circle.id, now)) merged.set(row.id, row);
+    }
+    const socials = [...merged.values()]
+      .sort((a, b) => b.created_at - a.created_at)
+      .map((row) => socialPayload(deps.db, row, me.id));
+    sendJson(res, 200, { socials });
+    return;
+  }
+
   if (method === "GET" && pathname === "/api/socials") {
     const circle = requireCircle(deps, me.id, requested);
     const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id));
@@ -667,6 +721,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (socialId && method === "DELETE") {
     await endSocial(deps, me, socialId[1], requested);
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/plans" && isAllCircles(method, pathname, url)) {
+    const today = isoDate(deps.now(), deps.config.tz);
+    const through = addDays(today, PLAN_DAYS_AHEAD);
+    const merged = new Map<string, PlanRow>();
+    for (const circle of listCirclesForUser(deps.db, me.id)) {
+      for (const row of listVisiblePlans(deps.db, circle.id, today, through)) if (!merged.has(row.id)) merged.set(row.id, row);
+    }
+    const plans = [...merged.values()]
+      .sort((a, b) =>
+        a.for_date.localeCompare(b.for_date) ||
+        Number(a.at_time == null) - Number(b.at_time == null) ||
+        (a.at_time ?? "").localeCompare(b.at_time ?? "") ||
+        a.created_at - b.created_at,
+      )
+      .map((row) => planPayload(deps.db, row, today, me.id));
+    sendJson(res, 200, { plans });
     return;
   }
 
@@ -742,6 +815,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       return;
     }
     throw new HttpError(405, "method not allowed");
+  }
+
+  if (pathname.startsWith("/api/me/calendar-sync")) {
+    await handleCalendarSync(req, res, deps, limits, method, pathname, url, body, me);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/circles/availability") {
+    const circle = requireCircle(deps, me.id, requested);
+    const now = deps.now();
+    const raw = url.searchParams.get("at");
+    const at = raw == null || raw === "" ? now : Number(raw);
+    if (!Number.isFinite(at) || at < now - 60 * 60 * 1000 || at > now + 30 * 24 * 60 * 60 * 1000) {
+      throw new HttpError(400, "at must be a time in the next 30 days");
+    }
+    const seen = circleAvailability(deps.db, circle.id, me.id, Math.round(at), now);
+    const people = [...seen].filter(([id, value]) => id !== me.id && value).map(([id, value]) => ({ id, ...value! }));
+    sendJson(res, 200, { at: Math.round(at), people });
+    return;
   }
 
   const planShare = matchPath(pathname, /^\/api\/plans\/([^/]+)\/share$/);
@@ -999,6 +1091,7 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
       avatarRev: row?.avatar_rev || null,
       buzzToken: user.buzz_token,
       whatsNewSeen: user.whats_new_seen ?? null,
+      calendarConnected: isConnected(deps.db, user.id),
     },
     circles: circles.map((circle) => ({
       id: circle.id,
@@ -1416,6 +1509,9 @@ function pastDayLabel(day: string, today: string): string {
 function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow, viewerId: string | null = null) {
   const members = listMembers(deps.db, circle.id);
   const reach = reachForCircle(deps.db, circle.id);
+  const now = deps.now();
+  // Busy or free only, never a title. Only people who shared their calendar with this circle.
+  const availability = viewerId ? circleAvailability(deps.db, circle.id, viewerId, now, now) : new Map();
   return {
     id: circle.id,
     name: circle.name,
@@ -1429,8 +1525,79 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
       avatarRev: member.avatar_rev || null,
       admin: Boolean(member.is_admin),
       reach: reach.get(member.id) ?? "off",
+      availability: member.id === viewerId ? null : availability.get(member.id) ?? null,
     })),
   };
+}
+
+/**
+ * /api/me/calendar-sync: the availability import for the signed-in person.
+ * GET status, PUT or POST {url} to connect or replace, PATCH {sharedCircleIds}, DELETE to remove,
+ * POST /refresh to sync now, GET /day?date=YYYY-MM-DD for their own titles (owner only).
+ */
+async function handleCalendarSync(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  deps: AppDeps,
+  limits: Limits,
+  method: string,
+  pathname: string,
+  url: URL,
+  body: Record<string, unknown>,
+  me: UserRow,
+): Promise<void> {
+  const fb = { db: deps.db, config: deps.config, now: deps.now, calendarNet: deps.calendarNet };
+  const limit = () => {
+    if (!limits.calendarSync.hit(`calendar-sync:${me.id}`, deps.now())) throw new HttpError(429, "Too many tries. Wait a minute.");
+  };
+  const asHttp = (error: unknown): never => {
+    if (error instanceof CalendarError) throw new HttpError(400, error.message);
+    throw error;
+  };
+  if (pathname === "/api/me/calendar-sync") {
+    if (method === "GET") {
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "PUT" || method === "POST") {
+      limit();
+      await connectCalendar(fb, me.id, body.url).catch(asHttp);
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "PATCH") {
+      if (!isConnected(deps.db, me.id)) throw new HttpError(409, "Connect a calendar first.");
+      try {
+        setSharedCircles(deps.db, me.id, body.sharedCircleIds);
+      } catch (error) {
+        asHttp(error);
+      }
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    if (method === "DELETE") {
+      disconnectCalendar(deps.db, me.id);
+      sendJson(res, 200, syncStatus(deps.db, me.id));
+      return;
+    }
+    throw new HttpError(405, "method not allowed");
+  }
+  if (pathname === "/api/me/calendar-sync/refresh" && method === "POST") {
+    if (!isConnected(deps.db, me.id)) throw new HttpError(409, "Connect a calendar first.");
+    limit();
+    await syncUser(fb, me.id);
+    sendJson(res, 200, syncStatus(deps.db, me.id));
+    return;
+  }
+  if (pathname === "/api/me/calendar-sync/day" && method === "GET") {
+    const day = url.searchParams.get("date") ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !isCalendarDate(day)) throw new HttpError(400, "date must be YYYY-MM-DD");
+    const connected = isConnected(deps.db, me.id);
+    // Titles for the signed-in owner only. sendJson already sends cache-control: no-store.
+    sendJson(res, 200, { connected, date: day, events: connected ? ownDayEvents(deps.db, deps.config, me.id, day) : [] });
+    return;
+  }
+  throw new HttpError(404, "not found");
 }
 
 function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {
@@ -1447,6 +1614,8 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
+    circleId: social.circle_id,
+    circleName: getCircleById(db, social.circle_id)?.name ?? "",
     creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
@@ -1474,6 +1643,9 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     time: plan.at_time,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
+    // Home circle. `circles` below still lists every linked circle.
+    circleId: plan.circle_id,
+    circleName: getCircleById(db, plan.circle_id)?.name ?? "",
     shareId: plan.share_id ?? null,
     // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
     remindedAt: plan.reminded_at ?? null,
@@ -1555,6 +1727,14 @@ async function handleAdmin(
     updateFeedbackAsOperator(res, deps, pathname, body);
     return;
   }
+  if (method === "GET" && pathname === "/api/admin/avatars") {
+    await listAvatarsAsOperator(res, deps);
+    return;
+  }
+  if ((method === "GET" || method === "HEAD") && /^\/api\/admin\/avatars\/[^/]*$/.test(pathname)) {
+    await sendAvatarAsOperator(res, deps, method, pathname);
+    return;
+  }
   try {
     if (method === "POST" && pathname === "/api/admin/query") {
       const sql = body.sql;
@@ -1600,7 +1780,56 @@ function isOperatorPath(pathname: string): boolean {
     || /^\/api\/admin\/circles\/[^/]+\/delete$/.test(pathname)
     || /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname)
     || pathname === "/api/admin/feedback"
-    || /^\/api\/admin\/feedback\/[^/]+$/.test(pathname);
+    || /^\/api\/admin\/feedback\/[^/]+$/.test(pathname)
+    || pathname === "/api/admin/avatars"
+    || /^\/api\/admin\/avatars\/[^/]*$/.test(pathname);
+}
+
+/** Backup inventory: only users whose photo file is readable. Ids and file facts, no profile fields. */
+async function listAvatarsAsOperator(res: http.ServerResponse, deps: AppDeps): Promise<void> {
+  const avatars: Array<{ id: string; avatarRev: number | null; mime: string; bytes: number }> = [];
+  for (const row of listUserAvatarRevs(deps.db)) {
+    if (!UUID_RE.test(row.id)) continue;
+    const file = await avatarFile(deps.config.avatarDir, row.id);
+    if (!file) continue;
+    avatars.push({ id: row.id, avatarRev: row.avatar_rev ?? null, mime: file.mime, bytes: file.data.length });
+  }
+  console.log(`admin avatars ok rows=${avatars.length}`);
+  sendJson(res, 200, { avatars });
+}
+
+/** Raw photo bytes for a one-shot backup. Read only, never cached. */
+async function sendAvatarAsOperator(
+  res: http.ServerResponse,
+  deps: AppDeps,
+  method: string,
+  pathname: string,
+): Promise<void> {
+  const match = /^\/api\/admin\/avatars\/([^/]*)$/.exec(pathname);
+  let id = "";
+  try {
+    id = parseId(match?.[1] ?? "");
+  } catch {
+    console.log("admin avatar denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const file = getUserById(deps.db, id) ? await avatarFile(deps.config.avatarDir, id) : null;
+  if (!file) {
+    console.log("admin avatar denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  console.log(`admin avatar ok bytes=${file.data.length}`);
+  res.writeHead(200, {
+    "content-type": file.mime,
+    "content-length": file.data.length,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+  });
+  if (method === "HEAD") res.end();
+  else res.end(file.data);
 }
 
 function listFeedbackAsOperator(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps): void {
@@ -1797,6 +2026,64 @@ async function notifyCircleDeleted(
 function requireUser(user: UserRow | undefined): UserRow {
   if (!user) throw new HttpError(401, "sign in required");
   return user;
+}
+
+/** GET /api/socials, /api/plans and /api/calendar-month with ?all=1 merge every circle the caller belongs to. */
+function isAllCircles(method: string, pathname: string, url: URL): boolean {
+  return (
+    method === "GET" &&
+    (pathname === "/api/socials" || pathname === "/api/plans" || pathname === "/api/calendar-month") &&
+    url.searchParams.get("all") === "1"
+  );
+}
+
+/** A month grid is at most 6 weeks; a little slack, never a dump of every event. */
+export const CALENDAR_MAX_DAYS = 62;
+/** Per kind. A busy month is a few dozen, so this only stops a runaway answer. */
+export const CALENDAR_MAX_EVENTS = 500;
+
+function readCalendarRange(url: URL): { from: string; to: string } {
+  const from = url.searchParams.get("from") ?? "";
+  const to = url.searchParams.get("to") ?? "";
+  if (!isCalendarDate(from) || !isCalendarDate(to)) throw new HttpError(400, "from and to are required");
+  const span = daysBetween(from, to);
+  if (span < 0 || span >= CALENDAR_MAX_DAYS) throw new HttpError(400, "pick a shorter range");
+  return { from, to };
+}
+
+/**
+ * Every plan (by for_date) and social (by the app-timezone day it started) in [from, to],
+ * across `circles`, ended ones included. Each event once, with its home circle.
+ */
+function calendarMonth(deps: AppDeps, circles: CircleRow[], range: { from: string; to: string }, viewerId: string) {
+  const tz = deps.config.tz;
+  const today = isoDate(deps.now(), tz);
+  const plans = new Map<string, PlanRow>();
+  const socials = new Map<string, SocialRow>();
+  // A day of slack each side, then the exact day in the app timezone decides.
+  const fromMs = zonedDateTime(addDays(range.from, -1), "00:00", tz);
+  const toMs = zonedDateTime(addDays(range.to, 2), "00:00", tz);
+  for (const circle of circles) {
+    for (const row of listPlansOnDays(deps.db, circle.id, range.from, range.to)) if (!plans.has(row.id)) plans.set(row.id, row);
+    for (const row of listSocialsStartedBetween(deps.db, circle.id, fromMs, toMs)) {
+      const day = isoDate(row.starts_at ?? row.created_at, tz);
+      if (day >= range.from && day <= range.to && !socials.has(row.id)) socials.set(row.id, row);
+    }
+  }
+  const planList = [...plans.values()]
+    .sort((a, b) =>
+      a.for_date.localeCompare(b.for_date) ||
+      Number(a.at_time == null) - Number(b.at_time == null) ||
+      (a.at_time ?? "").localeCompare(b.at_time ?? "") ||
+      a.created_at - b.created_at,
+    )
+    .slice(0, CALENDAR_MAX_EVENTS)
+    .map((row) => ({ ...planPayload(deps.db, row, today, viewerId), endedAt: row.ended_at ?? null }));
+  const socialList = [...socials.values()]
+    .sort((a, b) => (a.starts_at ?? a.created_at) - (b.starts_at ?? b.created_at))
+    .slice(0, CALENDAR_MAX_EVENTS)
+    .map((row) => ({ ...socialPayload(deps.db, row, viewerId), day: isoDate(row.starts_at ?? row.created_at, tz) }));
+  return { from: range.from, to: range.to, today, plans: planList, socials: socialList };
 }
 
 function readRequestedCircle(req: http.IncomingMessage, url: URL, body: Record<string, unknown>): string | null {
