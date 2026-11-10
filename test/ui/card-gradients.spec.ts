@@ -3,7 +3,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import { gradientClass } from "../../public/card-grad.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 const NOTES = ["Sushi night", "Board games", "Morning run", "Rooftop drinks", "Museum trip"];
 
@@ -121,7 +121,7 @@ test("each plan card has its own gradient, kept after reload, on the map and in 
     await head.waitFor({ state: "detached" });
 
     // Map card for the plan with a place.
-    await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+    await openEventsMap(page);
     const pin = page.locator(".leaflet-marker-icon.pin").first();
     await pin.waitFor({ timeout: 10_000 });
     await page.waitForTimeout(400);

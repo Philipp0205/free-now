@@ -4,7 +4,7 @@ import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 const HITS = [
   { name: "jomi Bagel Deli", address: "Hasenbergsteige 5, Stuttgart", lat: 48.7705, lng: 9.1655, distanceM: 1100 },
@@ -221,7 +221,7 @@ async function signIn(page: Page, name: string) {
 }
 
 async function openMapCard(page: Page) {
-  await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+  await openEventsMap(page);
   const pin = page.locator(".leaflet-marker-icon.pin").first();
   await pin.waitFor({ timeout: 10_000 });
   await page.waitForTimeout(500);

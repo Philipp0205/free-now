@@ -1433,6 +1433,30 @@ export function listPastSocials(db: DatabaseSync, circleId: string, now: number)
   );
 }
 
+/** Socials in a circle that started (starts_at, else created_at) in [fromMs, toMs). Live and ended alike. */
+export function listSocialsStartedBetween(db: DatabaseSync, circleId: string, fromMs: number, toMs: number): SocialRow[] {
+  return all<SocialRow>(
+    db,
+    `${SOCIAL_SELECT} WHERE s.circle_id = ? AND COALESCE(s.starts_at, s.created_at) >= ? AND COALESCE(s.starts_at, s.created_at) < ?
+     ORDER BY COALESCE(s.starts_at, s.created_at) ASC`,
+    circleId,
+    fromMs,
+    toMs,
+  );
+}
+
+/** Plans linked to a circle with for_date in [from, to], ended ones too. */
+export function listPlansOnDays(db: DatabaseSync, circleId: string, from: string, to: string): PlanRow[] {
+  return all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND p.for_date >= ? AND p.for_date <= ?
+     ORDER BY p.for_date ASC, p.at_time IS NULL, p.at_time ASC, p.created_at ASC`,
+    circleId,
+    from,
+    to,
+  );
+}
+
 export function listPastPlans(db: DatabaseSync, circleId: string, today: string): PlanRow[] {
   return all<PlanRow>(
     db,
