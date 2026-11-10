@@ -7,7 +7,7 @@ import zlib from "node:zlib";
 import type { Page } from "playwright-core";
 import { shortDate } from "../../public/when.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 /** Screenshots land here. Override with MAP_PINS_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.MAP_PINS_SHOT_DIR || "/workspace/hangry-mapbuzz-logs/shots");
@@ -167,7 +167,7 @@ test("map pins: day labels, photos with a broken-photo fallback, a going crowd w
     brokenHits = 0;
     const page = await phone(width, height, host.token, cyd.user.id);
     try {
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       const planPin = page.locator(".leaflet-marker-icon.pin-plan").filter({ has: page.locator(".pin-when", { hasText: "Tomorrow" }) });
       const laterPin = page.locator(".leaflet-marker-icon.pin-plan").filter({ hasNot: page.locator(".pin-when", { hasText: "Tomorrow" }) });
       const nowPin = page.locator(".leaflet-marker-icon.pin-social");

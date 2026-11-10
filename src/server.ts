@@ -2,6 +2,7 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { clearExpiredLocations, HISTORY_DAYS, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
+import { syncCalendarFeeds } from "./freebusy.js";
 import { startPmtilesFetch } from "./pmtiles-fetch.js";
 import { createNoopPushSender, createWebPushSender } from "./push.js";
 import { sendStartReminders } from "./remind.js";
@@ -30,6 +31,24 @@ const sweepTimer = setInterval(sweepNow, 60 * 60 * 1000);
 const locationTimer = setInterval(clearLocationsNow, 60 * 1000);
 sweepTimer.unref?.();
 locationTimer.unref?.();
+
+// Calendar availability import: whoever is due, every 5 minutes, and once shortly after boot.
+let calendarRunning = false;
+function syncCalendarsNow(): void {
+  if (calendarRunning) return;
+  calendarRunning = true;
+  void syncCalendarFeeds({ db, config, now: () => Date.now() })
+    .catch((error: unknown) => {
+      console.error("calendar sync failed", error instanceof Error ? error.name : "unknown");
+    })
+    .finally(() => {
+      calendarRunning = false;
+    });
+}
+const calendarTimer = setInterval(syncCalendarsNow, 5 * 60 * 1000);
+const calendarBootTimer = setTimeout(syncCalendarsNow, 30 * 1000);
+calendarTimer.unref?.();
+calendarBootTimer.unref?.();
 
 const server = http.createServer(
   createApp({
@@ -61,6 +80,8 @@ server.listen(config.port, "0.0.0.0", () => {
 function shutdown(): void {
   clearInterval(sweepTimer);
   clearInterval(locationTimer);
+  clearInterval(calendarTimer);
+  clearTimeout(calendarBootTimer);
   server.close(() => {
     db.close();
     process.exit(0);

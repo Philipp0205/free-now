@@ -144,24 +144,27 @@ function glowIcon(size, { radiusFrac, sigmaFrac }) {
   return blur(pixels, size, size, 3, size * sigmaFrac);
 }
 
+// Android draws the badge as a one-colour mask from its alpha, so colour is ignored.
+// A solid white dot filling the 20 of 24 dp live area reads clearly in the status bar.
 function badge(size) {
   const pixels = Buffer.alloc(size * size * 4);
-  const radius = size * 0.22;
+  const radius = size * 0.42;
   const cx = (size - 1) / 2;
   const cy = (size - 1) / 2;
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const dist = Math.hypot(x - cx, y - cy);
       const index = (y * size + x) * 4;
-      if (dist > radius) continue;
-      const fade = Math.max(0, 1 - dist / radius);
+      // One pixel of anti-aliasing at the rim, fully opaque inside.
+      const cover = Math.max(0, Math.min(1, radius - dist + 0.5));
+      if (cover === 0) continue;
       pixels[index] = 255;
       pixels[index + 1] = 255;
       pixels[index + 2] = 255;
-      pixels[index + 3] = Math.round(255 * fade * fade);
+      pixels[index + 3] = Math.round(255 * cover);
     }
   }
-  return blur(pixels, size, size, 4, size * 0.04);
+  return pixels;
 }
 
 function background(width, height, seed, stops) {

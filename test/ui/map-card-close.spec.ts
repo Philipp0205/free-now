@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA as CHROME_UA, useHangry } from "./harness.js";
+import { SIZES, UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 /** Set to a folder to keep screenshots, for example MAP_CLOSE_SHOT_DIR=.oc/shots/map-card-close. */
 const SHOT_DIR = process.env.MAP_CLOSE_SHOT_DIR ? path.resolve(process.env.MAP_CLOSE_SHOT_DIR) : "";
@@ -69,7 +69,7 @@ test("map card: a quiet Close in the corner, Escape and a tap on the map put it 
     page.on("pageerror", (error) => errors.push(String(error)));
     const label = `${width}`;
     try {
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       await page.waitForTimeout(400);
       await openCard(page);
 
@@ -121,11 +121,11 @@ test("map card: a quiet Close in the corner, Escape and a tap on the map put it 
       assert.ok(Math.abs(after.x - before.x) > 20 || Math.abs(after.y - before.y) > 20, `pan moved the pin ${JSON.stringify({ before, after })}`);
       assert.equal(await card.count(), 0, "a drag does not bring the card back");
 
-      // 2. Escape, while the card is the top layer. The Map tab stays.
+      // 2. Escape, while the card is the top layer. The Events tab stays on the map.
       await openCard(page);
       await page.keyboard.press("Escape");
       await cardGone(page, "Escape");
-      assert.ok(await page.locator("#hangry-map").isVisible(), "Escape left the Map tab open");
+      assert.ok(await page.locator("#hangry-map").isVisible(), "Escape left the map open");
 
       // Escape belongs to a sheet opened from the card, not to the card under it.
       await openCard(page);
