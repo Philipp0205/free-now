@@ -661,6 +661,7 @@ button:disabled { cursor: default; opacity: 0.55; }
   letter-spacing: -0.03em;
 }
 .avatars .avatar:first-child { margin-left: 0; }
+.avatars .avatar-more { width: auto; min-width: 28px; padding: 0 6px; border-radius: 999px; background: #3a3a3c; font-size: 11px; }
 .avatar.lg { width: 72px; height: 72px; font-size: 28px; border: 0; margin: 0; }
 .avatar.header { width: 34px; height: 34px; font-size: 14px; border: 0; }
 img.avatar { object-fit: cover; display: block; flex: none; }
@@ -1127,6 +1128,8 @@ form.sheet,
 .guest-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .guest-row .reply-line { margin: 0; flex: 1; min-width: 0; }
 .guest-row .avatar { margin: 0; flex: none; border: 0; }
+.cant-list .guest-row .avatar { opacity: 0.6; }
+.cant-list .guest-row .reply-line { color: var(--muted); }
 .guest-row .text-btn { min-height: 44px; padding-left: 12px; padding-right: 12px; }
 .where { margin-top: 0; }
 .where-field {
