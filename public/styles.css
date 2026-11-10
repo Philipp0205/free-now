@@ -664,6 +664,52 @@ button:disabled { cursor: default; opacity: 0.55; }
 .avatar.lg { width: 72px; height: 72px; font-size: 28px; border: 0; margin: 0; }
 .avatar.header { width: 34px; height: 34px; font-size: 14px; border: 0; }
 img.avatar { object-fit: cover; display: block; flex: none; }
+/* Away / Busy: a small mark on the lower right of the face. */
+.avatar-wrap { position: relative; display: inline-flex; flex: none; margin-left: -8px; }
+.avatars .avatar-wrap:first-child { margin-left: 0; }
+.avatar-wrap > .avatar { margin: 0; }
+.profile-hero .avatar-wrap { margin: 0; }
+.status-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #1c1c1e;
+  box-shadow: 0 0 0 2px #000;
+  line-height: 1;
+  pointer-events: none;
+  /* Above the next face in an overlapping row. */
+  z-index: 1;
+}
+.status-badge[data-status="busy"] { background: #3a2a00; }
+.away-line {
+  margin: 10px 22px 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.list > .away-line { margin: 14px 12px 0; }
+.status-panel h3 { margin-bottom: 8px; }
+.status-summary { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; color: #fff; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.status-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.status-actions .btn { flex: 1 1 0; min-width: 0; }
+.status-actions.two { display: grid; grid-template-columns: 1fr 1fr; }
+.status-editor .field input[type="date"] { width: 100%; }
+.status-card {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #2c2c2e;
+}
+.status-card p { margin: 0; overflow-wrap: anywhere; }
+.status-card-head { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.status-card-text { margin-top: 6px !important; color: #fff; font-size: 15px; line-height: 1.4; }
+.status-card-meta { margin-top: 4px !important; color: var(--muted); font-size: 14px; }
+.status-card-mark { flex: none; }
 .visually-hidden {
   position: absolute !important;
   width: 1px;
@@ -790,6 +836,22 @@ button.row {
 .row p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 .members-title { margin: 18px 12px 4px; font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
 .member-row h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Name and face open the details sheet for everyone; Manage stays beside it for admins. */
+.member-open {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.member-row p.status-line { color: rgba(255, 255, 255, 0.86); overflow-wrap: anywhere; }
 .admin-badge {
   display: inline-flex;
   align-items: center;
@@ -1127,6 +1189,10 @@ form.sheet,
 .guest-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .guest-row .reply-line { margin: 0; flex: 1; min-width: 0; }
 .guest-row .avatar { margin: 0; flex: none; border: 0; }
+.guest-row .avatar-wrap { margin: 0; }
+.guest-text { flex: 1; min-width: 0; }
+.guest-text .reply-line { margin: 0; }
+.guest-status { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .guest-row .text-btn { min-height: 44px; padding-left: 12px; padding-right: 12px; }
 .where { margin-top: 0; }
 .where-field {
@@ -1716,6 +1782,27 @@ html.kb-open .sheet .help { margin-top: 0; }
   box-shadow: none;
 }
 .leaflet-marker-icon.pin.pin-styled .pin-more { background: #3a3a3c; }
+/* Away / Busy on a pin face: the face keeps its round clip through the photo, the mark sits outside it. */
+.leaflet-marker-icon.pin .pin-letter.has-status,
+.leaflet-marker-icon.pin .pin-face.has-status { overflow: visible; }
+.leaflet-marker-icon.pin .pin-face.has-status .pin-photo { border-radius: 50%; }
+.leaflet-marker-icon.pin .pin-status { z-index: 1; }
+.leaflet-marker-icon.pin .pin-status {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1c1c1e;
+  box-shadow: 0 0 0 1.5px rgba(28, 28, 30, 0.9);
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+}
+.leaflet-marker-icon.pin .pin-face .pin-status { width: 12px; height: 12px; right: -4px; bottom: -4px; font-size: 8px; }
 .leaflet-marker-icon.pin.pin-styled .pin-when {
   position: static;
   transform: none;

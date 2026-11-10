@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-09-away-status",
+    "date": "2026-11-09",
+    "title": "Away or Busy",
+    "bullets": [
+      "On the You tab you can set yourself to Away or Busy, with a short note, a place and an end day if you like.",
+      "Friends in your circles see a small badge on your picture and the note next to your name.",
+      "It clears itself after the end day, or you clear it yourself. You still get every buzz and plan."
+    ]
+  },
+  {
     "id": "2026-11-09-glass-pins",
     "date": "2026-11-09",
     "title": "Nicer map pins",

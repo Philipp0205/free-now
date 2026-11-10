@@ -373,6 +373,10 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "color", "color INTEGER");
   ensureColumn(db, "users", "whats_new_seen", "whats_new_seen TEXT");
   ensureColumn(db, "users", "avatar_rev", "avatar_rev INTEGER");
+  ensureColumn(db, "users", "status_type", "status_type TEXT");
+  ensureColumn(db, "users", "status_text", "status_text TEXT");
+  ensureColumn(db, "users", "status_place", "status_place TEXT");
+  ensureColumn(db, "users", "status_until", "status_until INTEGER");
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -603,6 +607,31 @@ export function bumpAvatarRev(db: DatabaseSync, id: string, now: number): number
 
 export function clearAvatarRev(db: DatabaseSync, id: string): void {
   db.prepare("UPDATE users SET avatar_rev = NULL WHERE id = ?").run(id);
+}
+
+export type StatusRow = {
+  status_type: string | null;
+  status_text: string | null;
+  status_place: string | null;
+  status_until: number | null;
+};
+
+export function getUserStatus(db: DatabaseSync, id: string): StatusRow | undefined {
+  return one<StatusRow>(db, "SELECT status_type, status_text, status_place, status_until FROM users WHERE id = ?", id);
+}
+
+export function setUserStatus(db: DatabaseSync, id: string, status: StatusRow): void {
+  db.prepare("UPDATE users SET status_type = ?, status_text = ?, status_place = ?, status_until = ? WHERE id = ?").run(
+    status.status_type,
+    status.status_text,
+    status.status_place,
+    status.status_until,
+    id,
+  );
+}
+
+export function clearUserStatus(db: DatabaseSync, id: string): void {
+  db.prepare("UPDATE users SET status_type = NULL, status_text = NULL, status_place = NULL, status_until = NULL WHERE id = ?").run(id);
 }
 
 /** Same person, or someone in at least one circle with them. */

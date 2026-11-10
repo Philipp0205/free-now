@@ -8,6 +8,7 @@ import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
+import { STATUS_PLACE_MAX, STATUS_TEXT_MAX, activeStatus, circleStatusLine, statusBadge, statusLabel, statusLine, statusToday, statusUntilDay, untilText } from "./status.js";
 
 const TOKEN_KEY = "fn_token";
 const CIRCLE_KEY = "fn_circle";
@@ -17,7 +18,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v51";
+const APP_VERSION = "hangry-v55";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -365,6 +366,7 @@ function friendlyMessage(raw, status) {
     return "The host removed you from this.";
   }
   if (lower.includes("photo")) return text;
+  if (lower.includes("away or busy") || lower.includes("end day") || /^(note|place) must be/.test(lower)) return text;
   if (lower.includes("chat is closed")) return "This chat is closed.";
   if (lower.includes("1000")) return "Keep it under 1000 characters.";
   if (lower.includes("write a message")) return "Write a message.";
@@ -1186,6 +1188,8 @@ function home() {
       onclick: () => shareInvite(),
     }),
   );
+  const away = awayLine();
+  if (away) parts.push(away);
   const live = state.socials.filter((social) => isLiveSocial(social) || social.creator.id === state.me.user.id);
   const later = state.socials.filter((social) => !isLiveSocial(social) && social.creator.id !== state.me.user.id);
   const feed = [...live.map(socialCard), ...later.map(socialCard), ...sortedPlans(state.plans).map(planCard)];
@@ -1416,6 +1420,7 @@ function circleScreen() {
       ]),
     ]),
     el("div", { class: "list" }, [
+      awayLine(),
       el("h2", { class: "members-title", text: "Members" }),
       ...circle.members.map((member) => memberRow(member)),
     ]),
@@ -1425,6 +1430,12 @@ function circleScreen() {
         ])
       : null,
   ]);
+}
+
+/** Who in this circle is away or busy, in one line. Null when no one is. */
+function awayLine() {
+  const text = circleStatusLine(state.me?.circle?.members, state.me?.user?.id);
+  return text ? el("p", { class: "away-line", text }) : null;
 }
 
 function homeChatBanner() {
@@ -1820,6 +1831,111 @@ function buzzNote(code) {
   ]);
 }
 
+/** Away / Busy on the You tab: a summary with Edit and Clear, or two buttons that open the editor. */
+function statusPanel() {
+  const status = activeStatus(state.me.user.status);
+  if (state.statusDraft) return statusEditor();
+  if (status) {
+    return el("div", { class: "panel status-panel", "data-status": status.type }, [
+      el("h3", { text: "Your status" }),
+      el("p", { class: "status-summary" }, [
+        el("span", { class: "status-card-mark", "aria-hidden": "true", text: statusBadge(status.type) }),
+        el("span", { text: statusLine(status) }),
+      ]),
+      el("p", { class: "help", text: "People in your circles see this next to your name." }),
+      el("div", { class: "status-actions" }, [
+        el("button", { class: "btn secondary", type: "button", text: "Edit status", onclick: () => editStatus(status.type) }),
+        el("button", { class: "text-btn", type: "button", text: "Clear status", onclick: () => { void onClearStatus(); } }),
+      ]),
+    ]);
+  }
+  return el("div", { class: "panel status-panel" }, [
+    el("h3", { text: "Status" }),
+    el("p", { class: "help", text: "Away for a while? Let your circles know." }),
+    el("div", { class: "status-actions two" }, [
+      el("button", { class: "btn secondary", type: "button", text: "\u2708\ufe0f Set Away", onclick: () => editStatus("away") }),
+      el("button", { class: "btn secondary", type: "button", text: "\u23f3 Set Busy", onclick: () => editStatus("busy") }),
+    ]),
+  ]);
+}
+
+function editStatus(type) {
+  const current = activeStatus(state.me.user.status);
+  state.statusDraft = {
+    type,
+    text: current?.text || "",
+    place: current?.place || "",
+    untilDay: statusUntilDay(current),
+  };
+  render();
+  requestAnimationFrame(() => document.getElementById("status-text")?.focus({ preventScroll: true }));
+}
+
+function statusEditor() {
+  const draft = state.statusDraft;
+  const typeButton = (type) => el("button", {
+    type: "button",
+    class: draft.type === type ? "on" : "",
+    "aria-pressed": draft.type === type ? "true" : "false",
+    text: statusLabel(type),
+    onclick: () => {
+      draft.type = type;
+      render();
+    },
+  });
+  return el("form", { class: "panel stack status-panel status-editor", onsubmit: onSaveStatus }, [
+    el("h3", { id: "status-type-label", text: "Your status" }),
+    el("div", { class: "segment", role: "group", "aria-labelledby": "status-type-label" }, [typeButton("away"), typeButton("busy")]),
+    field("Note (optional)", "status-text", draft.text, (value) => { draft.text = value; }, {
+      maxlength: String(STATUS_TEXT_MAX),
+      placeholder: "Tennis vacation in Portugal",
+    }),
+    field("Where (optional)", "status-place", draft.place, (value) => { draft.place = value; }, {
+      maxlength: String(STATUS_PLACE_MAX),
+      placeholder: "Portugal",
+    }),
+    el("label", { class: "field" }, [
+      el("span", { text: "Until (optional)" }),
+      el("input", {
+        id: "status-until",
+        class: "sheet-control",
+        type: "date",
+        min: statusToday(),
+        value: draft.untilDay || "",
+        oninput: (event) => { draft.untilDay = event.target.value; },
+        onchange: (event) => { draft.untilDay = event.target.value; },
+      }),
+    ]),
+    el("p", { class: "help", text: "It clears itself after that day. Leave it empty to keep it until you clear it." }),
+    el("div", { class: "status-actions" }, [
+      el("button", { class: "btn", type: "submit", text: "Save status" }),
+      el("button", { class: "text-btn", type: "button", text: "Cancel", onclick: () => { state.statusDraft = null; render(); } }),
+    ]),
+  ]);
+}
+
+async function onSaveStatus(event) {
+  event.preventDefault();
+  const draft = state.statusDraft;
+  if (!draft) return;
+  await run(async () => {
+    state.me = await api("/api/me/status", {
+      method: "PUT",
+      body: { type: draft.type, text: draft.text, place: draft.place, untilDay: draft.untilDay || null },
+    });
+    state.statusDraft = null;
+    state.error = "Status saved";
+  });
+}
+
+async function onClearStatus() {
+  await run(async () => {
+    state.me = await api("/api/me/status", { method: "DELETE" });
+    state.statusDraft = null;
+    state.error = "Status cleared";
+  });
+}
+
 function youScreen() {
   const code = state.me.user.buzzToken;
   const hasPhoto = Boolean(state.me.user.avatarRev);
@@ -1841,6 +1957,7 @@ function youScreen() {
             hasPhoto ? el("button", { class: "text-btn", type: "button", text: "Remove photo", onclick: () => { void onRemovePhoto(); } }) : null,
           ]),
     ]),
+    statusPanel(),
     el("form", { class: "panel stack", onsubmit: onRename }, [
       field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
       el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
@@ -2172,14 +2289,23 @@ function memberRow(member) {
   const self = member.id === state.me.user.id;
   const reach = reachText(member.reach);
   const line = [self ? "You" : "", reach].filter(Boolean).join(" · ");
+  const status = statusLine(member.status);
   return el("div", { class: "row member-row" }, [
-    avatar(member, 40),
-    el("div", { class: "grow" }, [
-      el("h3", {}, [
-        el("span", { text: member.name }),
-        member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
+    el("button", {
+      class: "member-open",
+      type: "button",
+      "aria-label": `Details for ${member.name}`,
+      onclick: () => openMemberMenu(member),
+    }, [
+      avatar(member, 40),
+      el("div", { class: "grow" }, [
+        el("h3", {}, [
+          el("span", { text: member.name }),
+          member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
+        ]),
+        status ? el("p", { class: "status-line", "data-status": member.status.type, text: status }) : null,
+        line ? el("p", { text: line }) : null,
       ]),
-      line ? el("p", { text: line }) : null,
     ]),
     youAreAdmin() && !self
       ? el("button", {
@@ -2199,9 +2325,26 @@ function openMemberMenu(member) {
   render();
 }
 
+/** Away / Busy with its note, place and end day, for the member sheet. */
+function statusCard(person) {
+  const status = activeStatus(person?.status);
+  if (!status) return null;
+  const until = untilText(status.until);
+  return el("div", { class: "status-card", "data-status": status.type }, [
+    el("p", { class: "status-card-head" }, [
+      el("span", { class: "status-card-mark", "aria-hidden": "true", text: statusBadge(status.type) }),
+      el("strong", { text: statusLabel(status.type) }),
+    ]),
+    status.text ? el("p", { class: "status-card-text", text: status.text }) : null,
+    status.place ? el("p", { class: "status-card-meta", text: status.place }) : null,
+    el("p", { class: "status-card-meta", text: until ? until.charAt(0).toUpperCase() + until.slice(1) : "No end day" }),
+  ]);
+}
+
 function memberSheet() {
   const member = state.memberMenu;
   if (!member) return el("div");
+  const manage = youAreAdmin() && member.id !== state.me.user.id;
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-label": member.name }, [
@@ -2210,17 +2353,20 @@ function memberSheet() {
         el("h2", { text: member.name }),
         el("p", { class: "help", text: [member.admin ? "Admin" : "Member", reachText(member.reach)].filter(Boolean).join(" · ") }),
       ]),
-      el("div", { class: "actions" }, [
-        member.admin
-          ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
-          : el("button", { class: "action", type: "button", text: "Make admin", onclick: () => setMemberAdmin(member, true) }),
-        el("button", {
-          class: "action",
-          type: "button",
-          text: "Remove from circle",
-          onclick: () => confirmRemoveMember(member),
-        }),
-      ]),
+      statusCard(member),
+      manage
+        ? el("div", { class: "actions" }, [
+            member.admin
+              ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
+              : el("button", { class: "action", type: "button", text: "Make admin", onclick: () => setMemberAdmin(member, true) }),
+            el("button", {
+              class: "action",
+              type: "button",
+              text: "Remove from circle",
+              onclick: () => confirmRemoveMember(member),
+            }),
+          ])
+        : el("div", { class: "actions" }, [el("button", { class: "action", type: "button", text: "Close", onclick: closeSheet })]),
     ]),
   ]);
 }
@@ -2818,13 +2964,17 @@ function pushSheet() {
         }),
       ]),
       el("div", { class: "sheet-scroll" }, [
-        el("div", { class: "list" }, detail.push.people.map((person) => el("div", { class: "row" }, [
-          avatar(person, 40),
-          el("div", { class: "grow" }, [
-            el("h3", { text: person.name }),
-            el("p", { text: pushStatusText(person) }),
-          ]),
-        ]))),
+        el("div", { class: "list" }, detail.push.people.map((person) => {
+          // Here status is the delivery state; Away / Busy comes as userStatus.
+          const away = activeStatus(person.userStatus);
+          return el("div", { class: "row" }, [
+            avatar({ ...person, status: away }, 40),
+            el("div", { class: "grow" }, [
+              el("h3", { text: person.name }),
+              el("p", { text: [pushStatusText(person), away ? statusLabel(away.type) : ""].filter(Boolean).join(" · ") }),
+            ]),
+          ]);
+        })),
       ]),
     ]),
   ]);
@@ -3339,6 +3489,7 @@ function collectPins() {
       own: mine,
       personId: social.creator.id,
       photo: pinPhoto(social.creator),
+      status: activeStatus(social.creator.status)?.type || "",
       now: socialPinState(social) === "now",
       label: pinLabel("social", social, Date.now(), appTz()),
     });
@@ -3361,6 +3512,7 @@ function collectPins() {
       own: mine,
       personId: plan.creator.id,
       photo: pinPhoto(plan.creator),
+      status: activeStatus(plan.creator.status)?.type || "",
       now: false,
       label: pinLabel("plan", plan, Date.now(), appTz()),
       // The host is the pin itself, so the crowd is everyone else who is In.
@@ -3369,6 +3521,7 @@ function collectPins() {
         initial: initial(person.name),
         color: colorFor(person),
         photo: pinPhoto(person),
+        status: activeStatus(person.status)?.type || "",
       })),
       more: crowd.more,
     });
@@ -4950,7 +5103,11 @@ function guestLine(text, person, kind, event) {
 }
 
 function guestDetailRow(text, person, kind, event) {
-  const line = el("p", { class: "reply-line", text });
+  const reply = el("p", { class: "reply-line", text });
+  const status = statusLine(person?.status);
+  const line = status
+    ? el("div", { class: "guest-text" }, [reply, el("p", { class: "guest-status", "data-status": person.status.type, text: status })])
+    : reply;
   if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) {
     return el("div", { class: "guest-row" }, [avatar(person), line]);
   }
@@ -5153,7 +5310,26 @@ function avatarImg(url, person, size, extra) {
   return node;
 }
 
+/** The face, with a small Away / Busy badge on it while that status is on. */
 function avatar(person, size = 28, extra = "") {
+  const face = avatarFace(person, size, extra);
+  const status = activeStatus(person?.status);
+  if (!status) return face;
+  const badge = el("span", {
+    class: "status-badge",
+    role: "img",
+    "aria-label": statusLabel(status.type),
+    "data-status": status.type,
+    text: statusBadge(status.type),
+  });
+  const mark = Math.max(14, Math.round(size * 0.4));
+  badge.style.width = `${mark}px`;
+  badge.style.height = `${mark}px`;
+  badge.style.fontSize = `${Math.round(mark * 0.62)}px`;
+  return el("span", { class: "avatar-wrap" }, [face, badge]);
+}
+
+function avatarFace(person, size = 28, extra = "") {
   const key = avatarKey(person);
   const cached = key ? avatarUrls.get(key) : undefined;
   if (typeof cached === "string") return avatarImg(cached, person, size, extra);

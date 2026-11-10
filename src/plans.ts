@@ -89,7 +89,7 @@ export async function publishPlan(
     recipients.map((member) => ({ userId: member.id, ...newPlanNotice(plan, user.name, today) })),
     circle,
   );
-  return planPayload(deps.db, plan, today, user.id);
+  return planPayload(deps.db, plan, today, user.id, deps.now());
 }
 
 /** The new-plan push. Also sent once to a circle the plan is shared with later. */
@@ -120,7 +120,7 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requ
   await setPlanComing(deps, user, plan, now);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, user.id);
+  return planPayload(deps.db, fresh, today, user.id, deps.now());
 }
 
 async function setPlanComing(
@@ -211,7 +211,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   }
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return planPayload(deps.db, fresh, today, user.id);
+  return planPayload(deps.db, fresh, today, user.id, deps.now());
 }
 
 async function notifyPlanReply(
@@ -294,7 +294,7 @@ export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, re
   const everyone = [...new Set([...targets.values()].flat())];
   if (cooling && everyone.length === 0) throw new HttpError(429, "Already reminded.", { retryAt });
   // Nobody left to ask: no push, and the hour stays free for later.
-  if (everyone.length === 0) return { reminded: 0, plan: planPayload(deps.db, plan, today, user.id) };
+  if (everyone.length === 0) return { reminded: 0, plan: planPayload(deps.db, plan, today, user.id, deps.now()) };
   // Claimed before any await, in one transaction with the record of who was reminded, so two taps
   // at once send one reminder. A newcomer-only reminder keeps the hour as it was.
   let claimed: Set<string>;
@@ -324,7 +324,7 @@ export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, re
   for (const batch of batches) await notifyUsers(deps.db, deps.push, now, batch.notices, batch.circle);
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
-  return { reminded: claimed.size, plan: planPayload(deps.db, fresh, today, user.id) };
+  return { reminded: claimed.size, plan: planPayload(deps.db, fresh, today, user.id, deps.now()) };
 }
 
 /** The reminder push. Shaped like the reschedule push: the news in the title, the place under it. */

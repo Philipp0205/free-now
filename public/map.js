@@ -274,6 +274,9 @@ export function bindMap({
     return item;
   }
 
+  /** Away / Busy mark on a face, same as the badge on an avatar in the app. */
+  const STATUS_MARKS = { away: "\u2708\ufe0f", busy: "\u23f3" };
+
   /** Initials stay underneath. A photo that fails to load is removed and the initials show. */
   function face(cls, person) {
     const item = node("span", cls, person.initial || "");
@@ -289,6 +292,14 @@ export function bindMap({
       img.src = person.photo;
       item.append(img);
     }
+    if (STATUS_MARKS[person.status]) {
+      item.classList.add("has-status");
+      const mark = node("span", "pin-status", STATUS_MARKS[person.status]);
+      mark.dataset.status = person.status;
+      mark.setAttribute("role", "img");
+      mark.setAttribute("aria-label", person.status === "away" ? "Away" : "Busy");
+      item.append(mark);
+    }
     return item;
   }
 
@@ -298,7 +309,7 @@ export function bindMap({
    */
   function pinIcon(L, pin) {
     const wrap = node("span", "pin-body");
-    wrap.append(face("pin-letter", { id: pin.personId, initial: pin.initial, color: pin.color, photo: pin.photo }));
+    wrap.append(face("pin-letter", { id: pin.personId, initial: pin.initial, color: pin.color, photo: pin.photo, status: pin.status }));
     if (pin.faces?.length || pin.more) {
       const crowd = node("span", "pin-crowd");
       for (const person of pin.faces || []) crowd.append(face("pin-face", person));
@@ -317,8 +328,8 @@ export function bindMap({
   }
 
   function pinSig(pin) {
-    const faces = (pin.faces || []).map((person) => `${person.id}:${person.initial}:${person.color}:${person.photo || ""}`).join("|");
-    return `${pin.lat},${pin.lng},${pin.initial},${pin.kind},${pin.color},${pin.photo || ""},${pin.now ? 1 : 0},${pin.label || ""},${faces},${pin.more || 0}`;
+    const faces = (pin.faces || []).map((person) => `${person.id}:${person.initial}:${person.color}:${person.photo || ""}:${person.status || ""}`).join("|");
+    return `${pin.lat},${pin.lng},${pin.initial},${pin.kind},${pin.color},${pin.photo || ""},${pin.status || ""},${pin.now ? 1 : 0},${pin.label || ""},${faces},${pin.more || 0}`;
   }
 
   /** Live buzzers stay above everything else on the map. */
