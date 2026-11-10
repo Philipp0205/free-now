@@ -314,6 +314,14 @@ CREATE TABLE IF NOT EXISTS chat_mutes (
   PRIMARY KEY (user_id, chat_id)
 );
 
+CREATE TABLE IF NOT EXISTS message_reactions (
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id, emoji)
+);
+
 CREATE TABLE IF NOT EXISTS calendar_feeds (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,

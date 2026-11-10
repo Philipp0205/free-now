@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-09-chat-mentions-reactions",
+    "date": "2026-11-09",
+    "title": "Mentions and reactions in chat",
+    "bullets": [
+      "Type @ in a chat to tag a friend. They get a notification that you mentioned them.",
+      "Press and hold a message to react with a quick emoji. On a computer, use the small smile next to the time.",
+      "Reaction counts show under the message. Tap one to add or take back yours."
+    ]
+  },
+  {
     "id": "2026-11-09-glass-pins",
     "date": "2026-11-09",
     "title": "Nicer map pins",

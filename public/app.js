@@ -8,6 +8,7 @@ import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
+import { REACTIONS, findMentions, insertMention, mentionAt, mentionMatches, toggledReactions } from "./mentions.js";
 
 const TOKEN_KEY = "fn_token";
 const CIRCLE_KEY = "fn_circle";
@@ -17,7 +18,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v51";
+const APP_VERSION = "hangry-v52";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -99,6 +100,12 @@ const state = {
   alertsReturn: "home",
   chatDraft: "",
   chatStick: false,
+  /** Open @ autocomplete in the composer: { start, query, index }. */
+  chatMention: null,
+  /** Message id whose quick-reaction bar is open. */
+  chatReactFor: null,
+  /** Pill whose names are showing after a long-press: { id, emoji }. */
+  chatWho: null,
   chatSummary: { circle: { unread: 0, muted: false }, events: [], unreadByCircle: {} },
   past: false,
   pastDays: null,
@@ -428,7 +435,7 @@ async function refresh({ initial = false } = {}) {
     circles: state.me?.circles ?? null,
     banner: state.banner?.id ?? null,
     chats: state.chatSummary,
-    thread: state.chatThread?.messages?.map((message) => message.id) ?? null,
+    thread: state.chatThread?.messages?.map((message) => [message.id, (message.reactions || []).map((item) => `${item.emoji}${item.count}${item.mine ? "+" : ""}`)]) ?? null,
   });
   persistCachedState();
   const hadStatus = Boolean(state.statusMessage);
@@ -1568,6 +1575,9 @@ function closeChat() {
   state.chat = null;
   state.chatThread = null;
   state.chatDraft = "";
+  state.chatMention = null;
+  state.chatReactFor = null;
+  state.chatWho = null;
   state.tab = state.chatReturn || "home";
   render();
 }
@@ -1575,7 +1585,8 @@ function closeChat() {
 function chatScreen() {
   const thread = state.chatThread;
   const title = thread?.title || "Chat";
-  return     el("section", { class: "chat-screen", "aria-label": title }, [
+  const me = thread?.participants?.find((person) => person.id === state.me?.user?.id);
+  return     el("section", { class: "chat-screen", "aria-label": title, style: me ? `--me:${me.color}` : null }, [
     state.statusMessage ? el("p", { class: "status-banner", role: "status", text: state.statusMessage }) : null,
     el("header", { class: "chat-head" }, [
       el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closeChat }),
@@ -1605,11 +1616,248 @@ function chatScreen() {
             placeholder: "Message",
             value: state.chatDraft,
             autocomplete: "off",
-            oninput: (event) => { state.chatDraft = event.target.value; },
+            "aria-autocomplete": "list",
+            "aria-controls": "mention-list",
+            oninput: (event) => {
+              state.chatDraft = event.target.value;
+              noteMentionTyping(event.target);
+            },
+            onkeydown: onComposerKey,
+            onblur: (event) => {
+              if (!event.target.isConnected || !state.chatMention) return;
+              state.chatMention = null;
+              paintMentions();
+            },
           }),
           el("button", { class: "btn chat-send", type: "submit", text: "Send" }),
+          mentionPicker(),
         ]),
   ]);
+}
+
+/** Who can be tagged: the chat's people, never you. */
+function mentionChoices() {
+  const pick = state.chatMention;
+  if (!pick) return [];
+  return mentionMatches(state.chatThread?.participants || [], pick.query, state.me?.user?.id);
+}
+
+function mentionPicker() {
+  const people = mentionChoices();
+  if (!people.length) return null;
+  const index = Math.min(state.chatMention.index, people.length - 1);
+  return el("ul", { class: "mention-list", id: "mention-list", role: "listbox", "aria-label": "Mention someone" }, people.map((person, i) =>
+    el("li", {
+      class: i === index ? "mention-option active" : "mention-option",
+      role: "option",
+      "aria-selected": i === index ? "true" : "false",
+      style: `--person:${person.color}`,
+      // Keeps focus (and the keyboard) on the composer.
+      onmousedown: (event) => event.preventDefault(),
+      onclick: () => chooseMention(person),
+    }, [el("span", { class: "mention-dot", "aria-hidden": "true" }), el("span", { text: person.name })])));
+}
+
+/** Swaps the list in place, so typing never rebuilds the composer under the keyboard. */
+function paintMentions() {
+  const form = document.querySelector(".chat-compose");
+  if (!form) return;
+  form.querySelector(".mention-list")?.remove();
+  const next = mentionPicker();
+  if (next) form.append(next);
+}
+
+function noteMentionTyping(input) {
+  const found = mentionAt(input.value, input.selectionStart ?? input.value.length);
+  const before = state.chatMention;
+  state.chatMention = found ? { ...found, index: before && before.start === found.start ? before.index : 0 } : null;
+  paintMentions();
+}
+
+function onComposerKey(event) {
+  const people = mentionChoices();
+  if (!people.length) return;
+  const pick = state.chatMention;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    pick.index = (Math.min(pick.index, people.length - 1) + step + people.length) % people.length;
+    paintMentions();
+  } else if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    chooseMention(people[Math.min(pick.index, people.length - 1)]);
+  } else if (event.key === "Escape") {
+    // Only the list closes; the chat stays open.
+    event.preventDefault();
+    event.stopPropagation();
+    state.chatMention = null;
+    paintMentions();
+  }
+}
+
+function chooseMention(person) {
+  const input = document.getElementById("chat-input");
+  const pick = state.chatMention;
+  if (!input || !pick) return;
+  const next = insertMention(input.value, pick.start, input.selectionStart ?? input.value.length, person.name);
+  input.value = next.text;
+  state.chatDraft = next.text;
+  state.chatMention = null;
+  paintMentions();
+  input.focus({ preventScroll: true });
+  input.setSelectionRange(next.caret, next.caret);
+}
+
+/** Message text with each @Name of someone in the chat in their colour. Yours is a little stronger. */
+function messageText(text) {
+  const thread = state.chatThread;
+  const colors = new Map();
+  for (const message of thread?.messages || []) if (message.color && message.name) colors.set(message.name.toLowerCase(), message.color);
+  for (const person of thread?.participants || []) colors.set(person.name.toLowerCase(), person.color);
+  const hits = findMentions(text, [...colors.keys()]);
+  if (!hits.length) return el("p", { text });
+  const me = (state.me?.user?.name || "").trim().toLowerCase();
+  const parts = [];
+  let at = 0;
+  for (const hit of hits) {
+    if (hit.start > at) parts.push(text.slice(at, hit.start));
+    const key = hit.name.toLowerCase();
+    parts.push(el("span", {
+      class: key === me ? "mention me" : "mention",
+      style: `--person:${colors.get(key)}`,
+      text: text.slice(hit.start, hit.end),
+    }));
+    at = hit.end;
+  }
+  if (at < text.length) parts.push(text.slice(at));
+  return el("p", {}, parts);
+}
+
+/** You can react once you are one of the chat's people and were not removed. */
+function canReact() {
+  const thread = state.chatThread;
+  if (!thread || thread.removed) return false;
+  return (thread.participants || []).some((person) => person.id === state.me?.user?.id);
+}
+
+function reactionBar(message) {
+  return el("div", { class: "react-bar", role: "toolbar", "aria-label": "React" }, REACTIONS.map((emoji) => {
+    const mine = (message.reactions || []).some((item) => item.emoji === emoji && item.mine);
+    return el("button", {
+      class: mine ? "react-pick mine" : "react-pick",
+      type: "button",
+      "aria-label": `React ${emoji}`,
+      "aria-pressed": mine ? "true" : "false",
+      text: emoji,
+      onclick: () => { if (!pressConsumed()) void reactTo(message.id, emoji); },
+    });
+  }));
+}
+
+function reactionPills(message, live) {
+  const list = message.reactions || [];
+  if (!list.length) return null;
+  const who = state.chatWho && state.chatWho.id === message.id
+    ? list.find((item) => item.emoji === state.chatWho.emoji)
+    : null;
+  return el("div", { class: "chat-reacts" }, [
+    ...list.map((item) => el("button", {
+      class: item.mine ? "react-pill mine" : "react-pill",
+      type: "button",
+      "data-emoji": item.emoji,
+      title: item.names.join(", "),
+      "aria-label": `${item.emoji} ${item.count}: ${item.names.join(", ")}`,
+      "aria-pressed": item.mine ? "true" : "false",
+      disabled: !live,
+      onclick: () => { if (!pressConsumed()) void reactTo(message.id, item.emoji); },
+    }, [el("span", { class: "react-emoji", text: item.emoji }), el("span", { class: "react-count", text: String(item.count) })])),
+    who ? el("span", { class: "react-who", text: who.names.join(", ") }) : null,
+  ]);
+}
+
+const LONG_PRESS_MS = 400;
+let pressTimer = 0;
+let pressStart = null;
+let pressUsedAt = 0;
+
+/** A long-press just fired, so the click that follows it is not a tap. */
+function pressConsumed() {
+  return Date.now() - pressUsedAt < 700;
+}
+
+/** Touch and pen: hold a message for the reaction bar, or a pill for who reacted. */
+function startPress(event, message) {
+  if (event.pointerType === "mouse") return;
+  const pill = event.target.closest?.(".react-pill");
+  // Chrome's touch adjustment can land a press on the row's Delete, so only the bar itself is left alone.
+  if (event.target.closest?.(".react-bar")) return;
+  clearTimeout(pressTimer);
+  pressStart = { x: event.clientX, y: event.clientY };
+  pressTimer = setTimeout(() => {
+    pressStart = null;
+    pressUsedAt = Date.now();
+    tick();
+    if (pill) state.chatWho = { id: message.id, emoji: pill.dataset.emoji };
+    else {
+      state.chatReactFor = message.id;
+      state.chatWho = null;
+    }
+    render();
+  }, LONG_PRESS_MS);
+}
+
+function movePress(event) {
+  if (!pressStart) return;
+  if (Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > 8) endPress();
+}
+
+function endPress() {
+  clearTimeout(pressTimer);
+  pressStart = null;
+}
+
+function openReactionBar(message) {
+  state.chatReactFor = state.chatReactFor === message.id ? null : message.id;
+  state.chatWho = null;
+  render();
+  document.querySelector(".react-bar .react-pick")?.focus({ preventScroll: true });
+}
+
+/** Puts the bar or the names away without a re-render, so the tap that did it still lands. */
+function closeReactUi() {
+  if (!state.chatReactFor && !state.chatWho) return false;
+  state.chatReactFor = null;
+  state.chatWho = null;
+  document.querySelectorAll(".react-bar, .react-who").forEach((node) => node.remove());
+  document.querySelectorAll('.chat-react-btn[aria-expanded="true"]').forEach((node) => node.setAttribute("aria-expanded", "false"));
+  return true;
+}
+
+async function reactTo(messageId, emoji) {
+  const thread = state.chatThread;
+  const message = thread?.messages?.find((item) => item.id === messageId);
+  if (!message) return;
+  const on = !(message.reactions || []).some((item) => item.emoji === emoji && item.mine);
+  tick();
+  message.reactions = toggledReactions(message.reactions || [], emoji, state.me?.user?.name || "You");
+  state.chatReactFor = null;
+  state.chatWho = null;
+  render();
+  try {
+    const result = await api(`/api/messages/${encodeURIComponent(messageId)}/reactions`, { method: "POST", body: { emoji, on } });
+    const current = state.chatThread?.messages?.find((item) => item.id === messageId);
+    if (current) current.reactions = result.reactions;
+  } catch (error) {
+    if (error.status === 401) return;
+    state.error = error.message || "Something went wrong. Try again.";
+    try {
+      if (state.chat) state.chatThread = (await api(chatTargetUrl(state.chat))).chat;
+    } catch {
+      /* the next refresh catches up */
+    }
+    scheduleErrorClear();
+  }
+  render();
 }
 
 function systemLine(message) {
@@ -1621,16 +1869,36 @@ function systemLine(message) {
 
 function messageRow(message) {
   const accent = message.system ? "" : message.color || "";
+  const live = canReact();
   return el("article", {
     class: message.mine ? "chat-msg mine" : "chat-msg",
     "data-color": accent || null,
+    "data-id": message.id,
     style: accent ? `--person:${accent}` : null,
+    onpointerdown: live ? (event) => startPress(event, message) : null,
+    onpointermove: live ? movePress : null,
+    onpointerup: live ? endPress : null,
+    onpointercancel: live ? endPress : null,
+    // A held finger opens the reaction bar, not the browser's own menu.
+    oncontextmenu: live ? (event) => { if (prefersTouchUi()) event.preventDefault(); } : null,
   }, [
     el("header", {}, [
       el("strong", { text: message.mine ? "You" : message.name }),
+      live
+        ? el("button", {
+            class: "chat-react-btn",
+            type: "button",
+            "aria-label": "React",
+            "aria-expanded": state.chatReactFor === message.id ? "true" : "false",
+            text: "☺",
+            onclick: () => openReactionBar(message),
+          })
+        : null,
       el("time", { text: messageWhen(message.at) }),
     ]),
-    el("p", { text: message.text }),
+    messageText(message.text),
+    live && state.chatReactFor === message.id ? reactionBar(message) : null,
+    reactionPills(message, live),
     message.canDelete
       ? el("button", { class: "text-btn", type: "button", text: "Delete", onclick: () => confirmDeleteMessage(message) })
       : null,
@@ -5630,8 +5898,22 @@ document.addEventListener("pointerdown", (event) => {
   render();
 }, true);
 
+document.addEventListener("pointerdown", (event) => {
+  if (!state.chatReactFor && !state.chatWho) return;
+  const target = event.target;
+  if (target && target.closest && target.closest(".react-bar, .chat-react-btn, .react-pill")) return;
+  closeReactUi();
+}, true);
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (state.chat && (state.chatReactFor || state.chatWho)) {
+    event.preventDefault();
+    const id = state.chatReactFor;
+    closeReactUi();
+    if (id) document.querySelector(`.chat-msg[data-id="${CSS.escape(id)}"] .chat-react-btn`)?.focus({ preventScroll: true });
+    return;
+  }
   // An open pin card sits above the Map tab but below every sheet, menu and chat.
   if (mapCardOnTop()) {
     event.preventDefault();
