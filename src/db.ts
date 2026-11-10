@@ -217,6 +217,16 @@ CREATE TABLE IF NOT EXISTS plan_joins (
   PRIMARY KEY (plan_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS plan_proposals (
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  proposer_id TEXT NOT NULL REFERENCES users(id),
+  for_date TEXT NOT NULL,
+  at_time TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (plan_id, proposer_id)
+);
+
 CREATE TABLE IF NOT EXISTS push_subs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -932,6 +942,9 @@ function endMemberEvents(db: DatabaseSync, circleId: string, userId: string): vo
   db.prepare(
     "DELETE FROM plan_joins WHERE user_id = ? AND plan_id IN (SELECT id FROM plans WHERE circle_id = ?)",
   ).run(userId, circleId);
+  db.prepare(
+    "DELETE FROM plan_proposals WHERE proposer_id = ? AND plan_id IN (SELECT id FROM plans WHERE circle_id = ?)",
+  ).run(userId, circleId);
 }
 
 export function removalBlocksJoin(db: DatabaseSync, circleId: string, userId: string, inviteCode: string): boolean {
@@ -1458,6 +1471,63 @@ export function setPlanReply(
 
 export function removePlanJoin(db: DatabaseSync, planId: string, userId: string): void {
   db.prepare("DELETE FROM plan_joins WHERE plan_id = ? AND user_id = ?").run(planId, userId);
+}
+
+export type PlanProposalRow = {
+  plan_id: string;
+  proposer_id: string;
+  for_date: string;
+  at_time: string | null;
+  note: string;
+  created_at: number;
+};
+
+export type PlanProposalListRow = PlanProposalRow & { name: string; color: number | null; avatar_rev: number | null };
+
+/** One pending proposal per person per plan. Proposing again replaces it. */
+export function setPlanProposal(
+  db: DatabaseSync,
+  planId: string,
+  proposerId: string,
+  forDate: string,
+  atTime: string | null,
+  note: string,
+  createdAt: number,
+): void {
+  db.prepare(
+    `INSERT INTO plan_proposals (plan_id, proposer_id, for_date, at_time, note, created_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(plan_id, proposer_id) DO UPDATE SET
+       for_date = excluded.for_date, at_time = excluded.at_time, note = excluded.note, created_at = excluded.created_at`,
+  ).run(planId, proposerId, forDate, atTime, note, createdAt);
+}
+
+export function getPlanProposal(db: DatabaseSync, planId: string, proposerId: string): PlanProposalRow | undefined {
+  return one(
+    db,
+    "SELECT plan_id, proposer_id, for_date, at_time, note, created_at FROM plan_proposals WHERE plan_id = ? AND proposer_id = ?",
+    planId,
+    proposerId,
+  );
+}
+
+export function listPlanProposals(db: DatabaseSync, planId: string): PlanProposalListRow[] {
+  return all<PlanProposalListRow>(
+    db,
+    `SELECT p.plan_id, p.proposer_id, p.for_date, p.at_time, p.note, p.created_at, u.name, u.color, u.avatar_rev
+     FROM plan_proposals p
+     JOIN users u ON u.id = p.proposer_id
+     WHERE p.plan_id = ?
+     ORDER BY p.created_at ASC`,
+    planId,
+  );
+}
+
+export function deletePlanProposal(db: DatabaseSync, planId: string, proposerId: string): void {
+  db.prepare("DELETE FROM plan_proposals WHERE plan_id = ? AND proposer_id = ?").run(planId, proposerId);
+}
+
+export function clearPlanProposals(db: DatabaseSync, planId: string): void {
+  db.prepare("DELETE FROM plan_proposals WHERE plan_id = ?").run(planId);
 }
 
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {

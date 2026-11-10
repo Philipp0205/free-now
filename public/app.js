@@ -25,7 +25,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v69";
+const APP_VERSION = "hangry-v70";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -140,6 +140,7 @@ const state = {
   eventDetail: null,
   arrivalPick: null,
   shareCircles: null,
+  proposeDate: null,
   newCircleName: "",
   whatsNew: null,
   whatsNewView: null,
@@ -1396,6 +1397,9 @@ function planCard(plan) {
         planCirclesLine(plan),
         planDescription(plan),
         planReplySummary(plan),
+        plan.proposals?.length
+          ? el("p", { class: "plan-circles", text: plan.proposals.length === 1 ? "1 new date proposed" : `${plan.proposals.length} new dates proposed` })
+          : null,
         placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
         removedNote(plan),
       ]),
@@ -2627,6 +2631,10 @@ function eventDetailSheet() {
           chatRow(kind, item),
           over ? null : cardActions(kind, item, { locked: mine }),
         ]) : null,
+        kind === "plan" && !over && item.proposals?.length ? proposalsBlock(item) : null,
+        kind === "plan" && !over && canProposeDate(item)
+          ? el("button", { class: "btn secondary propose-btn", type: "button", text: "Propose new date", onclick: () => openProposeDate(item) })
+          : null,
         el("h3", { class: "members-title", text: "Who's in" }),
         el("div", { class: "list" }, unique.map((person) => {
           const line = person.id === item.creator.id
@@ -2638,6 +2646,121 @@ function eventDetailSheet() {
       ]),
     ]),
   ]);
+}
+
+/** Guests of an open plan can suggest another day. The host just edits the plan. */
+function canProposeDate(plan) {
+  return Boolean(plan?.creator) && plan.creator.id !== state.me.user.id && !plan.removedBy && planOpen(plan);
+}
+
+function proposalsBlock(plan) {
+  const manage = canManageEvent(plan);
+  const decide = (proposal, action) => run(async () => {
+    await api(`/api/plans/${plan.id}/proposals/${proposal.userId}/${action}`, { method: "POST" });
+    await refresh({ initial: true });
+  });
+  return el("div", { class: "proposal-block" }, [
+    el("h3", { class: "members-title", text: "Proposed dates" }),
+    el("div", { class: "list" }, plan.proposals.map((proposal) => el("div", { class: "proposal-row" }, [
+      el("div", { class: "guest-row" }, [
+        avatar(proposal),
+        el("div", { class: "reply-line" }, [
+          el("span", { text: `${proposal.name} proposed ${proposal.whenLabel}${proposal.time ? ` · ${proposal.time}` : ""}` }),
+          proposal.note ? el("p", { class: "proposal-note", text: proposal.note }) : null,
+        ]),
+      ]),
+      manage ? el("div", { class: "proposal-actions" }, [
+        el("button", { class: "btn", type: "button", text: "Accept", onclick: () => { void decide(proposal, "accept"); } }),
+        el("button", { class: "btn ghost", type: "button", text: "Dismiss", onclick: () => { void decide(proposal, "dismiss"); } }),
+      ]) : null,
+    ]))),
+  ]);
+}
+
+function openProposeDate(plan) {
+  state.proposeDate = { id: plan.id, date: plan.forDate || "", time: plan.time || "", note: "", busy: false, error: "" };
+  state.sheet = "propose-date";
+  render();
+}
+
+function proposeDateSheet() {
+  const propose = state.proposeDate;
+  if (!propose) return el("div");
+  const range = planDayRange(Date.now(), appTz());
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
+    el("form", { class: "sheet", role: "dialog", "aria-label": "Propose new date", ...saveOnlyFromButton(sendProposal) }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { text: "Propose new date" }),
+        el("p", { class: "help", text: "The host picks. You get a note when they decide." }),
+      ]),
+      el("div", { class: "sheet-scroll" }, [
+        el("div", { class: "sheet-form" }, [
+          el("label", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", text: "Date" }),
+            el("input", {
+              id: "propose-date",
+              class: "sheet-control",
+              type: "date",
+              min: range.min,
+              max: range.max,
+              value: propose.date,
+              oninput: (event) => { propose.date = event.target.value; },
+            }),
+          ]),
+          el("label", { class: "sheet-group" }, [
+            el("span", { class: "sheet-label", text: "Time (optional)" }),
+            el("input", {
+              id: "propose-time",
+              class: "sheet-control",
+              type: "time",
+              value: propose.time,
+              oninput: (event) => { propose.time = event.target.value; },
+            }),
+          ]),
+          sheetField("Note (optional)", "propose-note", propose.note, (value) => { propose.note = value; }, { maxlength: "140", placeholder: "Why this day?" }),
+          propose.error ? el("p", { class: "time-error", role: "alert", text: propose.error }) : null,
+        ]),
+      ]),
+      el("div", { class: "sheet-dock stack" }, [
+        el("button", { class: "btn", type: "submit", text: propose.busy ? "Sending…" : "Send proposal", disabled: propose.busy }),
+        el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: closeSheet }),
+      ]),
+    ]),
+  ]);
+}
+
+async function sendProposal(event) {
+  event.preventDefault();
+  const propose = state.proposeDate;
+  if (!propose || propose.busy) return;
+  if (!propose.date) {
+    propose.error = PICK_DATE_ERROR;
+    render();
+    return;
+  }
+  propose.busy = true;
+  propose.error = "";
+  render();
+  try {
+    const body = { date: propose.date, note: propose.note };
+    if (propose.time) body.time = propose.time;
+    await api(`/api/plans/${propose.id}/proposals`, { method: "POST", body });
+  } catch (error) {
+    propose.busy = false;
+    propose.error = isNetworkFailure(error)
+      ? "You're offline. Try again."
+      : error.status >= 500 ? "Something went wrong. Try again." : (error.message || "Something went wrong. Try again.");
+    if (state.proposeDate === propose) render();
+    return;
+  }
+  state.proposeDate = null;
+  state.sheet = null;
+  await refresh({ initial: true });
+  state.error = "Proposal sent";
+  render();
+  scheduleErrorClear();
 }
 
 function canManageEvent(item) {
@@ -2732,6 +2855,12 @@ function cardOverflow(kind, item, { onMap = false } = {}) {
       action: () => { state.cardMenu = null; void sendReply(kind, item, "declined"); },
       on: declined,
     });
+    if (kind === "plan" && canProposeDate(item)) {
+      items.push({
+        text: "Propose new date",
+        action: () => { state.cardMenu = null; openProposeDate(item); },
+      });
+    }
   }
   /* Map card already has a quiet Open in Maps link; keep the menu item on plan cards only. */
   if (!onMap && kind === "plan" && item.location) {
@@ -3419,6 +3548,7 @@ function sheet() {
   if (state.sheet === "event-detail") return eventDetailSheet();
   if (state.sheet === "arrival") return arrivalSheet();
   if (state.sheet === "share-circles") return shareCirclesSheet();
+  if (state.sheet === "propose-date") return proposeDateSheet();
   if (state.sheet === "push") return pushSheet();
   if (state.sheet === "whats-new") return whatsNewSheet();
   if (state.sheet === "feedback") return feedbackSheet();
@@ -6239,6 +6369,7 @@ function closeSheet() {
   if (state.sheet === "event-detail") state.eventDetail = null;
   if (state.sheet === "arrival") state.arrivalPick = null;
   if (state.sheet === "share-circles") state.shareCircles = null;
+  if (state.sheet === "propose-date") state.proposeDate = null;
   state.cardMenu = null;
   state.sheet = null;
   state.whereMap = false;

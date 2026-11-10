@@ -12,14 +12,15 @@ import {
   planInCircle,
   listMembers,
   listPlanRemindedUserIds,
+  setPlanProposal,
   setPlanReply,
   type PlanRow,
   type UserRow,
 } from "./db.js";
 import { audiencePlace, eventTitle, notifyUsers, planRemindTitle, planReplyBody, replyPushBody, type Notice } from "./notify.js";
-import { addDays, clockLabel, isCalendarDate, isoDate, noticeDay, zonedDateTime } from "./time.js";
+import { addDays, clockLabel, isCalendarDate, isoDate, noticeDay, shortDate, zonedDateTime } from "./time.js";
 import { recordEventLine, replyLogText } from "./chat.js";
-import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "./app.js";
+import { HttpError, parseId, planPayload, readClock, requireCircle, type AppDeps } from "./app.js";
 import { normalizeReply, readArriveAt, type Reply } from "./socials.js";
 import { ensureShareId } from "./plan-share.js";
 
@@ -212,6 +213,50 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   return planPayload(deps.db, fresh, today, user.id);
+}
+
+/** A guest suggests another day (and maybe a time) for the host to accept or dismiss. One per person, newest wins. */
+export async function proposePlanDate(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id, requested);
+  const plan = getPlan(deps.db, id);
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  assertPlanOpen(plan, today);
+  if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
+  const block = getPlanReply(deps.db, plan.id, user.id);
+  if (block?.blocked) throw new HttpError(403, removedMessage(block.removed_by));
+  const forDate = readPlanDate(body.date, today);
+  const time = readClock(body.time);
+  assertPlanClock(forDate, time, now, deps.config.tz);
+  const note = typeof body.note === "string" ? body.note.trim() : "";
+  if (note.length > 140) throw new HttpError(400, "note is too long (140)");
+  if (forDate === plan.for_date && (time === null || time === plan.at_time)) throw new HttpError(400, "That is already the plan.");
+  setPlanProposal(deps.db, plan.id, user.id, forDate, time, note, now);
+  const when = `${shortDate(forDate, today)}${time ? ` · ${time}` : ""}`;
+  recordEventLine(deps.db, {
+    circleId: plan.circle_id,
+    kind: "plan",
+    refId: plan.id,
+    hostId: plan.creator_id,
+    title: plan.note,
+    actorId: user.id,
+    text: `${user.name} proposed ${when}`,
+    now,
+  });
+  await notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: plan.creator_id,
+      title: "New date proposed",
+      body: `${user.name} proposed ${when} for ${plan.note}`,
+      kind: "plan-proposal",
+      refId: plan.id,
+      tag: `plan-proposal:${plan.id}:${user.id}`,
+      url: `/?plan=${plan.id}`,
+    },
+  ], getCircleById(deps.db, plan.circle_id));
+  return planPayload(deps.db, plan, today, user.id);
 }
 
 async function notifyPlanReply(

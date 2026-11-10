@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-10-propose-new-date",
+    "date": "2026-11-10",
+    "title": "Propose a new date for a plan",
+    "bullets": [
+      "Can't make the day? Tap Propose new date on a plan and suggest another day.",
+      "The host sees every proposal in the plan details and taps Accept or Dismiss.",
+      "Accepting moves the plan for everyone."
+    ]
+  },
+  {
     "id": "2026-11-10-circle-switch-alerts",
     "date": "2026-11-10",
     "title": "Alerts no longer repeat when you switch circles",

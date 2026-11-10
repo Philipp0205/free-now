@@ -21,6 +21,10 @@ import {
   addMember,
   addSocialJoin,
   blockPlanGuest,
+  clearPlanProposals,
+  deletePlanProposal,
+  getPlanProposal,
+  listPlanProposals,
   blockSocialGuest,
   clearRemoval,
   removalBlocksJoin,
@@ -117,7 +121,7 @@ import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } f
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
-import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
+import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, proposePlanDate, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
 import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
@@ -787,6 +791,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  const planProposals = matchPath(pathname, /^\/api\/plans\/([^/]+)\/proposals$/);
+  if (planProposals && method === "POST") {
+    sendJson(res, 201, { plan: await proposePlanDate(deps, me, planProposals[1], body, requested) });
+    return;
+  }
+
+  const planProposal = matchPath(pathname, /^\/api\/plans\/([^/]+)\/proposals\/([^/]+)\/(accept|dismiss)$/);
+  if (planProposal && method === "POST") {
+    const decide = planProposal[3] === "accept" ? acceptProposal : dismissProposal;
+    sendJson(res, 200, { plan: await decide(deps, me, planProposal[1], planProposal[2], requested) });
+    return;
+  }
+
   const planRemind = matchPath(pathname, /^\/api\/plans\/([^/]+)\/remind$/);
   if (planRemind && method === "POST") {
     sendJson(res, 200, await remindPlan(deps, me, planRemind[1], requested));
@@ -1392,6 +1409,47 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   return planPayload(deps.db, fresh, today, user.id);
 }
 
+async function acceptProposal(deps: AppDeps, user: UserRow, rawId: string, rawUserId: string, requested: string | null = null) {
+  const id = parseId(rawId);
+  const proposerId = parseId(rawUserId);
+  const circle = requireCircle(deps, user.id, requested);
+  const plan = getPlan(deps.db, id);
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  assertEventHost(deps, user, plan.circle_id, plan.creator_id);
+  const proposal = getPlanProposal(deps.db, plan.id, proposerId);
+  if (!proposal) throw new HttpError(404, "proposal not found");
+  await editPlan(deps, user, plan.id, { date: proposal.for_date, ...(proposal.at_time ? { time: proposal.at_time } : {}) }, requested);
+  clearPlanProposals(deps.db, plan.id);
+  const fresh = getPlan(deps.db, plan.id);
+  if (!fresh) throw new HttpError(500, "plan missing");
+  return planPayload(deps.db, fresh, isoDate(deps.now(), deps.config.tz), user.id);
+}
+
+async function dismissProposal(deps: AppDeps, user: UserRow, rawId: string, rawUserId: string, requested: string | null = null) {
+  const id = parseId(rawId);
+  const proposerId = parseId(rawUserId);
+  const circle = requireCircle(deps, user.id, requested);
+  const plan = getPlan(deps.db, id);
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  assertEventHost(deps, user, plan.circle_id, plan.creator_id);
+  if (!getPlanProposal(deps.db, plan.id, proposerId)) throw new HttpError(404, "proposal not found");
+  deletePlanProposal(deps.db, plan.id, proposerId);
+  const now = deps.now();
+  const today = isoDate(now, deps.config.tz);
+  await notifyUsers(deps.db, deps.push, now, [
+    {
+      userId: proposerId,
+      title: "Date kept",
+      body: `${user.name} kept ${plan.note} on ${shortDate(plan.for_date, today)}${plan.at_time ? ` · ${plan.at_time}` : ""}`,
+      kind: "plan-proposal",
+      refId: plan.id,
+      tag: `plan-proposal:${plan.id}:${proposerId}`,
+      url: `/?plan=${plan.id}`,
+    },
+  ], getCircleById(deps.db, plan.circle_id) ?? circle);
+  return planPayload(deps.db, plan, today, user.id);
+}
+
 /** circleIds is the full set. Creator only, their own circles only. The home circle always stays. */
 function readPlanCircles(deps: AppDeps, user: UserRow, plan: PlanRow, raw: unknown): string[] {
   if (plan.creator_id !== user.id) throw new HttpError(403, "Only the host can do that.");
@@ -1662,6 +1720,17 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
       joinedAt: join.joined_at,
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,
+    })),
+    proposals: listPlanProposals(db, plan.id).map((proposal) => ({
+      userId: proposal.proposer_id,
+      name: proposal.name,
+      color: colorHex(proposal.proposer_id, proposal.color),
+      avatarRev: proposal.avatar_rev || null,
+      forDate: proposal.for_date,
+      whenLabel: dayLabel(proposal.for_date, today),
+      time: proposal.at_time,
+      note: proposal.note,
+      createdAt: proposal.created_at,
     })),
     // Every linked circle, so people reached by "Share with other circles" show too.
     ...optionalPush(pushSummaryForPlan(db, plan.id, plan.creator_id, viewerId)),
@@ -2234,7 +2303,7 @@ function readStart(body: Record<string, unknown>, now: number, tz: string): numb
   return assertLaterToday(instant, now, tz);
 }
 
-function readClock(value: unknown): string | null {
+export function readClock(value: unknown): string | null {
   if (value == null || value === "") return null;
   if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value)) throw new HttpError(400, "Pick a valid time, like 19:30");
   const hour = Number(value.slice(0, 2));
