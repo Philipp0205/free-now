@@ -25,7 +25,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v67";
+const APP_VERSION = "hangry-v68";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -1875,6 +1875,53 @@ function buzzNote(code) {
   ]);
 }
 
+function flicPanel(code) {
+  const circles = state.me?.circles || [];
+  const current = state.me?.circle;
+  // With more than one circle the link names the circle on screen, like buzzNote.
+  const aimed = circles.length > 1 && current;
+  const link = `${location.origin}/api/buzz/${encodeURIComponent(code)}${aimed ? `?circle=${encodeURIComponent(current.id)}` : ""}`;
+  return el("div", { class: "panel" }, [
+    el("button", {
+      class: "text-btn",
+      type: "button",
+      text: state.showButton ? "Hide button setup" : "Set up a Flic button",
+      onclick: () => {
+        state.showButton = !state.showButton;
+        render();
+      },
+    }),
+    state.showButton
+      ? el("div", {}, [
+          el("p", {
+            class: "help",
+            text: aimed
+              ? `One press tells ${current.name} you're free now.`
+              : "One press tells your circle you're free now.",
+          }),
+          el("pre", { class: "curl", text: link }),
+          el("ol", { class: "guide-reenable" }, [
+            "In the Flic app, open your button and choose Push.",
+            "Add the Internet Request action.",
+            "Paste this link as the URL, set the method to POST, and save.",
+            "Optional: add the same link under Hold with the method DELETE. Holding the button then ends your social.",
+          ].map((line) => el("li", { text: line }))),
+          el("p", {
+            class: "help",
+            style: "margin-top: 12px",
+            text: "Keep this link private. It contains your recovery code, and anyone with it can post as you.",
+          }),
+          el("button", {
+            class: "btn secondary",
+            type: "button",
+            text: "Copy link",
+            onclick: () => copyText(link, "Button link copied"),
+          }),
+        ])
+      : null,
+  ]);
+}
+
 function youScreen() {
   const code = state.me.user.buzzToken;
   const hasPhoto = Boolean(state.me.user.avatarRev);
@@ -1974,6 +2021,7 @@ function youScreen() {
           ])
         : null,
     ]),
+    flicPanel(code),
     el("div", { class: "panel stack" }, [
       el("button", { class: "btn danger", type: "button", text: "Leave circle", onclick: onLeave }),
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),

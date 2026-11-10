@@ -28,6 +28,7 @@ import {
   deletePushSubForUser,
   finishPlan,
   finishSocial,
+  getActiveSocialByCreator,
   listPastPlans,
   listPastSocials,
   listPlansOnDays,
@@ -411,7 +412,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (pathname.startsWith("/api/buzz/")) {
-    if (method !== "POST") throw new HttpError(405, "method not allowed");
+    if (method !== "POST" && method !== "DELETE") throw new HttpError(405, "method not allowed");
     let token = pathname.slice("/api/buzz/".length);
     try {
       token = decodeURIComponent(token);
@@ -420,6 +421,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     }
     const buzzer = token ? getUserByBuzzToken(deps.db, token) : undefined;
     if (!buzzer) throw new HttpError(404, "unknown token");
+    if (method === "DELETE") {
+      // Ends the social in the circle a POST would post to.
+      // Ending with nothing live is still a success, so a second hold is harmless.
+      const circle = requireCircle(deps, buzzer.id, requested ?? buzzCircle(deps, buzzer.id));
+      const live = getActiveSocialByCreator(deps.db, buzzer.id, circle.id, deps.now());
+      if (live) await endSocial(deps, buzzer, live.id, circle.id);
+      sendEmpty(res, 204);
+      return;
+    }
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
     const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));

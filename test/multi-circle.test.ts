@@ -300,3 +300,28 @@ test("a buzz with no circle posts to the circle joined last", async () => {
     assert.equal(aimed.socials.some((social: { note: string }) => social.note === "At home"), true);
   });
 });
+
+test("a DELETE on the buzz token ends the social in the circle a buzz would post to", async () => {
+  await withApp(async ({ port, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
+    at(START + 1000);
+    const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
+    const live = async (circleId: string) =>
+      (await api(port, "GET", `/api/socials?circle=${circleId}`, { token: alex.token })).socials.length;
+
+    await api(port, "DELETE", "/api/buzz/not-a-real-token", { status: 404 });
+    await api(port, "POST", `/api/buzz/${alex.buzzToken}`, { status: 201 });
+    await api(port, "POST", `/api/buzz/${alex.buzzToken}?circle=${home.circle.id}`, { status: 201 });
+
+    await api(port, "DELETE", `/api/buzz/${alex.buzzToken}`, { status: 204 });
+    assert.equal(await live(uni.circle.id), 0);
+    assert.equal(await live(home.circle.id), 1);
+    // Nothing live there any more: still fine.
+    await api(port, "DELETE", `/api/buzz/${alex.buzzToken}`, { status: 204 });
+
+    await api(port, "DELETE", `/api/buzz/${alex.buzzToken}?circle=${home.circle.id}`, { status: 204 });
+    assert.equal(await live(home.circle.id), 0);
+    await api(port, "POST", `/api/buzz/${alex.buzzToken}`, { status: 201 });
+  });
+});

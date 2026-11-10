@@ -50,8 +50,21 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is calendar availability, in plain words", () => {
+test("the newest entry is the Flic button, in plain words", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-10-flic-button");
+  assert.equal(top.date, "2026-11-10");
+  assert.ok(top.title.length <= 60, top.title);
+  assert.ok(top.bullets.length <= 4);
+  for (const line of top.bullets) assert.ok(line.length <= 140, line);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /Flic button/);
+  assert.match(text, /You tab/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("calendar availability is listed, in plain words", () => {
+  const top = RAW.find((entry) => entry.id === "2026-11-10-calendar-availability")!;
   assert.equal(top.id, "2026-11-10-calendar-availability");
   assert.equal(top.date, "2026-11-10");
   assert.ok(top.title.length <= 60, top.title);
@@ -235,7 +248,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v67");
+  assert.equal(cache?.[1], "hangry-v68");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
