@@ -1809,6 +1809,10 @@ html.kb-open .sheet .help { margin-top: 0; }
 .guide-reenable { margin: 8px 0 0; padding-left: 18px; }
 .guide-reenable li { margin: 6px 0; }
 .guide .stack { margin-top: 18px; }
+.join-install .guide-steps { margin-top: 16px; }
+.join-install .guide-steps li { align-items: center; }
+.join-install .guide-steps strong { font-size: 15px; font-weight: 600; }
+.join-install .stack { margin-top: 16px; }
 .ios-hint button.link {
   border: 0;
   background: transparent;

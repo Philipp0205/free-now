@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-10-invite-install",
+    "date": "2026-11-10",
+    "title": "Install Hangry after you join",
+    "bullets": [
+      "After you join a circle from an invite, Hangry shows how to install it as an app on your phone.",
+      "On iPhone, open Hangry in Safari, tap Share, then Add to Home Screen.",
+      "On Android, tap Install app, or use the Chrome menu and choose Install app.",
+      "Tap Not now to skip it. It does not come back every time you open Hangry."
+    ]
+  },
+  {
     "id": "2026-11-10-notification-icon",
     "date": "2026-11-10",
     "title": "A clearer notification icon",
