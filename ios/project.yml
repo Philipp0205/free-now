@@ -1,0 +1,47 @@
+# XcodeGen spec. `xcodegen generate` turns this into Hangry.xcodeproj and
+# Hangry/Info.plist, so neither is checked in.
+name: Hangry
+options:
+  bundleIdPrefix: io.kurrle
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    # Codemagic's build counter. TestFlight needs a new number for every upload.
+    CURRENT_PROJECT_VERSION: ${BUILD_NUMBER}
+    SWIFT_VERSION: "5.0"
+targets:
+  Hangry:
+    type: application
+    platform: iOS
+    sources:
+      - Hangry
+    info:
+      path: Hangry/Info.plist
+      properties:
+        CFBundleDisplayName: Hangry
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIUserInterfaceStyle: Dark
+        NSLocationWhenInUseUsageDescription: Hangry shows your friends where you are when you choose to share your location.
+        NSCameraUsageDescription: Hangry uses the camera when you take a photo for a plan.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.kurrle.hangry
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  Hangry:
+    build:
+      targets:
+        Hangry: all
+    archive:
+      config: Release
