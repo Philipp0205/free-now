@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-10-zurich-map",
+    "date": "2026-11-10",
+    "title": "Dark map in Zürich too",
+    "bullets": [
+      "The detailed dark street map now covers Zürich and the lake, the same way it already covers Stuttgart.",
+      "The stretch between the two cities is covered as well.",
+      "Outside this area you still see the regular street map. There is nothing to reinstall."
+    ]
+  },
+  {
     "id": "2026-11-10-circle-switch-alerts",
     "date": "2026-11-10",
     "title": "Alerts no longer repeat when you switch circles",
