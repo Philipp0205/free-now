@@ -96,6 +96,7 @@ For the dark vector map (`MAP_PMTILES_PATH`):
 - Data © OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright). Full builds also contain Natural Earth (public domain) at z0–5 and Daylight landcover at z0–7 (source: https://docs.protomaps.com/basemaps/layers).
 - The in-map attribution reads "Protomaps © OpenStreetMap".
 - The 1.2 MB test fixture is z12–15 and OSM-only; see `test/fixtures/README.md`.
+- The usual production archive is one file covering the Stuttgart and Zürich regions and the area between them (bounds 8.3 to 9.95 E, 47.15 to 49.15 N, zoom 0 to 15, about 513 MiB). It is not in the repo. Outside those bounds the raster map is used.
 - No fonts are bundled. Labels are drawn on canvas with system fonts.
 
 The 16 MiB cap on a single range is our own defensive limit, not a PMTiles rule. The PMTiles spec only guarantees that the header and root directory fit in the first 16 KiB; metadata, leaf directories, and tiles have no size bound in the spec. A request over the cap gets 416, and the client falls back to the raster map.
