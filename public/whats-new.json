@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-10-notification-icon",
+    "date": "2026-11-10",
+    "title": "A clearer notification icon",
+    "bullets": [
+      "On Android, the small Hangry icon in the status bar and on each notification is now a big solid dot, like the button in the app.",
+      "It was a faint blur before, so it is much easier to spot now.",
+      "Android draws that small icon in one colour. The pink Hangry dot still shows as the big picture inside each notification."
+    ]
+  },
+  {
     "id": "2026-11-09-glass-pins",
     "date": "2026-11-09",
     "title": "Nicer map pins",
