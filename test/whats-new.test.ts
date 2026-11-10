@@ -50,8 +50,24 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is the monthly calendar, in plain words", () => {
+test("the newest entry is calendar availability, in plain words", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-10-calendar-availability");
+  assert.equal(top.date, "2026-11-10");
+  assert.ok(top.title.length <= 60, top.title);
+  assert.ok(top.bullets.length <= 4);
+  for (const line of top.bullets) assert.ok(line.length <= 140, line);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /busy or free/);
+  assert.match(text, /never the names/);
+  assert.match(text, /until you turn one on/);
+  assert.match(text, /I'm in/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the monthly calendar entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-calendar-month")!;
+  assert.ok(top, "monthly calendar entry");
   assert.equal(top.id, "2026-11-10-calendar-month");
   assert.equal(top.date, "2026-11-10");
   assert.equal(top.title, "Events: a monthly calendar and the map");
@@ -219,13 +235,14 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v65");
+  assert.equal(cache?.[1], "hangry-v67");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/map-pin.js"));
   assert.ok(paths.includes("/calendar-month.js"));
+  assert.ok(paths.includes("/freebusy.js"));
   const app = read("../public/app.js");
   assert.equal(/const APP_VERSION = "([^"]+)"/.exec(app)?.[1], cache?.[1]);
 });

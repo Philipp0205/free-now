@@ -7,6 +7,7 @@ import { goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
+import { PLAN_DURATION_MS, availabilityText, dayEvents, eventOverlaps, eventTimeText, untilText } from "./freebusy.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 import { CIRCLE_COLORS, WEEKDAY_LABELS, circleColor, eventCrowd, freeOnDay, gridRange, monthGrid, monthStart, monthTitle, shiftMonth } from "./calendar-month.js";
 
@@ -24,7 +25,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v65";
+const APP_VERSION = "hangry-v67";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -140,6 +141,12 @@ const state = {
   feedbackBusy: false,
   /** Calendar feed on the You tab: { loaded, active, createdAt, url, webcalUrl, busy }. url is set only right after making one. */
   calendarFeed: null,
+  /** Calendar availability on the You tab: syncStatus from the server plus { loaded, busy, draft, error }. */
+  calendarSync: null,
+  /** Busy people at a later time on the create sheet: { at, people: [{ id, state, until }] }. */
+  busyAt: null,
+  /** The "I'm in" tap waiting on the owner's own calendar for that day. */
+  calendarCheckBusy: "",
   feedbackSent: false,
 };
 
@@ -850,6 +857,8 @@ function clearSession() {
   state.past = false;
   state.pastDays = null;
   state.calendarFeed = null;
+  state.calendarSync = null;
+  state.busyAt = null;
 }
 
 function render() {
@@ -1916,6 +1925,7 @@ function youScreen() {
         : null,
     ]),
     calendarFeedPanel(),
+    calendarSyncPanel(),
     el("div", { class: "panel panel-rows" }, [
       el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
         el("div", { class: "grow" }, [
@@ -2125,6 +2135,179 @@ function onRevokeCalendarFeed() {
   render();
 }
 
+const CALENDAR_SYNC_STEPS = [
+  "Google Calendar on a computer: Settings, pick your calendar, Integrate calendar, then copy Secret address in iCal format.",
+  "Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, then copy the ICS link.",
+  "iCloud: in the Calendar app tap the info button next to a calendar, turn on Public Calendar, then Share Link.",
+];
+
+/** Import side of calendars: friends see busy or free, never titles. The link never comes back from the server. */
+function calendarSyncPanel() {
+  if (!state.calendarSync) void loadCalendarSync();
+  const sync = state.calendarSync || { loaded: false };
+  const head = [
+    el("h3", { text: "Calendar availability" }),
+    el("p", { text: "Friends in circles you pick see when you're busy or free. They never see what is in your calendar." }),
+  ];
+  const wrap = (kids) => el("section", { class: "panel calendar-sync", "aria-label": "Calendar availability" }, [...head, ...kids]);
+  if (!sync.loaded) return wrap([el("p", { class: "help", text: "Loading…" })]);
+  const error = sync.error ? el("p", { class: "time-error sync-error", role: "alert", text: sync.error }) : null;
+  if (!sync.connected) {
+    return wrap([
+      el("form", { class: "stack", novalidate: "", onsubmit: (event) => { event.preventDefault(); void onConnectCalendar(); } }, [
+        el("label", { class: "field" }, [
+          el("span", { text: "Private calendar link" }),
+          el("input", {
+            id: "calendar-sync-url",
+            class: "calendar-url",
+            type: "url",
+            inputmode: "url",
+            autocomplete: "off",
+            autocapitalize: "off",
+            spellcheck: "false",
+            placeholder: "https://… .ics",
+            value: sync.draft || "",
+            oninput: (event) => { state.calendarSync.draft = event.target.value; },
+          }),
+        ]),
+        error,
+        el("button", { class: "btn secondary", type: "submit", text: sync.busy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
+      ]),
+      el("p", { class: "help sync-note", text: "It stays off for every circle until you turn one on. Hangry keeps the link encrypted and never shows it again." }),
+      el("ul", { class: "feed-steps" }, CALENDAR_SYNC_STEPS.map((line) => el("li", { text: line }))),
+    ]);
+  }
+  const circles = sync.circles || [];
+  const shared = new Set(sync.sharedCircleIds || []);
+  return wrap([
+    el("p", { class: "sync-host", text: `Connected: ${sync.host || "calendar"}` }),
+    syncStatusLine(sync),
+    error,
+    el("p", { class: "sheet-label sync-label", text: "Show busy or free in" }),
+    el("div", { class: "sync-circles" }, circles.map((circle) => el("label", { class: "share-toggle" }, [
+      el("input", {
+        type: "checkbox",
+        checked: shared.has(circle.id),
+        disabled: sync.busy,
+        onchange: (event) => { void onShareCalendar(circle.id, event.target.checked); },
+      }),
+      el("span", { text: circle.name }),
+    ]))),
+    shared.size ? null : el("p", { class: "help sync-note", text: "Off everywhere. Tick a circle to share." }),
+    el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
+    el("div", { class: "feed-manage" }, [
+      el("button", { class: "text-btn", type: "button", text: "Check now", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
+      el("button", { class: "text-btn danger", type: "button", text: "Remove", disabled: sync.busy, onclick: onRemoveCalendar }),
+    ]),
+  ]);
+}
+
+function syncStatusLine(sync) {
+  if (sync.lastSyncOk === false) {
+    return el("div", { class: "sync-status bad" }, [
+      el("p", { class: "help", text: `${sync.lastError || "The last check failed"}. Friends see your last good copy for up to a day.` }),
+      el("button", { class: "text-btn", type: "button", text: "Try again", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
+    ]);
+  }
+  if (!sync.lastSyncAt) return el("p", { class: "help sync-status", text: "Checking your calendar…" });
+  const today = zonedParts(Date.now(), appTz()).day;
+  const day = zonedParts(sync.lastSyncAt, appTz()).day;
+  const when = day === today ? clock(sync.lastSyncAt) : `${feedDate(sync.lastSyncAt)} ${clock(sync.lastSyncAt)}`;
+  return el("p", { class: "help sync-status", text: `Last checked ${when}. Hangry checks about every 20 minutes.` });
+}
+
+function paintCalendarSync() {
+  const node = document.querySelector(".calendar-sync");
+  if (node) node.replaceWith(calendarSyncPanel());
+  else render();
+}
+
+function applyCalendarSync(data, extra = {}) {
+  state.calendarSync = { loaded: true, ...data, draft: "", busy: false, error: "", ...extra };
+  if (state.me?.user) state.me.user.calendarConnected = Boolean(data.connected);
+}
+
+async function loadCalendarSync() {
+  state.calendarSync = { loaded: false };
+  try {
+    const data = await api("/api/me/calendar-sync", { circle: null });
+    if (!state.calendarSync || state.calendarSync.loaded) return;
+    applyCalendarSync(data);
+  } catch {
+    state.calendarSync = { loaded: true, connected: false, circles: [], sharedCircleIds: [], draft: "" };
+  }
+  document.querySelector(".calendar-sync")?.replaceWith(calendarSyncPanel());
+}
+
+/** Shows the server's short reason in the panel, never the link itself. */
+function calendarSyncError(error) {
+  if (error?.status === 400 && error.data?.error) return String(error.data.error);
+  if (error?.status === 429) return "That's a lot at once. Try again in a minute.";
+  return isNetworkFailure(error) ? "You're offline. Try again." : "Something went wrong. Try again.";
+}
+
+async function calendarSyncCall(path, options, after) {
+  const draft = state.calendarSync?.draft || "";
+  state.calendarSync = { ...(state.calendarSync || { loaded: true }), busy: true, error: "" };
+  paintCalendarSync();
+  try {
+    const data = await api(path, { ...options, circle: null });
+    applyCalendarSync(data);
+    after?.(data);
+  } catch (error) {
+    state.calendarSync = { ...state.calendarSync, busy: false, draft, error: calendarSyncError(error) };
+  }
+  paintCalendarSync();
+}
+
+async function onConnectCalendar() {
+  const url = (document.getElementById("calendar-sync-url")?.value || state.calendarSync?.draft || "").trim();
+  if (!url) {
+    state.calendarSync = { ...state.calendarSync, error: "Paste your private calendar link first." };
+    paintCalendarSync();
+    return;
+  }
+  state.calendarSync.draft = url;
+  await calendarSyncCall("/api/me/calendar-sync", { method: "PUT", body: { url } });
+}
+
+async function onRefreshCalendar() {
+  await calendarSyncCall("/api/me/calendar-sync/refresh", { method: "POST", body: {} });
+}
+
+async function onShareCalendar(circleId, on) {
+  const ids = new Set(state.calendarSync?.sharedCircleIds || []);
+  if (on) ids.add(circleId);
+  else ids.delete(circleId);
+  await calendarSyncCall("/api/me/calendar-sync", { method: "PATCH", body: { sharedCircleIds: [...ids] } });
+}
+
+function onRemoveCalendar() {
+  state.confirm = {
+    title: "Remove calendar?",
+    body: "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
+    confirmLabel: "Remove",
+    action: async () => {
+      await calendarSyncCall("/api/me/calendar-sync", { method: "DELETE" });
+    },
+  };
+  render();
+}
+
+/** Busy or free right now for a member who shares with this circle, from the circle payload. */
+function memberAvailability(id) {
+  return state.me?.circle?.members?.find((member) => member.id === id)?.availability || null;
+}
+
+function availabilityLine(availability, from = Date.now()) {
+  const text = availabilityText(availability, from, appTz());
+  if (!text) return null;
+  return el("p", { class: `avail-line ${availability.state}` }, [
+    el("span", { class: "avail-dot", "aria-hidden": "true" }),
+    el("span", { text }),
+  ]);
+}
+
 function tabbar(fresh = false) {
   const tabs = [
     ["home", "Now", "home"],
@@ -2227,6 +2410,7 @@ function memberRow(member) {
         member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
       ]),
       line ? el("p", { text: line }) : null,
+      self ? null : availabilityLine(member.availability),
     ]),
     youAreAdmin() && !self
       ? el("button", {
@@ -3210,6 +3394,7 @@ function sheet() {
         el("div", { class: "sheet-form" }, [
           whenBlock(),
           planning ? null : timeBlock(),
+          planning ? null : busyAtBlock(),
           sheetField(planning ? "Plan" : "Note (optional)", "sheet-note", state.noteDraft, (value) => {
             state.noteDraft = value;
             paintSummary();
@@ -3225,10 +3410,14 @@ function sheet() {
               class: "sheet-control",
               type: "time",
               value: state.planTime,
-              oninput: (event) => { state.planTime = event.target.value; },
+              oninput: (event) => {
+                state.planTime = event.target.value;
+                paintBusyAt();
+              },
             }),
             planTimeError(),
           ]) : null,
+          planning ? busyAtBlock() : null,
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
         ]),
@@ -4101,6 +4290,77 @@ function timeBlock() {
   ]);
 }
 
+/** The moment the create sheet is about: now, the later start, or a timed plan. Null for an untimed plan. */
+function sheetBusyAt(now = Date.now()) {
+  if (state.sheet === "plan") {
+    const day = chosenPlanDay();
+    if (!day || !/^\d{2}:\d{2}$/.test(state.planTime || "")) return null;
+    const at = clockInstant(day, state.planTime);
+    return Number.isFinite(at) ? at : null;
+  }
+  if (state.whenMode !== "later") return "now";
+  if (state.startChoice === "+60") return Math.floor((now + 3600000) / 60000) * 60000;
+  if (!/^\d{2}:\d{2}$/.test(state.startChoice)) return null;
+  const range = planDayRange(now, appTz());
+  const tomorrow = offeringTomorrow(now) && state.startChoice === nextLaterSlot(now, appTz());
+  const at = clockInstant(tomorrow ? range.tomorrow : range.today, state.startChoice);
+  return Number.isFinite(at) ? at : null;
+}
+
+let busyAtTimer = 0;
+
+/**
+ * "Busy then: Alex until 15:30". Only people who share their calendar with this circle, and
+ * only busy or free: the server never sends what is in anyone's calendar.
+ */
+function busyAtBlock() {
+  const at = sheetBusyAt();
+  const node = el("div", { class: "busy-at", "aria-live": "polite" });
+  if (at === null) return node;
+  const self = state.me?.user?.id;
+  let people;
+  let from = Date.now();
+  if (at === "now") {
+    people = (state.me?.circle?.members || [])
+      .filter((member) => member.id !== self && member.availability)
+      .map((member) => ({ id: member.id, ...member.availability }));
+  } else if (state.busyAt?.at === at) {
+    people = state.busyAt.people;
+    from = at;
+  } else {
+    clearTimeout(busyAtTimer);
+    busyAtTimer = setTimeout(() => { void loadBusyAt(at); }, 250);
+    return node;
+  }
+  const names = new Map((state.me?.circle?.members || []).map((member) => [member.id, member.name]));
+  const busy = people.filter((person) => person.state === "busy" && names.has(person.id) && person.id !== self);
+  if (!busy.length) return node;
+  const parts = busy.map((person) => Number.isFinite(person.until)
+    ? `${names.get(person.id)} until ${untilText(person.until, from, appTz())}`
+    : names.get(person.id));
+  node.append(
+    el("span", { class: "avail-dot", "aria-hidden": "true" }),
+    el("span", { text: `${at === "now" ? "Busy now" : "Busy then"}: ${parts.join(", ")}` }),
+  );
+  return node;
+}
+
+async function loadBusyAt(at) {
+  let people = [];
+  try {
+    const data = await api(`/api/circles/availability?at=${at}`);
+    people = Array.isArray(data?.people) ? data.people : [];
+  } catch {
+    people = [];
+  }
+  state.busyAt = { at, people };
+  paintBusyAt();
+}
+
+function paintBusyAt() {
+  document.querySelector(".busy-at")?.replaceWith(busyAtBlock());
+}
+
 function pushLine(name, place, fromTime, note) {
   const spot = place.trim();
   const when = fromTime.trim();
@@ -4260,9 +4520,10 @@ function inToggle(kind, item, { locked = false } = {}) {
       if (hostLocked && inNow) return;
       state.cardMenu = null;
       tick();
-      state.inPop = { key: `${kind}:${item.id}`, on: !inNow, startedAt: 0, until: Date.now() + 10_000 };
-      if (inNow) void leaveEvent(kind, item);
-      else void sendReply(kind, item, "in");
+      if (inNow) {
+        state.inPop = { key: `${kind}:${item.id}`, on: false, startedAt: 0, until: Date.now() + 10_000 };
+        void leaveEvent(kind, item);
+      } else void joinIn(kind, item);
     },
   });
   if (pop) node.addEventListener("animationend", () => {
@@ -4308,6 +4569,84 @@ function tick() {
   } catch {
     /* no vibration here */
   }
+}
+
+function joinNow(kind, item) {
+  state.inPop = { key: `${kind}:${item.id}`, on: true, startedAt: 0, until: Date.now() + 10_000 };
+  void sendReply(kind, item, "in");
+}
+
+/** The stretch of time the hangout covers, for the overlap highlight. Untimed plans have none. */
+function hangoutWindow(kind, item, now = Date.now()) {
+  if (kind === "plan") {
+    if (!/^\d{2}:\d{2}$/.test(item.time || "")) return null;
+    const start = clockInstant(item.forDate, item.time);
+    return Number.isFinite(start) ? { start, end: start + PLAN_DURATION_MS } : null;
+  }
+  const start = item.startsAt && item.startsAt > now ? item.startsAt : now;
+  return Number.isFinite(item.expiresAt) && item.expiresAt > start ? { start, end: item.expiresAt } : null;
+}
+
+function hangoutDay(kind, item, now = Date.now()) {
+  if (kind === "plan") return /^\d{4}-\d{2}-\d{2}$/.test(item.forDate || "") ? item.forDate : "";
+  return zonedParts(item.startsAt && item.startsAt > now ? item.startsAt : now, appTz()).day;
+}
+
+/**
+ * I'm in, with a look at your own calendar first. Only for someone who connected one, and
+ * only when that day has events. No events, or no answer, joins straight away.
+ */
+async function joinIn(kind, item) {
+  const day = hangoutDay(kind, item);
+  if (!state.me?.user?.calendarConnected || !day) {
+    joinNow(kind, item);
+    return;
+  }
+  const key = `${kind}:${item.id}`;
+  if (state.calendarCheckBusy === key) return;
+  state.calendarCheckBusy = key;
+  let events = [];
+  try {
+    const data = await api(`/api/me/calendar-sync/day?date=${day}`, { circle: null });
+    if (data?.connected === false && state.me?.user) state.me.user.calendarConnected = false;
+    events = dayEvents(data?.events);
+  } catch {
+    events = [];
+  } finally {
+    state.calendarCheckBusy = "";
+  }
+  if (!events.length) {
+    joinNow(kind, item);
+    return;
+  }
+  const span = hangoutWindow(kind, item);
+  const clash = events.some((event) => eventOverlaps(event, span));
+  const today = planDayRange(Date.now(), appTz()).today;
+  const label = dayLabel(day, today) || day;
+  state.confirm = {
+    title: clash ? "This clashes with your calendar" : `Your calendar ${label === "Today" || label === "Tomorrow" ? label.toLowerCase() : `on ${label}`}`,
+    body: span
+      ? (clash ? "Highlighted events overlap. Only you can see this." : "Nothing overlaps. Only you can see this.")
+      : "Only you can see this.",
+    confirmLabel: "I'm in",
+    confirmClass: "btn",
+    extra: calendarCheckList(events, day, span),
+    action: async () => joinNow(kind, item),
+  };
+  render();
+}
+
+function calendarCheckList(events, day, span) {
+  const dayStart = clockInstant(day, "00:00");
+  const dayEnd = clockInstant(addDays(day, 1), "00:00");
+  return el("ul", { class: "cal-check", "aria-label": "Your events that day" }, events.map((event) => {
+    const hit = eventOverlaps(event, span);
+    return el("li", { class: hit ? "cal-event clash" : "cal-event" }, [
+      el("span", { class: "cal-time", text: eventTimeText(event, dayStart, dayEnd, appTz()) }),
+      el("span", { class: "cal-title", text: event.title || "Busy" }),
+      hit ? el("span", { class: "cal-flag", text: "Overlaps" }) : null,
+    ]);
+  }));
 }
 
 async function leaveEvent(kind, item) {
@@ -5407,7 +5746,14 @@ function guestLine(text, person, kind, event) {
 }
 
 function guestDetailRow(text, person, kind, event) {
-  const line = el("p", { class: "reply-line", text });
+  const availability = person.id === state.me.user.id ? null : memberAvailability(person.id);
+  const busyText = availability ? availabilityText(availability, Date.now(), appTz()) : "";
+  const line = busyText
+    ? el("div", { class: "reply-line" }, [
+        el("span", { text }),
+        el("span", { class: `avail-tag ${availability.state}`, text: busyText }),
+      ])
+    : el("p", { class: "reply-line", text });
   if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) {
     return el("div", { class: "guest-row" }, [avatar(person), line]);
   }
@@ -6409,6 +6755,7 @@ function confirmSheet() {
         el("h2", { text: pending.title }),
       ]),
       el("p", { class: "help sheet-body", text: pending.body }),
+      pending.extra ? el("div", { class: "sheet-extra" }, [pending.extra]) : null,
       pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
       confirmActions([
         pending.copy
@@ -6420,7 +6767,7 @@ function confirmSheet() {
             })
           : null,
         el("button", {
-          class: "btn danger",
+          class: pending.confirmClass || "btn danger",
           type: "button",
           text: pending.confirmLabel,
           onclick: () => {
