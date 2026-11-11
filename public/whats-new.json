@@ -11,6 +11,15 @@
     ]
   },
   {
+    "id": "2026-11-11-chat-caret",
+    "date": "2026-11-11",
+    "title": "Tap to move the cursor while typing in chat",
+    "bullets": [
+      "Tapping inside what you are typing in chat now moves the cursor, and the keyboard stays open.",
+      "Buttons and the rest of the app feel the same as before."
+    ]
+  },
+  {
     "id": "2026-11-09-faster-map",
     "date": "2026-11-11",
     "title": "Faster map",
