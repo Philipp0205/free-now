@@ -3,7 +3,7 @@ import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, t
 import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, shortDate, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
-import { goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
+import { cardCrowd, goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
@@ -25,7 +25,7 @@ const INSTALL_LATER_KEY = "fn_install_later";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v70";
+const APP_VERSION = "hangry-v71";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -1335,7 +1335,6 @@ function pastCard(event) {
 
 function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
-  const people = [social.creator, ...social.joined.filter((person) => person.reply !== "declined")];
   const upcoming = social.startsAt && social.startsAt > Date.now();
   const menuOpen = state.cardMenu === `social:${social.id}`;
   return el("article", {
@@ -1355,7 +1354,7 @@ function socialCard(social) {
         "aria-label": "Open details",
         onclick: () => openEventDetail("social", social),
       }, [
-        el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+        avatarStack(social),
         el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
         el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
         replySummary(social),
@@ -1370,7 +1369,6 @@ function socialCard(social) {
 
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
-  const people = [plan.creator, ...plan.joined];
   const menuOpen = state.cardMenu === `plan:${plan.id}`;
   return el("article", {
     class: [
@@ -1390,7 +1388,7 @@ function planCard(plan) {
         "aria-label": "Open details",
         onclick: () => openEventDetail("plan", plan),
       }, [
-        el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+        avatarStack(plan),
         el("h3", { text: plan.note }),
         el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
         planCirclesLine(plan),
@@ -2599,16 +2597,11 @@ function eventDetailSheet() {
   if (kind === "plan") when = `${item.whenLabel}${item.time ? ` · ${item.time}` : ""}${over ? " · Ended" : ""}`;
   else if (over) when = `${shortDate(calSocialDay(item), calToday())} · ${clock(item.startsAt ?? item.createdAt)} · Ended`;
   else when = item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt);
-  const people = kind === "plan"
-    ? [item.creator, ...item.joined]
-    : [item.creator, ...item.joined.filter((person) => person.reply !== "declined")];
-  const unique = [];
-  const seen = new Set();
-  for (const person of people) {
-    if (!person?.id || seen.has(person.id)) continue;
-    seen.add(person.id);
-    unique.push(person);
-  }
+  const crowd = cardCrowd(item.creator, item.joined);
+  const line = (person) => (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
+  const personRow = (text, person) => over
+    ? el("div", { class: "guest-row" }, [avatar(person), el("p", { class: "reply-line", text })])
+    : guestDetailRow(text, person, kind, item);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-label": "Details" }, [
@@ -2628,13 +2621,13 @@ function eventDetailSheet() {
           over ? null : cardActions(kind, item, { locked: mine }),
         ]) : null,
         el("h3", { class: "members-title", text: "Who's in" }),
-        el("div", { class: "list" }, unique.map((person) => {
-          const line = person.id === item.creator.id
-            ? `${person.name} · host`
-            : (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
-          if (over) return el("div", { class: "guest-row" }, [avatar(person), el("p", { class: "reply-line", text: line })]);
-          return guestDetailRow(line, person, kind, item);
-        })),
+        el("div", { class: "list" }, crowd.people.map((person) => personRow(
+          person.id === item.creator.id ? `${person.name} · host` : line(person), person,
+        ))),
+        crowd.cant.length ? el("h3", { class: "members-title", text: "Can't make it" }) : null,
+        crowd.cant.length ? el("div", { class: "list cant-list" }, crowd.cant.map((person) => (
+          personRow(line(person), person)
+        ))) : null,
       ]),
     ]),
   ]);
@@ -4543,13 +4536,18 @@ function maybeLine(person, mine) {
   return mine ? "You're maybe" : `${person.name} is maybe`;
 }
 
-/** Shown in the who-row: in, maybe, and can't. Only in counts as In. */
-function answered(person) {
-  return inReply(person) || person.reply === "maybe" || person.reply === "declined";
+/** The card's faces: host first, then everyone In or Maybe. Can't stays in the details. */
+function avatarStack(item) {
+  const crowd = cardCrowd(item.creator, item.joined);
+  return el("div", { class: "avatars" }, [
+    ...crowd.stack.map((person) => avatar(person)),
+    crowd.more ? el("span", { class: "avatar avatar-more", text: `+${crowd.more}`, "aria-label": `${crowd.more} more` }) : null,
+  ]);
 }
 
+/** Shown in the who-row: in and maybe. Can't is only in the details. */
 function replySummary(social) {
-  const people = social.joined.filter(answered);
+  const people = cardCrowd(social.creator, social.joined).listed;
   return whoRow("social", social, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
 }
 
@@ -5772,7 +5770,7 @@ function mapCard(pin) {
       social && !own ? replySummary(social) : null,
       social ? removedNote(social) : null,
       plan && !own ? (plan.removedBy ? removedNote(plan) : (
-        (plan.joined.find((person) => person.id === state.me.user.id) && el("p", {
+        (plan.joined.find((person) => person.id === state.me.user.id && person.reply !== "declined") && el("p", {
           class: "reply-line",
           text: planReplyLine(plan.joined.find((person) => person.id === state.me.user.id)),
         }))
@@ -5801,7 +5799,7 @@ function planReplyLine(person) {
 }
 
 function planReplySummary(plan) {
-  const people = plan.joined.filter(answered);
+  const people = cardCrowd(plan.creator, plan.joined).listed;
   return whoRow("plan", plan, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
 }
 

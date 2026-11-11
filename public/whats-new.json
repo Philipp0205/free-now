@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-10-card-whos-in",
+    "date": "2026-11-10",
+    "title": "See who's in on the card",
+    "bullets": [
+      "Each card now shows the people who are coming, with their pictures and names.",
+      "People who can't make it are no longer listed on the card. Open the details to see them under Can't make it."
+    ]
+  },
+  {
     "id": "2026-11-10-zurich-map",
     "date": "2026-11-10",
     "title": "Dark map in Zürich too",
