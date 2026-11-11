@@ -1741,6 +1741,8 @@ html.kb-open .sheet .help { margin-top: 0; }
 /* Own stacking context, so Leaflet's 400+ z-indexes stay under the sheets and scrim. */
 .map-wrap { position: relative; isolation: isolate; margin: 4px 12px 12px; --attr-h: 64px; flex: 1 0 240px; min-height: 0; display: flex; flex-direction: column; }
 .hangry-map { flex: 1; min-height: 0; border-radius: 24px; overflow: hidden; background: #141416; }
+/* Leaflet's own css loads later and paints the map light grey: stay dark until the tiles draw. */
+.hangry-map.leaflet-container, .where-map.leaflet-container { background: #141416; }
 /* Map / Calendar and This circle / All circles share one short row, smaller than the 44px sheet segments. */
 .events-controls { display: flex; align-items: center; gap: 8px; margin: 2px 12px 4px; }
 .events-controls .segment { flex: 1; min-width: 0; padding: 2px; gap: 2px; border-radius: 10px; }

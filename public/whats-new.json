@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-09-faster-map",
+    "date": "2026-11-11",
+    "title": "Faster map",
+    "bullets": [
+      "The map stays dark until the dark map is ready, with no light street map flashing in first.",
+      "The app gets the map ready in the background, so opening it again feels snappier.",
+      "Pins, cards and the live buzz work just like before."
+    ]
+  },
+  {
     "id": "2026-11-09-chat-mentions-reactions",
     "date": "2026-11-11",
     "title": "Mentions, reactions and replies in chat",

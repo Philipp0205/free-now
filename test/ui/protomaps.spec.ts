@@ -107,7 +107,7 @@ async function uploadPhotos(tokens: string[]): Promise<void> {
 
 type Archive = { statuses: number[]; ranges: string[]; bytes: number };
 
-async function phone(width: number, height: number, token: string, brokenPhoto: string, options: { worker?: boolean } = {}) {
+async function phone(width: number, height: number, token: string, brokenPhoto: string, options: { worker?: boolean; archiveDelay?: number } = {}) {
   const worker = options.worker ?? true;
   const context = await hangry.browser.newContext({
     viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: CHROME_UA,
@@ -123,6 +123,13 @@ async function phone(width: number, height: number, token: string, brokenPhoto: 
     raster.hits += 1;
     return route.fulfill({ status: 200, contentType: "image/png", body: TILE_PNG });
   });
+  if (options.archiveDelay) {
+    const delay = options.archiveDelay;
+    await context.route("**/tiles/basemap.pmtiles", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      await route.continue().catch(() => {});
+    });
+  }
   const broken = { hits: 0 };
   await context.route(`**/api/users/${brokenPhoto}/avatar**`, (route) => {
     broken.hits += 1;
@@ -494,6 +501,102 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
       await page.waitForTimeout(600);
       assert.equal(aborted, abortedAfterSwap, `${width}: the archive is not retried once it failed`);
       await shot(page, `protomaps-failed-w${width}.png`);
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
+/** The map while it waits: Leaflet is up, how many raster images and vector canvases it holds, its background. */
+const WAITING = `(() => {
+  const map = document.getElementById("hangry-map");
+  if (!map || !map.classList.contains("leaflet-container")) return null;
+  const rgb = (getComputedStyle(map).backgroundColor.match(/\\d+/g) || []).slice(0, 3).map(Number);
+  return {
+    images: map.querySelectorAll("img.leaflet-tile").length,
+    canvases: map.querySelectorAll("canvas.leaflet-tile").length,
+    light: rgb.length === 3 ? (rgb[0] + rgb[1] + rgb[2]) / 3 : 255,
+  };
+})()`;
+
+test("a slow archive: the map stays dark with no raster tiles, then the dark map draws", { timeout: 300_000 }, async () => {
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Sol" });
+  await hangry.call("POST", "/api/circles", host.token, { name: "Slow" });
+  await hangry.call("POST", "/api/plans", host.token, {
+    note: "Slow dinner", date: daysAhead(1), time: "19:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,
+  });
+  const ARCHIVE_DELAY = 4000;
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  for (const [width, height] of SIZES) {
+    // Every archive read is held back, the head read ahead on the idle app too.
+    const { page, raster, archive } = await phone(width, height, host.token, "nobody", { worker: false, archiveDelay: ARCHIVE_DELAY });
+    try {
+      await openEventsMap(page);
+      await page.waitForFunction(WAITING, null, { timeout: 10_000, polling: 50 });
+      // Watch the wait until the first vector tile is in: never a raster tile, always a dark background.
+      const samples: Array<{ images: number; canvases: number; light: number }> = [];
+      const until = Date.now() + 20_000;
+      let shotTaken = false;
+      while (Date.now() < until) {
+        const now = await page.evaluate(WAITING) as { images: number; canvases: number; light: number };
+        samples.push(now);
+        assert.equal(now.images, 0, `${width}: no raster tile while the archive loads ${JSON.stringify(now)}`);
+        assert.ok(now.light < 40, `${width}: dark background while waiting ${JSON.stringify(now)}`);
+        if (now.canvases > 0) break;
+        if (!shotTaken && samples.length >= 10) {
+          await page.screenshot({ path: path.join(SHOT_DIR, `protomaps-slow-waiting-w${width}.png`) });
+          shotTaken = true;
+        }
+        await page.waitForTimeout(50);
+      }
+      assert.ok(samples.filter((sample) => sample.canvases === 0).length >= 10, `${width}: the wait was watched (${samples.length} samples)`);
+      assert.equal(raster.hits, 0, `${width}: no Esri tiles fetched while waiting`);
+      await settleOn(page, "vector", `${width} slow archive ready`);
+      assert.ok(archive.statuses.length > 0 && archive.statuses.every((status) => status === 206), `${width}: archive read ${archive.statuses}`);
+      assert.equal(await layerAdds(page), 1, `${width}: straight to the dark map, no raster first`);
+      assert.equal(raster.hits, 0, `${width}: no Esri tiles at all`);
+      // Tile reads are held back too: wait for the streets to be painted before the picture.
+      const paintBy = Date.now() + 20_000;
+      let pixels = await darkWithStreets(page);
+      while (!(pixels.dark && pixels.streets) && Date.now() < paintBy) {
+        await page.waitForTimeout(200);
+        pixels = await darkWithStreets(page);
+      }
+      assert.ok(pixels.dark && pixels.streets, `${width}: the dark map is drawn ${JSON.stringify(pixels)}`);
+      await shot(page, `protomaps-slow-vector-w${width}.png`);
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
+test("on an idle app the map files and the archive head load ahead, so the Map tab opens dark at once", { timeout: 300_000 }, async () => {
+  const meta = await hangry.call("GET", "/api/meta");
+  const head = meta.mapPmtilesHead as number;
+  assert.ok(Number.isSafeInteger(head) && head >= 16384, `head size in meta (${head})`);
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Wim" });
+  await hangry.call("POST", "/api/circles", host.token, { name: "Warm" });
+  await hangry.call("POST", "/api/plans", host.token, {
+    note: "Warm dinner", date: daysAhead(1), time: "19:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,
+  });
+  for (const [width, height] of SIZES) {
+    const { page, raster, archive } = await phone(width, height, host.token, "nobody", { worker: false });
+    try {
+      // Still on Now: Leaflet, the vector script and the head arrive without opening the map.
+      await page.waitForFunction(`Boolean(window.L && window.protomapsL)`, null, { timeout: 10_000 });
+      const deadline = Date.now() + 10_000;
+      while (!archive.ranges.includes(`bytes=0-${head - 1}`) && Date.now() < deadline) await page.waitForTimeout(50);
+      assert.deepEqual(archive.ranges, [`bytes=0-${head - 1}`], `${width}: one head read ahead`);
+      assert.equal(await page.locator("#hangry-map").count(), 0, `${width}: map not open yet`);
+      assert.equal(await page.locator("link[data-leaflet]").count(), 1, `${width}: Leaflet css in place`);
+
+      await openEventsMap(page);
+      await page.locator(".leaflet-marker-icon.pin-plan").waitFor({ timeout: 10_000 });
+      await settleOn(page, "vector", `${width} warm open`);
+      assert.equal(await layerAdds(page), 1, `${width}: straight to the dark map, no raster first`);
+      assert.equal(raster.hits, 0, `${width}: no raster tiles`);
+      assert.equal(archive.ranges.filter((range) => range.startsWith("bytes=0-")).length, 1, `${width}: the head was not read again ${archive.ranges}`);
+      await shot(page, `protomaps-warm-w${width}.png`);
     } finally {
       await page.context().close();
     }

@@ -8,10 +8,25 @@ export type PmtilesInfo = {
   maxzoom: number;
   /** Smallest file length the header allows: the end of its last section. */
   bytes: number;
+  /** Where tile data starts. Everything before it is header, directories and metadata. */
+  dataOffset: number;
 };
 
 /** A PMTiles v3 header is exactly 127 bytes. */
 export const PMTILES_HEADER_BYTES = 127;
+/** The first read protomaps makes: header plus root directory in one go. */
+export const PMTILES_FIRST_READ = 16 * 1024;
+/** Most of the archive head kept in memory and prefetched by the app. */
+export const PMTILES_HEAD_CAP = 512 * 1024;
+
+/**
+ * The bytes every map open reads before any tile: header and directories, at least the
+ * first 16 KiB read, at most 512 KiB, never past the archive's end. Served from memory and
+ * prefetched by the app.
+ */
+export function pmtilesHeadBytes(info: PmtilesInfo): number {
+  return Math.min(Math.max(PMTILES_FIRST_READ, info.dataOffset), PMTILES_HEAD_CAP, info.bytes);
+}
 
 /**
  * Reads the fixed v3 header: magic "PMTiles", version 3, zoom range, and bounds (int32 × 1e7).
@@ -74,5 +89,6 @@ export function parsePmtilesHeader(header: Buffer, filePath = ""): PmtilesInfo {
     if (end > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("bad section offsets");
     bytes = Math.max(bytes, Number(end));
   }
-  return { path: filePath, bounds: [west, south, east, north], minzoom, maxzoom, bytes };
+  const dataOffset = Number(header.readBigUInt64LE(56));
+  return { path: filePath, bounds: [west, south, east, north], minzoom, maxzoom, bytes, dataOffset };
 }

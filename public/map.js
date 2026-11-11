@@ -17,6 +17,11 @@ export function bindMap({
 }) {
   let leafletPromise = null;
   let vectorPromise = null;
+  /** The archive once its header is read. Kept for the page, so a new map draws vector at once. */
+  let vectorReady = null;
+  /** The archive head (header and directories) read ahead in one request: { url, data, etag } or null. */
+  let headPromise = null;
+  let warmed = false;
   /** Once the archive fails (gone, cut short, unreachable) every map on this page stays raster. */
   let vectorBroken = false;
   const brokenListeners = new Set();
@@ -105,6 +110,7 @@ export function bindMap({
    * Decided once the view is set and again after every move or zoom. A swap adds the new layer
    * on top and drops the old one when the new one has drawn, so the map never goes blank.
    * The view never changes here, so a swap cannot trigger another one.
+   * While the archive is not ready yet the map stays on its dark background, no tiles.
    */
   function addMapTiles(L, map) {
     const cover = vectorCoverage(state.meta);
@@ -113,12 +119,11 @@ export function bindMap({
       return;
     }
     let gone = false;
-    let archive = null;
+    let archive = vectorReady;
     let loading = false;
     let shown = null;
     let next = null;
     let swapTimer = 0;
-    let waitTimer = 0;
 
     const build = (mode) => (mode === "raster" ? rasterLayer(L) : window.protomapsL.leafletLayer({
       url: archive,
@@ -158,14 +163,12 @@ export function bindMap({
       if (mode === "vector" && !archive) {
         if (!loading) {
           loading = true;
-          // A slow archive must not leave the map empty: raster first, vector once it is ready.
-          if (!shown) waitTimer = setTimeout(() => { if (!shown && !gone) show("raster"); }, 4000);
+          // No light raster tiles in the meantime: they would flash before the dark map.
           loadVectorArchive(cover.url).then(
             (ready) => { archive = ready; },
             (error) => markVectorBroken(error),
           ).finally(() => {
             loading = false;
-            clearTimeout(waitTimer);
             settle();
           });
         }
@@ -186,7 +189,6 @@ export function bindMap({
       gone = true;
       brokenListeners.delete(settle);
       clearTimeout(swapTimer);
-      clearTimeout(waitTimer);
     });
     map.whenReady(settle);
     map.on("moveend zoomend", settle);
@@ -200,29 +202,89 @@ export function bindMap({
   }
 
   /**
-   * The archive, header already read. Every later byte read is watched: a failure that is not our
-   * own cancel (a 404 or 503, a cut connection, offline) gives up on vector tiles for this page.
-   * A failed vector tile would otherwise stay an empty dark square.
+   * The archive, header already read. Reads inside the prefetched head come from memory. Every
+   * other read after the header is watched: a failure that is not our own cancel (a 404 or 503,
+   * a cut connection, offline) gives up on vector tiles for this page. A failed vector tile
+   * would otherwise stay an empty dark square. Kept for the page: a new map reuses it.
    */
   function loadVectorArchive(url) {
     if (!vectorPromise) {
-      vectorPromise = loadProtomaps().then(async (protomapsL) => {
+      vectorPromise = Promise.all([loadProtomaps(), readHead(url)]).then(async ([protomapsL, head]) => {
         const archive = new protomapsL.PmtilesSource(url, true).p;
-        await archive.getHeader();
         const source = archive.source;
         const getBytes = source.getBytes.bind(source);
-        source.getBytes = async (...args) => {
+        let watch = false;
+        source.getBytes = async (offset, length, signal, etag) => {
+          if (head && offset + length <= head.data.byteLength) {
+            return { data: head.data.slice(offset, offset + length), etag: head.etag };
+          }
           try {
-            return await getBytes(...args);
+            return await getBytes(offset, length, signal, etag);
           } catch (error) {
-            if (error?.name !== "AbortError") markVectorBroken(error);
+            // The archive may have been replaced on the server: read the header fresh from now on.
+            if (error?.name !== "AbortError") head = null;
+            if (watch && error?.name !== "AbortError") markVectorBroken(error);
             throw error;
           }
         };
+        await archive.getHeader();
+        watch = true;
+        vectorReady = archive;
         return archive;
       });
     }
     return vectorPromise;
+  }
+
+  /**
+   * Header and directories in one range request, the size the server names. Null when it does
+   * not answer with exactly that range; the archive then reads its header the usual way.
+   */
+  async function readHead(url) {
+    if (headPromise) return headPromise;
+    const length = Number.isSafeInteger(state.meta?.mapPmtilesHead) && state.meta.mapPmtilesHead > 0
+      ? state.meta.mapPmtilesHead
+      : 16384;
+    headPromise = (async () => {
+      const response = await fetch(url, { headers: { range: `bytes=0-${length - 1}` } });
+      if (response.status !== 206 || !String(response.headers.get("content-range") || "").startsWith(`bytes 0-${length - 1}/`)) {
+        response.body?.cancel().catch(() => {});
+        return null;
+      }
+      const data = await response.arrayBuffer();
+      if (data.byteLength !== length) return null;
+      const etag = response.headers.get("etag");
+      return { data, etag: etag && !etag.startsWith("W/") ? etag : undefined };
+    })().catch(() => null);
+    const head = await headPromise;
+    if (!head) headPromise = null;
+    return head;
+  }
+
+  /**
+   * Once the app is idle: Leaflet, the vector map script and the archive header, so the Map tab
+   * and the place picker draw at once. Failures are dropped; opening a map tries again.
+   */
+  function warmMap() {
+    if (warmed) return;
+    warmed = true;
+    const run = () => {
+      loadLeaflet().catch(() => {});
+      primeVector();
+    };
+    if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 2000 });
+    else setTimeout(run, 1000);
+  }
+
+  /**
+   * Starts reading the archive header next to the Leaflet download. A failure here only drops
+   * the promise, so the map that opens next tries again and decides about raster itself.
+   */
+  function primeVector() {
+    const cover = vectorCoverage(state.meta);
+    if (!cover || vectorBroken || vectorPromise) return;
+    const pending = loadVectorArchive(cover.url);
+    pending.catch(() => { if (vectorPromise === pending) vectorPromise = null; });
   }
 
   /** Same loading as Leaflet: one script tag from /vendor, after Leaflet itself. */
@@ -232,7 +294,10 @@ export function bindMap({
       const script = document.createElement("script");
       script.src = "/vendor/protomaps-leaflet/protomaps-leaflet.js";
       script.onload = () => (window.protomapsL ? resolve(window.protomapsL) : reject(new Error("vector map failed to load")));
-      script.onerror = () => reject(new Error("vector map failed to load"));
+      script.onerror = () => {
+        script.remove();
+        reject(new Error("vector map failed to load"));
+      };
       document.body.append(script);
     });
   }
@@ -391,6 +456,7 @@ export function bindMap({
   async function mountWhereMap() {
     const host = document.getElementById("where-map");
     if (!host || !bag().whereMap || !pickerSheet()) return;
+    primeVector();
     const L = await loadLeaflet();
     if (!host.isConnected || !bag().whereMap || !pickerSheet()) return;
     destroyWhereMap();
@@ -460,6 +526,7 @@ export function bindMap({
   async function mountMap() {
     const host = document.getElementById("hangry-map");
     if (!host || state.tab !== "map") return;
+    primeVector();
     const L = await loadLeaflet();
     if (!host.isConnected || state.tab !== "map") return;
     const pins = collectPins();
@@ -553,5 +620,5 @@ export function bindMap({
     return Boolean(openMapPin && document.querySelector("#map-card-host .map-card"));
   }
 
-  return { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins, closeMapCard, mapCardOpen };
+  return { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins, closeMapCard, mapCardOpen, warmMap };
 }

@@ -50,8 +50,23 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is chat mentions, reactions and replies, in plain words without an em dash", () => {
+test("the newest entry is the faster map, in plain words", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-09-faster-map");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Faster map");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /stays dark until the dark map is ready/);
+  assert.doesNotMatch(text, /right away|fills in/, "no street map first");
+  assert.match(text, /snappier/);
+  assert.doesNotMatch(text, /PMTiles|cache|prefetch|archive/i, "no jargon");
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the chat mentions, reactions and replies entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-09-chat-mentions-reactions")!;
+  assert.ok(top, "chat mentions entry");
   assert.equal(top.id, "2026-11-09-chat-mentions-reactions");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Mentions, reactions and replies in chat");
@@ -340,12 +355,14 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v74");
+  assert.equal(cache?.[1], "hangry-v75");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/map-pin.js"));
+  assert.ok(paths.includes("/vendor/leaflet/leaflet.js"));
+  assert.ok(paths.includes("/vendor/leaflet/leaflet.css"));
   assert.ok(paths.includes("/status.js"));
   assert.ok(paths.includes("/mentions.js"));
   assert.ok(paths.includes("/calendar-month.js"));
