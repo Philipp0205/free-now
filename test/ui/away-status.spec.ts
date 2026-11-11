@@ -3,7 +3,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import { addDays } from "../../src/time.js";
 import { statusToday } from "../../public/status.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openEventsMap, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 
 const hangry = useHangry();
@@ -179,7 +179,7 @@ test("map pins carry the Away mark on the host and on crowd faces", async () => 
   await hangry.call("POST", `/api/plans/${plan.id}/reply`, bea.token, { reply: "in" });
   const { context, page } = await phone(bea.token);
   try {
-    await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+    await openEventsMap(page);
     const pin = page.locator(".leaflet-marker-icon.pin-plan", { hasText: "P" }).filter({ has: page.locator(`.pin-letter[data-person="${phil.user.id}"]`) });
     await pin.waitFor({ timeout: 10_000 });
     await pin.locator(".pin-body > .pin-letter.has-status .pin-status[data-status='away']").waitFor();
