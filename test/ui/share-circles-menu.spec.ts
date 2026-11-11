@@ -5,7 +5,7 @@ import test from "node:test";
 import type { Locator, Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openEventsMap, useHangry } from "./harness.js";
 
 const TZ = "Europe/Berlin";
 /** Screenshots of the menu and the sheet. Override with SCM_SHOT_DIR=/some/folder. */
@@ -243,7 +243,7 @@ test("the map card's ⋯ offers it to the host too", { timeout: 60_000 }, async 
   });
   const { page, errors } = await phone(360, 640, ana.token, friends.id);
   try {
-    await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+    await openEventsMap(page);
     const pin = page.locator(".leaflet-marker-icon.pin").first();
     await pin.waitFor({ timeout: 10_000 });
     await page.waitForTimeout(400);

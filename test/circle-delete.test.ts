@@ -7,7 +7,7 @@ import { flushChatNotices } from "../src/chat.js";
 import { api, START, withApp } from "./http.js";
 
 const ADMIN = "a".repeat(32);
-const CIRCLE_ID_TABLES = ["chats", "circle_removals", "feedback", "memberships", "notifications", "plan_circles", "plans", "push_deliveries", "socials"];
+const CIRCLE_ID_TABLES = ["calendar_share", "chats", "circle_removals", "feedback", "memberships", "notifications", "plan_circles", "plans", "push_deliveries", "socials"];
 
 test("deleting a circle leaves no orphan rows", async () => {
   const logs: string[] = [];

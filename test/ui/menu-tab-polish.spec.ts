@@ -170,7 +170,7 @@ test("rapid tab taps with a slow chat end on the last tab tapped", { timeout: 90
       await route.continue();
     });
     await tab(page, "Now").click();
-    await tab(page, "Map").click();
+    await tab(page, "Events").click();
     await tab(page, "Chat").click();
     await tab(page, "Now").click();
     await page.waitForTimeout(600);

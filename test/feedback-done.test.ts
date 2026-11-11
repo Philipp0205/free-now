@@ -345,7 +345,7 @@ test("zero-circle submitter reads their alert with no circle named; unrelated pe
 test("client: zero-circle refresh loads personal alerts, setup lists them, and the banner opens What's new", () => {
   const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   // refresh() no longer bails out without a circle.
-  assert.match(app, /async function refresh\(\{ initial = false \} = \{\}\) \{\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(\);/);
+  assert.match(app, /async function refresh\(\{ initial = false \} = \{\}\) \{\n  const seq = \+\+refreshSeq;\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(seq\);/);
   assert.match(app, /api\("\/api\/notifications", \{ circle: null \}\)/);
   assert.match(app, /root\.append\(setup\(\)\);\n    if \(state\.sheet === "whats-new"\) root\.append\(whatsNewSheet\(\)\);/);
   assert.match(app, /personalAlerts\(\),\n  \]\);/);
