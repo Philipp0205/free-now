@@ -139,6 +139,7 @@ import {
   CalendarError,
   circleAvailability,
   connectCalendar,
+  connectGoogle,
   disconnectCalendar,
   isConnected,
   ownDayEvents,
@@ -147,6 +148,7 @@ import {
   syncUser,
   type CalendarNet,
 } from "./freebusy.js";
+import { consumeGoogleState, googleEnabled, startGoogleAuth } from "./google-calendar.js";
 
 export type AppDeps = {
   db: DatabaseSync;
@@ -460,6 +462,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     }
     console.log("push ack status=ok");
     sendEmpty(res, 204);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/calendar/google/callback") {
+    await handleGoogleCallback(req, res, deps, url);
     return;
   }
 
@@ -844,6 +851,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       return;
     }
     throw new HttpError(405, "method not allowed");
+  }
+
+  if (method === "GET" && pathname === "/api/calendar/google/start") {
+    if (!googleEnabled(deps.config)) throw new HttpError(404, "not found");
+    if (!limits.calendarSync.hit(`calendar-sync:${me.id}`, deps.now())) throw new HttpError(429, "Too many tries. Wait a minute.");
+    sendJson(res, 200, { url: startGoogleAuth(deps.db, deps.config, me.id, requestOrigin(req, deps.config), deps.now()) });
+    return;
   }
 
   if (pathname.startsWith("/api/me/calendar-sync")) {
@@ -1589,13 +1603,13 @@ async function handleCalendarSync(
   };
   if (pathname === "/api/me/calendar-sync") {
     if (method === "GET") {
-      sendJson(res, 200, syncStatus(deps.db, me.id));
+      sendJson(res, 200, syncStatus(deps.db, me.id, deps.config));
       return;
     }
     if (method === "PUT" || method === "POST") {
       limit();
       await connectCalendar(fb, me.id, body.url).catch(asHttp);
-      sendJson(res, 200, syncStatus(deps.db, me.id));
+      sendJson(res, 200, syncStatus(deps.db, me.id, deps.config));
       return;
     }
     if (method === "PATCH") {
@@ -1605,12 +1619,12 @@ async function handleCalendarSync(
       } catch (error) {
         asHttp(error);
       }
-      sendJson(res, 200, syncStatus(deps.db, me.id));
+      sendJson(res, 200, syncStatus(deps.db, me.id, deps.config));
       return;
     }
     if (method === "DELETE") {
-      disconnectCalendar(deps.db, me.id);
-      sendJson(res, 200, syncStatus(deps.db, me.id));
+      await disconnectCalendar(fb, me.id);
+      sendJson(res, 200, syncStatus(deps.db, me.id, deps.config));
       return;
     }
     throw new HttpError(405, "method not allowed");
@@ -1619,7 +1633,7 @@ async function handleCalendarSync(
     if (!isConnected(deps.db, me.id)) throw new HttpError(409, "Connect a calendar first.");
     limit();
     await syncUser(fb, me.id);
-    sendJson(res, 200, syncStatus(deps.db, me.id));
+    sendJson(res, 200, syncStatus(deps.db, me.id, deps.config));
     return;
   }
   if (pathname === "/api/me/calendar-sync/day" && method === "GET") {
@@ -1631,6 +1645,33 @@ async function handleCalendarSync(
     return;
   }
   throw new HttpError(404, "not found");
+}
+
+/**
+ * Google sends the browser back here. No session: the stored one-time state says who started it.
+ * Always lands on /?calendar=google or /?calendar=google-error, with nothing secret in the URL.
+ */
+async function handleGoogleCallback(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, url: URL): Promise<void> {
+  if (!googleEnabled(deps.config)) throw new HttpError(404, "not found");
+  const origin = requestOrigin(req, deps.config);
+  const code = url.searchParams.get("code") ?? "";
+  const pending = consumeGoogleState(deps.db, url.searchParams.get("state") ?? "", deps.now());
+  let ok = false;
+  if (pending && code && code.length <= 2048 && !url.searchParams.get("error")) {
+    const fb = { db: deps.db, config: deps.config, now: deps.now, calendarNet: deps.calendarNet };
+    try {
+      await connectGoogle(fb, pending.userId, code, pending.verifier, origin);
+      ok = true;
+    } catch (error) {
+      console.log(`google calendar connect failed reason="${error instanceof Error ? error.message : "unknown"}"`);
+    }
+  }
+  res.writeHead(302, {
+    location: `${origin}/?calendar=${ok ? "google" : "google-error"}`,
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  });
+  res.end();
 }
 
 function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {

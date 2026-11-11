@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v75";
+const APP_VERSION = "hangry-v78";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -176,12 +176,15 @@ const planFocus = deepLinkParams.get("plan");
 const socialFocus = deepLinkParams.get("social");
 const chatFocus = deepLinkParams.get("chat");
 const circleFocus = deepLinkParams.get("circle");
+/** Google sends people back to /?calendar=google or /?calendar=google-error. Handled once after the session loads. */
+const calendarLanding = ["google", "google-error"].includes(deepLinkParams.get("calendar") || "") ? deepLinkParams.get("calendar") : "";
 if (circleFocus) rememberCircle(circleFocus);
 if (chatFocus) state.deepLink = { kind: "chat", id: chatFocus };
 else if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
 else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
-if (state.deepLink || circleFocus) {
+if (state.deepLink || circleFocus || calendarLanding) {
   const url = new URL(location.href);
+  url.searchParams.delete("calendar");
   url.searchParams.delete("social");
   url.searchParams.delete("plan");
   url.searchParams.delete("chat");
@@ -312,7 +315,9 @@ async function boot() {
     if (state.me && !state.me.circle && state.circleDraft === "friends") {
       state.circleDraft = `${state.me.user.name}'s circle`;
     }
+    landCalendar();
     render();
+    scheduleErrorClear();
     if (!state.offline) {
       reportDisplay();
       refresh({ initial: true }).catch(() => {});
@@ -2794,6 +2799,31 @@ const CALENDAR_SYNC_STEPS = [
   "iCloud: in the Calendar app tap the info button next to a calendar, turn on Public Calendar, then Share Link.",
 ];
 
+const GOOGLE_PERMISSIONS_URL = "https://myaccount.google.com/permissions";
+const SECRET_LINK_NOTE = "A private calendar link lets Hangry download the whole calendar file, including event names. Hangry keeps only the times, plus your event names encrypted for you alone (so you can see them when you tap I'm in). It discards places, notes and people. Friends still only see busy or free.";
+
+function permissionsLink() {
+  return el("a", { href: GOOGLE_PERMISSIONS_URL, target: "_blank", rel: "noopener noreferrer", text: "myaccount.google.com/permissions" });
+}
+
+/** Plain words on what Hangry can and cannot see once Google is connected. */
+function googleFacts() {
+  return el("div", { class: "sync-facts" }, [
+    el("h4", { text: "What Hangry can and can't see" }),
+    el("ul", { class: "feed-steps" }, [
+      el("li", { text: "Hangry only sees when you're busy, never event names, places, people or notes." }),
+      el("li", { text: "Hangry asks Google only for the free/busy permission, and Google's consent screen says so. Hangry never receives event titles or details, and never stores them." }),
+      el("li", { text: "Hangry stores only your busy times for the next 14 days, plus an encrypted token so it can check again." }),
+      el("li", { text: "Hangry checks about every 20 minutes." }),
+      el("li", {}, [
+        "To disconnect, tap Remove in this panel. Hangry deletes the token and the busy times, and tells Google to revoke access. You can also revoke Hangry at ",
+        permissionsLink(),
+        ".",
+      ]),
+    ]),
+  ]);
+}
+
 /** Import side of calendars: friends see busy or free, never titles. The link never comes back from the server. */
 function calendarSyncPanel() {
   if (!state.calendarSync) void loadCalendarSync();
@@ -2806,7 +2836,18 @@ function calendarSyncPanel() {
   if (!sync.loaded) return wrap([el("p", { class: "help", text: "Loading…" })]);
   const error = sync.error ? el("p", { class: "time-error sync-error", role: "alert", text: sync.error }) : null;
   if (!sync.connected) {
+    const google = Boolean(sync.googleAvailable);
     return wrap([
+      google ? el("button", {
+        class: "btn sync-google",
+        type: "button",
+        text: sync.googleBusy ? "Connecting…" : "Connect Google Calendar",
+        disabled: sync.busy,
+        onclick: () => { void onConnectGoogle(); },
+      }) : null,
+      google && sync.googleError ? el("p", { class: "time-error sync-error", role: "alert", text: sync.googleError }) : null,
+      google ? googleFacts() : null,
+      google ? el("p", { class: "sheet-label sync-label", text: "Or use a private calendar link" }) : null,
       el("form", { class: "stack", novalidate: "", onsubmit: (event) => { event.preventDefault(); void onConnectCalendar(); } }, [
         el("label", { class: "field" }, [
           el("span", { text: "Private calendar link" }),
@@ -2824,12 +2865,14 @@ function calendarSyncPanel() {
           }),
         ]),
         error,
-        el("button", { class: "btn secondary", type: "submit", text: sync.busy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
+        el("button", { class: "btn secondary", type: "submit", text: sync.busy && !sync.googleBusy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
       ]),
+      el("p", { class: "help sync-note secret-link-note", text: SECRET_LINK_NOTE }),
       el("p", { class: "help sync-note", text: "It stays off for every circle until you turn one on. Hangry keeps the link encrypted and never shows it again." }),
       el("ul", { class: "feed-steps" }, CALENDAR_SYNC_STEPS.map((line) => el("li", { text: line }))),
     ]);
   }
+  const isGoogle = sync.source === "google";
   const circles = sync.circles || [];
   const shared = new Set(sync.sharedCircleIds || []);
   return wrap([
@@ -2847,7 +2890,10 @@ function calendarSyncPanel() {
       el("span", { text: circle.name }),
     ]))),
     shared.size ? null : el("p", { class: "help sync-note", text: "Off everywhere. Tick a circle to share." }),
-    el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
+    isGoogle
+      ? el("p", { class: "help sync-note", text: "Hangry never sees the names of your events, so they will not appear when you tap I'm in." })
+      : el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
+    isGoogle ? el("p", { class: "help sync-note" }, ["You can revoke Hangry any time at ", permissionsLink(), "."]) : null,
     el("div", { class: "feed-manage" }, [
       el("button", { class: "text-btn", type: "button", text: "Check now", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
       el("button", { class: "text-btn danger", type: "button", text: "Remove", disabled: sync.busy, onclick: onRemoveCalendar }),
@@ -2876,7 +2922,7 @@ function paintCalendarSync() {
 }
 
 function applyCalendarSync(data, extra = {}) {
-  state.calendarSync = { loaded: true, ...data, draft: "", busy: false, error: "", ...extra };
+  state.calendarSync = { loaded: true, ...data, draft: "", busy: false, googleBusy: false, error: "", googleError: "", ...extra };
   if (state.me?.user) state.me.user.calendarConnected = Boolean(data.connected);
 }
 
@@ -2924,6 +2970,39 @@ async function onConnectCalendar() {
   await calendarSyncCall("/api/me/calendar-sync", { method: "PUT", body: { url } });
 }
 
+/** Asks the server for Google's consent URL and leaves for it. The URL is never shown. */
+async function onConnectGoogle() {
+  if (state.calendarSync?.busy) return;
+  state.calendarSync = { ...state.calendarSync, busy: true, googleBusy: true, error: "", googleError: "" };
+  paintCalendarSync();
+  try {
+    const data = await api("/api/calendar/google/start", { circle: null });
+    if (typeof data?.url !== "string" || !data.url) throw new Error("no url");
+    location.href = data.url;
+  } catch (error) {
+    const message = error?.status === 429
+      ? "That's a lot at once. Try again in a minute."
+      : isNetworkFailure(error) ? "You're offline. Try again." : "Could not reach Google Calendar. Try again.";
+    state.calendarSync = { ...state.calendarSync, busy: false, googleBusy: false, googleError: message };
+    paintCalendarSync();
+  }
+}
+
+/** Coming back from Google (or Back from its page) must not leave the button stuck on Connecting. */
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted || !state.calendarSync?.googleBusy) return;
+  state.calendarSync = { ...state.calendarSync, busy: false, googleBusy: false };
+  paintCalendarSync();
+});
+
+/** The return trip from Google: open the You tab, say how it went, and let the panel load fresh. */
+function landCalendar() {
+  if (!calendarLanding || !state.token || !state.me?.circle) return;
+  state.tab = "you";
+  state.calendarSync = null;
+  state.error = calendarLanding === "google" ? "Google Calendar connected" : "Could not connect Google Calendar. Try again.";
+}
+
 async function onRefreshCalendar() {
   await calendarSyncCall("/api/me/calendar-sync/refresh", { method: "POST", body: {} });
 }
@@ -2936,9 +3015,12 @@ async function onShareCalendar(circleId, on) {
 }
 
 function onRemoveCalendar() {
+  const google = state.calendarSync?.source === "google";
   state.confirm = {
     title: "Remove calendar?",
-    body: "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
+    body: google
+      ? "Friends stop seeing when you're busy. Hangry deletes the token and the busy times, and tells Google to revoke access."
+      : "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
     confirmLabel: "Remove",
     action: async () => {
       await calendarSyncCall("/api/me/calendar-sync", { method: "DELETE" });

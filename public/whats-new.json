@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-11-google-freebusy",
+    "date": "2026-11-11",
+    "title": "Connect Google Calendar",
+    "bullets": [
+      "Connect Google Calendar on the You tab so friends in circles you pick see when you're busy or free.",
+      "Hangry only sees busy times, never event names. The You tab says what is stored, how often it checks, and how to disconnect.",
+      "You can remove it in Hangry or revoke it at myaccount.google.com/permissions.",
+      "The private link still works. It includes event names, but Hangry keeps only the times and your own titles."
+    ]
+  },
+  {
     "id": "2026-11-09-faster-map",
     "date": "2026-11-11",
     "title": "Faster map",

@@ -2416,6 +2416,13 @@ html.kb-open .sheet .help { margin-top: 0; }
 .calendar-sync .sync-circles .share-toggle span { min-width: 0; overflow-wrap: anywhere; }
 .calendar-sync .sync-note { margin: 12px 0 0; }
 .calendar-sync .feed-steps { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; line-height: 1.4; display: grid; gap: 6px; }
+.calendar-sync .sync-google { margin: 4px 0 0; }
+.calendar-sync .sync-google + .sync-error { margin-top: 8px; }
+.calendar-sync .sync-facts { margin-top: 16px; }
+.calendar-sync .sync-facts h4 { margin: 0; font-size: 15px; font-weight: 650; color: #fff; }
+.calendar-sync .sync-facts .feed-steps { margin-top: 8px; }
+.calendar-sync .sync-label + .stack { margin-top: 8px; }
+.calendar-sync a { color: #fff; text-decoration: underline; overflow-wrap: anywhere; }
 .calendar-sync .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
 .calendar-sync .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }
 .avail-line { display: flex; align-items: center; gap: 6px; }
