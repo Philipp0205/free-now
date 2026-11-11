@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { circleStatusLine, statusLine } from "../../public/status.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 
 const hangry = useHangry();
@@ -61,7 +61,7 @@ test("a quick Busy until shows to friends and clears", async () => {
   const { phil, bea } = await seed();
   const { context, page } = await phone(phil.token);
   try {
-    await tab(page, "You");
+    await openYouSection(page, "Availability & calendar");
     for (const label of ["1 hour", "2 hours", "Until 6pm", "Until tomorrow"]) await page.getByRole("button", { name: label, exact: true }).waitFor();
     await shot(page, "you-presets.png");
     await page.getByRole("button", { name: "1 hour", exact: true }).click();
@@ -113,7 +113,7 @@ test("weekly hours make a person Busy to friends, with no Clear status", async (
   const { weekday, start, end } = aroundNow();
   const { context, page } = await phone(phil.token);
   try {
-    await tab(page, "You");
+    await openYouSection(page, "Availability & calendar");
     await page.getByRole("button", { name: "Set weekly hours" }).click();
     const today = page.locator(".hours-block").first().getByRole("button", { name: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekday - 1], exact: true });
     if ((await today.getAttribute("aria-pressed")) !== "true") await today.click();
@@ -213,7 +213,7 @@ test("the You tab and a friend's Circle row fit at phone sizes", async () => {
   for (const [width, height] of SIZES) {
     const { context, page } = await phone(phil.token, width, height);
     try {
-      await tab(page, "You");
+      await openYouSection(page, "Availability & calendar");
       await page.locator(".hours-panel").waitFor();
       assert.ok((await overflow(page)) <= 0, `saved panel has no sideways scroll at ${width}px`);
       await page.getByRole("button", { name: "Edit weekly hours" }).last().click();

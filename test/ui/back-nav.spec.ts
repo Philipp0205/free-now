@@ -45,6 +45,7 @@ async function shot(page: Page, name: string) {
 }
 
 const heading = (page: Page, text: string) => page.locator("h1.screen-title", { hasText: new RegExp(`^${text}$`) });
+const subHeading = (page: Page, text: string) => page.locator(".you-section h1", { hasText: new RegExp(`^${text}$`) });
 const tab = (page: Page, name: string) => page.locator("nav.tabbar").getByRole("button", { name, exact: true });
 const bell = (page: Page) => page.locator('.screen-head button.icon-btn[aria-label^="Alerts"]');
 
@@ -154,22 +155,30 @@ for (const [width, height] of SIZES) {
 
       // Notifications sheet on You: Back closes the sheet, then You.
       await tab(page, "You").click();
+      await heading(page, "You").waitFor();
+      await shot(page, "back-you-menu");
+      await page.locator(".page").getByRole("button", { name: "Notifications", exact: true }).click();
       await page.locator("button.notif-row").click();
       const notifications = page.getByRole("dialog", { name: "Notifications" });
       await notifications.waitFor();
       await shot(page, "back-notifications");
       await back(page);
       await notifications.waitFor({ state: "detached" });
+      await subHeading(page, "Notifications").waitFor();
+      await back(page);
       await heading(page, "You").waitFor();
       await back(page);
       await atRest(page);
 
       // Closing in the UI drops the entry too, so the next Back still lands one layer down.
       await tab(page, "You").click();
+      await page.locator(".page").getByRole("button", { name: "Notifications", exact: true }).click();
       await page.locator("button.notif-row").click();
       await notifications.waitFor();
       await page.keyboard.press("Escape");
       await notifications.waitFor({ state: "detached" });
+      await subHeading(page, "Notifications").waitFor();
+      await back(page);
       await heading(page, "You").waitFor();
       await back(page);
       await atRest(page);

@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, call, useHangry } from "./harness.js";
+import { SIZES, UA, call, openYouSection, useHangry } from "./harness.js";
 
 /** Screenshots go here. Override with FDCAL_SHOT_DIR=/some/folder. The feed link is always masked. */
 const SHOT_DIR = path.resolve(process.env.FDCAL_SHOT_DIR || ".oc/shots/feedback-done-calendar");
@@ -56,7 +56,7 @@ for (const [width, height] of SIZES) {
     try {
       await page.goto(hangry.baseUrl);
       await dismiss(page);
-      await page.getByRole("button", { name: "You", exact: true }).click();
+      await openYouSection(page, "Availability & calendar");
       const panel = page.getByRole("region", { name: "Calendar feed" });
       await panel.getByRole("button", { name: "Turn on calendar feed" }).click();
       await panel.locator(".feed-url").waitFor();
@@ -85,9 +85,9 @@ for (const [width, height] of SIZES) {
       assert.equal(feed.active, true);
 
       // Alerts lists the personal alert. Leaving You hides the one-time link, as before.
-      await page.locator(".screen-head .icon-btn[aria-label^='Alerts']").click();
+      await page.getByRole("button", { name: /^Alerts/ }).click();
       await page.locator(".alert-card", { hasText: "Your suggestion is live" }).waitFor();
-      await page.getByRole("button", { name: "You", exact: true }).click();
+      await openYouSection(page, "Availability & calendar");
       await panel.getByRole("button", { name: "Reset link" }).waitFor();
       assert.equal(await panel.locator(".feed-url").count(), 0);
       await shot(page, "3-you-tab-after-alerts");

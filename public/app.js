@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v83";
+const APP_VERSION = "hangry-v85";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -166,6 +166,8 @@ const state = {
   calendarSync: null,
   /** Assistant tokens on the You tab: { loaded, failed, tokens, busy, draft, secret }. secret is set only right after making one. */
   agentTokens: null,
+  /** Open You sub-screen: null (the menu) or one of YOU_SECTIONS ids. */
+  youSection: null,
   /** Busy people at a later time on the create sheet: { at, people: [{ id, state, until }] }. */
   busyAt: null,
   /** The "I'm in" tap waiting on the owner's own calendar for that day. */
@@ -908,6 +910,7 @@ function clearSession() {
   state.calendarFeed = null;
   state.calendarSync = null;
   state.agentTokens = null;
+  state.youSection = null;
   state.busyAt = null;
 }
 
@@ -1180,22 +1183,26 @@ function shell() {
   return phone;
 }
 
-function screenHeader(title) {
+function alertsBell() {
   const unread = state.notifications.filter((note) => !note.readAt).length;
+  return el("button", {
+    class: state.tab === "alerts" ? "icon-btn on" : "icon-btn",
+    type: "button",
+    "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
+    "aria-expanded": state.tab === "alerts" ? "true" : "false",
+    onclick: () => {
+      if (state.tab === "alerts") closeAlerts();
+      else void onTab("alerts");
+    },
+  }, [
+    icon("bell"),
+    unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+  ]);
+}
+
+function screenHeader(title) {
   const titleEl = el("h1", { class: "screen-title", text: title });
-  const bell = el("button", {
-      class: state.tab === "alerts" ? "icon-btn on" : "icon-btn",
-      type: "button",
-      "aria-label": unread ? `Alerts, ${unread} unread` : "Alerts",
-      "aria-expanded": state.tab === "alerts" ? "true" : "false",
-      onclick: () => {
-        if (state.tab === "alerts") closeAlerts();
-        else void onTab("alerts");
-      },
-    }, [
-      icon("bell"),
-      unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
-    ]);
+  const bell = alertsBell();
   const switcher = circleSwitcher();
   if (!switcher) return el("header", { class: "screen-head" }, [titleEl, bell]);
   return el("header", { class: "screen-head" }, [
@@ -2769,11 +2776,88 @@ function flicPanel(code) {
   ]);
 }
 
+const YOU_SECTIONS = [
+  { id: "profile", title: "Profile" },
+  { id: "availability", title: "Availability & calendar" },
+  { id: "notifications", title: "Notifications" },
+  { id: "assistants", title: "Assistants" },
+  { id: "account", title: "Account" },
+];
+
+function openYouSection(id) {
+  state.youSection = id;
+  render();
+}
+
+function closeYouSection() {
+  state.youSection = null;
+  render();
+}
+
+function youSectionSummary(id) {
+  if (id === "profile") return state.me.user.name;
+  if (id === "availability") {
+    const status = activeStatus(state.me.user.status);
+    if (status) return statusLine(status, Date.now(), viewerTz());
+    if (state.calendarSync?.source === "google") return "Google connected";
+    if (state.me.user.calendarConnected || state.calendarSync?.connected) return "Calendar connected";
+    return "No status";
+  }
+  if (id === "notifications") return notificationStatusLabel();
+  if (id === "assistants") {
+    const tokens = state.agentTokens;
+    if (!tokens?.loaded || tokens.failed) return "";
+    return tokens.tokens.length === 0 ? "No tokens" : tokens.tokens.length === 1 ? "1 token" : `${tokens.tokens.length} tokens`;
+  }
+  return "";
+}
+
+function youMenuRow(title, summary, onclick) {
+  return el("button", { class: "row nav-row", type: "button", "aria-label": title, onclick }, [
+    el("div", { class: "grow" }, [
+      el("h3", { text: title }),
+      summary ? el("p", { text: summary }) : null,
+    ]),
+    icon("chevron"),
+  ]);
+}
+
 function youScreen() {
-  const code = state.me.user.buzzToken;
-  const hasPhoto = Boolean(state.me.user.avatarRev);
+  if (state.youSection) return youSectionScreen(state.youSection);
   return el("div", {}, [
     screenHeader("You"),
+    el("div", { class: "panel panel-rows" }, YOU_SECTIONS.map((section) => (
+      youMenuRow(section.title, youSectionSummary(section.id), () => openYouSection(section.id))
+    ))),
+    el("div", { class: "panel panel-rows" }, [
+      youMenuRow("What's new", "Recent changes to Hangry", () => { void openWhatsNewList(); }),
+      youMenuRow("Send feedback", "Ideas, bugs, anything", openFeedback),
+    ]),
+  ]);
+}
+
+function youSectionScreen(id) {
+  const section = YOU_SECTIONS.find((item) => item.id === id);
+  const bodies = {
+    profile: profileSection,
+    availability: () => [statusPanel(), busyHoursPanel(), calendarFeedPanel(), calendarSyncPanel()],
+    notifications: notificationsSection,
+    assistants: () => [agentTokensPanel()],
+    account: accountSection,
+  };
+  return el("div", { class: "you-section" }, [
+    el("header", { class: "chat-head" }, [
+      el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closeYouSection }),
+      el("h1", { text: section.title }),
+      alertsBell(),
+    ]),
+    ...bodies[id](),
+  ]);
+}
+
+function profileSection() {
+  const hasPhoto = Boolean(state.me.user.avatarRev);
+  return [
     el("div", { class: "profile-hero" }, [
       el("button", {
         class: "avatar-btn",
@@ -2790,13 +2874,16 @@ function youScreen() {
             hasPhoto ? el("button", { class: "text-btn", type: "button", text: "Remove photo", onclick: () => { void onRemovePhoto(); } }) : null,
           ]),
     ]),
-    statusPanel(),
-    busyHoursPanel(),
     el("form", { class: "panel stack", onsubmit: onRename }, [
       field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
       el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
       el("p", { class: "help", text: "Friends see this name on your cards." }),
     ]),
+  ];
+}
+
+function notificationsSection() {
+  return [
     el("div", { class: "panel" }, [
       el("button", {
         class: "row notif-row",
@@ -2820,25 +2907,12 @@ function youScreen() {
         ? el("button", { class: "btn secondary", type: "button", text: "Install app", onclick: onInstall })
         : null,
     ]),
-    calendarFeedPanel(),
-    calendarSyncPanel(),
-    agentTokensPanel(),
-    el("div", { class: "panel panel-rows" }, [
-      el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
-        el("div", { class: "grow" }, [
-          el("h3", { text: "What's new" }),
-          el("p", { text: "Recent changes to Hangry" }),
-        ]),
-        icon("chevron"),
-      ]),
-      el("button", { class: "row nav-row", type: "button", onclick: openFeedback }, [
-        el("div", { class: "grow" }, [
-          el("h3", { text: "Send feedback" }),
-          el("p", { text: "Ideas, bugs, anything" }),
-        ]),
-        icon("chevron"),
-      ]),
-    ]),
+  ];
+}
+
+function accountSection() {
+  const code = state.me.user.buzzToken;
+  return [
     el("div", { class: "panel" }, [
       el("button", {
         class: "text-btn",
@@ -2876,7 +2950,7 @@ function youScreen() {
       el("button", { class: "btn danger", type: "button", text: "Leave circle", onclick: onLeave }),
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),
     ]),
-  ]);
+  ];
 }
 
 function calendarFeedPanel() {
@@ -2969,10 +3043,10 @@ async function shareFeedLink(url) {
   }
 }
 
-/** The feed link shows once. Once the You screen is not on show, it is gone for good. */
+/** The feed link shows once. Once the Availability & calendar screen is not on show, it is gone for good. */
 function forgetShownFeedLink() {
   if (!state.calendarFeed?.url) return;
-  if (state.tab === "you" && !state.chat && !state.past) return;
+  if (state.tab === "you" && state.youSection === "availability" && !state.chat && !state.past) return;
   state.calendarFeed = { ...state.calendarFeed, url: "", webcalUrl: "" };
 }
 
@@ -3105,10 +3179,10 @@ async function copyAgentToken(secret) {
   scheduleErrorClear();
 }
 
-/** The token shows once. Once the You screen is not on show, it is gone for good. */
+/** The token shows once. Once the Assistants screen is not on show, it is gone for good. */
 function forgetShownAgentToken() {
   if (!state.agentTokens?.secret) return;
-  if (state.tab === "you" && !state.chat && !state.past) return;
+  if (state.tab === "you" && state.youSection === "assistants" && !state.chat && !state.past) return;
   state.agentTokens = { ...state.agentTokens, secret: "" };
 }
 
@@ -3363,6 +3437,7 @@ window.addEventListener("pageshow", (event) => {
 function landCalendar() {
   if (!calendarLanding || !state.token || !state.me?.circle) return;
   state.tab = "you";
+  state.youSection = "availability";
   state.calendarSync = null;
   state.error = calendarLanding === "google" ? "Google Calendar connected" : "Could not connect Google Calendar. Try again.";
 }
@@ -7364,6 +7439,7 @@ function currentOverlayDepth() {
   if (state.circleMenu) depth += 1;
   if (state.chat) depth += 1;
   if (state.past) depth += 1;
+  if (state.tab === "you" && state.youSection) depth += 1;
   return depth + tabLayers();
 }
 
@@ -7435,6 +7511,10 @@ function dismissTopOverlay() {
   }
   if (state.past) {
     closePast();
+    return;
+  }
+  if (state.tab === "you" && state.youSection) {
+    closeYouSection();
     return;
   }
   if (state.tab === "alerts") {
@@ -7667,6 +7747,7 @@ async function onTab(id) {
     state.alertsReturn = ALERTS_RETURN_TABS.includes(state.tab) ? state.tab : "home";
   }
   state.tab = id;
+  state.youSection = null;
   state.sheet = null;
   state.focusPlan = "";
   state.mapHistory = false;

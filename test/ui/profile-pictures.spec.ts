@@ -12,6 +12,7 @@ import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
+import { openYouSection } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/profile-pictures/";
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
@@ -187,7 +188,7 @@ test("add a photo on You; it shows on the hero, plan card, members and details; 
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await asUser(page, host.token);
-    await tab(page, "You");
+    await openYouSection(page, "Profile");
     const hero = page.locator(".profile-hero");
     assert.equal(await hero.locator("span.avatar.lg").innerText(), "H");
     assert.equal(await hero.getByRole("button", { name: "Remove photo" }).count(), 0, "no Remove without a photo");
@@ -228,7 +229,7 @@ test("add a photo on You; it shows on the hero, plan card, members and details; 
 
     // w390 You shot.
     await page.setViewportSize({ width: 390, height: 844 });
-    await tab(page, "You");
+    await openYouSection(page, "Profile");
     await photoOk(page, ".profile-hero img.avatar.lg", 72);
     await page.screenshot({ path: shot("you-with-photo-w390.png") });
     await page.setViewportSize({ width: 360, height: 640 });
@@ -268,7 +269,7 @@ test("demo video: set photo → card → remove at 360×640", { timeout: 120_000
   try {
     await asUser(page, host.token);
     await page.waitForTimeout(600);
-    await tab(page, "You");
+    await openYouSection(page, "Profile");
     await page.waitForTimeout(800);
     await choosePhoto(page, path.join(tmpRoot, "photo.png"));
     await page.locator(".profile-hero img.avatar.lg").waitFor();
@@ -276,7 +277,7 @@ test("demo video: set photo → card → remove at 360×640", { timeout: 120_000
     await tab(page, "Now");
     await page.locator(".card-plan img.avatar").waitFor();
     await page.waitForTimeout(1200);
-    await tab(page, "You");
+    await openYouSection(page, "Profile");
     await page.waitForTimeout(600);
     await page.locator(".profile-hero").getByRole("button", { name: "Remove photo" }).click();
     await page.locator(".profile-hero span.avatar.lg").waitFor();

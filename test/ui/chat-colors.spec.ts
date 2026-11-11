@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
 
 const shotsDir = path.resolve("test/ui/screenshots");
 
@@ -27,7 +27,7 @@ test("own messages carry the avatar color and a friend keeps one color in every 
   const page = await openAs(alex.token);
   try {
     const avatar = await page.locator(".card-now .avatars .avatar").first().evaluate((node) => getComputedStyle(node).backgroundColor);
-    await page.getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Profile");
     const profile = await page.locator(".avatar.lg").evaluate((node) => getComputedStyle(node).backgroundColor);
     assert.equal(profile, avatar, "card and profile avatar agree");
     await page.getByRole("button", { name: "Circle", exact: true }).click();

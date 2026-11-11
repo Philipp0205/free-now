@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, useHangry } from "./harness.js";
+import { SIZES, openYouSection, useHangry } from "./harness.js";
 
 /** Screenshots land here. Override with CAL_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.CAL_SHOT_DIR || "/workspace/hangry-calendar-android-artifacts");
@@ -76,7 +76,7 @@ async function host(label: string) {
 }
 
 async function turnOn(page: Page) {
-  await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+  await openYouSection(page, "Availability & calendar");
   const panel = page.getByRole("region", { name: "Calendar feed" });
   await panel.getByRole("button", { name: "Turn on calendar feed" }).click();
   await panel.locator(".feed-url").waitFor();
@@ -201,7 +201,8 @@ test("after a reload, or Back and return, the link is gone and Reset link is exp
     let panel = await turnOn(page);
     // The phone's Back from the You tab, then back to You.
     await page.evaluate(() => history.back());
-    await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+    await page.getByRole("heading", { name: "You", exact: true, level: 1 }).waitFor();
+    await openYouSection(page, "Availability & calendar");
     await panel.getByText(ONCE, { exact: false }).waitFor();
     assert.equal(await panel.locator(".feed-url").count(), 0, "Back hides the link");
 
@@ -210,7 +211,7 @@ test("after a reload, or Back and return, the link is gone and Reset link is exp
     await panel.locator(".feed-url").waitFor();
 
     await page.reload();
-    await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Availability & calendar");
     panel = page.getByRole("region", { name: "Calendar feed" });
     await panel.getByText(ONCE, { exact: false }).waitFor();
     await panel.getByText(/On since/).waitFor();

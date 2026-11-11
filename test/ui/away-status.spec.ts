@@ -3,7 +3,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import { addDays } from "../../src/time.js";
 import { statusToday } from "../../public/status.js";
-import { SIZES, UA, openEventsMap, useHangry } from "./harness.js";
+import { SIZES, UA, openEventsMap, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 
 const hangry = useHangry();
@@ -41,7 +41,7 @@ test("set Away on the You tab, friends see the badge and line, then clear it", a
   const untilDay = addDays(statusToday(), 4);
   const { context, page } = await phone(phil.token);
   try {
-    await tab(page, "You");
+    await openYouSection(page, "Availability & calendar");
     await page.getByRole("button", { name: /Set Away/ }).click();
     await page.locator("#status-text").fill("Tennis vacation in Portugal");
     await page.locator("#status-place").fill("Portugal");
@@ -52,6 +52,7 @@ test("set Away on the You tab, friends see the badge and line, then clear it", a
     const summary = await page.locator(".status-summary").innerText();
     assert.match(summary, /Away · Tennis vacation in Portugal · until \d+ \w{3}$/);
     assert.ok(!summary.includes("Portugal · Portugal"), "the place is not said twice");
+    await openYouSection(page, "Profile");
     await page.locator(".profile-hero .status-badge[aria-label='Away']").waitFor();
 
     const friend = await phone(bea.token);
@@ -85,11 +86,12 @@ test("set Away on the You tab, friends see the badge and line, then clear it", a
     assert.equal(await page.locator(".sheet").getByRole("button", { name: "Make admin" }).count(), 0);
     await page.locator(".sheet").getByRole("button", { name: "Close" }).click();
 
-    await tab(page, "You");
+    await openYouSection(page, "Availability & calendar");
     await page.getByRole("button", { name: "Clear status" }).click();
     await page.locator(".toast", { hasText: "Status cleared" }).waitFor();
-    assert.equal(await page.locator(".status-badge").count(), 0);
     await page.getByRole("button", { name: /Set Busy/ }).waitFor();
+    await openYouSection(page, "Profile");
+    assert.equal(await page.locator(".status-badge").count(), 0);
     const me = await hangry.call("GET", "/api/me", phil.token);
     assert.equal(me.user.status, null);
   } finally {
@@ -116,7 +118,7 @@ test("an ended status is not shown, and a past end day is refused with a message
 
   const { context, page } = await phone(phil.token);
   try {
-    await tab(page, "You");
+    await openYouSection(page, "Availability & calendar");
     await page.getByRole("button", { name: /Set Away/ }).click();
     assert.equal(await page.locator("#status-text").getAttribute("maxlength"), "60");
     assert.equal(await page.locator("#status-place").getAttribute("maxlength"), "40");
@@ -160,7 +162,7 @@ test("status panel and member row fit at phone sizes", async () => {
   }
   const { context, page } = await phone(phil.token, 320, 568);
   try {
-    await tab(page, "You");
+    await openYouSection(page, "Availability & calendar");
     await page.locator(".status-panel").waitFor();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.ok(overflow <= 0, "You tab has no sideways scroll at 320px");

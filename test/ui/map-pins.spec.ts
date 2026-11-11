@@ -7,7 +7,7 @@ import zlib from "node:zlib";
 import type { Page } from "playwright-core";
 import { shortDate } from "../../public/when.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, openYouSection, useHangry } from "./harness.js";
 
 /** Screenshots land here. Override with MAP_PINS_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.MAP_PINS_SHOT_DIR || "/workspace/hangry-mapbuzz-logs/shots");
@@ -74,7 +74,7 @@ function testPhoto(width = 320, height = 240): Buffer {
 async function uploadPhoto(token: string, file: string) {
   const page = await phone(360, 640, token);
   try {
-    await page.locator("nav.tabbar").getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Profile");
     const chooser = page.waitForEvent("filechooser");
     await page.locator(".profile-hero .avatar-btn").click();
     await (await chooser).setFiles(file);

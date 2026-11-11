@@ -5,7 +5,7 @@ import test from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
 
@@ -376,8 +376,8 @@ test("denied notifications explain how to allow them again", { timeout: 90_000 }
     assert.equal(await page.getByRole("button", { name: "Turn on notifications" }).count(), 0);
     await page.screenshot({ path: shot("polish-notifications-denied.png") });
     await page.locator(".sheet button.btn.ghost", { hasText: "Not now" }).click();
-    await page.getByRole("button", { name: "You", exact: true }).click();
-    await page.getByRole("button", { name: "Notifications" }).click();
+    await openYouSection(page, "Notifications");
+    await page.locator("button.notif-row").click();
     await page.locator(".guide").waitFor();
     await page.getByText("Settings → Site settings → Notifications").waitFor();
     assert.equal(await page.locator(".guide").getByRole("button", { name: "Turn on notifications" }).count(), 0);
@@ -505,8 +505,8 @@ test("a scrolled install guide drags closed only from the top", { timeout: 90_00
     await signIn(page, "Philipp");
     const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "You", exact: true }).click();
-    await page.getByRole("button", { name: "Notifications" }).click();
+    await openYouSection(page, "Notifications");
+    await page.locator("button.notif-row").click();
     await page.locator(".guide").waitFor();
     await page.locator(".guide-scrim").evaluate((node) => {
       const filler = document.createElement("div");
@@ -1451,7 +1451,7 @@ test("you can edit your name, and an admin can edit the circle name", { timeout:
     await signIn(page, "Alex");
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
-    await page.getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Profile");
     await page.getByText("Your name", { exact: true }).waitFor();
     await page.locator("#rename").fill("Alexis");
     await page.getByRole("button", { name: "Save name" }).click();
@@ -1696,7 +1696,7 @@ test("two circles stay separate when you switch, post, join, and leave", { timeo
     await beaPage.getByRole("button", { name: "Now", exact: true }).waitFor();
     assert.equal(await beaPage.getByRole("heading", { name: "Soup" }).count(), 0);
 
-    await page.getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Account");
     page.once("dialog", (dialog) => void dialog.accept());
     await page.getByRole("button", { name: "Leave circle" }).click();
     await page.getByRole("button", { name: "Now", exact: true }).waitFor();

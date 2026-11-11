@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
 
 const hangry = useHangry();
 
@@ -19,7 +19,7 @@ test("the You tab shows a Flic link that starts and ends a social", { timeout: 9
   page.on("pageerror", (error) => errors.push(error.stack || String(error)));
   try {
     await signIn(page, "Marius");
-    await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Account");
     await page.getByRole("button", { name: "Set up a Flic button" }).click();
     const link = (await page.locator("pre.curl").innerText()).trim();
     // One circle: the link needs no circle argument.

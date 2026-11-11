@@ -66,8 +66,25 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the reaction notification entry is the newest, in plain words without an em dash", () => {
+test("the settings menu entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-11-settings-menu");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Settings, split into pages");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /You tab is now a short menu/);
+  assert.match(text, /Back button/);
+  assert.match(text, /Android back/);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= 140, line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
+});
+
+test("the reaction notification entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-reaction-notify")!;
   assert.equal(top.id, "2026-11-11-reaction-notify");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Get notified when friends react");
@@ -433,7 +450,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v83");
+  assert.equal(cache?.[1], "hangry-v85");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
