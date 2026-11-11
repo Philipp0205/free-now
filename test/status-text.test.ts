@@ -3,19 +3,21 @@ import fs from "node:fs";
 import test from "node:test";
 import {
   activeStatus,
+  busyUntilPresets,
   circleStatusLine,
   statusBadge,
   statusLine,
   statusShort,
   statusToday,
   statusUntilDay,
+  untilFromClock,
   untilText,
   STATUS_PLACE_MAX as CLIENT_PLACE_MAX,
   STATUS_TEXT_MAX as CLIENT_TEXT_MAX,
   STATUS_TZ as CLIENT_TZ,
 } from "../public/status.js";
 import { STATUS_PLACE_MAX, STATUS_TEXT_MAX, STATUS_TZ } from "../src/status.js";
-import { endOfDay } from "../src/time.js";
+import { endOfDay, zonedDateTime } from "../src/time.js";
 
 const NOW = Date.parse("2026-11-09T11:00:00Z");
 const UNTIL = endOfDay("2026-11-13", "Europe/Berlin");
@@ -70,6 +72,61 @@ test("circle line groups by type, says You, caps names and shows a lone end day"
   assert.equal(circleStatusLine(many, "", NOW), "Away: A, B, C +2");
   assert.equal(circleStatusLine([{ id: "b", name: "Bea", status: null }], "", NOW), null);
   assert.equal(circleStatusLine(members, "", UNTIL + 1), "Busy: Alex");
+});
+
+test("untilText reads an end of day as a date and any other instant as a clock", () => {
+  const at = (iso: string) => Date.parse(iso);
+  // NOW is Mon 9 Nov 2026 12:00 Berlin.
+  assert.equal(untilText(at("2026-11-09T17:00:00Z"), NOW), "until 18:00");
+  assert.equal(untilText(at("2026-11-10T17:00:00Z"), NOW), "until tomorrow 18:00");
+  assert.equal(untilText(at("2026-11-13T17:00:00Z"), NOW), "until Fri 18:00");
+  assert.equal(untilText(at("2027-01-08T17:00:00Z"), NOW), "until Fri 18:00 2027");
+  assert.equal(untilText(at("2026-11-09T23:00:00Z"), NOW), "until tomorrow 00:00", "midnight sharp is a clock time, not an end of day");
+  assert.equal(untilText(endOfDay("2026-11-13", "Europe/Berlin"), NOW), "until 13 Nov");
+  assert.equal(untilText(endOfDay("2027-01-02", "Europe/Berlin"), NOW), "until 2 Jan 2027");
+  // The same instants read in another zone.
+  assert.equal(untilText(at("2026-11-09T17:00:00Z"), NOW, "Europe/Lisbon"), "until 17:00");
+  assert.equal(untilText(endOfDay("2026-11-13", "Europe/Lisbon"), NOW, "Europe/Lisbon"), "until 13 Nov");
+  assert.equal(untilText(endOfDay("2026-11-13", "Europe/Lisbon"), NOW), "until Sat 00:59", "a Lisbon end of day is not a Berlin one");
+  assert.equal(statusLine({ type: "busy", text: null, place: null, until: at("2026-11-09T17:00:00Z") }, NOW), "Busy · until 18:00");
+  assert.equal(statusShort({ type: "busy", until: at("2026-11-10T17:00:00Z") }, NOW), "Busy until tomorrow 18:00");
+  assert.equal(statusShort({ type: "busy", until: at("2026-11-09T17:00:00Z") }, NOW, "Europe/Lisbon"), "Busy until 17:00");
+  assert.equal(circleStatusLine([{ id: "a", name: "Alex", status: { type: "busy", until: at("2026-11-09T17:00:00Z") } }], "", NOW), "Busy: Alex, until 18:00");
+  assert.equal(circleStatusLine([{ id: "a", name: "Alex", status: { type: "busy", until: at("2026-11-09T17:00:00Z") } }], "", NOW, 3, "Europe/Lisbon"), "Busy: Alex, until 17:00");
+});
+
+test("untilFromClock is the next occurrence of a clock time", () => {
+  assert.equal(untilFromClock("18:00", NOW), Date.parse("2026-11-09T17:00:00Z"));
+  assert.equal(untilFromClock("11:59", NOW), Date.parse("2026-11-10T10:59:00Z"));
+  assert.equal(untilFromClock("12:00", NOW), Date.parse("2026-11-10T11:00:00Z"), "now exactly rolls to tomorrow");
+  assert.equal(untilFromClock("18:00", NOW, "Europe/Lisbon"), Date.parse("2026-11-09T18:00:00Z"));
+  assert.equal(untilFromClock("nope", NOW), null);
+  assert.equal(untilFromClock("25:00", NOW), null);
+  // Across the spring-forward day the answer matches the server rule.
+  const before = Date.parse("2026-03-28T20:00:00Z");
+  assert.equal(untilFromClock("18:00", before), zonedDateTime("2026-03-29", "18:00", "Europe/Berlin"));
+});
+
+test("busy presets: 1 hour, 2 hours, 6pm and the end of tomorrow", () => {
+  const presets = busyUntilPresets(NOW);
+  assert.deepEqual(presets.map((p: { id: string }) => p.id), ["1h", "2h", "6pm", "tomorrow"]);
+  assert.deepEqual(presets.map((p: { label: string }) => p.label), ["1 hour", "2 hours", "Until 6pm", "Until tomorrow"]);
+  assert.deepEqual(presets.map((p: { until: number }) => p.until), [
+    NOW + 3_600_000,
+    NOW + 7_200_000,
+    Date.parse("2026-11-09T17:00:00Z"),
+    endOfDay("2026-11-10", "Europe/Berlin"),
+  ]);
+  const evening = Date.parse("2026-11-09T18:30:00Z"); // 19:30 Berlin
+  const late = busyUntilPresets(evening);
+  assert.equal(late[2].until, Date.parse("2026-11-10T17:00:00Z"), "6pm has passed, so tomorrow");
+  assert.equal(late[3].until, endOfDay("2026-11-10", "Europe/Berlin"));
+  // Just after midnight in Berlin, "tomorrow" is still the next Berlin day.
+  const night = Date.parse("2026-11-09T23:30:00Z"); // 00:30 on the 10th
+  assert.equal(busyUntilPresets(night)[3].until, endOfDay("2026-11-11", "Europe/Berlin"));
+  assert.equal(busyUntilPresets(NOW, "Europe/Lisbon")[3].until, endOfDay("2026-11-10", "Europe/Lisbon"));
+  assert.equal(untilText(presets[3].until, NOW), "until 10 Nov");
+  assert.equal(untilText(presets[2].until, NOW), "until 18:00");
 });
 
 test("the worker caches status.js with the shell", () => {

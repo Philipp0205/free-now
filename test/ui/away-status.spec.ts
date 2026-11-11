@@ -117,7 +117,7 @@ test("an ended status is not shown, and a past end day is refused with a message
   const { context, page } = await phone(phil.token);
   try {
     await tab(page, "You");
-    await page.getByRole("button", { name: /Set Busy/ }).click();
+    await page.getByRole("button", { name: /Set Away/ }).click();
     assert.equal(await page.locator("#status-text").getAttribute("maxlength"), "60");
     assert.equal(await page.locator("#status-place").getAttribute("maxlength"), "40");
     assert.equal(await page.locator("#status-until").getAttribute("min"), statusToday());
