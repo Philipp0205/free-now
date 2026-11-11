@@ -50,8 +50,22 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is the faster map, in plain words", () => {
+test("the newest entry is the chat cursor fix, in plain words", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-11-chat-caret");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Tap to move the cursor while typing in chat");
+  assert.equal(top.bullets.length, 2);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /moves the cursor/);
+  assert.match(text, /keyboard stays open/);
+  assert.doesNotMatch(text, /touch-action|caret|iOS|CSS/i, "no jargon");
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the faster map entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-09-faster-map")!;
+  assert.ok(top, "faster map entry");
   assert.equal(top.id, "2026-11-09-faster-map");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Faster map");
@@ -355,7 +369,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v75");
+  assert.equal(cache?.[1], "hangry-v77");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

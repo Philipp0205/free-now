@@ -17,7 +17,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
-html { touch-action: manipulation; }
+/* Do not set touch-action: manipulation on html (or any ancestor of text fields).
+   A child cannot re-enable what a parent disabled, and it steals caret taps in
+   focused inputs on iOS, which closes the keyboard. Buttons set it themselves. */
 html.sheet-open,
 html.sheet-open body {
   overflow: hidden;
@@ -1543,6 +1545,9 @@ textarea.sheet-control {
   padding: 0 16px;
   font-size: 16px;
   color: #fff;
+  touch-action: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 textarea.sheet-control {
   display: block;
