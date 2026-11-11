@@ -5,7 +5,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA, useHangry } from "./harness.js";
+import { UA, openYouSection, useHangry } from "./harness.js";
 
 const SHOT_DIR = path.resolve(process.env.NOTIF_SHOT_DIR || ".oc/shots");
 const ENDPOINT = "https://push.example/fake";
@@ -111,7 +111,7 @@ test("Settings → Notifications turns push off and back on at 393x852", { timeo
   const sheet = page.getByRole("dialog", { name: "Notifications" });
   try {
     await page.goto(hangry.baseUrl);
-    await page.locator("nav.tabbar").getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Notifications");
     await row.getByText("Off", { exact: true }).waitFor();
 
     // Turn on.
@@ -152,7 +152,7 @@ test("Settings → Notifications turns push off and back on at 393x852", { timeo
     await page.getByText("Coffee", { exact: true }).first().waitFor();
     await page.waitForTimeout(2500);
     assert.equal(await page.locator(".sheet").count(), 0, "no onboarding nag");
-    await page.locator("nav.tabbar").getByRole("button", { name: "You", exact: true }).click();
+    await openYouSection(page, "Notifications");
     await row.getByText("Off", { exact: true }).waitFor();
 
     // Turn back on.

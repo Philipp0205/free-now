@@ -5,7 +5,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import { fakeGoogle, type Fake } from "../fake-google.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 
 /** Screenshots land here (gitignored). Override with PRIVACY_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.PRIVACY_SHOT_DIR || "test/ui/screenshots/privacy");
@@ -115,7 +115,7 @@ for (const [width, height] of SIZES) {
     const page = await ctx.newPage();
     try {
       await page.goto(`${hangry.baseUrl}/`);
-      await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+      await openYouSection(page, "Availability & calendar");
       const facts = page.locator(".sync-facts");
       await facts.waitFor();
       await facts.getByText("What Hangry can and can't see").waitFor();

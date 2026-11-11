@@ -8,7 +8,7 @@ import { addDays, isoDate, zonedDateTime } from "../../src/time.js";
 import { untilText } from "../../public/freebusy.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 
 const TZ = "Europe/Berlin";
 const MIN = 60_000;
@@ -134,7 +134,7 @@ for (const [width, height, mobile] of WIDTHS) {
     const { alex, friends, work } = await seed(tag, false);
     const page = await phone(width, height, alex.token, friends.id, mobile);
     try {
-      await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+      await openYouSection(page, "Availability & calendar");
       const panel = page.getByRole("region", { name: "Calendar availability" });
       await panel.getByRole("button", { name: "Connect calendar" }).waitFor();
       await panel.getByText("They never see what is in your calendar.", { exact: false }).waitFor();

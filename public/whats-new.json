@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-11-settings-menu",
+    "date": "2026-11-11",
+    "title": "Settings, split into pages",
+    "bullets": [
+      "The You tab is now a short menu: Profile, Availability & calendar, Notifications, Assistants and Account.",
+      "Each section opens its own screen with a Back button, so nothing is buried in one long page.",
+      "The Android back button steps out of a section first, then leaves the You tab."
+    ]
+  },
+  {
     "id": "2026-11-11-privacy",
     "date": "2026-11-11",
     "title": "A public privacy policy",

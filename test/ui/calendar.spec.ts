@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 
 const TZ = "Europe/Berlin";
 /** Screenshots land here. Override with CAL_SHOT_DIR. */
@@ -106,7 +106,7 @@ for (const [width, height] of SIZES) {
     await call("POST", "/api/plans", host.token, { note: `Board games ${width}`, time: "18:00" });
     const page = await phone(width, height, host.token);
     try {
-      await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+      await openYouSection(page, "Availability & calendar");
       const panel = page.getByRole("region", { name: "Calendar feed" });
       await panel.getByRole("button", { name: "Turn on calendar feed" }).waitFor();
       await panel.getByText("Your calendar app decides how often it checks for changes, which can take hours.", { exact: false }).waitFor();
@@ -131,7 +131,7 @@ for (const [width, height] of SIZES) {
 
       // Leaving the tab hides the link for good: only the date shows after that.
       await page.locator(".tabbar").getByRole("button", { name: "Now", exact: true }).click();
-      await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+      await openYouSection(page, "Availability & calendar");
       await panel.getByText(/On since/).waitFor();
       assert.equal(await panel.locator(".feed-url").count(), 0);
 

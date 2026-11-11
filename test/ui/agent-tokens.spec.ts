@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 
 const SHOT_DIR = path.resolve("test/ui/screenshots/agent-api");
 const hangry = useHangry();
@@ -88,7 +88,7 @@ async function fitsWidth(page: Page, selector: string) {
 }
 
 async function openYou(page: Page) {
-  await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+  await openYouSection(page, "Assistants");
   await page.getByRole("region", { name: "Assistant tokens" }).waitFor();
   await page.getByRole("region", { name: "Assistant tokens" }).getByLabel("Token name").waitFor();
 }

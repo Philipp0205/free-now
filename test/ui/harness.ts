@@ -17,6 +17,19 @@ export async function openEventsMap(page: Page): Promise<void> {
   await page.locator(".events-view").getByRole("button", { name: "Map", exact: true }).click();
 }
 
+/** Opens the You tab and waits for its menu heading. */
+export async function openYou(page: Page): Promise<void> {
+  await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+  await page.getByRole("heading", { name: "You", exact: true, level: 1 }).waitFor();
+}
+
+/** Opens the You tab, then one of its menu rows (Profile, Availability & calendar, ...), and waits for that screen's heading. */
+export async function openYouSection(page: Page, title: string): Promise<void> {
+  await openYou(page);
+  await page.locator(".page").getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("heading", { name: title, exact: true, level: 1 }).waitFor();
+}
+
 /** The three phone sizes we check UI at. */
 export const SIZES = [[320, 568], [360, 640], [412, 915]] as const;
 

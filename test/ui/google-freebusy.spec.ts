@@ -5,7 +5,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import { fakeGoogle, type Fake } from "../fake-google.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 
 const TZ = "Europe/Berlin";
 const MIN = 60_000;
@@ -69,7 +69,7 @@ function absent(text: string, label: string) {
 }
 
 async function openYou(page: Page) {
-  await page.locator(".tabbar").getByRole("button", { name: "You", exact: true }).click();
+  await openYouSection(page, "Availability & calendar");
   const panel = page.getByRole("region", { name: "Calendar availability" });
   await panel.waitFor();
   return panel;
