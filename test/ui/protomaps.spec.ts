@@ -531,7 +531,7 @@ test("a slow archive: the map stays dark with no raster tiles, then the dark map
     // Every archive read is held back, the head read ahead on the idle app too.
     const { page, raster, archive } = await phone(width, height, host.token, "nobody", { worker: false, archiveDelay: ARCHIVE_DELAY });
     try {
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       await page.waitForFunction(WAITING, null, { timeout: 10_000, polling: 50 });
       // Watch the wait until the first vector tile is in: never a raster tile, always a dark background.
       const samples: Array<{ images: number; canvases: number; light: number }> = [];
@@ -590,7 +590,7 @@ test("on an idle app the map files and the archive head load ahead, so the Map t
       assert.equal(await page.locator("#hangry-map").count(), 0, `${width}: map not open yet`);
       assert.equal(await page.locator("link[data-leaflet]").count(), 1, `${width}: Leaflet css in place`);
 
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       await page.locator(".leaflet-marker-icon.pin-plan").waitFor({ timeout: 10_000 });
       await settleOn(page, "vector", `${width} warm open`);
       assert.equal(await layerAdds(page), 1, `${width}: straight to the dark map, no raster first`);
