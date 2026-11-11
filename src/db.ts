@@ -331,6 +331,14 @@ CREATE TABLE IF NOT EXISTS message_reactions (
   PRIMARY KEY (message_id, user_id, emoji)
 );
 
+-- One row per reactor per message, kept after an unreact, so the author is pinged once.
+CREATE TABLE IF NOT EXISTS reaction_notices (
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS calendar_feeds (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,

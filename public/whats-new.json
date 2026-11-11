@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-11-reaction-notify",
+    "date": "2026-11-11",
+    "title": "Get notified when friends react",
+    "bullets": [
+      "When a friend reacts to your chat message, you get a notification.",
+      "It shows who reacted, which emoji, and a short bit of your message. Tap it to open the chat.",
+      "You are not notified for your own reactions, or when you have muted the chat."
+    ]
+  },
+  {
     "id": "2026-11-11-google-freebusy",
     "date": "2026-11-11",
     "title": "Connect Google Calendar",
@@ -50,7 +60,7 @@
       "Pins, cards and the live buzz work just like before."
     ]
   },
-  {
+{
     "id": "2026-11-09-chat-mentions-reactions",
     "date": "2026-11-11",
     "title": "Mentions, reactions and replies in chat",

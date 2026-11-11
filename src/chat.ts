@@ -114,7 +114,9 @@ export async function routeChat(
   if (react && method === "POST") {
     const messageId = decodeURIComponent(react[1]);
     const on = typeof body.on === "boolean" ? body.on : null;
-    return { status: 200, body: { messageId, reactions: toggleReaction(deps, user.id, messageId, body.emoji, on) } };
+    const result = toggleReaction(deps, user.id, messageId, body.emoji, on);
+    if (result.added) await notifyReaction(deps, result.added.chat, messageId, user.id, user.name, result.added.emoji, result.added.authorId, result.added.text);
+    return { status: 200, body: { messageId, reactions: result.reactions } };
   }
   const message = /^\/api\/messages\/([^/]+)$/.exec(pathname);
   if (message && method === "DELETE") {
@@ -298,6 +300,38 @@ async function notifyReply(
   return [authorId];
 }
 
+/** Pings the message's author once per reactor per message. Skips yourself, a muted chat, and an author who left the audience. */
+async function notifyReaction(
+  deps: ChatDeps,
+  chat: ChatRow,
+  messageId: string,
+  reactorId: string,
+  reactorName: string,
+  emoji: string,
+  authorId: string,
+  text: string,
+): Promise<void> {
+  if (authorId === reactorId || isMuted(deps.db, chat.id, authorId)) return;
+  if (!chatAudience(deps.db, chat).some((member) => member.id === authorId)) return;
+  // The notice row outlives an unreact, so switching emoji or re-adding stays quiet.
+  const fresh = Number(deps.db.prepare(
+    "INSERT INTO reaction_notices (message_id, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+  ).run(messageId, reactorId, deps.now()).changes);
+  if (fresh === 0) return;
+  const head = `${reactorName} reacted ${emoji} to: \u201c`;
+  const room = Math.max(MENTION_BODY_MAX - head.length - 1, 1);
+  let excerpt = text.replace(/\s+/g, " ").trim();
+  if (excerpt.length > room) {
+    let cut = "";
+    for (const char of excerpt) {
+      if (cut.length + char.length > room - 1) break;
+      cut += char;
+    }
+    excerpt = `${cut.trimEnd()}\u2026`;
+  }
+  await pingNow(deps, chat, [authorId], `${head}${excerpt}\u201d`, `chat-reaction:${messageId}:${reactorId}`);
+}
+
 /** One immediate chat push plus alert per person, deep-linked into the chat. Never throws. */
 async function pingNow(deps: ChatDeps, chat: ChatRow, recipients: string[], text: string, tag: string): Promise<void> {
   if (recipients.length === 0) return;
@@ -323,13 +357,13 @@ async function pingNow(deps: ChatDeps, chat: ChatRow, recipients: string[], text
   }
 }
 
-/** Adds or removes your emoji on a message. `on` null flips it; true or false sets it, so a repeat is a no-op. */
+/** Adds or removes your emoji on a message. `on` null flips it; true or false sets it, so a repeat is a no-op. `added` is set only for a new reaction. */
 export function toggleReaction(deps: ChatDeps, userId: string, messageId: string, raw: unknown, on: boolean | null = null) {
   const emoji = typeof raw === "string" ? raw : "";
   if (!(REACTIONS as readonly string[]).includes(emoji)) throw new ChatError(400, "Pick one of the quick reactions.");
-  const row = one<{ id: string; chat_id: string; kind: string; deleted_at: number | null }>(
+  const row = one<{ id: string; chat_id: string; user_id: string; body: string; kind: string; deleted_at: number | null }>(
     deps.db,
-    "SELECT id, chat_id, kind, deleted_at FROM messages WHERE id = ?",
+    "SELECT id, chat_id, user_id, body, kind, deleted_at FROM messages WHERE id = ?",
     messageId,
   );
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
@@ -340,12 +374,17 @@ export function toggleReaction(deps: ChatDeps, userId: string, messageId: string
   const gone = on === true
     ? 0
     : Number(deps.db.prepare("DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?").run(row.id, userId, emoji).changes);
+  let added = false;
   if (on === true || (on === null && gone === 0)) {
-    deps.db.prepare(
+    added = Number(deps.db.prepare(
       "INSERT INTO message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
-    ).run(row.id, userId, emoji, deps.now());
+    ).run(row.id, userId, emoji, deps.now()).changes) > 0;
   }
-  return reactionsFor(deps.db, [row.id], userId).get(row.id) ?? [];
+  return {
+    reactions: reactionsFor(deps.db, [row.id], userId).get(row.id) ?? [],
+    // Set only when a reaction row was really inserted, so removals and repeats stay silent.
+    added: added ? { chat, emoji, authorId: row.user_id, text: row.body } : null,
+  };
 }
 
 type ReactionSummary = { emoji: string; count: number; mine: boolean; names: string[] };
