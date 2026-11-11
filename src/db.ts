@@ -328,6 +328,17 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
   token_hash TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_user ON agent_tokens(user_id);
 `;
 
 let sqliteWarningPatched = false;
@@ -1599,6 +1610,44 @@ export function setCalendarFeed(db: DatabaseSync, userId: string, tokenHash: str
 
 export function deleteCalendarFeed(db: DatabaseSync, userId: string): void {
   db.prepare("DELETE FROM calendar_feeds WHERE user_id = ?").run(userId);
+}
+
+export type AgentTokenRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  token_hash: string;
+  token_prefix: string;
+  created_at: number;
+  last_used_at: number | null;
+};
+
+export function insertAgentToken(db: DatabaseSync, row: AgentTokenRow): void {
+  db.prepare(
+    "INSERT INTO agent_tokens (id, user_id, name, token_hash, token_prefix, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(row.id, row.user_id, row.name, row.token_hash, row.token_prefix, row.created_at, row.last_used_at);
+}
+
+export function countAgentTokens(db: DatabaseSync, userId: string): number {
+  return one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM agent_tokens WHERE user_id = ?", userId)?.n ?? 0;
+}
+
+/** Newest first. */
+export function listAgentTokens(db: DatabaseSync, userId: string): AgentTokenRow[] {
+  return all<AgentTokenRow>(db, "SELECT * FROM agent_tokens WHERE user_id = ? ORDER BY created_at DESC, rowid DESC", userId);
+}
+
+export function getAgentTokenByHash(db: DatabaseSync, tokenHash: string): AgentTokenRow | undefined {
+  return one<AgentTokenRow>(db, "SELECT * FROM agent_tokens WHERE token_hash = ?", tokenHash);
+}
+
+export function touchAgentToken(db: DatabaseSync, id: string, now: number): void {
+  db.prepare("UPDATE agent_tokens SET last_used_at = ? WHERE id = ?").run(now, id);
+}
+
+/** False when the id is not this person's token. */
+export function deleteAgentToken(db: DatabaseSync, userId: string, id: string): boolean {
+  return Number(db.prepare("DELETE FROM agent_tokens WHERE id = ? AND user_id = ?").run(id, userId).changes) > 0;
 }
 
 export function getUserByFeedHash(db: DatabaseSync, tokenHash: string): UserRow | undefined {
