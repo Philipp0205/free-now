@@ -1,12 +1,125 @@
 [
   {
     "id": "2026-11-09-faster-map",
-    "date": "2026-11-09",
+    "date": "2026-11-11",
     "title": "Faster map",
     "bullets": [
       "The map stays dark until the dark map is ready, with no light street map flashing in first.",
       "The app gets the map ready in the background, so opening it again feels snappier.",
       "Pins, cards and the live buzz work just like before."
+    ]
+  },
+  {
+    "id": "2026-11-09-chat-mentions-reactions",
+    "date": "2026-11-11",
+    "title": "Mentions, reactions and replies in chat",
+    "bullets": [
+      "Type @ in a chat to tag a friend. They get a notification that you mentioned them.",
+      "Press and hold a message to react with a quick emoji, or tap Reply. On a computer, use the smile or the arrow next to the time.",
+      "Reaction counts show under the message. Tap one to add or take back yours.",
+      "Swipe a message to the right to reply. A quote shows above what you write, and the person you replied to gets a notification."
+    ]
+  },
+  {
+    "id": "2026-11-09-away-status",
+    "date": "2026-11-11",
+    "title": "Away or Busy",
+    "bullets": [
+      "On the You tab you can set yourself to Away or Busy, with a short note, a place and an end day if you like.",
+      "Friends in your circles see a small badge on your picture and the note next to your name.",
+      "It clears itself after the end day, or you clear it yourself. You still get every buzz and plan."
+    ]
+  },
+  {
+    "id": "2026-11-10-invite-install",
+    "date": "2026-11-10",
+    "title": "Install Hangry after you join",
+    "bullets": [
+      "After you join a circle from an invite, Hangry shows how to install it as an app on your phone.",
+      "On iPhone, open Hangry in Safari, tap Share, then Add to Home Screen.",
+      "On Android, tap Install app, or use the Chrome menu and choose Install app.",
+      "Tap Not now to skip it. It does not come back every time you open Hangry."
+    ]
+  },
+  {
+    "id": "2026-11-10-card-whos-in",
+    "date": "2026-11-10",
+    "title": "See who's in on the card",
+    "bullets": [
+      "Each card now shows the people who are coming, with their pictures and names.",
+      "People who can't make it are no longer listed on the card. Open the details to see them under Can't make it."
+    ]
+  },
+  {
+    "id": "2026-11-10-zurich-map",
+    "date": "2026-11-10",
+    "title": "Dark map in Zürich too",
+    "bullets": [
+      "The detailed dark street map now covers Zürich and the lake, the same way it already covers Stuttgart.",
+      "The stretch between the two cities is covered as well.",
+      "Outside this area you still see the regular street map. There is nothing to reinstall."
+    ]
+  },
+  {
+    "id": "2026-11-10-circle-switch-alerts",
+    "date": "2026-11-10",
+    "title": "Alerts no longer repeat when you switch circles",
+    "bullets": [
+      "Switching circles no longer pops up alerts you have already seen.",
+      "A new alert now shows once, even right after a few switches.",
+      "The Alerts list and the circle name stay on the circle you picked."
+    ]
+  },
+  {
+    "id": "2026-11-10-flic-button",
+    "date": "2026-11-10",
+    "title": "Say you're free with a Flic button",
+    "bullets": [
+      "The You tab has a new Set up a Flic button section, with your button link and the steps for the Flic app.",
+      "One press tells your circle you're free now.",
+      "Holding the button can end your hangout again."
+    ]
+  },
+  {
+    "id": "2026-11-10-calendar-availability",
+    "date": "2026-11-10",
+    "title": "Share when you're free",
+    "bullets": [
+      "Connect a private calendar link on the You tab.",
+      "Friends see only busy or free, never the names of your events.",
+      "You choose which circles see it. It stays off until you turn one on.",
+      "When you tap I'm in, you can check your own calendar for that day first."
+    ]
+  },
+  {
+    "id": "2026-11-10-calendar-month",
+    "date": "2026-11-10",
+    "title": "Events: a monthly calendar and the map",
+    "bullets": [
+      "The bottom tab is now called Events, with a calendar icon and a Map / Calendar switch at the top.",
+      "Calendar is the first view you see. After that, Events remembers whether you last picked Map or Calendar.",
+      "The month shows plans and hangouts, past days too, with the faces of who is in. Tap a day, then an event.",
+      "This circle / All circles works on the calendar the same way it works on the map, each circle in its own colour."
+    ]
+  },
+  {
+    "id": "2026-11-10-notification-icon",
+    "date": "2026-11-10",
+    "title": "A clearer notification icon",
+    "bullets": [
+      "On Android, the small Hangry icon in the status bar and on each notification is now a big solid dot, like the button in the app.",
+      "It was a faint blur before, so it is much easier to spot now.",
+      "Android draws that small icon in one colour. The pink Hangry dot still shows as the big picture inside each notification."
+    ]
+  },
+  {
+    "id": "2026-11-09-map-all-circles",
+    "date": "2026-11-09",
+    "title": "One map for every circle",
+    "bullets": [
+      "If you are in more than one circle, the Map has a This circle / All circles switch at the top.",
+      "All circles puts every place from all your circles on one map, and remembers your pick.",
+      "A card on the All map names the circle it comes from, and In, chat and share go to that circle."
     ]
   },
   {

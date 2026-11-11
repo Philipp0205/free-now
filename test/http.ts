@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
+import type { CalendarNet } from "../src/freebusy.js";
 import type { PushPayload, PushSender } from "../src/push.js";
 
 // Shared by the route tests. Not a test file: `npm test` only runs `test/*.test.ts`.
@@ -36,6 +37,8 @@ export type WithAppOptions = {
    * "fixed" always reports START, which is what location.test.ts did.
    */
   now?: "controllable" | "fixed";
+  /** Fake DNS and HTTP for the calendar availability import. */
+  calendarNet?: CalendarNet;
 };
 
 type ApiOptions = { token?: string; body?: unknown; status?: number };
@@ -69,6 +72,7 @@ export async function withApp(fn: (ctx: any) => Promise<void>, options: WithAppO
     push,
     config: { ...config, dbPath: ":memory:" },
     now: readNow,
+    calendarNet: options.calendarNet,
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const port = (server.address() as AddressInfo).port;

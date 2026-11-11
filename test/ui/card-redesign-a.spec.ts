@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA as CHROME_UA, useHangry } from "./harness.js";
+import { SIZES, UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/card-a";
 
@@ -250,7 +250,7 @@ test("map card has the In toggle and ⋯ menu, and the menu stays on screen", { 
       await asUser(page, friend.token);
       await page.goto(hangry.baseUrl);
       await dismiss(page);
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       const pin = page.locator(".leaflet-marker-icon.pin").first();
       await pin.waitFor({ timeout: 10_000 });
       await page.waitForTimeout(400);

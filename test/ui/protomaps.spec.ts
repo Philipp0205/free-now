@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { Page, Response } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 /**
  * The dark Protomaps basemap over a real regional archive, and the raster map outside it.
@@ -298,7 +298,7 @@ test("dark vector map over Stuttgart with every pin feature, raster in Berlin an
   for (const [width, height] of SIZES) {
     const { page, raster, broken, archive } = await phone(width, height, host.token, cyd.user.id);
     try {
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       const planPin = page.locator(".leaflet-marker-icon.pin-plan");
       const nowPin = page.locator(".leaflet-marker-icon.pin-social");
       await planPin.waitFor({ timeout: 10_000 });
@@ -424,7 +424,7 @@ test("edges, deep zoom, and an archive that fails mid-session: raster where vect
   for (const [width, height] of SIZES) {
     const { page, raster, archive } = await phone(width, height, host.token, "nobody", { worker: false });
     try {
-      await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+      await openEventsMap(page);
       await page.locator(".leaflet-marker-icon.pin-plan").waitFor({ timeout: 10_000 });
       await moveTo(page, CENTER, VECTOR_ZOOM);
       await settleOn(page, "vector", `${width} center`);

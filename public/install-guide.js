@@ -431,6 +431,35 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
   };
 }
 
+/**
+ * The install step right after someone joins a circle from an invite.
+ * Null when there is nothing to show: already installed, or a computer.
+ * Steps come from installPrompt so both sheets say the same thing.
+ */
+export function joinInstallStep(signals, { canPrompt = false } = {}) {
+  if (signals.standalone) return null;
+  const prompt = installPrompt(signals, { canPrompt });
+  if (prompt.quiet) return null;
+  const why = signals.platform === "ios"
+    ? "One tap from your home screen. iPhone notifications only work from there."
+    : "One tap from your home screen, so friends can reach you.";
+  let lede = why;
+  let steps = prompt.steps;
+  if (prompt.kind === "ios-other") lede = `Open this page in Safari first. ${why}`;
+  if (prompt.kind === "unsupported") lede = "This browser can't install Hangry. Open this page in Chrome, then tap Install app.";
+  if (prompt.kind === "native" && !canPrompt) {
+    steps = ["Open the three-dot menu ⋮.", "Tap Install app or Add to Home screen.", "Open Hangry from the icon."];
+  }
+  return {
+    kind: prompt.kind,
+    title: "Install Hangry as an app",
+    lede,
+    steps,
+    offerInstall: prompt.offerInstall,
+    copyLink: prompt.copyLink,
+  };
+}
+
 function guideLede(signals) {
   if (signals.platform === "ios") {
     return "iPhone notifications need the Home Screen app. A Safari tab can't receive them.";
