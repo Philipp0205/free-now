@@ -53,7 +53,7 @@ test("the card Share entry is in the changelog, in plain words without an em das
 test("the newest entry is chat mentions, reactions and replies, in plain words without an em dash", () => {
   const top = RAW[0];
   assert.equal(top.id, "2026-11-09-chat-mentions-reactions");
-  assert.equal(top.date, "2026-11-09");
+  assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Mentions, reactions and replies in chat");
   assert.equal(top.bullets.length, 4);
   const text = [top.title, ...top.bullets].join(" ");
@@ -68,8 +68,154 @@ test("the newest entry is chat mentions, reactions and replies, in plain words w
   for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
 });
 
+test("the Away or Busy entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-09-away-status")!;
+  assert.ok(top, "Away or Busy entry");
+  assert.equal(top.id, "2026-11-09-away-status");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Away or Busy");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /You tab/);
+  assert.match(text, /badge/);
+  assert.match(text, /clears itself/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the install-after-joining entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-invite-install")!;
+  assert.ok(top, "invite install entry");
+  assert.equal(top.id, "2026-11-10-invite-install");
+  assert.equal(top.date, "2026-11-10");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /join a circle/);
+  assert.match(text, /iPhone/);
+  assert.match(text, /Share, then Add to Home Screen/);
+  assert.match(text, /Android/);
+  assert.match(text, /Install app/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the card who's in entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-card-whos-in")!;
+  assert.ok(top, "card who's in entry");
+  assert.equal(top.id, "2026-11-10-card-whos-in");
+  assert.equal(top.date, "2026-11-10");
+  assert.equal(top.title, "See who's in on the card");
+  assert.equal(top.bullets.length, 2);
+  assert.match(top.bullets[0], /people who are coming/);
+  assert.match(top.bullets[1], /can't make it/);
+  assert.match(top.bullets[1], /details/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the Zürich dark map entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-zurich-map")!;
+  assert.ok(top, "Zürich dark map entry");
+  assert.equal(top.id, "2026-11-10-zurich-map");
+  assert.equal(top.date, "2026-11-10");
+  assert.equal(top.title, "Dark map in Zürich too");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /Zürich/);
+  assert.match(text, /Stuttgart/);
+  assert.match(text, /between the two cities/);
+  assert.match(text, /regular street map/);
+  assert.doesNotMatch(text, /\b(pmtiles|archive|vector|tiles?|zoom|bounds)\b/i);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the circle switch alerts entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-circle-switch-alerts")!;
+  assert.ok(top, "circle switch alerts entry");
+  assert.equal(top.id, "2026-11-10-circle-switch-alerts");
+  assert.equal(top.date, "2026-11-10");
+  assert.equal(top.title, "Alerts no longer repeat when you switch circles");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /already seen/);
+  assert.match(text, /shows once/);
+  for (const line of top.bullets) assert.ok(line.length <= 140, line);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the Flic button entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-flic-button")!;
+  assert.ok(top, "Flic button entry");
+  assert.equal(top.id, "2026-11-10-flic-button");
+  assert.equal(top.date, "2026-11-10");
+  assert.ok(top.title.length <= 60, top.title);
+  assert.ok(top.bullets.length <= 4);
+  for (const line of top.bullets) assert.ok(line.length <= 140, line);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /Flic button/);
+  assert.match(text, /You tab/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("calendar availability is listed, in plain words", () => {
+  const top = RAW.find((entry) => entry.id === "2026-11-10-calendar-availability")!;
+  assert.equal(top.id, "2026-11-10-calendar-availability");
+  assert.equal(top.date, "2026-11-10");
+  assert.ok(top.title.length <= 60, top.title);
+  assert.ok(top.bullets.length <= 4);
+  for (const line of top.bullets) assert.ok(line.length <= 140, line);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /busy or free/);
+  assert.match(text, /never the names/);
+  assert.match(text, /until you turn one on/);
+  assert.match(text, /I'm in/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the monthly calendar entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-calendar-month")!;
+  assert.ok(top, "monthly calendar entry");
+  assert.equal(top.id, "2026-11-10-calendar-month");
+  assert.equal(top.date, "2026-11-10");
+  assert.equal(top.title, "Events: a monthly calendar and the map");
+  assert.ok(top.title.length <= 60, top.title);
+  assert.equal(top.bullets.length, 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /called Events/);
+  assert.match(text, /calendar icon/);
+  assert.match(text, /Map \/ Calendar/);
+  assert.match(text, /Calendar is the first view/);
+  assert.match(text, /remembers/);
+  assert.match(text, /past days/);
+  assert.match(text, /who is in/);
+  assert.match(text, /This circle \/ All circles works on the calendar/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the clearer notification icon entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-notification-icon");
+  assert.ok(top, "notification icon entry");
+  assert.equal(top.id, "2026-11-10-notification-icon");
+  assert.equal(top.date, "2026-11-10");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /Android/);
+  assert.match(text, /solid dot/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the one map for every circle entry stays, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-09-map-all-circles")!;
+  assert.equal(top.id, "2026-11-09-map-all-circles");
+  assert.equal(top.date, "2026-11-09");
+  assert.equal(top.title, "One map for every circle");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /This circle \/ All circles/);
+  assert.match(text, /names the circle/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
 test("the glass map pins entry is kept, in plain words", () => {
-  const top = RAW.find((item) => item.id === "2026-11-09-glass-pins");
+  const top = RAW.find((item) => item.id === "2026-11-09-glass-pins")!;
   assert.ok(top, "glass pins entry");
   assert.equal(top.title, "Nicer map pins");
   assert.equal(top.bullets.length, 3);
@@ -194,12 +340,16 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v52");
+  assert.equal(cache?.[1], "hangry-v74");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/map-pin.js"));
+  assert.ok(paths.includes("/status.js"));
+  assert.ok(paths.includes("/mentions.js"));
+  assert.ok(paths.includes("/calendar-month.js"));
+  assert.ok(paths.includes("/freebusy.js"));
   const app = read("../public/app.js");
   assert.equal(/const APP_VERSION = "([^"]+)"/.exec(app)?.[1], cache?.[1]);
 });

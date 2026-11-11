@@ -76,6 +76,11 @@ export function zonedDateTime(isoDay: string, hhmm: string, tz: string): number 
   return wall - before;
 }
 
+/** Last millisecond of a calendar day in `tz`: one ms before the next day's midnight there. */
+export function endOfDay(isoDay: string, tz: string): number {
+  return zonedDateTime(addDays(isoDay, 1), "00:00", tz) - 1;
+}
+
 /** True for a real YYYY-MM-DD day. "2026-02-30" is not. */
 export function isCalendarDate(iso: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;

@@ -384,6 +384,10 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "color", "color INTEGER");
   ensureColumn(db, "users", "whats_new_seen", "whats_new_seen TEXT");
   ensureColumn(db, "users", "avatar_rev", "avatar_rev INTEGER");
+  ensureColumn(db, "users", "status_type", "status_type TEXT");
+  ensureColumn(db, "users", "status_text", "status_text TEXT");
+  ensureColumn(db, "users", "status_place", "status_place TEXT");
+  ensureColumn(db, "users", "status_until", "status_until INTEGER");
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -412,8 +416,63 @@ export function openDb(dbPath: string): DatabaseSync {
   const insert = db.prepare("INSERT INTO sessions (id, user_id, token_hash, created_at) VALUES (?, ?, ?, ?)");
   for (const user of missing) insert.run(crypto.randomUUID(), user.id, user.token_hash, user.created_at);
   db.prepare("UPDATE social_joins SET reply = 'coming' WHERE reply IN ('join', 'in')").run();
+  // After migrateMembershipKey: calendar_share points at the (user_id, circle_id) key.
+  db.exec(CALENDAR_SYNC_SCHEMA);
   return db;
 }
+
+/**
+ * Calendar availability import. Separate from calendar_feeds (the export).
+ * calendar_sync holds the encrypted private link and sync state, calendar_busy only merged busy
+ * intervals, calendar_event the owner-only titles (encrypted) for the "I'm in" check, and
+ * calendar_share the circles the owner opted into. A share row goes when the membership goes.
+ */
+const CALENDAR_SYNC_SCHEMA = `
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS calendar_sync (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  url_enc TEXT NOT NULL,
+  host TEXT NOT NULL,
+  rev TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_sync_at INTEGER,
+  last_ok INTEGER,
+  last_ok_at INTEGER,
+  last_error TEXT,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  next_sync_at INTEGER NOT NULL,
+  window_end INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_sync_next ON calendar_sync(next_sync_at);
+
+CREATE TABLE IF NOT EXISTS calendar_busy (
+  user_id TEXT NOT NULL REFERENCES calendar_sync(user_id) ON DELETE CASCADE,
+  start_ms INTEGER NOT NULL,
+  end_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_busy_user ON calendar_busy(user_id, start_ms);
+
+CREATE TABLE IF NOT EXISTS calendar_event (
+  user_id TEXT NOT NULL REFERENCES calendar_sync(user_id) ON DELETE CASCADE,
+  start_ms INTEGER NOT NULL,
+  end_ms INTEGER NOT NULL,
+  all_day INTEGER NOT NULL DEFAULT 0,
+  title_enc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_event_user ON calendar_event(user_id, start_ms);
+
+CREATE TABLE IF NOT EXISTS calendar_share (
+  user_id TEXT NOT NULL REFERENCES calendar_sync(user_id) ON DELETE CASCADE,
+  circle_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, circle_id),
+  FOREIGN KEY (user_id, circle_id) REFERENCES memberships(user_id, circle_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_share_circle ON calendar_share(circle_id);
+`;
 
 /**
  * Who a "Remind friends" reached, per plan. Alerts can be cleared or pruned; this cannot, so the hour holds.
@@ -614,6 +673,36 @@ export function bumpAvatarRev(db: DatabaseSync, id: string, now: number): number
 
 export function clearAvatarRev(db: DatabaseSync, id: string): void {
   db.prepare("UPDATE users SET avatar_rev = NULL WHERE id = ?").run(id);
+}
+
+export type StatusRow = {
+  status_type: string | null;
+  status_text: string | null;
+  status_place: string | null;
+  status_until: number | null;
+};
+
+export function getUserStatus(db: DatabaseSync, id: string): StatusRow | undefined {
+  return one<StatusRow>(db, "SELECT status_type, status_text, status_place, status_until FROM users WHERE id = ?", id);
+}
+
+export function setUserStatus(db: DatabaseSync, id: string, status: StatusRow): void {
+  db.prepare("UPDATE users SET status_type = ?, status_text = ?, status_place = ?, status_until = ? WHERE id = ?").run(
+    status.status_type,
+    status.status_text,
+    status.status_place,
+    status.status_until,
+    id,
+  );
+}
+
+export function clearUserStatus(db: DatabaseSync, id: string): void {
+  db.prepare("UPDATE users SET status_type = NULL, status_text = NULL, status_place = NULL, status_until = NULL WHERE id = ?").run(id);
+}
+
+/** Every user id with its photo rev, for the admin avatar backup. No profile fields. */
+export function listUserAvatarRevs(db: DatabaseSync): Array<{ id: string; avatar_rev: number | null }> {
+  return all<{ id: string; avatar_rev: number | null }>(db, "SELECT id, avatar_rev FROM users ORDER BY created_at, id");
 }
 
 /** Same person, or someone in at least one circle with them. */
@@ -830,6 +919,7 @@ export function removeMember(db: DatabaseSync, circleId: string, userId: string)
       }
     }
     endMemberEvents(db, circleId, userId);
+    db.prepare("DELETE FROM calendar_share WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
     db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
     const row = one<{ n: number | bigint }>(
       db,
@@ -860,6 +950,7 @@ export function kickMember(db: DatabaseSync, circleId: string, userId: string): 
       `INSERT INTO circle_removals (circle_id, user_id, invite_code) VALUES (?, ?, ?)
        ON CONFLICT(circle_id, user_id) DO UPDATE SET invite_code = excluded.invite_code`,
     ).run(circleId, userId, circle?.invite_code ?? "");
+    db.prepare("DELETE FROM calendar_share WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
     db.prepare("DELETE FROM memberships WHERE circle_id = ? AND user_id = ?").run(circleId, userId);
   });
   return "ok";
@@ -927,7 +1018,8 @@ export type CircleDeleteResult = {
  * Removes one circle and everything that belongs to it. One transaction.
  *
  * Tables that reference circle_id:
- * memberships, socials, plans, plan_circles, notifications, circle_removals, chats, push_deliveries.
+ * memberships, socials, plans, plan_circles, notifications, circle_removals, chats, push_deliveries,
+ * calendar_share (not counted; it also goes with its membership by ON DELETE CASCADE).
  * plan_circles also loses every link of a plan whose home is this circle.
  * feedback is the exception: its rows stay and circle_id is set to NULL.
  *
@@ -947,6 +1039,7 @@ export function deleteCircle(db: DatabaseSync, circleId: string): CircleDeleteRe
     const inPlans = "plan_id IN (SELECT id FROM plans WHERE circle_id = ?)";
     // Feedback outlives the circle it was sent from. Not counted below.
     db.prepare("UPDATE feedback SET circle_id = NULL WHERE circle_id = ?").run(circleId);
+    db.prepare("DELETE FROM calendar_share WHERE circle_id = ?").run(circleId);
     const counts: CircleDeleteCounts = {
       messages: removed(db, `DELETE FROM messages WHERE ${inChats}`, circleId),
       chat_reads: removed(db, `DELETE FROM chat_reads WHERE ${inChats}`, circleId),
@@ -1436,6 +1529,30 @@ export function listPastSocials(db: DatabaseSync, circleId: string, now: number)
     `${SOCIAL_SELECT} WHERE s.circle_id = ? AND s.expires_at <= ? ORDER BY COALESCE(s.starts_at, s.created_at) DESC`,
     circleId,
     now,
+  );
+}
+
+/** Socials in a circle that started (starts_at, else created_at) in [fromMs, toMs). Live and ended alike. */
+export function listSocialsStartedBetween(db: DatabaseSync, circleId: string, fromMs: number, toMs: number): SocialRow[] {
+  return all<SocialRow>(
+    db,
+    `${SOCIAL_SELECT} WHERE s.circle_id = ? AND COALESCE(s.starts_at, s.created_at) >= ? AND COALESCE(s.starts_at, s.created_at) < ?
+     ORDER BY COALESCE(s.starts_at, s.created_at) ASC`,
+    circleId,
+    fromMs,
+    toMs,
+  );
+}
+
+/** Plans linked to a circle with for_date in [from, to], ended ones too. */
+export function listPlansOnDays(db: DatabaseSync, circleId: string, from: string, to: string): PlanRow[] {
+  return all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND p.for_date >= ? AND p.for_date <= ?
+     ORDER BY p.for_date ASC, p.at_time IS NULL, p.at_time ASC, p.created_at ASC`,
+    circleId,
+    from,
+    to,
   );
 }
 

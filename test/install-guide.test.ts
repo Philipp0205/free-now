@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/install-guide.js";
+import { installGuide, installPrompt, joinInstallStep, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/install-guide.js";
 
 const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const IOS_INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 320.0.0.0";
@@ -247,4 +247,48 @@ test("a desktop browser shows both phone guides", () => {
   assert.deepEqual(guide.groups.map((group) => group.label), ["iPhone", "Android"]);
   assert.match(flat(guide), /Add to Home Screen/);
   assert.match(flat(guide), /Install app or Add to Home screen/);
+});
+
+test("the post-join install step uses the same steps per browser and skips installed or desktop", () => {
+  const signals = (userAgent: string, extra: Record<string, unknown> = {}) => readInstallSignals({ userAgent, notificationPermission: "default", ...extra });
+
+  const ios = joinInstallStep(signals(IOS_SAFARI));
+  assert.equal(ios?.title, "Install Hangry as an app");
+  assert.equal(ios?.kind, "ios");
+  assert.deepEqual(ios?.steps, installPrompt(signals(IOS_SAFARI)).steps);
+  assert.match(ios?.steps.join(" ") ?? "", /Share button.*Add to Home Screen/);
+  assert.match(ios?.lede ?? "", /notifications only work from there/);
+  assert.equal(ios?.offerInstall, false);
+
+  for (const userAgent of [IOS_CHROME, IOS_INSTAGRAM]) {
+    const other = joinInstallStep(signals(userAgent));
+    assert.equal(other?.kind, "ios-other");
+    assert.match(other?.lede ?? "", /Open this page in Safari first/);
+    assert.match(other?.steps.join(" ") ?? "", /Share, then Add to Home Screen/);
+    assert.equal(other?.copyLink, true);
+  }
+
+  const prompted = joinInstallStep(signals(ANDROID_CHROME), { canPrompt: true });
+  assert.equal(prompted?.kind, "native");
+  assert.equal(prompted?.offerInstall, true);
+  assert.deepEqual(prompted?.steps, []);
+  const menu = joinInstallStep(signals(ANDROID_CHROME));
+  assert.equal(menu?.offerInstall, false);
+  assert.match(menu?.steps.join(" ") ?? "", /three-dot menu ⋮/);
+  assert.match(menu?.steps.join(" ") ?? "", /Install app or Add to Home screen/);
+
+  assert.equal(joinInstallStep(signals(ANDROID_FIREFOX))?.kind, "firefox");
+  for (const userAgent of [ANDROID_DUCK, ANDROID_WEBVIEW]) {
+    const off = joinInstallStep(signals(userAgent));
+    assert.equal(off?.kind, "unsupported");
+    assert.match(off?.lede ?? "", /Open this page in Chrome/);
+    assert.equal(off?.copyLink, true);
+  }
+
+  assert.equal(joinInstallStep(signals(IOS_SAFARI, { standalone: true })), null);
+  assert.equal(joinInstallStep(signals(ANDROID_CHROME, { standalone: true }), { canPrompt: true }), null);
+  assert.equal(joinInstallStep(signals("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")), null);
+  for (const step of [ios, menu, prompted]) {
+    for (const line of [step?.title ?? "", step?.lede ?? "", ...(step?.steps ?? [])]) assert.ok(!line.includes("\u2014"), line);
+  }
 });
