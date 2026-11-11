@@ -1,2 +1,6 @@
 User-agent: *
+Allow: /googlee48df27048aaa965.html
+Allow: /privacy
+Allow: /privacy/
+Allow: /$
 Disallow: /

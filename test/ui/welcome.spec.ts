@@ -149,6 +149,9 @@ test("signed out: the login view links to /welcome quietly, an invite link does 
   await page.locator("#name").waitFor();
   const link = page.getByRole("link", { name: "What is Hangry?" });
   assert.equal(await link.getAttribute("href"), "/welcome");
+  const privacy = page.getByRole("link", { name: "Privacy" });
+  assert.equal(await privacy.getAttribute("href"), "/privacy");
+  assert.equal(await privacy.getAttribute("class"), "gate-about");
   const fit = await overflow(page);
   assert.equal(fit.scroll, fit.client);
   await page.screenshot({ path: path.join(SHOT_DIR, "login-link-w360.png") });
@@ -159,6 +162,7 @@ test("signed out: the login view links to /welcome quietly, an invite link does 
   await page.goto(`${hangry.baseUrl}/join/${circle.inviteCode}`);
   await page.locator(".lede", { hasText: "Join Fake circle" }).waitFor();
   assert.equal(await page.getByRole("link", { name: "What is Hangry?" }).count(), 0, "the invite screen stays focused");
+  assert.equal(await page.getByRole("link", { name: "Privacy" }).getAttribute("href"), "/privacy", "the legal link stays");
 
   await page.getByRole("button", { name: "I have a recovery code" }).waitFor();
   await page.goto(`${hangry.baseUrl}/`);

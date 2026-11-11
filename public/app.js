@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v84";
+const APP_VERSION = "hangry-v86";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -1123,10 +1123,13 @@ function welcome() {
               render();
             },
           }),
-          state.pendingCode || state.inviteError
-            ? null
-            : el("a", { class: "gate-about", href: "/welcome", text: "What is Hangry?" }),
         ]),
+    el("div", { class: "gate-links" }, [
+      state.pendingCode || state.inviteError || recovering
+        ? null
+        : el("a", { class: "gate-about", href: "/welcome", text: "What is Hangry?" }),
+      el("a", { class: "gate-about", href: "/privacy", text: "Privacy" }),
+    ]),
   ]);
 }
 
@@ -3197,6 +3200,7 @@ function googleFacts() {
       el("li", { text: "Hangry asks Google only for the free/busy permission, and Google's consent screen says so. Hangry never receives event titles or details, and never stores them." }),
       el("li", { text: "Hangry stores only your busy times for the next 14 days, plus an encrypted token so it can check again." }),
       el("li", { text: "Hangry checks about every 20 minutes." }),
+      el("li", {}, ["The ", el("a", { href: "/privacy", text: "privacy policy" }), " has the same details."]),
       el("li", {}, [
         "To disconnect, tap Remove in this panel. Hangry deletes the token and the busy times, and tells Google to revoke access. You can also revoke Hangry at ",
         permissionsLink(),
