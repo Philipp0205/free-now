@@ -7,6 +7,9 @@
  * "I'm in" check. Locations, descriptions, and attendees are never stored. The link is encrypted
  * with AES-256-GCM, keyed by CALENDAR_SYNC_KEY or a random key kept in app_meta.
  * Logs carry host, status, duration, and counts only: never the link, a title, or a key.
+ *
+ * A row is either source "ics" (the link above) or "google" (google-calendar.ts: OAuth with the
+ * freebusy scope, only the encrypted refresh token kept, busy blocks and no titles at all).
  */
 import crypto from "node:crypto";
 import dns from "node:dns";
@@ -15,6 +18,15 @@ import https from "node:https";
 import net from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 import type { Config } from "./config.js";
+import {
+  exchangeGoogleCode,
+  fetchGoogleBusy,
+  googleEnabled,
+  GoogleError,
+  refreshGoogleAccess,
+  revokeGoogleToken,
+  type GoogleConfig,
+} from "./google-calendar.js";
 import { FREEBUSY_WINDOW_MS, parseIcs } from "./ics-parse.js";
 import { addDays, zonedDateTime } from "./time.js";
 
@@ -365,7 +377,7 @@ export async function fetchIcs(start: URL, options: FetchOptions = {}): Promise<
 
 export type FreeBusyDeps = {
   db: DatabaseSync;
-  config: Pick<Config, "calendarSyncKey" | "tz">;
+  config: Pick<Config, "calendarSyncKey" | "tz"> & GoogleConfig;
   now: () => number;
   calendarNet?: CalendarNet;
 };
@@ -374,6 +386,8 @@ type SyncRow = {
   user_id: string;
   url_enc: string;
   host: string;
+  source: string;
+  token_enc: string | null;
   rev: string;
   created_at: number;
   last_sync_at: number | null;
@@ -463,6 +477,19 @@ function writeOutcome(db: DatabaseSync, key: Buffer, userId: string, rev: string
   }
 }
 
+async function googleOutcome(deps: FreeBusyDeps, key: Buffer, userId: string, row: SyncRow, now: number, access?: string): Promise<Outcome> {
+  try {
+    if (!access) {
+      const refresh = row.token_enc ? unseal(key, row.token_enc, userId) : null;
+      if (refresh === null) return { ok: false, error: ERR.reconnect };
+      access = await refreshGoogleAccess(deps.config, refresh);
+    }
+    return { ok: true, busy: await fetchGoogleBusy(deps.config, access, now), events: [], status: 200 };
+  } catch (error) {
+    return { ok: false, error: error instanceof GoogleError ? (error.reconnect ? ERR.reconnect : error.message) : ERR.unreachable };
+  }
+}
+
 /** Syncs one person now. A no-op while another sync for them is running. */
 export async function syncUser(deps: FreeBusyDeps, userId: string): Promise<void> {
   const running = flights(deps.db);
@@ -472,6 +499,11 @@ export async function syncUser(deps: FreeBusyDeps, userId: string): Promise<void
     const row = getRow(deps.db, userId);
     if (!row) return;
     const key = syncKey(deps.db, deps.config);
+    if (row.source === "google") {
+      const outcome = await googleOutcome(deps, key, userId, row, deps.now());
+      writeOutcome(deps.db, key, userId, row.rev, outcome, deps.now());
+      return;
+    }
     const plain = unseal(key, row.url_enc, userId);
     const now = deps.now();
     if (plain === null) {
@@ -518,21 +550,61 @@ export async function connectCalendar(deps: FreeBusyDeps, userId: string, raw: u
   const key = syncKey(deps.db, deps.config);
   const rev = crypto.randomUUID();
   const sealed = seal(key, url.toString(), userId);
+  const old = googleToken(deps, key, userId);
   deps.db.prepare(
-    `INSERT INTO calendar_sync (user_id, url_enc, host, rev, created_at, fail_count, next_sync_at)
-     VALUES (?, ?, ?, ?, ?, 0, ?)
-     ON CONFLICT(user_id) DO UPDATE SET url_enc = excluded.url_enc, host = excluded.host, rev = excluded.rev,
-       created_at = excluded.created_at, last_sync_at = NULL, last_ok = NULL, last_ok_at = NULL, last_error = NULL,
+    `INSERT INTO calendar_sync (user_id, url_enc, host, source, token_enc, rev, created_at, fail_count, next_sync_at)
+     VALUES (?, ?, ?, 'ics', NULL, ?, ?, 0, ?)
+     ON CONFLICT(user_id) DO UPDATE SET url_enc = excluded.url_enc, host = excluded.host, source = 'ics', token_enc = NULL,
+       rev = excluded.rev, created_at = excluded.created_at, last_sync_at = NULL, last_ok = NULL, last_ok_at = NULL, last_error = NULL,
        fail_count = 0, next_sync_at = excluded.next_sync_at, window_end = NULL`,
   ).run(userId, sealed, bareHost(url), rev, now, now);
   deps.db.prepare("DELETE FROM calendar_busy WHERE user_id = ?").run(userId);
   deps.db.prepare("DELETE FROM calendar_event WHERE user_id = ?").run(userId);
   writeOutcome(deps.db, key, userId, rev, outcome, deps.now());
+  if (old) await revokeGoogleToken(deps.config, old);
 }
 
-export function disconnectCalendar(db: DatabaseSync, userId: string): void {
-  // calendar_busy, calendar_event, and calendar_share go with it (ON DELETE CASCADE).
-  db.prepare("DELETE FROM calendar_sync WHERE user_id = ?").run(userId);
+/** The person's Google refresh token, or null when they have none. */
+function googleToken(deps: FreeBusyDeps, key: Buffer, userId: string): string | null {
+  const row = getRow(deps.db, userId);
+  if (!row || row.source !== "google" || !row.token_enc) return null;
+  return unseal(key, row.token_enc, userId);
+}
+
+/**
+ * Finishes a Google connect: trades the code (freebusy scope only), stores the sealed refresh token,
+ * and runs the first sync. Replaces any link or earlier Google grant, and revokes an earlier Google grant. Shared circles stay shared.
+ */
+export async function connectGoogle(deps: FreeBusyDeps, userId: string, code: string, verifier: string, origin: string): Promise<void> {
+  if (!googleEnabled(deps.config)) throw new GoogleError("Google Calendar is not available right now");
+  const tokens = await exchangeGoogleCode(deps.config, code, verifier, origin);
+  const now = deps.now();
+  const key = syncKey(deps.db, deps.config);
+  const old = googleToken(deps, key, userId);
+  const rev = crypto.randomUUID();
+  deps.db.prepare(
+    `INSERT INTO calendar_sync (user_id, url_enc, host, source, token_enc, rev, created_at, fail_count, next_sync_at)
+     VALUES (?, '', 'Google', 'google', ?, ?, ?, 0, ?)
+     ON CONFLICT(user_id) DO UPDATE SET url_enc = '', host = 'Google', source = 'google', token_enc = excluded.token_enc,
+       rev = excluded.rev, created_at = excluded.created_at, last_sync_at = NULL, last_ok = NULL, last_ok_at = NULL,
+       last_error = NULL, fail_count = 0, next_sync_at = excluded.next_sync_at, window_end = NULL`,
+  ).run(userId, seal(key, tokens.refreshToken, userId), rev, now, now);
+  deps.db.prepare("DELETE FROM calendar_busy WHERE user_id = ?").run(userId);
+  deps.db.prepare("DELETE FROM calendar_event WHERE user_id = ?").run(userId);
+  const row = getRow(deps.db, userId)!;
+  const outcome = await googleOutcome(deps, key, userId, row, now, tokens.accessToken);
+  writeOutcome(deps.db, key, userId, rev, outcome, deps.now());
+  if (old && old !== tokens.refreshToken) await revokeGoogleToken(deps.config, old);
+}
+
+/**
+ * Removes the connection. A Google grant is revoked at Google, but the local rows go either way
+ * (calendar_busy, calendar_event, and calendar_share go with it via ON DELETE CASCADE).
+ */
+export async function disconnectCalendar(deps: FreeBusyDeps, userId: string): Promise<void> {
+  const token = googleToken(deps, syncKey(deps.db, deps.config), userId);
+  deps.db.prepare("DELETE FROM calendar_sync WHERE user_id = ?").run(userId);
+  if (token) await revokeGoogleToken(deps.config, token);
 }
 
 export function isConnected(db: DatabaseSync, userId: string): boolean {
@@ -561,6 +633,8 @@ export function setSharedCircles(db: DatabaseSync, userId: string, raw: unknown)
 
 export type SyncStatus = {
   connected: boolean;
+  googleAvailable: boolean;
+  source: "ics" | "google" | null;
   host: string | null;
   lastSyncAt: number | null;
   lastSyncOk: boolean | null;
@@ -569,7 +643,8 @@ export type SyncStatus = {
   circles: Array<{ id: string; name: string }>;
 };
 
-export function syncStatus(db: DatabaseSync, userId: string): SyncStatus {
+export function syncStatus(db: DatabaseSync, userId: string, config: GoogleConfig = {}): SyncStatus {
+  const googleAvailable = googleEnabled(config);
   const row = getRow(db, userId);
   const circles = (db
     .prepare(
@@ -577,11 +652,13 @@ export function syncStatus(db: DatabaseSync, userId: string): SyncStatus {
        WHERE m.user_id = ? ORDER BY m.joined_at ASC, c.name ASC`,
     )
     .all(userId) as Array<{ id: string; name: string }>).map((c) => ({ id: c.id, name: c.name }));
-  if (!row) return { connected: false, host: null, lastSyncAt: null, lastSyncOk: null, lastError: null, sharedCircleIds: [], circles };
+  if (!row) return { connected: false, googleAvailable, source: null, host: null, lastSyncAt: null, lastSyncOk: null, lastError: null, sharedCircleIds: [], circles };
   const shared = (db.prepare("SELECT circle_id FROM calendar_share WHERE user_id = ?").all(userId) as Array<{ circle_id: string }>)
     .map((item) => item.circle_id);
   return {
     connected: true,
+    googleAvailable,
+    source: row.source === "google" ? "google" : "ics",
     host: row.host,
     lastSyncAt: row.last_sync_at,
     lastSyncOk: row.last_ok === null ? null : Boolean(row.last_ok),

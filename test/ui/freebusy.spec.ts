@@ -68,7 +68,7 @@ function link(tag: string) {
 }
 
 async function phone(width: number, height: number, token: string, circleId: string, mobile = true) {
-  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile, userAgent: UA });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile, userAgent: UA, timezoneId: TZ });
   await skipWhatsNew(context);
   await context.addInitScript(([value, circle]) => {
     localStorage.setItem("fn_install_later", String(Date.now()));

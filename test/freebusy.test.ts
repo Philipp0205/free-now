@@ -241,7 +241,7 @@ test("connect, share with one circle, and friends there see busy or free, never 
 
     const before = await api(port, "GET", "/api/me/calendar-sync", { token: alex.token, status: 200 });
     assert.deepEqual(before, {
-      connected: false, host: null, lastSyncAt: null, lastSyncOk: null, lastError: null, sharedCircleIds: [],
+      connected: false, googleAvailable: false, source: null, host: null, lastSyncAt: null, lastSyncOk: null, lastError: null, sharedCircleIds: [],
       circles: [{ id: friends.id, name: "Friends" }, { id: work.id, name: "Work" }],
     });
     const notYet = await api(port, "PATCH", "/api/me/calendar-sync", { token: alex.token, body: { sharedCircleIds: [friends.id] }, status: 409 });

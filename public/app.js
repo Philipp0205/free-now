@@ -10,7 +10,7 @@ import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
 import { PLAN_DURATION_MS, availabilityText, dayEvents, eventOverlaps, eventTimeText, untilText } from "./freebusy.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 import { REACTIONS, findMentions, insertMention, mentionAt, mentionMatches, toggledReactions } from "./mentions.js";
-import { STATUS_PLACE_MAX, STATUS_TEXT_MAX, activeStatus, circleStatusLine, statusBadge, statusLabel, statusLine, statusToday, statusUntilDay, untilText as statusUntilText } from "./status.js";
+import { STATUS_PLACE_MAX, STATUS_TEXT_MAX, activeStatus, busyUntilPresets, circleStatusLine, statusBadge, statusLabel, statusLine, statusToday, statusUntilDay, untilFromClock, untilText as statusUntilText } from "./status.js";
 import { CIRCLE_COLORS, WEEKDAY_LABELS, circleColor, eventCrowd, freeOnDay, gridRange, monthGrid, monthStart, monthTitle, shiftMonth } from "./calendar-month.js";
 
 const TOKEN_KEY = "fn_token";
@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v76";
+const APP_VERSION = "hangry-v83";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -164,6 +164,8 @@ const state = {
   calendarFeed: null,
   /** Calendar availability on the You tab: syncStatus from the server plus { loaded, busy, draft, error }. */
   calendarSync: null,
+  /** Assistant tokens on the You tab: { loaded, failed, tokens, busy, draft, secret }. secret is set only right after making one. */
+  agentTokens: null,
   /** Busy people at a later time on the create sheet: { at, people: [{ id, state, until }] }. */
   busyAt: null,
   /** The "I'm in" tap waiting on the owner's own calendar for that day. */
@@ -176,12 +178,15 @@ const planFocus = deepLinkParams.get("plan");
 const socialFocus = deepLinkParams.get("social");
 const chatFocus = deepLinkParams.get("chat");
 const circleFocus = deepLinkParams.get("circle");
+/** Google sends people back to /?calendar=google or /?calendar=google-error. Handled once after the session loads. */
+const calendarLanding = ["google", "google-error"].includes(deepLinkParams.get("calendar") || "") ? deepLinkParams.get("calendar") : "";
 if (circleFocus) rememberCircle(circleFocus);
 if (chatFocus) state.deepLink = { kind: "chat", id: chatFocus };
 else if (planFocus) state.deepLink = { kind: "plan", id: planFocus };
 else if (socialFocus) state.deepLink = { kind: "social", id: socialFocus };
-if (state.deepLink || circleFocus) {
+if (state.deepLink || circleFocus || calendarLanding) {
   const url = new URL(location.href);
+  url.searchParams.delete("calendar");
   url.searchParams.delete("social");
   url.searchParams.delete("plan");
   url.searchParams.delete("chat");
@@ -312,7 +317,9 @@ async function boot() {
     if (state.me && !state.me.circle && state.circleDraft === "friends") {
       state.circleDraft = `${state.me.user.name}'s circle`;
     }
+    landCalendar();
     render();
+    scheduleErrorClear();
     if (!state.offline) {
       reportDisplay();
       refresh({ initial: true }).catch(() => {});
@@ -900,6 +907,7 @@ function clearSession() {
   state.pastDays = null;
   state.calendarFeed = null;
   state.calendarSync = null;
+  state.agentTokens = null;
   state.busyAt = null;
 }
 
@@ -1146,6 +1154,7 @@ function personalAlerts() {
 
 function shell() {
   forgetShownFeedLink();
+  forgetShownAgentToken();
   const phone = el("div", { class: "phone" });
   if (state.chat) {
     phone.append(chatScreen());
@@ -1536,7 +1545,7 @@ function circleScreen() {
 
 /** Who in this circle is away or busy, in one line. Null when no one is. */
 function awayLine() {
-  const text = circleStatusLine(state.me?.circle?.members, state.me?.user?.id);
+  const text = circleStatusLine(state.me?.circle?.members, state.me?.user?.id, Date.now(), 3, viewerTz());
   return text ? el("p", { class: "away-line", text }) : null;
 }
 
@@ -2374,27 +2383,62 @@ function buzzNote(code) {
   ]);
 }
 
-/** Away / Busy on the You tab: a summary with Edit and Clear, or two buttons that open the editor. */
+/** The person's own zone: the one saved with their status or hours, else this device's, else the app's. */
+function userTz() {
+  return state.me?.user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || appTz();
+}
+
+/** The active status the person set by hand. Weekly hours do not count. */
+function manualStatus() {
+  const status = activeStatus(state.me.user.status);
+  return status && status.source !== "schedule" ? status : null;
+}
+
+/** "Busy until" quick picks as chips. `isOn` marks the chosen one in the editor. */
+function busyPresetChips(onPick, isOn = () => false) {
+  return el("div", { class: "busy-presets", role: "group", "aria-label": "Busy until" }, busyUntilPresets(Date.now(), userTz()).map((preset) => el("button", {
+    type: "button",
+    class: isOn(preset) ? "chip on" : "chip",
+    "aria-pressed": isOn(preset) ? "true" : "false",
+    text: preset.label,
+    onclick: () => onPick(preset),
+  })));
+}
+
+/** Away / Busy on the You tab: a summary with Edit and Clear, or quick Busy picks and two buttons that open the editor. */
 function statusPanel() {
   const status = activeStatus(state.me.user.status);
   if (state.statusDraft) return statusEditor();
   if (status) {
+    const fromHours = status.source === "schedule";
     return el("div", { class: "panel status-panel", "data-status": status.type }, [
       el("h3", { text: "Your status" }),
       el("p", { class: "status-summary" }, [
         el("span", { class: "status-card-mark", "aria-hidden": "true", text: statusBadge(status.type) }),
-        el("span", { text: statusLine(status) }),
+        el("span", { text: statusLine(status, Date.now(), viewerTz()) }),
       ]),
-      el("p", { class: "help", text: "People in your circles see this next to your name." }),
-      el("div", { class: "status-actions" }, [
-        el("button", { class: "btn secondary", type: "button", text: "Edit status", onclick: () => editStatus(status.type) }),
-        el("button", { class: "text-btn", type: "button", text: "Clear status", onclick: () => { void onClearStatus(); } }),
-      ]),
+      el("p", {
+        class: "help",
+        text: fromHours
+          ? "From your weekly hours. Friends only see that you're busy or free, and until when."
+          : "People in your circles see this next to your name.",
+      }),
+      el("div", { class: "status-actions" }, fromHours
+        ? [
+            el("button", { class: "btn secondary", type: "button", text: "Set a status", onclick: () => editStatus("busy") }),
+            el("button", { class: "text-btn", type: "button", text: "Edit weekly hours", onclick: editBusyHours }),
+          ]
+        : [
+            el("button", { class: "btn secondary", type: "button", text: "Edit status", onclick: () => editStatus(status.type) }),
+            el("button", { class: "text-btn", type: "button", text: "Clear status", onclick: () => { void onClearStatus(); } }),
+          ]),
     ]);
   }
   return el("div", { class: "panel status-panel" }, [
     el("h3", { text: "Status" }),
-    el("p", { class: "help", text: "Away for a while? Let your circles know." }),
+    el("p", { class: "help", text: "Busy for a bit, or away for a while? Let your circles know." }),
+    el("p", { class: "busy-presets-label", text: "Busy until" }),
+    busyPresetChips((preset) => { void onQuickBusy(preset); }),
     el("div", { class: "status-actions two" }, [
       el("button", { class: "btn secondary", type: "button", text: "\u2708\ufe0f Set Away", onclick: () => editStatus("away") }),
       el("button", { class: "btn secondary", type: "button", text: "\u23f3 Set Busy", onclick: () => editStatus("busy") }),
@@ -2402,13 +2446,27 @@ function statusPanel() {
   ]);
 }
 
+async function onQuickBusy(preset) {
+  await run(async () => {
+    state.me = await api("/api/me/status", {
+      method: "PUT",
+      body: { type: "busy", until: preset.until, timezone: userTz() },
+    });
+    state.statusDraft = null;
+    state.error = "Status saved";
+  });
+}
+
 function editStatus(type) {
-  const current = activeStatus(state.me.user.status);
+  const current = manualStatus();
   state.statusDraft = {
     type,
     text: current?.text || "",
     place: current?.place || "",
     untilDay: statusUntilDay(current),
+    until: current?.type === "busy" && type === "busy" ? current.until ?? null : null,
+    preset: "",
+    clock: "",
   };
   render();
   requestAnimationFrame(() => document.getElementById("status-text")?.focus({ preventScroll: true }));
@@ -2416,6 +2474,7 @@ function editStatus(type) {
 
 function statusEditor() {
   const draft = state.statusDraft;
+  const busy = draft.type === "busy";
   const typeButton = (type) => el("button", {
     type: "button",
     class: draft.type === type ? "on" : "",
@@ -2437,19 +2496,46 @@ function statusEditor() {
       maxlength: String(STATUS_PLACE_MAX),
       placeholder: "Portugal",
     }),
-    el("label", { class: "field" }, [
-      el("span", { text: "Until (optional)" }),
-      el("input", {
-        id: "status-until",
-        class: "sheet-control",
-        type: "date",
-        min: statusToday(),
-        value: draft.untilDay || "",
-        oninput: (event) => { draft.untilDay = event.target.value; },
-        onchange: (event) => { draft.untilDay = event.target.value; },
-      }),
-    ]),
-    el("p", { class: "help", text: "It clears itself after that day. Leave it empty to keep it until you clear it." }),
+    ...(busy
+      ? [
+          el("p", { class: "busy-presets-label", text: "Busy until" }),
+          busyPresetChips((preset) => {
+            draft.until = preset.until;
+            draft.preset = preset.id;
+            draft.clock = "";
+            render();
+          }, (preset) => draft.preset === preset.id),
+          el("label", { class: "field" }, [
+            el("span", { text: "Or until a time" }),
+            el("input", {
+              id: "status-until-time",
+              class: "sheet-control",
+              type: "time",
+              value: draft.clock || "",
+              oninput: (event) => setBusyClock(draft, event.target.value),
+              onchange: (event) => {
+                setBusyClock(draft, event.target.value);
+                render();
+              },
+            }),
+          ]),
+          el("p", { class: "help", text: "It clears itself at that time. Friends only see that you're busy or free, and until when." }),
+        ]
+      : [
+          el("label", { class: "field" }, [
+            el("span", { text: "Until (optional)" }),
+            el("input", {
+              id: "status-until",
+              class: "sheet-control",
+              type: "date",
+              min: statusToday(),
+              value: draft.untilDay || "",
+              oninput: (event) => { draft.untilDay = event.target.value; },
+              onchange: (event) => { draft.untilDay = event.target.value; },
+            }),
+          ]),
+          el("p", { class: "help", text: "It clears itself after that day. Leave it empty to keep it until you clear it." }),
+        ]),
     el("div", { class: "status-actions" }, [
       el("button", { class: "btn", type: "submit", text: "Save status" }),
       el("button", { class: "text-btn", type: "button", text: "Cancel", onclick: () => { state.statusDraft = null; render(); } }),
@@ -2457,14 +2543,24 @@ function statusEditor() {
   ]);
 }
 
+/** A custom time sets the end to its next occurrence. The page redraws on change, not on every keystroke. */
+function setBusyClock(draft, value) {
+  draft.clock = value;
+  draft.preset = "";
+  draft.until = untilFromClock(value, Date.now(), userTz());
+}
+
 async function onSaveStatus(event) {
   event.preventDefault();
   const draft = state.statusDraft;
   if (!draft) return;
+  const busy = draft.type === "busy";
   await run(async () => {
     state.me = await api("/api/me/status", {
       method: "PUT",
-      body: { type: draft.type, text: draft.text, place: draft.place, untilDay: draft.untilDay || null },
+      body: busy
+        ? { type: draft.type, text: draft.text, place: draft.place, until: draft.until || null, untilDay: null, timezone: userTz() }
+        : { type: draft.type, text: draft.text, place: draft.place, untilDay: draft.untilDay || null, until: null },
     });
     state.statusDraft = null;
     state.error = "Status saved";
@@ -2476,6 +2572,153 @@ async function onClearStatus() {
     state.me = await api("/api/me/status", { method: "DELETE" });
     state.statusDraft = null;
     state.error = "Status cleared";
+  });
+}
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const BUSY_BLOCKS_MAX = 3;
+
+/** "Mon–Fri 09:00 to 17:00" for one block: runs of consecutive days are joined. */
+function busyBlockText(block) {
+  const days = [...new Set(block.days)].sort((a, b) => a - b);
+  const runs = [];
+  for (const day of days) {
+    const last = runs[runs.length - 1];
+    if (last && last[1] === day - 1) last[1] = day;
+    else runs.push([day, day]);
+  }
+  const names = runs.map(([from, to]) => {
+    if (from === to) return WEEKDAYS[from - 1];
+    return to === from + 1 ? `${WEEKDAYS[from - 1]}, ${WEEKDAYS[to - 1]}` : `${WEEKDAYS[from - 1]}\u2013${WEEKDAYS[to - 1]}`;
+  });
+  return `${names.join(", ")} ${block.start} to ${block.end}`;
+}
+
+/** Weekly busy hours on the You tab: a summary with Edit and Remove, or a button that opens the editor. */
+function busyHoursPanel() {
+  if (state.hoursDraft) return busyHoursEditor();
+  const schedule = state.me.user.busyHours;
+  if (!schedule?.blocks?.length) {
+    return el("div", { class: "panel stack hours-panel" }, [
+      el("h3", { text: "Weekly hours" }),
+      el("p", { class: "help", text: "Set hours when you're usually busy, like weekdays 9 to 5. Friends only see that you're busy or free, and until when." }),
+      el("button", { class: "btn secondary", type: "button", text: "Set weekly hours", onclick: editBusyHours }),
+    ]);
+  }
+  return el("div", { class: "panel stack hours-panel" }, [
+    el("h3", { text: "Weekly hours" }),
+    el("div", { class: "hours-summary" }, schedule.blocks.map((block) => el("p", { text: busyBlockText(block) }))),
+    el("p", { class: "help", text: `Times are in your time zone (${schedule.timezone}). Friends only see that you're busy or free, and until when.` }),
+    el("div", { class: "status-actions" }, [
+      el("button", { class: "btn secondary", type: "button", text: "Edit weekly hours", onclick: editBusyHours }),
+      el("button", { class: "text-btn", type: "button", text: "Remove weekly hours", onclick: () => { void onRemoveBusyHours(); } }),
+    ]),
+  ]);
+}
+
+function editBusyHours() {
+  const saved = state.me.user.busyHours?.blocks;
+  state.hoursDraft = {
+    blocks: saved?.length
+      ? saved.map((block) => ({ days: [...block.days], start: block.start, end: block.end }))
+      : [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+  };
+  render();
+}
+
+function busyHoursEditor() {
+  const draft = state.hoursDraft;
+  const blocks = draft.blocks.map((block, index) => el("div", { class: "hours-block", "data-block": String(index) }, [
+    el("div", { class: "hours-days", role: "group", "aria-label": `Days for block ${index + 1}` }, WEEKDAYS.map((name, i) => {
+      const day = i + 1;
+      const on = block.days.includes(day);
+      return el("button", {
+        type: "button",
+        class: on ? "chip on" : "chip",
+        "aria-pressed": on ? "true" : "false",
+        text: name,
+        onclick: () => {
+          block.days = on ? block.days.filter((d) => d !== day) : [...block.days, day].sort((a, b) => a - b);
+          render();
+        },
+      });
+    })),
+    el("div", { class: "hours-times" }, [
+      el("label", { class: "field" }, [
+        el("span", { text: "From" }),
+        el("input", {
+          class: "sheet-control hours-start",
+          type: "time",
+          value: block.start,
+          oninput: (event) => { block.start = event.target.value; },
+          onchange: (event) => { block.start = event.target.value; },
+        }),
+      ]),
+      el("label", { class: "field" }, [
+        el("span", { text: "To" }),
+        el("input", {
+          class: "sheet-control hours-end",
+          type: "time",
+          value: block.end,
+          oninput: (event) => { block.end = event.target.value; },
+          onchange: (event) => { block.end = event.target.value; },
+        }),
+      ]),
+    ]),
+    draft.blocks.length > 1
+      ? el("button", {
+          class: "text-btn",
+          type: "button",
+          text: "Remove",
+          "aria-label": `Remove block ${index + 1}`,
+          onclick: () => { draft.blocks.splice(index, 1); render(); },
+        })
+      : null,
+  ]));
+  return el("form", { class: "panel stack hours-panel hours-editor", onsubmit: onSaveBusyHours }, [
+    el("h3", { text: "Weekly hours" }),
+    ...blocks,
+    draft.blocks.length < BUSY_BLOCKS_MAX
+      ? el("button", {
+          class: "text-btn",
+          type: "button",
+          text: "Add another block",
+          onclick: () => { draft.blocks.push({ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }); render(); },
+        })
+      : null,
+    el("p", { class: "help", text: `Times are in your time zone (${userTz()}). Friends only see that you're busy or free, and until when.` }),
+    el("div", { class: "status-actions" }, [
+      el("button", { class: "btn", type: "submit", text: "Save weekly hours" }),
+      el("button", { class: "text-btn", type: "button", text: "Cancel", onclick: () => { state.hoursDraft = null; render(); } }),
+    ]),
+  ]);
+}
+
+async function onSaveBusyHours(event) {
+  event.preventDefault();
+  const draft = state.hoursDraft;
+  if (!draft) return;
+  await run(async () => {
+    if (draft.blocks.some((block) => !block.days.length)) {
+      state.error = "Pick at least one day";
+      return;
+    }
+    const body = await api("/api/me/busy-hours", {
+      method: "PUT",
+      body: { timezone: userTz(), blocks: draft.blocks.map((block) => ({ days: block.days, start: block.start, end: block.end })) },
+    });
+    state.hoursDraft = null;
+    state.me = await api("/api/me");
+    state.error = body.schedule ? "Weekly hours saved" : "Weekly hours removed";
+  });
+}
+
+async function onRemoveBusyHours() {
+  await run(async () => {
+    await api("/api/me/busy-hours", { method: "DELETE" });
+    state.hoursDraft = null;
+    state.me = await api("/api/me");
+    state.error = "Weekly hours removed";
   });
 }
 
@@ -2548,6 +2791,7 @@ function youScreen() {
           ]),
     ]),
     statusPanel(),
+    busyHoursPanel(),
     el("form", { class: "panel stack", onsubmit: onRename }, [
       field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
       el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
@@ -2578,6 +2822,7 @@ function youScreen() {
     ]),
     calendarFeedPanel(),
     calendarSyncPanel(),
+    agentTokensPanel(),
     el("div", { class: "panel panel-rows" }, [
       el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
         el("div", { class: "grow" }, [
@@ -2788,11 +3033,160 @@ function onRevokeCalendarFeed() {
   render();
 }
 
+/** Assistant tokens: an outside assistant acts as this person. The full token shows once, right after making it. */
+function agentTokensPanel() {
+  if (!state.agentTokens) void loadAgentTokens();
+  const data = state.agentTokens || { loaded: false };
+  const wrap = (kids) => el("section", { class: "panel agent-tokens", "aria-label": "Assistant tokens" }, [
+    el("h3", { text: "Assistant tokens" }),
+    el("p", { text: "A token lets an assistant act as you: read your circles, set your status, create plans and say you are in. Friends see those actions as you. You can revoke a token at any time and it stops working at once. The full token is shown only once, so copy it now." }),
+    ...kids,
+  ]);
+  if (!data.loaded) return wrap([el("p", { class: "help", text: "Loading…" })]);
+  const tokens = data.tokens || [];
+  return wrap([
+    data.secret ? agentTokenSecret(data.secret) : null,
+    el("form", { class: "stack", novalidate: "", onsubmit: (event) => { event.preventDefault(); void onCreateAgentToken(); } }, [
+      el("label", { class: "field" }, [
+        el("span", { text: "Token name" }),
+        el("input", {
+          id: "agent-token-name",
+          type: "text",
+          maxlength: "40",
+          autocomplete: "off",
+          placeholder: "Grok Bot",
+          value: data.draft || "",
+          oninput: (event) => { state.agentTokens.draft = event.target.value; },
+        }),
+      ]),
+      el("button", { class: "btn secondary", type: "submit", text: data.busy ? "Creating…" : "Create token", disabled: data.busy }),
+    ]),
+    data.failed ? el("p", { class: "help", text: "Could not load your tokens." }) : null,
+    tokens.length || data.failed ? null : el("p", { class: "help", text: "No tokens yet. Name one after the assistant you want to use it with." }),
+    tokens.length ? el("ul", { class: "agent-token-list" }, tokens.map(agentTokenRow)) : null,
+  ]);
+}
+
+function agentTokenSecret(secret) {
+  return el("div", { class: "stack agent-token-once" }, [
+    el("p", { class: "agent-token-secret", text: secret }),
+    el("p", { class: "help", text: "It will not be shown again. Copy it now and keep it private." }),
+    el("button", { class: "btn secondary", type: "button", text: "Copy", onclick: () => { void copyAgentToken(secret); } }),
+  ]);
+}
+
+function agentTokenRow(token) {
+  const used = token.lastUsedAt ? `Last used ${feedDate(token.lastUsedAt)}` : "Not used yet";
+  return el("li", { class: "agent-token-row" }, [
+    el("div", { class: "grow" }, [
+      el("strong", { text: token.name }),
+      el("p", { class: "help", text: `${token.tokenPrefix}… · Made ${feedDate(token.createdAt)} · ${used}` }),
+    ]),
+    el("button", {
+      class: "text-btn danger",
+      type: "button",
+      text: "Revoke",
+      "aria-label": `Revoke ${token.name}`,
+      onclick: () => onRevokeAgentToken(token),
+    }),
+  ]);
+}
+
+async function copyAgentToken(secret) {
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(secret);
+    copied = true;
+  } catch {
+    copied = copyWithSelection(secret);
+  }
+  state.error = copied ? "Token copied" : "Copy failed. Press and hold the token to copy it.";
+  render();
+  scheduleErrorClear();
+}
+
+/** The token shows once. Once the You screen is not on show, it is gone for good. */
+function forgetShownAgentToken() {
+  if (!state.agentTokens?.secret) return;
+  if (state.tab === "you" && !state.chat && !state.past) return;
+  state.agentTokens = { ...state.agentTokens, secret: "" };
+}
+
+async function loadAgentTokens() {
+  state.agentTokens = { loaded: false };
+  try {
+    const data = await api("/api/me/agent-tokens", { circle: null });
+    if (!state.agentTokens || state.agentTokens.loaded) return;
+    state.agentTokens = { loaded: true, tokens: data.tokens, draft: "" };
+  } catch {
+    state.agentTokens = { loaded: true, failed: true, tokens: [], draft: "" };
+  }
+  document.querySelector(".agent-tokens")?.replaceWith(agentTokensPanel());
+}
+
+async function onCreateAgentToken() {
+  const data = state.agentTokens;
+  if (!data?.loaded || data.busy) return;
+  data.busy = true;
+  render();
+  await run(async () => {
+    try {
+      const made = await api("/api/me/agent-tokens", { method: "POST", body: { name: data.draft || "" }, circle: null });
+      const list = await api("/api/me/agent-tokens", { circle: null });
+      state.agentTokens = { loaded: true, tokens: list.tokens, draft: "", secret: made.token };
+    } finally {
+      if (state.agentTokens) state.agentTokens.busy = false;
+    }
+  });
+}
+
+function onRevokeAgentToken(token) {
+  state.confirm = {
+    title: `Revoke ${token.name}?`,
+    body: "It stops working at once. Anything using it loses access until you make a new token.",
+    confirmLabel: "Revoke",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/me/agent-tokens/${encodeURIComponent(token.id)}`, { method: "DELETE", circle: null });
+        const list = await api("/api/me/agent-tokens", { circle: null });
+        state.agentTokens = { ...state.agentTokens, tokens: list.tokens, secret: "" };
+        state.error = "Token revoked";
+      });
+    },
+  };
+  render();
+}
+
 const CALENDAR_SYNC_STEPS = [
   "Google Calendar on a computer: Settings, pick your calendar, Integrate calendar, then copy Secret address in iCal format.",
   "Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, then copy the ICS link.",
   "iCloud: in the Calendar app tap the info button next to a calendar, turn on Public Calendar, then Share Link.",
 ];
+
+const GOOGLE_PERMISSIONS_URL = "https://myaccount.google.com/permissions";
+const SECRET_LINK_NOTE = "A private calendar link lets Hangry download the whole calendar file, including event names. Hangry keeps only the times, plus your event names encrypted for you alone (so you can see them when you tap I'm in). It discards places, notes and people. Friends still only see busy or free.";
+
+function permissionsLink() {
+  return el("a", { href: GOOGLE_PERMISSIONS_URL, target: "_blank", rel: "noopener noreferrer", text: "myaccount.google.com/permissions" });
+}
+
+/** Plain words on what Hangry can and cannot see once Google is connected. */
+function googleFacts() {
+  return el("div", { class: "sync-facts" }, [
+    el("h4", { text: "What Hangry can and can't see" }),
+    el("ul", { class: "feed-steps" }, [
+      el("li", { text: "Hangry only sees when you're busy, never event names, places, people or notes." }),
+      el("li", { text: "Hangry asks Google only for the free/busy permission, and Google's consent screen says so. Hangry never receives event titles or details, and never stores them." }),
+      el("li", { text: "Hangry stores only your busy times for the next 14 days, plus an encrypted token so it can check again." }),
+      el("li", { text: "Hangry checks about every 20 minutes." }),
+      el("li", {}, [
+        "To disconnect, tap Remove in this panel. Hangry deletes the token and the busy times, and tells Google to revoke access. You can also revoke Hangry at ",
+        permissionsLink(),
+        ".",
+      ]),
+    ]),
+  ]);
+}
 
 /** Import side of calendars: friends see busy or free, never titles. The link never comes back from the server. */
 function calendarSyncPanel() {
@@ -2806,7 +3200,18 @@ function calendarSyncPanel() {
   if (!sync.loaded) return wrap([el("p", { class: "help", text: "Loading…" })]);
   const error = sync.error ? el("p", { class: "time-error sync-error", role: "alert", text: sync.error }) : null;
   if (!sync.connected) {
+    const google = Boolean(sync.googleAvailable);
     return wrap([
+      google ? el("button", {
+        class: "btn sync-google",
+        type: "button",
+        text: sync.googleBusy ? "Connecting…" : "Connect Google Calendar",
+        disabled: sync.busy,
+        onclick: () => { void onConnectGoogle(); },
+      }) : null,
+      google && sync.googleError ? el("p", { class: "time-error sync-error", role: "alert", text: sync.googleError }) : null,
+      google ? googleFacts() : null,
+      google ? el("p", { class: "sheet-label sync-label", text: "Or use a private calendar link" }) : null,
       el("form", { class: "stack", novalidate: "", onsubmit: (event) => { event.preventDefault(); void onConnectCalendar(); } }, [
         el("label", { class: "field" }, [
           el("span", { text: "Private calendar link" }),
@@ -2824,12 +3229,14 @@ function calendarSyncPanel() {
           }),
         ]),
         error,
-        el("button", { class: "btn secondary", type: "submit", text: sync.busy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
+        el("button", { class: "btn secondary", type: "submit", text: sync.busy && !sync.googleBusy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
       ]),
+      el("p", { class: "help sync-note secret-link-note", text: SECRET_LINK_NOTE }),
       el("p", { class: "help sync-note", text: "It stays off for every circle until you turn one on. Hangry keeps the link encrypted and never shows it again." }),
       el("ul", { class: "feed-steps" }, CALENDAR_SYNC_STEPS.map((line) => el("li", { text: line }))),
     ]);
   }
+  const isGoogle = sync.source === "google";
   const circles = sync.circles || [];
   const shared = new Set(sync.sharedCircleIds || []);
   return wrap([
@@ -2847,7 +3254,10 @@ function calendarSyncPanel() {
       el("span", { text: circle.name }),
     ]))),
     shared.size ? null : el("p", { class: "help sync-note", text: "Off everywhere. Tick a circle to share." }),
-    el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
+    isGoogle
+      ? el("p", { class: "help sync-note", text: "Hangry never sees the names of your events, so they will not appear when you tap I'm in." })
+      : el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
+    isGoogle ? el("p", { class: "help sync-note" }, ["You can revoke Hangry any time at ", permissionsLink(), "."]) : null,
     el("div", { class: "feed-manage" }, [
       el("button", { class: "text-btn", type: "button", text: "Check now", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
       el("button", { class: "text-btn danger", type: "button", text: "Remove", disabled: sync.busy, onclick: onRemoveCalendar }),
@@ -2876,7 +3286,7 @@ function paintCalendarSync() {
 }
 
 function applyCalendarSync(data, extra = {}) {
-  state.calendarSync = { loaded: true, ...data, draft: "", busy: false, error: "", ...extra };
+  state.calendarSync = { loaded: true, ...data, draft: "", busy: false, googleBusy: false, error: "", googleError: "", ...extra };
   if (state.me?.user) state.me.user.calendarConnected = Boolean(data.connected);
 }
 
@@ -2924,6 +3334,39 @@ async function onConnectCalendar() {
   await calendarSyncCall("/api/me/calendar-sync", { method: "PUT", body: { url } });
 }
 
+/** Asks the server for Google's consent URL and leaves for it. The URL is never shown. */
+async function onConnectGoogle() {
+  if (state.calendarSync?.busy) return;
+  state.calendarSync = { ...state.calendarSync, busy: true, googleBusy: true, error: "", googleError: "" };
+  paintCalendarSync();
+  try {
+    const data = await api("/api/calendar/google/start", { circle: null });
+    if (typeof data?.url !== "string" || !data.url) throw new Error("no url");
+    location.href = data.url;
+  } catch (error) {
+    const message = error?.status === 429
+      ? "That's a lot at once. Try again in a minute."
+      : isNetworkFailure(error) ? "You're offline. Try again." : "Could not reach Google Calendar. Try again.";
+    state.calendarSync = { ...state.calendarSync, busy: false, googleBusy: false, googleError: message };
+    paintCalendarSync();
+  }
+}
+
+/** Coming back from Google (or Back from its page) must not leave the button stuck on Connecting. */
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted || !state.calendarSync?.googleBusy) return;
+  state.calendarSync = { ...state.calendarSync, busy: false, googleBusy: false };
+  paintCalendarSync();
+});
+
+/** The return trip from Google: open the You tab, say how it went, and let the panel load fresh. */
+function landCalendar() {
+  if (!calendarLanding || !state.token || !state.me?.circle) return;
+  state.tab = "you";
+  state.calendarSync = null;
+  state.error = calendarLanding === "google" ? "Google Calendar connected" : "Could not connect Google Calendar. Try again.";
+}
+
 async function onRefreshCalendar() {
   await calendarSyncCall("/api/me/calendar-sync/refresh", { method: "POST", body: {} });
 }
@@ -2936,9 +3379,12 @@ async function onShareCalendar(circleId, on) {
 }
 
 function onRemoveCalendar() {
+  const google = state.calendarSync?.source === "google";
   state.confirm = {
     title: "Remove calendar?",
-    body: "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
+    body: google
+      ? "Friends stop seeing when you're busy. Hangry deletes the token and the busy times, and tells Google to revoke access."
+      : "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
     confirmLabel: "Remove",
     action: async () => {
       await calendarSyncCall("/api/me/calendar-sync", { method: "DELETE" });
@@ -2953,7 +3399,7 @@ function memberAvailability(id) {
 }
 
 function availabilityLine(availability, from = Date.now()) {
-  const text = availabilityText(availability, from, appTz());
+  const text = availabilityText(availability, from, viewerTz());
   if (!text) return null;
   return el("p", { class: `avail-line ${availability.state}` }, [
     el("span", { class: "avail-dot", "aria-hidden": "true" }),
@@ -3055,7 +3501,7 @@ function memberRow(member) {
   const self = member.id === state.me.user.id;
   const reach = reachText(member.reach);
   const line = [self ? "You" : "", reach].filter(Boolean).join(" · ");
-  const status = statusLine(member.status);
+  const status = statusLine(member.status, Date.now(), viewerTz());
   return el("div", { class: "row member-row" }, [
     el("button", {
       class: "member-open",
@@ -3096,7 +3542,7 @@ function openMemberMenu(member) {
 function statusCard(person) {
   const status = activeStatus(person?.status);
   if (!status) return null;
-  const until = statusUntilText(status.until);
+  const until = statusUntilText(status.until, Date.now(), viewerTz());
   return el("div", { class: "status-card", "data-status": status.type }, [
     el("p", { class: "status-card-head" }, [
       el("span", { class: "status-card-mark", "aria-hidden": "true", text: statusBadge(status.type) }),
@@ -4874,6 +5320,11 @@ function appTz() {
   return state.meta?.tz || "Europe/Berlin";
 }
 
+/** This device's zone. Busy-until and availability clocks are shown in it, whatever zone the setter used. */
+function viewerTz() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || appTz();
+}
+
 /** Today, Tomorrow, or Pick a date. `bag` is state for a new plan, or the edit session. */
 function planDayBlock(bag, prefix) {
   const dayKey = prefix === "plan" ? "planDay" : "day";
@@ -5021,7 +5472,7 @@ function busyAtBlock() {
   const busy = people.filter((person) => person.state === "busy" && names.has(person.id) && person.id !== self);
   if (!busy.length) return node;
   const parts = busy.map((person) => Number.isFinite(person.until)
-    ? `${names.get(person.id)} until ${untilText(person.until, from, appTz())}`
+    ? `${names.get(person.id)} until ${untilText(person.until, from, viewerTz())}`
     : names.get(person.id));
   node.append(
     el("span", { class: "avail-dot", "aria-hidden": "true" }),
@@ -6436,9 +6887,9 @@ function guestLine(text, person, kind, event) {
 }
 
 function guestDetailRow(text, person, kind, event) {
-  const status = statusLine(person?.status);
+  const status = statusLine(person?.status, Date.now(), viewerTz());
   const availability = person.id === state.me.user.id ? null : memberAvailability(person.id);
-  const busyText = availability ? availabilityText(availability, Date.now(), appTz()) : "";
+  const busyText = availability ? availabilityText(availability, Date.now(), viewerTz()) : "";
   const reply = busyText
     ? el("div", { class: "reply-line" }, [
         el("span", { text }),

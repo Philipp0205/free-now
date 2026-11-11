@@ -10,6 +10,47 @@
     ]
   },
   {
+    "id": "2026-11-11-google-freebusy",
+    "date": "2026-11-11",
+    "title": "Connect Google Calendar",
+    "bullets": [
+      "Connect Google Calendar on the You tab so friends in circles you pick see when you're busy or free.",
+      "Hangry only sees busy times, never event names. The You tab says what is stored, how often it checks, and how to disconnect.",
+      "You can remove it in Hangry or revoke it at myaccount.google.com/permissions.",
+      "The private link still works. It includes event names, but Hangry keeps only the times and your own titles."
+    ]
+  },
+  {
+    "id": "2026-11-11-busy-until",
+    "date": "2026-11-11",
+    "title": "Busy until a time, or every week",
+    "bullets": [
+      "On the You tab, tap 1 hour, 2 hours, Until 6pm or Until tomorrow to show Busy. It clears itself when the time is up.",
+      "Set weekly hours, like weekdays 9 to 5, and you show as Busy during them without lifting a finger.",
+      "Friends only see that you're busy or free, and until when. Never why.",
+      "Tell your circle you're free and it wins over Busy, so friends know they can reach you."
+    ]
+  },
+  {
+    "id": "2026-11-11-assistant-tokens",
+    "date": "2026-11-11",
+    "title": "Let an assistant act for you",
+    "bullets": [
+      "On the You tab, make a named token for an assistant. Copy it right away, it is shown only once. Revoke it any time.",
+      "With it, an assistant can read your circles, set your status, make plans and say you are in, as you.",
+      "Friends see those actions as you, so only share a token with an assistant you trust."
+    ]
+  },
+  {
+    "id": "2026-11-11-chat-caret",
+    "date": "2026-11-11",
+    "title": "Tap to move the cursor while typing in chat",
+    "bullets": [
+      "Tapping inside what you are typing in chat now moves the cursor, and the keyboard stays open.",
+      "Buttons and the rest of the app feel the same as before."
+    ]
+  },
+  {
     "id": "2026-11-09-faster-map",
     "date": "2026-11-11",
     "title": "Faster map",

@@ -39,7 +39,14 @@ export type Config = {
    * Null: a random key is made once and kept in the database (app_meta).
    */
   calendarSyncKey: Buffer | null;
+  /** Both set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) turns on Connect Google Calendar. Otherwise null. */
+  googleClientId: string | null;
+  googleClientSecret: string | null;
+  /** Google endpoints. Defaults are the real ones; the GOOGLE_OAUTH_* overrides exist for tests. */
+  googleUrls: GoogleUrls;
 };
+
+export type GoogleUrls = { auth: string; token: string; freebusy: string; revoke: string };
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 // CARTO Voyager and dark_all on the public raster CDN both return an
@@ -76,6 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     ...readPmtilesConfig(env),
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
     calendarSyncKey: readCalendarSyncKey(env.CALENDAR_SYNC_KEY),
+    ...readGoogle(env),
   };
 }
 
@@ -225,4 +233,32 @@ export function readCalendarSyncKey(value: string | undefined): Buffer | null {
     if (key.length === 32) return key;
   }
   throw new Error("CALENDAR_SYNC_KEY must be 64 hex characters or base64 of 32 bytes");
+}
+
+function readGoogle(env: NodeJS.ProcessEnv): Pick<Config, "googleClientId" | "googleClientSecret" | "googleUrls"> {
+  const id = env.GOOGLE_CLIENT_ID?.trim() ?? "";
+  const secret = env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
+  if ((id || secret) && !(id && secret)) {
+    console.warn("Google Calendar is off: set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
+  }
+  const url = (name: string, fallback: string): string => {
+    const raw = env[name]?.trim() || fallback;
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return raw;
+    } catch {
+      /* falls through */
+    }
+    throw new Error(`${name} must be an http or https URL`);
+  };
+  return {
+    googleClientId: id && secret ? id : null,
+    googleClientSecret: id && secret ? secret : null,
+    googleUrls: {
+      auth: url("GOOGLE_OAUTH_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth"),
+      token: url("GOOGLE_OAUTH_TOKEN_URL", "https://oauth2.googleapis.com/token"),
+      freebusy: url("GOOGLE_OAUTH_FREEBUSY_URL", "https://www.googleapis.com/calendar/v3/freeBusy"),
+      revoke: url("GOOGLE_OAUTH_REVOKE_URL", "https://oauth2.googleapis.com/revoke"),
+    },
+  };
 }

@@ -9,7 +9,7 @@ import { skipWhatsNew } from "./whats-new-seen.js";
 const hangry = useHangry();
 
 async function phone(token: string, width = 412, height = 915) {
-  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId: "Europe/Berlin" });
   await skipWhatsNew(context);
   await context.route("https://server.arcgisonline.com/**", (route) => route.fulfill({ status: 204, body: "" }));
   const page = await context.newPage();
@@ -117,7 +117,7 @@ test("an ended status is not shown, and a past end day is refused with a message
   const { context, page } = await phone(phil.token);
   try {
     await tab(page, "You");
-    await page.getByRole("button", { name: /Set Busy/ }).click();
+    await page.getByRole("button", { name: /Set Away/ }).click();
     assert.equal(await page.locator("#status-text").getAttribute("maxlength"), "60");
     assert.equal(await page.locator("#status-place").getAttribute("maxlength"), "40");
     assert.equal(await page.locator("#status-until").getAttribute("min"), statusToday());

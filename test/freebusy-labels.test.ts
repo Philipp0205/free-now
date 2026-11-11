@@ -7,6 +7,15 @@ const TZ = "Europe/Berlin";
 const NOON = Date.UTC(2026, 10, 10, 11, 0);
 const at = (h: number, m = 0, day = 10) => Date.UTC(2026, 10, day, h - 1, m);
 
+test("the same instant reads as a different clock in each viewer's zone", () => {
+  const six = Date.UTC(2026, 10, 10, 18, 0);
+  const late = Date.UTC(2026, 10, 10, 23, 30);
+  assert.equal(availabilityText({ state: "busy", until: six }, NOON, "Europe/Lisbon"), "Busy until 18:00");
+  assert.equal(availabilityText({ state: "busy", until: six }, NOON, "Europe/Berlin"), "Busy until 19:00");
+  assert.equal(availabilityText({ state: "busy", until: late }, NOON, "Europe/Lisbon"), "Busy until 23:30");
+  assert.equal(availabilityText({ state: "busy", until: late }, NOON, "Europe/Berlin"), "Busy until tomorrow 00:30");
+});
+
 test("busy and free labels name the end time, or the day when it is not today", () => {
   assert.equal(availabilityText({ state: "busy", until: at(14, 30) }, NOON, TZ), "Busy until 14:30");
   assert.equal(availabilityText({ state: "free", until: at(11, 0, 11) }, NOON, TZ), "Free until tomorrow 11:00");

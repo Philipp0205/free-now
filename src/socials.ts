@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import {
+  clearUserStatus,
   getActiveSocialByCreator,
   getSocial,
   getSocialReply,
+  getUserStatus,
   insertSocial,
   listMembers,
   setSocialReply,
@@ -12,6 +14,7 @@ import {
 import { eventTitle, freePushBody, notifyUsers, replyPushBody } from "./notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "./reply-push.js";
 import { addDays, clockLabel, isoDate, zonedDateTime } from "./time.js";
+import { activeStatus } from "./status.js";
 import { recordEventLine, replyLogText } from "./chat.js";
 import { HttpError, parseId, requireCircle, socialPayload, type AppDeps } from "./app.js";
 
@@ -82,6 +85,11 @@ export async function publishSocial(
       keepWhere ? undefined : { point: nextPoint, place: nextPlace },
       start === undefined && !startChanged ? undefined : schedule,
     );
+  }
+  // Being free now ends a manual Busy. Away stays, and so does a later start.
+  if (nextStart == null || nextStart <= now) {
+    const row = getUserStatus(deps.db, user.id);
+    if (activeStatus(row, now)?.type === "busy") clearUserStatus(deps.db, user.id);
   }
   if (shouldNotify) {
     const title = shifted ? eventTitle("time") : fromTime ? eventTitle("later") : eventTitle("now");

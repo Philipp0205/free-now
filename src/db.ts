@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CHAT_COLORS, chooseColor } from "./chat-color.js";
-import { addDays } from "./time.js";
+import { addDays, isTimeZone } from "./time.js";
 
 export type UserRow = {
   id: string;
@@ -14,6 +14,7 @@ export type UserRow = {
   color?: number | null;
   whats_new_seen?: string | null;
   avatar_rev?: number | null;
+  timezone?: string | null;
 };
 
 export type CircleRow = {
@@ -238,6 +239,13 @@ CREATE TABLE IF NOT EXISTS notifications (
   read_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS busy_hours (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  timezone TEXT NOT NULL,
+  blocks TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_membership_circle ON memberships(circle_id);
 CREATE INDEX IF NOT EXISTS idx_socials_circle ON socials(circle_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_plans_circle ON plans(circle_id, for_date);
@@ -336,6 +344,17 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
   token_hash TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_user ON agent_tokens(user_id);
 `;
 
 let sqliteWarningPatched = false;
@@ -396,6 +415,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "status_text", "status_text TEXT");
   ensureColumn(db, "users", "status_place", "status_place TEXT");
   ensureColumn(db, "users", "status_until", "status_until INTEGER");
+  ensureColumn(db, "users", "timezone", "timezone TEXT");
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -426,6 +446,8 @@ export function openDb(dbPath: string): DatabaseSync {
   db.prepare("UPDATE social_joins SET reply = 'coming' WHERE reply IN ('join', 'in')").run();
   // After migrateMembershipKey: calendar_share points at the (user_id, circle_id) key.
   db.exec(CALENDAR_SYNC_SCHEMA);
+  ensureColumn(db, "calendar_sync", "source", "source TEXT NOT NULL DEFAULT 'ics'");
+  ensureColumn(db, "calendar_sync", "token_enc", "token_enc TEXT");
   return db;
 }
 
@@ -434,6 +456,8 @@ export function openDb(dbPath: string): DatabaseSync {
  * calendar_sync holds the encrypted private link and sync state, calendar_busy only merged busy
  * intervals, calendar_event the owner-only titles (encrypted) for the "I'm in" check, and
  * calendar_share the circles the owner opted into. A share row goes when the membership goes.
+ * source is 'ics' (url_enc holds the link) or 'google' (token_enc holds the encrypted refresh token,
+ * url_enc is empty). google_oauth_state is the short-lived state and PKCE verifier of a connect.
  */
 const CALENDAR_SYNC_SCHEMA = `
 CREATE TABLE IF NOT EXISTS app_meta (
@@ -445,6 +469,8 @@ CREATE TABLE IF NOT EXISTS calendar_sync (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   url_enc TEXT NOT NULL,
   host TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'ics',
+  token_enc TEXT,
   rev TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   last_sync_at INTEGER,
@@ -480,6 +506,15 @@ CREATE TABLE IF NOT EXISTS calendar_share (
   FOREIGN KEY (user_id, circle_id) REFERENCES memberships(user_id, circle_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_share_circle ON calendar_share(circle_id);
+
+CREATE TABLE IF NOT EXISTS google_oauth_state (
+  state TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_verifier TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_google_oauth_state_user ON google_oauth_state(user_id);
 `;
 
 /**
@@ -706,6 +741,94 @@ export function setUserStatus(db: DatabaseSync, id: string, status: StatusRow): 
 
 export function clearUserStatus(db: DatabaseSync, id: string): void {
   db.prepare("UPDATE users SET status_type = NULL, status_text = NULL, status_place = NULL, status_until = NULL WHERE id = ?").run(id);
+}
+
+/** The IANA zone the person saved, or null. */
+export function getUserTimezone(db: DatabaseSync, id: string): string | null {
+  return one<{ timezone: string | null }>(db, "SELECT timezone FROM users WHERE id = ?", id)?.timezone ?? null;
+}
+
+/** Stores a valid IANA zone. An unknown name is refused (false) and nothing is written. */
+export function setUserTimezone(db: DatabaseSync, id: string, tz: string): boolean {
+  if (!isTimeZone(tz)) return false;
+  db.prepare("UPDATE users SET timezone = ? WHERE id = ?").run(tz, id);
+  return true;
+}
+
+/** One weekly block: days 1 (Mon) to 7 (Sun), local times as HH:MM, start before end. */
+export type BusyBlock = { days: number[]; start: string; end: string };
+export type BusySchedule = { timezone: string; blocks: BusyBlock[]; updatedAt: number };
+
+type BusyHoursRow = { user_id: string; timezone: string; blocks: string; updated_at: number };
+
+function scheduleFromRow(row: BusyHoursRow): BusySchedule | null {
+  try {
+    const blocks = JSON.parse(row.blocks);
+    if (!Array.isArray(blocks)) return null;
+    return { timezone: row.timezone, blocks: blocks as BusyBlock[], updatedAt: row.updated_at };
+  } catch {
+    return null;
+  }
+}
+
+export function getBusyHours(db: DatabaseSync, userId: string): BusySchedule | null {
+  const row = one<BusyHoursRow>(db, "SELECT user_id, timezone, blocks, updated_at FROM busy_hours WHERE user_id = ?", userId);
+  return row ? scheduleFromRow(row) : null;
+}
+
+/** Saves the schedule and keeps its zone as the person's zone. Blocks are already validated. */
+export function setBusyHours(db: DatabaseSync, userId: string, timezone: string, blocks: BusyBlock[], now: number): BusySchedule {
+  db.prepare(
+    `INSERT INTO busy_hours (user_id, timezone, blocks, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET timezone = excluded.timezone, blocks = excluded.blocks, updated_at = excluded.updated_at`,
+  ).run(userId, timezone, JSON.stringify(blocks), now);
+  db.prepare("UPDATE users SET timezone = ? WHERE id = ?").run(timezone, userId);
+  return { timezone, blocks, updatedAt: now };
+}
+
+export function clearBusyHours(db: DatabaseSync, userId: string): void {
+  db.prepare("DELETE FROM busy_hours WHERE user_id = ?").run(userId);
+}
+
+/** Schedules of the viewer and everyone sharing a circle with them. One query, for visibleStatuses. */
+export function listVisibleBusyHours(db: DatabaseSync, viewerId: string): Map<string, BusySchedule> {
+  const rows = all<BusyHoursRow>(
+    db,
+    `SELECT b.user_id, b.timezone, b.blocks, b.updated_at FROM busy_hours b
+     WHERE b.user_id = ? OR EXISTS (
+       SELECT 1 FROM memberships mine JOIN memberships theirs ON theirs.circle_id = mine.circle_id
+       WHERE mine.user_id = ? AND theirs.user_id = b.user_id
+     )`,
+    viewerId,
+    viewerId,
+  );
+  const map = new Map<string, BusySchedule>();
+  for (const row of rows) {
+    const schedule = scheduleFromRow(row);
+    if (schedule) map.set(row.user_id, schedule);
+  }
+  return map;
+}
+
+const LIVE_SOCIAL = "s.expires_at > ? AND (s.starts_at IS NULL OR s.starts_at <= ?)";
+
+/** True when the person has an "I'm free" that is on now, in any circle. */
+export function hasLiveSocial(db: DatabaseSync, userId: string, now: number): boolean {
+  return one(db, `SELECT 1 AS found FROM socials s WHERE s.creator_id = ? AND ${LIVE_SOCIAL} LIMIT 1`, userId, now, now) !== undefined;
+}
+
+/** Which of these people have a live "I'm free" in any circle. One query. */
+export function liveSocialUsers(db: DatabaseSync, userIds: string[], now: number): Set<string> {
+  if (!userIds.length) return new Set();
+  const marks = userIds.map(() => "?").join(", ");
+  const rows = all<{ creator_id: string }>(
+    db,
+    `SELECT DISTINCT s.creator_id FROM socials s WHERE s.creator_id IN (${marks}) AND ${LIVE_SOCIAL}`,
+    ...userIds,
+    now,
+    now,
+  );
+  return new Set(rows.map((row) => row.creator_id));
 }
 
 /** Every user id with its photo rev, for the admin avatar backup. No profile fields. */
@@ -1607,6 +1730,44 @@ export function setCalendarFeed(db: DatabaseSync, userId: string, tokenHash: str
 
 export function deleteCalendarFeed(db: DatabaseSync, userId: string): void {
   db.prepare("DELETE FROM calendar_feeds WHERE user_id = ?").run(userId);
+}
+
+export type AgentTokenRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  token_hash: string;
+  token_prefix: string;
+  created_at: number;
+  last_used_at: number | null;
+};
+
+export function insertAgentToken(db: DatabaseSync, row: AgentTokenRow): void {
+  db.prepare(
+    "INSERT INTO agent_tokens (id, user_id, name, token_hash, token_prefix, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(row.id, row.user_id, row.name, row.token_hash, row.token_prefix, row.created_at, row.last_used_at);
+}
+
+export function countAgentTokens(db: DatabaseSync, userId: string): number {
+  return one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM agent_tokens WHERE user_id = ?", userId)?.n ?? 0;
+}
+
+/** Newest first. */
+export function listAgentTokens(db: DatabaseSync, userId: string): AgentTokenRow[] {
+  return all<AgentTokenRow>(db, "SELECT * FROM agent_tokens WHERE user_id = ? ORDER BY created_at DESC, rowid DESC", userId);
+}
+
+export function getAgentTokenByHash(db: DatabaseSync, tokenHash: string): AgentTokenRow | undefined {
+  return one<AgentTokenRow>(db, "SELECT * FROM agent_tokens WHERE token_hash = ?", tokenHash);
+}
+
+export function touchAgentToken(db: DatabaseSync, id: string, now: number): void {
+  db.prepare("UPDATE agent_tokens SET last_used_at = ? WHERE id = ?").run(now, id);
+}
+
+/** False when the id is not this person's token. */
+export function deleteAgentToken(db: DatabaseSync, userId: string, id: string): boolean {
+  return Number(db.prepare("DELETE FROM agent_tokens WHERE id = ? AND user_id = ?").run(id, userId).changes) > 0;
 }
 
 export function getUserByFeedHash(db: DatabaseSync, tokenHash: string): UserRow | undefined {

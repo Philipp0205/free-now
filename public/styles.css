@@ -17,7 +17,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
-html { touch-action: manipulation; }
+/* Do not set touch-action: manipulation on html (or any ancestor of text fields).
+   A child cannot re-enable what a parent disabled, and it steals caret taps in
+   focused inputs on iOS, which closes the keyboard. Buttons set it themselves. */
 html.sheet-open,
 html.sheet-open body {
   overflow: hidden;
@@ -699,7 +701,23 @@ img.avatar { object-fit: cover; display: block; flex: none; }
 .status-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .status-actions .btn { flex: 1 1 0; min-width: 0; }
 .status-actions.two { display: grid; grid-template-columns: 1fr 1fr; }
-.status-editor .field input[type="date"] { width: 100%; }
+.status-editor .field input[type="date"],
+.status-editor .field input[type="time"] { width: 100%; }
+.busy-presets-label { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.busy-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.busy-presets .chip { flex: 1 1 auto; min-width: 0; }
+.hours-summary p { margin: 0 0 4px; color: #fff; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.hours-block { display: grid; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
+.hours-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.hours-days .chip { flex: 0 0 auto; min-width: 44px; padding: 0 8px; text-align: center; }
+.hours-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hours-times .field { min-width: 0; }
+.hours-times input[type="time"] { width: 100%; min-width: 0; }
+/* Two time fields side by side clip AM/PM at 320px. */
+@media (max-width: 340px) {
+  .hours-times { grid-template-columns: 1fr; }
+}
+.hours-block .text-btn { justify-self: start; }
 .status-card {
   margin: 0 0 12px;
   padding: 12px 14px;
@@ -1543,6 +1561,9 @@ textarea.sheet-control {
   padding: 0 16px;
   font-size: 16px;
   color: #fff;
+  touch-action: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 textarea.sheet-control {
   display: block;
@@ -2313,6 +2334,26 @@ html.kb-open .sheet .help { margin-top: 0; }
 .calendar-feed .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
 .calendar-feed .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }
 
+.agent-tokens .agent-token-secret {
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #1c1c1e;
+  overflow-wrap: anywhere;
+  -webkit-user-select: all;
+  user-select: all;
+  -webkit-touch-callout: default;
+}
+.agent-tokens .agent-token-once .help { margin: 0; }
+.agent-tokens .agent-token-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.agent-tokens .agent-token-row { display: flex; align-items: center; gap: 12px; }
+.agent-tokens .agent-token-row .grow { min-width: 0; overflow-wrap: anywhere; }
+.agent-tokens .agent-token-row .help { margin: 2px 0 0; }
+.agent-tokens .agent-token-row .text-btn { min-height: 44px; padding: 8px 4px; }
+
 /* Calendar view on the Events tab: a month grid, then the picked day's events. */
 /* The month and the day list scroll above the tab bar, so the last row is never under it. */
 .cal { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 12px 24px; }
@@ -2416,6 +2457,13 @@ html.kb-open .sheet .help { margin-top: 0; }
 .calendar-sync .sync-circles .share-toggle span { min-width: 0; overflow-wrap: anywhere; }
 .calendar-sync .sync-note { margin: 12px 0 0; }
 .calendar-sync .feed-steps { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; line-height: 1.4; display: grid; gap: 6px; }
+.calendar-sync .sync-google { margin: 4px 0 0; }
+.calendar-sync .sync-google + .sync-error { margin-top: 8px; }
+.calendar-sync .sync-facts { margin-top: 16px; }
+.calendar-sync .sync-facts h4 { margin: 0; font-size: 15px; font-weight: 650; color: #fff; }
+.calendar-sync .sync-facts .feed-steps { margin-top: 8px; }
+.calendar-sync .sync-label + .stack { margin-top: 8px; }
+.calendar-sync a { color: #fff; text-decoration: underline; overflow-wrap: anywhere; }
 .calendar-sync .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
 .calendar-sync .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }
 .avail-line { display: flex; align-items: center; gap: 6px; }
