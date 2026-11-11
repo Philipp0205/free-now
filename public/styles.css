@@ -701,7 +701,23 @@ img.avatar { object-fit: cover; display: block; flex: none; }
 .status-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .status-actions .btn { flex: 1 1 0; min-width: 0; }
 .status-actions.two { display: grid; grid-template-columns: 1fr 1fr; }
-.status-editor .field input[type="date"] { width: 100%; }
+.status-editor .field input[type="date"],
+.status-editor .field input[type="time"] { width: 100%; }
+.busy-presets-label { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.busy-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.busy-presets .chip { flex: 1 1 auto; min-width: 0; }
+.hours-summary p { margin: 0 0 4px; color: #fff; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.hours-block { display: grid; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
+.hours-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.hours-days .chip { flex: 0 0 auto; min-width: 44px; padding: 0 8px; text-align: center; }
+.hours-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hours-times .field { min-width: 0; }
+.hours-times input[type="time"] { width: 100%; min-width: 0; }
+/* Two time fields side by side clip AM/PM at 320px. */
+@media (max-width: 340px) {
+  .hours-times { grid-template-columns: 1fr; }
+}
+.hours-block .text-btn { justify-self: start; }
 .status-card {
   margin: 0 0 12px;
   padding: 12px 14px;

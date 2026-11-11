@@ -43,6 +43,22 @@ test("the shipped changelog is newest first and every entry is well-formed", () 
   assert.equal(normalizeEntries(RAW).length, RAW.length);
 });
 
+test("the newest entry is busy until and weekly hours, in plain words", () => {
+  const top = RAW[0];
+  assert.equal(top.id, "2026-11-11-busy-until");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Busy until a time, or every week");
+  assert.equal(top.bullets.length, 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /You tab/);
+  assert.match(text, /clears itself/);
+  assert.match(text, /weekly hours/);
+  assert.match(text, /only see that you're busy or free, and until when/);
+  assert.match(text, /free/);
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-chat-caret"), "older entries are kept");
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
 test("the card Share entry is in the changelog, in plain words without an em dash", () => {
   const share = RAW.find((item) => item.id === "2026-11-07-card-share");
   assert.ok(share, "card Share entry");
@@ -50,10 +66,11 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the assistant tokens entry is the newest, in plain words", () => {
-  const top = RAW[0];
-  assert.equal(top.id, "2026-11-11-assistant-tokens");
+test("the assistant tokens entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-assistant-tokens")!;
+  assert.ok(top, "assistant tokens entry");
   assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Let an assistant act for you");
   assert.equal(top.bullets.length, 3);
   const text = [top.title, ...top.bullets].join(" ");
   assert.match(text, /named token/);
@@ -384,7 +401,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v80");
+  assert.equal(cache?.[1], "hangry-v81");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

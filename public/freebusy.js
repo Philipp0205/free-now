@@ -1,6 +1,6 @@
 /**
  * Busy/free labels for friends and the owner-only "I'm in" calendar check. Pure, so the
- * rules can be tested. The page passes the circle timezone; nothing here reads app state.
+ * rules can be tested. The page passes the viewer's timezone; nothing here reads app state.
  */
 import { addDays, zonedParts } from "./when.js";
 

@@ -35,9 +35,11 @@ import {
   listSocialsStartedBetween,
   getCircleByCode,
   getCircleById,
+  getBusyHours,
   getUserById,
   bumpAvatarRev,
   clearAvatarRev,
+  clearBusyHours,
   clearUserStatus,
   listUserAvatarRevs,
   sharesCircle,
@@ -132,7 +134,7 @@ import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, sh
 import { publishSocial, replySocial } from "./socials.js";
 import { AGENT_ROUTES_ERROR, isAgentAllowed, openapiJson } from "./openapi.js";
 import { llmsTxt } from "./llms-txt.js";
-import { ownStatus, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
+import { ownStatus, saveBusyHours, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
 import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
@@ -585,6 +587,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     }
     sendJson(res, 200, mePayload(deps, req, me, requested, agent));
     return;
+  }
+
+  if (pathname === "/api/me/busy-hours") {
+    if (method === "GET") {
+      sendJson(res, 200, { schedule: getBusyHours(deps.db, me.id) });
+      return;
+    }
+    if (method === "PUT" || method === "PATCH") {
+      try {
+        sendJson(res, 200, { schedule: saveBusyHours(deps.db, me.id, body, deps.now()) });
+      } catch (error) {
+        if (error instanceof StatusError) throw new HttpError(400, error.message);
+        throw error;
+      }
+      return;
+    }
+    if (method === "DELETE") {
+      clearBusyHours(deps.db, me.id);
+      sendJson(res, 200, { schedule: null });
+      return;
+    }
+    throw new HttpError(405, "method not allowed");
   }
 
   if (method === "POST" && pathname === "/api/me/display") {
@@ -1185,6 +1209,8 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
       color: colorHex(user.id, row?.color),
       avatarRev: row?.avatar_rev || null,
       status: ownStatus(deps.db, user.id, deps.now()),
+      timezone: row?.timezone ?? null,
+      busyHours: getBusyHours(deps.db, user.id),
       // The recovery code would let an agent token take over the account.
       ...(agent ? {} : { buzzToken: user.buzz_token }),
       whatsNewSeen: user.whats_new_seen ?? null,
