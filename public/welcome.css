@@ -411,6 +411,15 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
   margin: 0 auto;
 }
 
+/* Privacy policy at /privacy. Reuses the landing page header and footer. */
+.pv { max-width: 680px; margin: 0 auto; padding: 24px 0 56px; }
+.pv h1 { font-size: 34px; letter-spacing: -0.045em; line-height: 1.1; }
+.pv h2 { font-size: 20px; letter-spacing: -0.02em; margin-top: 32px; }
+.pv p { color: #d1d1d6; font-size: 16px; line-height: 1.55; margin-top: 12px; overflow-wrap: break-word; }
+.pv h1 + p { margin-top: 8px; }
+.pv .pv-date { color: var(--muted); font-size: 14px; }
+.pv-page .wl-foot a { color: var(--muted); }
+
 @media (max-width: 419px) {
   .wl-map { --s: 0.8; height: 340px; }
 }

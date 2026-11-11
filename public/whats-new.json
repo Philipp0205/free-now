@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-11-privacy",
+    "date": "2026-11-11",
+    "title": "A public privacy policy",
+    "bullets": [
+      "Hangry now has a privacy page at /privacy. It says what we store, including calendar and assistant tokens.",
+      "The login screen and the Google Calendar connect copy both link to it.",
+      "We do not show ads, and we do not sell your data. Ask in the app if you want your account deleted."
+    ]
+  },
+  {
     "id": "2026-11-11-reaction-notify",
     "date": "2026-11-11",
     "title": "Get notified when friends react",

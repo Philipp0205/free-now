@@ -66,6 +66,8 @@ button:disabled { cursor: default; opacity: 0.55; }
 .lede { color: var(--muted); margin: 0; font-size: 17px; line-height: 1.35; }
 .gate-about { align-self: center; margin-top: 6px; padding: 8px 12px; color: var(--faint); font-size: 14px; text-decoration: none; }
 .gate-about:hover { color: var(--muted); }
+.gate-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.gate-links .gate-about { margin-top: 0; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
 .or {
   display: flex; align-items: center; gap: 12px;
