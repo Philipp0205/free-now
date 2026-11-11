@@ -128,10 +128,16 @@ export function noticeDay(iso: string, today: string): string {
   return gap === 0 || gap === 1 ? dayLabel(iso, today) : shortDate(iso, today);
 }
 
-export function assertTimeZone(tz: string): void {
+/** True when Intl knows the zone name. */
+export function isTimeZone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(0);
+    return true;
   } catch {
-    throw new Error(`Invalid APP_TZ: ${tz}`);
+    return false;
   }
+}
+
+export function assertTimeZone(tz: string): void {
+  if (!isTimeZone(tz)) throw new Error(`Invalid APP_TZ: ${tz}`);
 }

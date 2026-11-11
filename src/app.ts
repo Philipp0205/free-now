@@ -35,9 +35,11 @@ import {
   listSocialsStartedBetween,
   getCircleByCode,
   getCircleById,
+  getBusyHours,
   getUserById,
   bumpAvatarRev,
   clearAvatarRev,
+  clearBusyHours,
   clearUserStatus,
   listUserAvatarRevs,
   sharesCircle,
@@ -55,6 +57,7 @@ import {
   unlinkPlanCircle,
   getSocial,
   getSocialReply,
+  countAgentTokens,
   getUserByBuzzToken,
   getUserByTokenHash,
   hasSocialJoin,
@@ -103,6 +106,17 @@ import { MAX_RANGE_BYTES, serveRangeFile } from "./range-file.js";
 import { createArchiveCheck, pmtilesHeadBytes, type PmtilesInfo } from "./pmtiles.js";
 import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
 import {
+  AGENT_NAME_MAX,
+  AGENT_TOKEN_LIMIT,
+  AGENT_TOKEN_PREFIX,
+  MAX_AGENT_TOKENS,
+  authFromAgentToken,
+  issueAgentToken,
+  listAgentTokensFor,
+  revokeAgentToken,
+  type RequestAuth,
+} from "./agent-tokens.js";
+import {
   FEEDBACK_LIMIT,
   cleanAppVersion,
   cleanFeedbackNote,
@@ -118,7 +132,9 @@ import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } f
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
-import { ownStatus, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
+import { AGENT_ROUTES_ERROR, isAgentAllowed, openapiJson } from "./openapi.js";
+import { llmsTxt } from "./llms-txt.js";
+import { ownStatus, saveBusyHours, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
 import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
@@ -185,6 +201,8 @@ export class HttpError extends Error {
     message: string,
     /** Extra fields for the JSON error body, for example retryAt on a 429. */
     public extra: Record<string, unknown> = {},
+    /** Extra response headers, for example Retry-After on a 429. */
+    public headers: Record<string, string> = {},
   ) {
     super(message);
   }
@@ -198,7 +216,14 @@ export const SHARE_LIMIT = { limit: 60, windowMs: 60_000 };
 /** Calendar link connects and refreshes per person. Each one fetches a remote file. */
 export const CALENDAR_SYNC_LIMIT = { limit: 10, windowMs: 60_000 };
 
-type Limits = { ack: RateLimiter; feedback: RateLimiter; share: RateLimiter; feed: RateLimiter; calendarSync: RateLimiter };
+type Limits = {
+  ack: RateLimiter;
+  feedback: RateLimiter;
+  share: RateLimiter;
+  feed: RateLimiter;
+  calendarSync: RateLimiter;
+  agent: RateLimiter;
+};
 
 export function createApp(deps: AppDeps): http.RequestListener {
   const limits: Limits = {
@@ -207,11 +232,12 @@ export function createApp(deps: AppDeps): http.RequestListener {
     share: createRateLimiter(SHARE_LIMIT),
     feed: createRateLimiter(FEED_LIMIT),
     calendarSync: createRateLimiter(CALENDAR_SYNC_LIMIT),
+    agent: createRateLimiter(AGENT_TOKEN_LIMIT),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
       if (error instanceof HttpError) {
-        sendJson(res, error.status, { ...error.extra, error: error.message });
+        sendJson(res, error.status, { ...error.extra, error: error.message }, error.headers);
         return;
       }
       if (error instanceof ChatError) {
@@ -288,6 +314,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       sendJson(res, 405, { error: "method not allowed" });
       return;
     }
+    if (pathname === "/llms.txt") {
+      sendPublic(req, res, "text/plain; charset=utf-8", llmsTxt);
+      return;
+    }
     const sharePage = matchPath(pathname, /^\/p\/([^/]+)\/?$/);
     if (sharePage) {
       if (!limits.share.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
@@ -322,7 +352,21 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
-  const user = userFromRequest(req, deps.db);
+  if (pathname === "/api/openapi.json" && (method === "GET" || method === "HEAD")) {
+    sendPublic(req, res, "application/json; charset=utf-8", openapiJson);
+    return;
+  }
+
+  const auth = authFromRequest(req, deps);
+  const user = auth?.user;
+  if (auth?.kind === "agent") {
+    const now = deps.now();
+    if (!limits.agent.hit(auth.agentTokenId ?? "", now)) {
+      const retryAfter = Math.max(1, Math.ceil(limits.agent.resetIn(auth.agentTokenId ?? "", now) / 1000));
+      throw new HttpError(429, "too many requests", {}, { "retry-after": String(retryAfter) });
+    }
+    if (!isAgentAllowed(method, pathname)) throw new HttpError(403, AGENT_ROUTES_ERROR);
+  }
   if (pathname === "/api/me/avatar" || /^\/api\/users\/[^/]+\/avatar$/.test(pathname)) {
     await handleAvatar(req, res, deps, method, pathname, requireUser(user));
     return;
@@ -471,6 +515,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   const me = requireUser(user);
+  const agent = auth?.kind === "agent";
 
   const chat = await routeChat(deps, me, method, pathname, body, requested);
   if (chat) {
@@ -517,7 +562,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   }
 
   if (method === "GET" && pathname === "/api/me") {
-    sendJson(res, 200, mePayload(deps, req, me, requested));
+    sendJson(res, 200, mePayload(deps, req, me, requested, agent));
     return;
   }
 
@@ -525,7 +570,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const name = cleanLabel(body.name, "name", 24);
     updateUserName(deps.db, me.id, name);
     const updated = { ...me, name };
-    sendJson(res, 200, mePayload(deps, req, updated, requested));
+    sendJson(res, 200, mePayload(deps, req, updated, requested, agent));
     return;
   }
 
@@ -547,8 +592,30 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     } else {
       throw new HttpError(405, "method not allowed");
     }
-    sendJson(res, 200, mePayload(deps, req, me, requested));
+    sendJson(res, 200, mePayload(deps, req, me, requested, agent));
     return;
+  }
+
+  if (pathname === "/api/me/busy-hours") {
+    if (method === "GET") {
+      sendJson(res, 200, { schedule: getBusyHours(deps.db, me.id) });
+      return;
+    }
+    if (method === "PUT" || method === "PATCH") {
+      try {
+        sendJson(res, 200, { schedule: saveBusyHours(deps.db, me.id, body, deps.now()) });
+      } catch (error) {
+        if (error instanceof StatusError) throw new HttpError(400, error.message);
+        throw error;
+      }
+      return;
+    }
+    if (method === "DELETE") {
+      clearBusyHours(deps.db, me.id);
+      sendJson(res, 200, { schedule: null });
+      return;
+    }
+    throw new HttpError(405, "method not allowed");
   }
 
   if (method === "POST" && pathname === "/api/me/display") {
@@ -586,6 +653,29 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const buzzToken = humanCode();
     rotateBuzzToken(deps.db, me.id, buzzToken);
     sendJson(res, 200, { buzzToken });
+    return;
+  }
+
+  if (pathname === "/api/me/agent-tokens") {
+    if (method === "GET") {
+      sendJson(res, 200, { tokens: listAgentTokensFor(deps.db, me.id) });
+      return;
+    }
+    if (method === "POST") {
+      const name = cleanLabel(body.name, "name", AGENT_NAME_MAX);
+      if (countAgentTokens(deps.db, me.id) >= MAX_AGENT_TOKENS) {
+        throw new HttpError(409, `You already have ${MAX_AGENT_TOKENS} agent tokens. Revoke one first.`);
+      }
+      sendJson(res, 201, issueAgentToken(deps.db, me.id, name, deps.now()));
+      return;
+    }
+    throw new HttpError(405, "method not allowed");
+  }
+
+  const agentTokenRoute = matchPath(pathname, /^\/api\/me\/agent-tokens\/([^/]+)$/);
+  if (agentTokenRoute && method === "DELETE") {
+    if (!revokeAgentToken(deps.db, me.id, safeDecode(agentTokenRoute[1]))) throw new HttpError(404, "not found");
+    sendEmpty(res, 204);
     return;
   }
 
@@ -649,14 +739,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const removed = deleteCircle(deps.db, circle.id);
     if (!removed) throw new HttpError(404, "not found");
     await notifyCircleDeleted(deps, removed.circle, me, members);
-    sendJson(res, 200, mePayload(deps, req, me, null));
+    sendJson(res, 200, mePayload(deps, req, me, null, agent));
     return;
   }
 
   if (method === "POST" && pathname === "/api/circles/leave") {
     const circle = requireCircle(deps, me.id, requested);
     removeMember(deps.db, circle.id, me.id);
-    sendJson(res, 200, mePayload(deps, req, me, null));
+    sendJson(res, 200, mePayload(deps, req, me, null, agent));
     return;
   }
 
@@ -1115,7 +1205,7 @@ async function handleAvatar(
   else res.end(file.data);
 }
 
-function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requested: string | null = null) {
+function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requested: string | null = null, agent = false) {
   const circles = listCirclesForUser(deps.db, user.id);
   const alertUnread = unreadNotificationsByCircle(deps.db, user.id);
   let active: CircleRow | undefined;
@@ -1133,7 +1223,10 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
       color: colorHex(user.id, row?.color),
       avatarRev: row?.avatar_rev || null,
       status: ownStatus(deps.db, user.id, deps.now()),
-      buzzToken: user.buzz_token,
+      timezone: row?.timezone ?? null,
+      busyHours: getBusyHours(deps.db, user.id),
+      // The recovery code would let an agent token take over the account.
+      ...(agent ? {} : { buzzToken: user.buzz_token }),
       whatsNewSeen: user.whats_new_seen ?? null,
       calendarConnected: isConnected(deps.db, user.id),
     },
@@ -2211,14 +2304,16 @@ export function requireCircle(deps: AppDeps, userId: string, requested: string |
   throw new HttpError(400, "circle is required");
 }
 
-function userFromRequest(req: http.IncomingMessage, db: DatabaseSync): UserRow | undefined {
+function authFromRequest(req: http.IncomingMessage, deps: AppDeps): RequestAuth | undefined {
   const header = req.headers.authorization;
   if (!header) return undefined;
   const match = /^Bearer\s+(\S+)$/i.exec(Array.isArray(header) ? header[0] : header);
   if (!match) return undefined;
   const token = match[1];
   if (token.length < 20 || token.length > 256) return undefined;
-  return getUserByTokenHash(db, sha256(token));
+  if (token.startsWith(AGENT_TOKEN_PREFIX)) return authFromAgentToken(deps.db, token, deps.now());
+  const user = getUserByTokenHash(deps.db, sha256(token));
+  return user ? { user, kind: "session" } : undefined;
 }
 
 function requestOrigin(req: http.IncomingMessage, config: Config): string {
@@ -2443,7 +2538,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+function sendJson(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   if (status === 204) {
     sendEmpty(res, 204);
     return;
@@ -2456,8 +2551,23 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "x-frame-options": "DENY",
+    ...headers,
   });
   res.end(json);
+}
+
+/** Static docs: same bytes for everyone, no session, no user data. */
+function sendPublic(req: http.IncomingMessage, res: http.ServerResponse, type: string, text: string): void {
+  res.writeHead(200, {
+    "content-type": type,
+    "content-length": Buffer.byteLength(text),
+    "cache-control": "no-cache",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "x-frame-options": "DENY",
+  });
+  if (req.method === "HEAD") res.end();
+  else res.end(text);
 }
 
 function sendEmpty(res: http.ServerResponse, status: number): void {

@@ -43,6 +43,22 @@ test("the shipped changelog is newest first and every entry is well-formed", () 
   assert.equal(normalizeEntries(RAW).length, RAW.length);
 });
 
+test("the busy until and weekly hours entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-busy-until")!;
+  assert.ok(top, "busy until entry");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Busy until a time, or every week");
+  assert.equal(top.bullets.length, 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /You tab/);
+  assert.match(text, /clears itself/);
+  assert.match(text, /weekly hours/);
+  assert.match(text, /only see that you're busy or free, and until when/);
+  assert.match(text, /free/);
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-chat-caret"), "older entries are kept");
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
 test("the card Share entry is in the changelog, in plain words without an em dash", () => {
   const share = RAW.find((item) => item.id === "2026-11-07-card-share");
   assert.ok(share, "card Share entry");
@@ -67,9 +83,25 @@ test("the newest entry is Connect Google Calendar, in plain words", () => {
   for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
 });
 
+test("the assistant tokens entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-assistant-tokens")!;
+  assert.ok(top, "assistant tokens entry");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Let an assistant act for you");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /named token/);
+  assert.match(text, /shown only once/);
+  assert.match(text, /Revoke it any time/);
+  assert.match(text, /read your circles, set your status, make plans and say you are in/);
+  assert.match(text, /Friends see those actions as you/);
+  assert.doesNotMatch(text, /OpenAPI|Bearer|SHA|REST|OAuth|API/, "no jargon");
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
 test("the chat cursor fix entry is kept, in plain words", () => {
   const top = RAW.find((item) => item.id === "2026-11-11-chat-caret")!;
-  assert.ok(top, "chat caret entry");
+  assert.ok(top, "chat cursor entry");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Tap to move the cursor while typing in chat");
   assert.equal(top.bullets.length, 2);
@@ -386,7 +418,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v78");
+  assert.equal(cache?.[1], "hangry-v82");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

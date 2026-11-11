@@ -48,6 +48,12 @@ There are no passwords. The first screen creates a user and stores a device toke
 
 Losing both the browser data and the recovery code means that user cannot be recovered. Create a new one and rejoin the circle.
 
+## Assistant tokens
+
+An assistant (an AI agent or a script) can act for you with its own token. You create it on the You tab. It is shown once, and you can revoke it any time. The assistant sends it as `Authorization: Bearer <token>`.
+
+An assistant token can only call the routes listed in `/api/openapi.json`. Any other route returns 403. `/llms.txt` is the same guide in plain text. Your friends see what the assistant does as you.
+
 ## Buzzer
 
 Each user has a secret URL. A Flic button, an ESP32, or `curl` can hit it. No session header.

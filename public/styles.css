@@ -701,7 +701,23 @@ img.avatar { object-fit: cover; display: block; flex: none; }
 .status-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .status-actions .btn { flex: 1 1 0; min-width: 0; }
 .status-actions.two { display: grid; grid-template-columns: 1fr 1fr; }
-.status-editor .field input[type="date"] { width: 100%; }
+.status-editor .field input[type="date"],
+.status-editor .field input[type="time"] { width: 100%; }
+.busy-presets-label { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.busy-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.busy-presets .chip { flex: 1 1 auto; min-width: 0; }
+.hours-summary p { margin: 0 0 4px; color: #fff; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.hours-block { display: grid; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
+.hours-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.hours-days .chip { flex: 0 0 auto; min-width: 44px; padding: 0 8px; text-align: center; }
+.hours-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hours-times .field { min-width: 0; }
+.hours-times input[type="time"] { width: 100%; min-width: 0; }
+/* Two time fields side by side clip AM/PM at 320px. */
+@media (max-width: 340px) {
+  .hours-times { grid-template-columns: 1fr; }
+}
+.hours-block .text-btn { justify-self: start; }
 .status-card {
   margin: 0 0 12px;
   padding: 12px 14px;
@@ -2317,6 +2333,26 @@ html.kb-open .sheet .help { margin-top: 0; }
 .calendar-feed .link-btn { display: flex; align-items: center; justify-content: center; text-decoration: none; }
 .calendar-feed .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
 .calendar-feed .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }
+
+.agent-tokens .agent-token-secret {
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #1c1c1e;
+  overflow-wrap: anywhere;
+  -webkit-user-select: all;
+  user-select: all;
+  -webkit-touch-callout: default;
+}
+.agent-tokens .agent-token-once .help { margin: 0; }
+.agent-tokens .agent-token-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.agent-tokens .agent-token-row { display: flex; align-items: center; gap: 12px; }
+.agent-tokens .agent-token-row .grow { min-width: 0; overflow-wrap: anywhere; }
+.agent-tokens .agent-token-row .help { margin: 2px 0 0; }
+.agent-tokens .agent-token-row .text-btn { min-height: 44px; padding: 8px 4px; }
 
 /* Calendar view on the Events tab: a month grid, then the picked day's events. */
 /* The month and the day list scroll above the tab bar, so the last row is never under it. */
