@@ -38,6 +38,7 @@ import {
   getUserById,
   bumpAvatarRev,
   clearAvatarRev,
+  clearUserStatus,
   listUserAvatarRevs,
   sharesCircle,
   listCirclesForUser,
@@ -117,6 +118,7 @@ import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } f
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
+import { ownStatus, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
 import { clearPlanShareId } from "./db.js";
 import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
@@ -515,6 +517,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  if (pathname === "/api/me/status") {
+    const now = deps.now();
+    if (method === "GET") {
+      sendJson(res, 200, { status: ownStatus(deps.db, me.id, now) });
+      return;
+    }
+    if (method === "PUT" || method === "PATCH") {
+      try {
+        saveStatus(deps.db, me.id, body, now);
+      } catch (error) {
+        if (error instanceof StatusError) throw new HttpError(400, error.message);
+        throw error;
+      }
+    } else if (method === "DELETE") {
+      clearUserStatus(deps.db, me.id);
+    } else {
+      throw new HttpError(405, "method not allowed");
+    }
+    sendJson(res, 200, mePayload(deps, req, me, requested));
+    return;
+  }
+
   if (method === "POST" && pathname === "/api/me/display") {
     if (typeof body.standalone !== "boolean") throw new HttpError(400, "standalone is required");
     recordDisplay(deps.db, me.id, body.standalone, deps.now());
@@ -676,7 +700,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
 
   if (method === "GET" && pathname === "/api/socials") {
     const circle = requireCircle(deps, me.id, requested);
-    const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id));
+    const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id, deps.now()));
     sendJson(res, 200, { socials });
     return;
   }
@@ -748,7 +772,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const now = deps.now();
     const today = isoDate(now, deps.config.tz);
     const plans = listVisiblePlans(deps.db, circle.id, today, addDays(today, PLAN_DAYS_AHEAD)).map((row) =>
-      planPayload(deps.db, row, today, me.id),
+      planPayload(deps.db, row, today, me.id, deps.now()),
     );
     sendJson(res, 200, { plans });
     return;
@@ -975,7 +999,7 @@ async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
-  return socialPayload(deps.db, fresh, user.id);
+  return socialPayload(deps.db, fresh, user.id, deps.now());
 }
 
 function leaveSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -985,7 +1009,7 @@ function leaveSocial(deps: AppDeps, user: UserRow, rawId: string, requested: str
   if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "that social has ended");
   removeSocialJoin(deps.db, social.id, user.id);
-  return socialPayload(deps.db, social, user.id);
+  return socialPayload(deps.db, social, user.id, deps.now());
 }
 
 function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -996,7 +1020,7 @@ function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested: strin
   removePlanJoin(deps.db, plan.id, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  return planPayload(deps.db, plan, today, user.id);
+  return planPayload(deps.db, plan, today, user.id, deps.now());
 }
 
 function createCircle(deps: AppDeps, userId: string, name: string, now: number): CircleRow {
@@ -1089,6 +1113,7 @@ function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRow, requ
       name: user.name,
       color: colorHex(user.id, row?.color),
       avatarRev: row?.avatar_rev || null,
+      status: ownStatus(deps.db, user.id, deps.now()),
       buzzToken: user.buzz_token,
       whatsNewSeen: user.whats_new_seen ?? null,
       calendarConnected: isConnected(deps.db, user.id),
@@ -1313,7 +1338,7 @@ async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Rec
   }
   const fresh = getSocial(deps.db, social.id);
   if (!fresh) throw new HttpError(500, "social missing");
-  return socialPayload(deps.db, fresh, user.id);
+  return socialPayload(deps.db, fresh, user.id, deps.now());
 }
 
 async function endPlan(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null): Promise<void> {
@@ -1389,7 +1414,7 @@ async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Recor
   const fresh = getPlan(deps.db, plan.id);
   if (!fresh) throw new HttpError(500, "plan missing");
   if (wantedCircles) await linkAdded(deps, user, fresh, kept, wantedCircles, now, today);
-  return planPayload(deps.db, fresh, today, user.id);
+  return planPayload(deps.db, fresh, today, user.id, deps.now());
 }
 
 /** circleIds is the full set. Creator only, their own circles only. The home circle always stays. */
@@ -1443,13 +1468,14 @@ type PastEvent = {
   at: number;
   time: string;
   place: string;
-  host: { id: string; name: string; color: string; avatarRev: number | null };
-  people: Array<{ id: string; name: string; color: string; avatarRev: number | null; arriveAt: number | null }>;
+  host: { id: string; name: string; color: string; avatarRev: number | null; status: PersonStatus | null };
+  people: Array<{ id: string; name: string; color: string; avatarRev: number | null; status: PersonStatus | null; arriveAt: number | null }>;
 };
 
 function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
+  const statuses = visibleStatuses(deps.db, viewerId, now);
   const events: PastEvent[] = [];
   for (const social of listPastSocials(deps.db, circleId, now)) {
     if (getSocialReply(deps.db, social.id, viewerId)?.blocked) continue;
@@ -1462,10 +1488,10 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: clockLabel(at, deps.config.tz),
       place: social.place ?? "",
-      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
+      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null },
       people: listSocialJoins(deps.db, social.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, arriveAt: join.arrive_at })),
     });
   }
   for (const plan of listPastPlans(deps.db, circleId, today)) {
@@ -1480,10 +1506,10 @@ function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: plan.at_time ?? "",
       place: plan.place ?? "",
-      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null },
+      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null, status: statuses.get(plan.creator_id) ?? null },
       people: listPlanJoins(deps.db, plan.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, arriveAt: join.arrive_at })),
     });
   }
   events.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at || b.id.localeCompare(a.id));
@@ -1509,6 +1535,7 @@ function pastDayLabel(day: string, today: string): string {
 function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleRow, viewerId: string | null = null) {
   const members = listMembers(deps.db, circle.id);
   const reach = reachForCircle(deps.db, circle.id);
+  const statuses = visibleStatuses(deps.db, viewerId, deps.now());
   const now = deps.now();
   // Busy or free only, never a title. Only people who shared their calendar with this circle.
   const availability = viewerId ? circleAvailability(deps.db, circle.id, viewerId, now, now) : new Map();
@@ -1523,6 +1550,7 @@ function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: CircleR
       name: member.name,
       color: colorHex(member.id, member.color),
       avatarRev: member.avatar_rev || null,
+      status: statuses.get(member.id) ?? null,
       admin: Boolean(member.is_admin),
       reach: reach.get(member.id) ?? "off",
       availability: member.id === viewerId ? null : availability.get(member.id) ?? null,
@@ -1605,7 +1633,8 @@ function removedByName(reply: { blocked: number; removed_by: string | null } | u
   return reply.removed_by?.trim() || "Someone";
 }
 
-export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: string | null = null) {
+export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: string | null = null, now: number = Date.now()) {
+  const statuses = visibleStatuses(db, viewerId, now);
   return {
     id: social.id,
     note: social.note,
@@ -1616,23 +1645,25 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     location: pointPayload(social.lat, social.lng),
     circleId: social.circle_id,
     circleName: getCircleById(db, social.circle_id)?.name ?? "",
-    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null },
+    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
       name: join.name,
       color: colorHex(join.id, join.color),
       avatarRev: join.avatar_rev || null,
+      status: statuses.get(join.id) ?? null,
       joinedAt: join.joined_at,
       reply: join.reply ?? "join",
       etaMin: join.eta_min ?? null,
       arriveAt: join.arrive_at ?? null,
     })),
-    ...pushField(db, social.circle_id, "social", social.id, social.creator_id, viewerId),
+    ...withStatuses(pushField(db, social.circle_id, "social", social.id, social.creator_id, viewerId), statuses),
   };
 }
 
-export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, viewerId: string | null = null) {
+export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, viewerId: string | null = null, now: number = Date.now()) {
+  const statuses = visibleStatuses(db, viewerId, now);
   return {
     id: plan.id,
     note: plan.note,
@@ -1650,7 +1681,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
     remindedAt: plan.reminded_at ?? null,
     remindAgainAt: remindAgainAt(db, plan, viewerId),
-    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null },
+    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null, status: statuses.get(plan.creator_id) ?? null },
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
@@ -1659,12 +1690,13 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
       name: join.name,
       color: colorHex(join.id, join.color),
       avatarRev: join.avatar_rev || null,
+      status: statuses.get(join.id) ?? null,
       joinedAt: join.joined_at,
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,
     })),
     // Every linked circle, so people reached by "Share with other circles" show too.
-    ...optionalPush(pushSummaryForPlan(db, plan.id, plan.creator_id, viewerId)),
+    ...withStatuses(optionalPush(pushSummaryForPlan(db, plan.id, plan.creator_id, viewerId)), statuses),
   };
 }
 
@@ -1681,6 +1713,13 @@ function pushField(
 
 function optionalPush(push: PushSummary | undefined): { push: PushSummary } | Record<string, never> {
   return push ? { push } : {};
+}
+
+/** The host's push roster shows who is away, as userStatus (status there is the delivery state). Delivery is unchanged. */
+function withStatuses<T extends { push?: PushSummary }>(field: T, statuses: Map<string, PersonStatus>): T {
+  if (!field.push) return field;
+  const people = field.push.people.map((person) => ({ ...person, userStatus: statuses.get(person.id) ?? null }));
+  return { ...field, push: { ...field.push, people } };
 }
 
 async function handleAdmin(
