@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v83";
+const APP_VERSION = "hangry-v84";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -262,8 +262,12 @@ setInterval(() => {
   }
 }, 3000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refresh().catch(() => {});
+  if (document.hidden) return;
+  refresh().catch(() => {});
+  void checkGoogleReturn();
 });
+window.addEventListener("focus", () => void checkGoogleReturn());
+window.addEventListener("pageshow", () => void checkGoogleReturn());
 /* iOS Safari only applies :active press styles once the page listens for touches. Passive, so scrolling is untouched. */
 document.addEventListener("touchstart", () => {}, { passive: true });
 
@@ -1009,7 +1013,9 @@ function view() {
     if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
     return root;
   }
-  if (!state.token || !state.me) {
+  if (calendarLanding && !state.token) {
+    root.append(calendarReturnScreen());
+  } else if (!state.token || !state.me) {
     root.append(welcome());
   } else if (!state.me.circle) {
     root.append(setup());
@@ -1032,6 +1038,18 @@ function view() {
     root.append(el("div", { class: "toast", role: "status", text: state.error }));
   }
   return root;
+}
+
+/** Google's page can open in a browser tab that has no session. Say how it went and point back to the app. */
+function calendarReturnScreen() {
+  return el("section", { class: "gate" }, [
+    el("div", { class: "hero" }, [
+      el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
+      el("h1", { class: "wordmark", text: "Hangry" }),
+      el("p", { class: "lede", text: calendarLanding === "google" ? "Google Calendar connected." : "Could not connect Google Calendar." }),
+      el("p", { class: "lede", text: "Go back to Hangry." }),
+    ]),
+  ]);
 }
 
 function welcome() {
@@ -3365,6 +3383,33 @@ function landCalendar() {
   state.tab = "you";
   state.calendarSync = null;
   state.error = calendarLanding === "google" ? "Google Calendar connected" : "Could not connect Google Calendar. Try again.";
+}
+
+/** The app stayed in the background while Google ran in another tab. On return, notice a new Google connection. */
+let googleReturnChecking = false;
+async function checkGoogleReturn() {
+  const before = state.calendarSync;
+  if (googleReturnChecking || document.hidden || !state.token || !state.me?.circle) return;
+  if (!before?.loaded || before.source === "google" || (before.busy && !before.googleBusy)) return;
+  googleReturnChecking = true;
+  try {
+    const data = await api("/api/me/calendar-sync", { circle: null });
+    if (data?.source !== "google" || state.calendarSync !== before || !state.token) return;
+    applyCalendarSync(data);
+    if (state.chat) {
+      state.chat = null;
+      state.chatThread = null;
+    }
+    state.tab = "you";
+    state.sheet = null;
+    state.error = "Google Calendar connected";
+    render();
+    scheduleErrorClear();
+  } catch {
+    // Offline or signed out: the next return will look again.
+  } finally {
+    googleReturnChecking = false;
+  }
 }
 
 async function onRefreshCalendar() {
