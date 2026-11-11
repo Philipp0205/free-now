@@ -438,6 +438,8 @@ export function openDb(dbPath: string): DatabaseSync {
   db.prepare("UPDATE social_joins SET reply = 'coming' WHERE reply IN ('join', 'in')").run();
   // After migrateMembershipKey: calendar_share points at the (user_id, circle_id) key.
   db.exec(CALENDAR_SYNC_SCHEMA);
+  ensureColumn(db, "calendar_sync", "source", "source TEXT NOT NULL DEFAULT 'ics'");
+  ensureColumn(db, "calendar_sync", "token_enc", "token_enc TEXT");
   return db;
 }
 
@@ -446,6 +448,8 @@ export function openDb(dbPath: string): DatabaseSync {
  * calendar_sync holds the encrypted private link and sync state, calendar_busy only merged busy
  * intervals, calendar_event the owner-only titles (encrypted) for the "I'm in" check, and
  * calendar_share the circles the owner opted into. A share row goes when the membership goes.
+ * source is 'ics' (url_enc holds the link) or 'google' (token_enc holds the encrypted refresh token,
+ * url_enc is empty). google_oauth_state is the short-lived state and PKCE verifier of a connect.
  */
 const CALENDAR_SYNC_SCHEMA = `
 CREATE TABLE IF NOT EXISTS app_meta (
@@ -457,6 +461,8 @@ CREATE TABLE IF NOT EXISTS calendar_sync (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   url_enc TEXT NOT NULL,
   host TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'ics',
+  token_enc TEXT,
   rev TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   last_sync_at INTEGER,
@@ -492,6 +498,15 @@ CREATE TABLE IF NOT EXISTS calendar_share (
   FOREIGN KEY (user_id, circle_id) REFERENCES memberships(user_id, circle_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_share_circle ON calendar_share(circle_id);
+
+CREATE TABLE IF NOT EXISTS google_oauth_state (
+  state TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_verifier TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_google_oauth_state_user ON google_oauth_state(user_id);
 `;
 
 /**

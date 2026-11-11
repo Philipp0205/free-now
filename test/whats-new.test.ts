@@ -43,9 +43,9 @@ test("the shipped changelog is newest first and every entry is well-formed", () 
   assert.equal(normalizeEntries(RAW).length, RAW.length);
 });
 
-test("the newest entry is busy until and weekly hours, in plain words", () => {
-  const top = RAW[0];
-  assert.equal(top.id, "2026-11-11-busy-until");
+test("the busy until and weekly hours entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-busy-until")!;
+  assert.ok(top, "busy until entry");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Busy until a time, or every week");
   assert.equal(top.bullets.length, 4);
@@ -64,6 +64,23 @@ test("the card Share entry is in the changelog, in plain words without an em das
   assert.ok(share, "card Share entry");
   assert.equal(share.title, "Share plans anywhere");
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
+});
+
+test("the newest entry is Connect Google Calendar, in plain words", () => {
+  const top = RAW[0];
+  assert.equal(top.id, "2026-11-11-google-freebusy");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Connect Google Calendar");
+  assert.equal(top.bullets.length, 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /busy or free/);
+  assert.match(text, /never event names/);
+  assert.match(text, /how often it checks/);
+  assert.match(text, /myaccount\.google\.com\/permissions/);
+  assert.match(text, /private link still works/);
+  assert.match(text, /only the times and your own titles/);
+  assert.doesNotMatch(text, /OAuth|PKCE|FreeBusy|scope|token/i, "no jargon");
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
 });
 
 test("the assistant tokens entry is kept, in plain words", () => {
@@ -401,7 +418,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v81");
+  assert.equal(cache?.[1], "hangry-v82");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
