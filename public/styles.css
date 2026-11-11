@@ -996,16 +996,229 @@ input[type="text"], input[type="url"], input[type="time"] {
 .chat-msg header time { flex: none; font-variant-numeric: tabular-nums; }
 .chat-msg p { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
 .chat-msg .text-btn { min-height: 44px; }
+/* @Name in the sender's chat colour; a mention of you gets a soft fill so it stands out. */
+.chat-msg p .mention { color: var(--person); font-weight: 600; }
+.chat-msg p .mention.me { background: color-mix(in srgb, var(--person) 24%, transparent); border-radius: 4px; padding: 0 3px; margin: 0 -1px; }
+/* React control: a quiet hint next to the time on desktop hover. Touch uses a long-press. */
+.chat-react-btn {
+  flex: none;
+  margin: -6px 0 -6px auto;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+}
+.chat-react-btn:focus-visible, .chat-react-btn[aria-expanded="true"] { opacity: 1; background: #1c1c1e; }
+@media (hover: hover) {
+  .chat-msg:hover .chat-react-btn { opacity: 1; }
+  .chat-react-btn:hover { background: #1c1c1e; color: var(--text); }
+}
+@media (hover: none) {
+  /* Touch: a long-press opens the bar, so the button stays out of the way and the hold never selects text. */
+  .chat-react-btn { display: none; }
+  .chat-msg { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}
+.react-bar {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 4px;
+  border-radius: 22px;
+  background: #1c1c1e;
+  border: 0.5px solid var(--hairline);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+.react-pick {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0;
+}
+.react-pick.mine { background: color-mix(in srgb, var(--me, #8e8e93) 30%, transparent); }
+@media (hover: hover) { .react-pick:hover { background: #2c2c2e; } }
+.chat-reacts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0; }
+.react-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 9px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: #1c1c1e;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.react-pill.mine {
+  border-color: color-mix(in srgb, var(--me, #8e8e93) 70%, transparent);
+  background: color-mix(in srgb, var(--me, #8e8e93) 22%, #1c1c1e);
+  color: var(--text);
+}
+.react-pill:disabled { opacity: 1; cursor: default; }
+.react-emoji { font-size: 15px; line-height: 1; }
+.react-who { color: var(--muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+/* Reply: same quiet control as the smile, and the bar gets a text Reply after the emoji. */
+.chat-reply-btn {
+  flex: none;
+  margin: -6px 0 -6px -6px;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+}
+.chat-reply-btn { align-self: center; }
+.chat-reply-btn .icon, .chat-reply-btn .icon svg { display: block; width: 16px; height: 16px; margin: auto; }
+.chat-reply-btn:focus-visible { opacity: 1; background: #1c1c1e; }
+@media (hover: hover) {
+  .chat-msg:hover .chat-reply-btn { opacity: 1; }
+  .chat-reply-btn:hover { background: #1c1c1e; color: var(--text); }
+}
+@media (hover: none) {
+  .chat-reply-btn { display: none; }
+  /* Sideways moves reach the swipe-to-reply; up and down still scroll the log. */
+  .chat-msg { touch-action: pan-y pinch-zoom; }
+}
+.react-reply {
+  flex: none;
+  height: 40px;
+  margin-left: 2px;
+  padding: 0 12px;
+  border: 0;
+  border-left: 0.5px solid var(--hairline);
+  border-radius: 0 20px 20px 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+}
+@media (hover: hover) { .react-reply:hover { background: #2c2c2e; } }
+@media (max-width: 340px) {
+  .react-pick { width: 34px; }
+  .react-reply { padding: 0 9px; }
+}
+/* The message a reply answers: one quiet line of who and what, not a second bubble. */
+.chat-quote {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  margin: 4px 0 0;
+  padding: 2px 0 2px 8px;
+  border: 0;
+  border-left: 2px solid var(--quote, var(--faint));
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: left;
+}
+.chat-msg .chat-quote strong { color: var(--quote, var(--muted)); font-size: 12px; font-weight: 600; }
+.chat-quote strong, .chat-quote span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-msg p.chat-quote.gone { display: block; font-style: italic; color: var(--faint); white-space: nowrap; }
+@media (hover: hover) { button.chat-quote:hover { color: var(--text); } }
+/* Shown after a tap on a quote: a soft wash that fades. */
+.chat-msg.flash { border-radius: 8px; background: color-mix(in srgb, var(--person, #8e8e93) 20%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--person, #8e8e93) 20%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .chat-msg.flash { animation: chat-flash 1.6s ease-out forwards; }
+}
+@keyframes chat-flash {
+  0%, 40% { background: color-mix(in srgb, var(--person, #8e8e93) 24%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--person, #8e8e93) 24%, transparent); }
+  100% { background: transparent; box-shadow: 0 0 0 6px transparent; }
+}
+/* Swipe right to reply: the message follows the finger a little. */
+.chat-msg.swiping { transform: translateX(var(--swipe, 0px)); }
+.chat-msg.swipe-ready { opacity: 0.8; }
+/* Above the input while replying: who and what, and an X that keeps the draft. */
+.reply-preview {
+  position: relative;
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 0 0 12px;
+  border-radius: 12px;
+  background: #1c1c1e;
+}
+.reply-preview::before { content: ""; position: absolute; top: 8px; bottom: 8px; left: 0; width: 3px; border-radius: 2px; background: var(--person, var(--faint)); }
+.reply-preview-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 6px 0; font-size: 13px; line-height: 1.3; }
+.reply-preview-copy strong { color: var(--person, var(--text)); font-size: 12px; font-weight: 600; }
+.reply-preview-copy strong, .reply-preview-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-preview-copy span { color: var(--muted); }
+.reply-cancel {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+}
+.reply-cancel .icon, .reply-cancel .icon svg { display: block; width: 18px; height: 18px; margin: auto; }
+@media (hover: hover) { .reply-cancel:hover { color: var(--text); } }
+/* @ autocomplete sits right above the composer, same width as the input. */
+.chat-compose { position: relative; }
+.mention-list {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(100% - 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: min(240px, 40dvh, calc(var(--vv-height, 100dvh) * 0.4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 14px;
+  background: #1c1c1e;
+  border: 0.5px solid var(--hairline);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.mention-option span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-option.active { background: #2c2c2e; }
+@media (hover: hover) { .mention-option:hover { background: #2c2c2e; } }
+.mention-dot { flex: none; width: 10px; height: 10px; border-radius: 5px; background: var(--person); }
 .chat-closed { margin: 0; padding: 16px; text-align: center; color: var(--muted); }
 .chat-compose {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
   background: #000;
 }
 /* input.sheet-control is 52px elsewhere; here input and Send match at 48px. */
-.chat-compose input.sheet-control { flex: 1; min-width: 0; height: 48px; min-height: 48px; }
+.chat-compose input.sheet-control { flex: 1 1 0; min-width: 0; height: 48px; min-height: 48px; }
 .chat-compose .chat-send { flex: none; width: auto; min-width: 64px; height: 48px; min-height: 48px; padding: 0 16px; }
 .chat-entry { min-height: 44px; min-width: 44px; padding: 0 4px; }
 .chat-chip {

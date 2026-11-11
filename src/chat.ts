@@ -9,6 +9,7 @@ import {
   listMembers,
   listPlanAudience,
   planInCircle,
+  type MemberRow,
 } from "./db.js";
 import { colorHex } from "./chat-color.js";
 import { notifyUsers } from "./notify.js";
@@ -51,9 +52,14 @@ type MessageRow = {
   created_at: number;
   name: string;
   color: number | null;
+  reply_to: string | null;
 };
 
 const TEXT_MAX = 1000;
+/** Quick reactions, in the order the bar and the pills show them. */
+export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"] as const;
+const REACTION_NAMES_MAX = 10;
+const MENTION_BODY_MAX = 140;
 export const CHAT_BATCH_MS = 15_000;
 export const CHAT_GAP_MS = 60_000;
 
@@ -97,12 +103,18 @@ export async function routeChat(
   }
   if (pathname === "/api/circles/chat") {
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "", requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo) } };
   }
   const mute = /^\/api\/chats\/([^/]+)\/mute$/.exec(pathname);
   if (mute && method === "POST") {
     setMuted(deps, user.id, decodeURIComponent(mute[1]), body.muted !== false);
     return { status: 204, body: null };
+  }
+  const react = /^\/api\/messages\/([^/]+)\/reactions$/.exec(pathname);
+  if (react && method === "POST") {
+    const messageId = decodeURIComponent(react[1]);
+    const on = typeof body.on === "boolean" ? body.on : null;
+    return { status: 200, body: { messageId, reactions: toggleReaction(deps, user.id, messageId, body.emoji, on) } };
   }
   const message = /^\/api\/messages\/([^/]+)$/.exec(pathname);
   if (message && method === "DELETE") {
@@ -113,13 +125,13 @@ export async function routeChat(
   if (social) {
     const id = decodeURIComponent(social[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo) } };
   }
   const plan = /^\/api\/plans\/([^/]+)\/chat$/.exec(pathname);
   if (plan) {
     const id = decodeURIComponent(plan[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo) } };
   }
   return null;
 }
@@ -194,17 +206,177 @@ export async function postThread(
   refId: string,
   raw: unknown,
   requestedCircle: string | null = null,
+  replyRaw: unknown = null,
 ): Promise<ReturnType<typeof threadPayload>> {
   const text = cleanText(raw);
   const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
+  const parent = replyTarget(deps.db, access.chat.id, replyRaw);
   const now = deps.now();
   const id = crypto.randomUUID();
   deps.db.prepare(
-    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at) VALUES (?, ?, ?, ?, 'text', ?)",
-  ).run(id, access.chat.id, userId, text, now);
+    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, reply_to) VALUES (?, ?, ?, ?, 'text', ?, ?)",
+  ).run(id, access.chat.id, userId, text, now, parent?.id ?? null);
   markRead(deps.db, access.chat.id, userId, now);
-  scheduleChatNotice(deps, access.chat.id, userId, userName, text);
+  const pinged = await notifyMentions(deps, access.chat, id, userId, userName, text);
+  if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, text, parent.user_id, pinged)) pinged.add(author);
+  scheduleChatNotice(deps, access.chat.id, userId, userName, text, pinged);
   return threadPayload(deps, access, userId);
+}
+
+/** The message a new one replies to: a live text message in the same chat. Nothing set is no reply. */
+function replyTarget(db: DatabaseSync, chatId: string, raw: unknown): { id: string; user_id: string } | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") throw new ChatError(400, "You can't reply to that.");
+  const row = one<{ id: string; chat_id: string; user_id: string; kind: string; deleted_at: number | null }>(
+    db,
+    "SELECT id, chat_id, user_id, kind, deleted_at FROM messages WHERE id = ?",
+    raw,
+  );
+  if (!row || row.chat_id !== chatId || row.deleted_at != null) throw new ChatError(404, "message not found");
+  if (row.kind !== "text") throw new ChatError(400, "You can't reply to that.");
+  return { id: row.id, user_id: row.user_id };
+}
+
+/** Where `@` starts a mention: the text start, or after anything that is not a letter, digit or underscore. */
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+/**
+ * Every `@Name` in the text that names one of `names`, case-insensitive. Longest name wins,
+ * so "@Alexandra" is never read as "@Alex". Same rule as findMentions in public/mentions.js.
+ */
+export function findMentions(text: string, names: string[]): Array<{ start: number; end: number; name: string }> {
+  const sorted = [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const lower = text.toLowerCase();
+  const found: Array<{ start: number; end: number; name: string }> = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== "@" || (i > 0 && WORD_CHAR.test(text[i - 1]))) {
+      i += 1;
+      continue;
+    }
+    const hit = sorted.find((name) => {
+      if (!lower.startsWith(name.toLowerCase(), i + 1)) return false;
+      const after = text[i + 1 + name.length];
+      return after === undefined || !WORD_CHAR.test(after);
+    });
+    if (!hit) {
+      i += 1;
+      continue;
+    }
+    const end = i + 1 + hit.length;
+    found.push({ start: i, end, name: hit });
+    i = end;
+  }
+  return found;
+}
+
+/** Pings each audience member the text names, right away. Returns who was pinged, so the batched notice skips them. */
+async function notifyMentions(deps: ChatDeps, chat: ChatRow, messageId: string, senderId: string, senderName: string, text: string): Promise<Set<string>> {
+  const audience = chatAudience(deps.db, chat);
+  const named = new Set(findMentions(text, audience.map((member) => member.name)).map((hit) => hit.name.toLowerCase()));
+  const recipients = audience
+    .filter((member) => named.has(member.name.trim().toLowerCase()) && member.id !== senderId && !isMuted(deps.db, chat.id, member.id))
+    .map((member) => member.id);
+  await pingNow(deps, chat, recipients, `${senderName} mentioned you: ${text}`, `chat-mention:${messageId}`);
+  return new Set(recipients);
+}
+
+/** Pings the author of the message replied to, right away, unless a mention already did. Returns who was pinged. */
+async function notifyReply(
+  deps: ChatDeps,
+  chat: ChatRow,
+  messageId: string,
+  senderId: string,
+  senderName: string,
+  text: string,
+  authorId: string,
+  already: Set<string>,
+): Promise<string[]> {
+  if (authorId === senderId || already.has(authorId) || isMuted(deps.db, chat.id, authorId)) return [];
+  if (!chatAudience(deps.db, chat).some((member) => member.id === authorId)) return [];
+  await pingNow(deps, chat, [authorId], `${senderName} replied to you: ${text}`, `chat-reply:${messageId}`);
+  return [authorId];
+}
+
+/** One immediate chat push plus alert per person, deep-linked into the chat. Never throws. */
+async function pingNow(deps: ChatDeps, chat: ChatRow, recipients: string[], text: string, tag: string): Promise<void> {
+  if (recipients.length === 0) return;
+  const title = chatTitle(chat);
+  const ref = chatRef(chat);
+  const body = text.slice(0, MENTION_BODY_MAX);
+  try {
+    for (const [circleId, userIds] of byReaderCircle(deps.db, chat, recipients)) {
+      const circle = one<{ name: string }>(deps.db, "SELECT name FROM circles WHERE id = ?", circleId);
+      await notifyUsers(deps.db, deps.push, deps.now(), userIds.map((userId) => ({
+        userId,
+        title,
+        body,
+        kind: "chat",
+        refId: ref,
+        tag,
+        url: `/?chat=${encodeURIComponent(ref)}`,
+      })), circle ? { id: circleId, name: circle.name } : null);
+    }
+  } catch (error) {
+    // The message is already saved. A failed ping must not fail the post.
+    console.error("chat ping failed", error instanceof Error ? error.message : error);
+  }
+}
+
+/** Adds or removes your emoji on a message. `on` null flips it; true or false sets it, so a repeat is a no-op. */
+export function toggleReaction(deps: ChatDeps, userId: string, messageId: string, raw: unknown, on: boolean | null = null) {
+  const emoji = typeof raw === "string" ? raw : "";
+  if (!(REACTIONS as readonly string[]).includes(emoji)) throw new ChatError(400, "Pick one of the quick reactions.");
+  const row = one<{ id: string; chat_id: string; kind: string; deleted_at: number | null }>(
+    deps.db,
+    "SELECT id, chat_id, kind, deleted_at FROM messages WHERE id = ?",
+    messageId,
+  );
+  if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
+  const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
+  if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
+  if (row.kind !== "text") throw new ChatError(400, "You can't react to that.");
+  if (!chatAudience(deps.db, chat).some((member) => member.id === userId)) throw new ChatError(403, "You can't react in this chat.");
+  const gone = on === true
+    ? 0
+    : Number(deps.db.prepare("DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?").run(row.id, userId, emoji).changes);
+  if (on === true || (on === null && gone === 0)) {
+    deps.db.prepare(
+      "INSERT INTO message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    ).run(row.id, userId, emoji, deps.now());
+  }
+  return reactionsFor(deps.db, [row.id], userId).get(row.id) ?? [];
+}
+
+type ReactionSummary = { emoji: string; count: number; mine: boolean; names: string[] };
+
+/** Reactions per message: allowlist order, names oldest first and capped. */
+function reactionsFor(db: DatabaseSync, messageIds: string[], userId: string): Map<string, ReactionSummary[]> {
+  const out = new Map<string, ReactionSummary[]>();
+  if (messageIds.length === 0) return out;
+  const rows = all<{ message_id: string; user_id: string; emoji: string; name: string }>(
+    db,
+    `SELECT r.message_id, r.user_id, r.emoji, u.name FROM message_reactions r JOIN users u ON u.id = r.user_id
+     WHERE r.message_id IN (${messageIds.map(() => "?").join(", ")})
+     ORDER BY r.created_at ASC, u.name ASC`,
+    ...messageIds,
+  );
+  const order = REACTIONS as readonly string[];
+  for (const row of rows) {
+    if (!order.includes(row.emoji)) continue;
+    const list = out.get(row.message_id) ?? [];
+    let pill = list.find((item) => item.emoji === row.emoji);
+    if (!pill) {
+      pill = { emoji: row.emoji, count: 0, mine: false, names: [] };
+      list.push(pill);
+    }
+    pill.count += 1;
+    if (row.user_id === userId) pill.mine = true;
+    if (pill.names.length < REACTION_NAMES_MAX) pill.names.push(row.name);
+    out.set(row.message_id, list);
+  }
+  for (const list of out.values()) list.sort((a, b) => order.indexOf(a.emoji) - order.indexOf(b.emoji));
+  return out;
 }
 
 export function deleteMessage(deps: ChatDeps, userId: string, messageId: string): void {
@@ -251,7 +423,8 @@ export function closeEventChat(db: DatabaseSync, circleId: string, kind: "social
   ).run(now, circleId, kind, refId);
 }
 
-export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderId: string, senderName: string, preview: string): void {
+/** `skip`: people already pinged for this message (a mention), so they do not hear it twice. */
+export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderId: string, senderName: string, preview: string, skip: Set<string> = new Set()): void {
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
   if (!chat) return;
   const body = `${senderName}: ${preview}`.slice(0, 140);
@@ -263,6 +436,7 @@ export function scheduleChatNotice(deps: ChatDeps, chatId: string, senderId: str
   }
   job.deps = deps;
   for (const member of noticeRecipients(deps.db, chat, senderId)) {
+    if (skip.has(member.id)) continue;
     const slot = job.slots.get(member.id);
     if (!slot) {
       const created: Slot = {
@@ -343,18 +517,10 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[],
   const allowed = new Set(chatAudience(deps.db, chat).map((member) => member.id));
   const recipients = userIds.filter((id) => allowed.has(id) && !isMuted(deps.db, chat.id, id));
   if (recipients.length === 0) return;
-  const title = chat.kind === "circle" ? (chat.title || "Circle chat") : (chat.title || "Chat");
-  const ref = chat.kind === "circle" ? "circle" : `${chat.kind}:${chat.ref_id}`;
+  const title = chatTitle(chat);
+  const ref = chatRef(chat);
   deps.db.prepare("UPDATE chats SET last_push_at = ? WHERE id = ?").run(deps.now(), chat.id);
-  // A shared plan's chat opens in a circle the reader is in: home if they can, else the first linked one.
-  const byCircle = new Map<string, string[]>();
-  for (const userId of recipients) {
-    const circleId = chat.kind === "plan" ? (readerCircle(deps.db, chat, userId) ?? chat.circle_id) : chat.circle_id;
-    const list = byCircle.get(circleId);
-    if (list) list.push(userId);
-    else byCircle.set(circleId, [userId]);
-  }
-  for (const [circleId, userIds] of byCircle) {
+  for (const [circleId, userIds] of byReaderCircle(deps.db, chat, recipients)) {
     const named = one<{ name: string }>(deps.db, "SELECT name FROM circles WHERE id = ?", circleId);
     await notifyUsers(deps.db, deps.push, deps.now(), userIds.map((userId) => ({
       userId,
@@ -368,6 +534,26 @@ async function deliverChatPush(deps: ChatDeps, chat: ChatRow, userIds: string[],
       skipAlert: chat.kind === "circle",
     })), named ? { id: circleId, name: named.name } : null);
   }
+}
+
+function chatTitle(chat: ChatRow): string {
+  return chat.kind === "circle" ? (chat.title || "Circle chat") : (chat.title || "Chat");
+}
+
+function chatRef(chat: ChatRow): string {
+  return chat.kind === "circle" ? "circle" : `${chat.kind}:${chat.ref_id}`;
+}
+
+/** A shared plan's chat opens in a circle the reader is in: home if they can, else the first linked one. */
+function byReaderCircle(db: DatabaseSync, chat: ChatRow, userIds: string[]): Map<string, string[]> {
+  const byCircle = new Map<string, string[]>();
+  for (const userId of userIds) {
+    const circleId = chat.kind === "plan" ? (readerCircle(db, chat, userId) ?? chat.circle_id) : chat.circle_id;
+    const list = byCircle.get(circleId);
+    if (list) list.push(userId);
+    else byCircle.set(circleId, [userId]);
+  }
+  return byCircle;
 }
 
 function readerCircle(db: DatabaseSync, chat: Pick<ChatRow, "ref_id" | "circle_id">, userId: string): string | null {
@@ -390,7 +576,8 @@ function recipientStillEligible(db: DatabaseSync, chat: ChatRow, userId: string)
   return chatAudience(db, chat).some((member) => member.id === userId);
 }
 
-function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
+/** Who may read and write a chat: the circle, or for an event the host, people coming, and earlier writers. Never blocked people. */
+export function chatAudience(db: DatabaseSync, chat: ChatRow): MemberRow[] {
   const linked = chat.kind === "plan" ? listPlanAudience(db, chat.ref_id) : [];
   const members = linked.length ? linked : listMembers(db, chat.circle_id);
   if (chat.kind === "circle") return members;
@@ -435,7 +622,7 @@ function chatAudience(db: DatabaseSync, chat: ChatRow): Array<{ id: string }> {
 function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   const messages = all<MessageRow>(
     deps.db,
-    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color
+    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color, m.reply_to
      FROM messages m JOIN users u ON u.id = m.user_id
      WHERE m.chat_id = ? AND m.deleted_at IS NULL
      ORDER BY m.created_at ASC
@@ -444,6 +631,8 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   );
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
+  const reactions = reactionsFor(deps.db, messages.filter((message) => message.kind === "text").map((message) => message.id), userId);
+  const quotes = quotesFor(deps.db, access.chat.id, messages, userId);
   return {
     id: access.chat.id,
     kind: access.chat.kind,
@@ -461,8 +650,49 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       mine: message.user_id === userId,
       color: message.kind === "text" ? colorHex(message.user_id, message.color) : null,
       canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
+      reactions: reactions.get(message.id) ?? [],
+      replyTo: message.reply_to ? quotes.get(message.reply_to) ?? goneQuote(message.reply_to) : null,
+    })),
+    participants: chatAudience(deps.db, access.chat).map((member) => ({
+      id: member.id,
+      name: member.name,
+      color: colorHex(member.id, member.color),
     })),
   };
+}
+
+type Quote = { id: string; name: string; text: string; mine: boolean; deleted: boolean; color: string | null };
+
+const QUOTE_MAX = 120;
+
+function goneQuote(id: string): Quote {
+  return { id, name: "", text: "", mine: false, deleted: true, color: null };
+}
+
+/** The one message each reply quotes, even if it was deleted since. A deleted one never carries its text. */
+function quotesFor(db: DatabaseSync, chatId: string, messages: MessageRow[], userId: string): Map<string, Quote> {
+  const out = new Map<string, Quote>();
+  const ids = [...new Set(messages.map((message) => message.reply_to).filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return out;
+  const rows = all<{ id: string; user_id: string; body: string; deleted_at: number | null; name: string | null; color: number | null }>(
+    db,
+    `SELECT m.id, m.user_id, m.body, m.deleted_at, u.name, u.color FROM messages m LEFT JOIN users u ON u.id = m.user_id
+     WHERE m.chat_id = ? AND m.id IN (${ids.map(() => "?").join(", ")})`,
+    chatId,
+    ...ids,
+  );
+  for (const row of rows) {
+    const deleted = row.deleted_at != null;
+    out.set(row.id, {
+      id: row.id,
+      name: row.name || "",
+      text: deleted ? "" : row.body.replace(/\s+/g, " ").trim().slice(0, QUOTE_MAX),
+      mine: row.user_id === userId,
+      deleted,
+      color: deleted ? null : colorHex(row.user_id, row.color),
+    });
+  }
+  return out;
 }
 
 type Access = { chat: ChatRow; title: string; closed: boolean; blocked: boolean };
