@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AGENT_TOKEN_LIMIT, MAX_AGENT_TOKENS } from "../src/agent-tokens.js";
+import { isAgentAllowed, listOperations } from "../src/openapi.js";
 import { api, withApp, type AppCtx } from "./http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 type Issued = { id: string; name: string; token: string; tokenPrefix: string; createdAt: number };
 
-const FORBIDDEN = "agent tokens cannot do that";
+const FORBIDDEN = "agent tokens can only use routes in /api/openapi.json";
 
 async function signUp(ctx: AppCtx, name: string, code?: string): Promise<Person> {
   const { json } = await api(ctx, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
@@ -326,5 +327,72 @@ test("wrong or malformed tokens are 401", async () => {
     // The real ones still work, and an agent token is not a session token.
     assert.equal(await statusOf(ctx, real.token), 200);
     assert.equal(await statusOf(ctx, alex.token), 200);
+  });
+});
+
+const UUID = "123e4567-e89b-42d3-a456-426614174000";
+
+test("the agent allow-list is exactly the documented operations", () => {
+  for (const { method, path } of listOperations()) {
+    const concrete = path.replace(/\{[^}]+\}/g, UUID);
+    assert.equal(isAgentAllowed(method, concrete), true, `${method} ${path}`);
+  }
+  const notDocumented: Array<[string, string]> = [
+    ["GET", "/api/chats"],
+    ["GET", "/api/definitely-not-a-route"],
+    ["POST", "/api/circles/chat"],
+    ["POST", "/api/circles/leave"],
+    ["PATCH", "/api/me"],
+    ["GET", "/api/me/calendar-sync"],
+    ["GET", "/api/me/agent-tokens"],
+    ["POST", "/api/auth/logout"],
+    ["GET", "/api/admin/feedback"],
+    // Documented path, undocumented method.
+    ["DELETE", "/api/socials"],
+    ["POST", "/api/me"],
+    // Exact paths do not match longer or shorter ones, and {id} is one segment.
+    ["GET", "/api/me/extra"],
+    ["GET", "/api/me/"],
+    ["GET", "/api"],
+    ["GET", "/x/api/me"],
+    ["POST", `/api/socials/${UUID}/join/extra`],
+    ["POST", `/api/socials/${UUID}/x/join`],
+    ["POST", "/api/socials//join"],
+  ];
+  for (const [method, path] of notDocumented) {
+    assert.equal(isAgentAllowed(method, path), false, `${method} ${path}`);
+  }
+});
+
+test("an agent token is refused on undocumented routes that the session can still use", async () => {
+  await withApp(async (ctx) => {
+    const alex = await member(ctx, "Alex");
+    const { token } = await issue(ctx, alex, "bot");
+
+    // Documented, so still fine.
+    assert.equal(await statusOf(ctx, token, "GET", "/api/health"), 200);
+    assert.equal(await statusOf(ctx, token), 200);
+
+    const calls: Array<[string, string, unknown?]> = [
+      ["POST", "/api/circles/chat", { text: "hi" }],
+      ["GET", "/api/me/calendar-sync"],
+      ["POST", "/api/me/calendar-sync", {}],
+      ["PUT", "/api/me/calendar-sync", {}],
+      ["POST", "/api/circles/leave", {}],
+      ["PATCH", "/api/me", { name: "Mallory" }],
+      ["GET", "/api/definitely-not-a-route"],
+    ];
+    for (const [method, path, body] of calls) {
+      const res = await api(ctx, method, path, { token, body });
+      assert.equal(res.status, 403, `${method} ${path}`);
+      assert.deepEqual(res.json, { error: FORBIDDEN }, `${method} ${path}`);
+    }
+
+    // The session is unchanged: nothing above took effect, and each route still works.
+    await api(ctx, "POST", "/api/circles/chat", { token: alex.token, body: { text: "hi" }, status: 201 });
+    await api(ctx, "GET", "/api/me/calendar-sync", { token: alex.token, status: 200 });
+    const renamed = await api(ctx, "PATCH", "/api/me", { token: alex.token, body: { name: "Alexa" }, status: 200 });
+    assert.equal(renamed.json.user.name, "Alexa");
+    await api(ctx, "POST", "/api/circles/leave", { token: alex.token, body: {}, status: 200 });
   });
 });

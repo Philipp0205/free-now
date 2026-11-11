@@ -16,7 +16,8 @@ The person creates the token on the You tab in the app. It starts with hng_,
 is shown once, and they can revoke it there at any time.
 
 Everything you do appears to their friends as that person. Ask before you post.
-Agent tokens cannot manage tokens or the account itself.
+Agent tokens can only call the routes listed in /api/openapi.json. Any other route
+is refused with 403.
 
 ## Circles
 

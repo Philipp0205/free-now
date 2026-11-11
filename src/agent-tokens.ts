@@ -76,15 +76,3 @@ export function listAgentTokensFor(db: DatabaseSync, userId: string) {
 export function revokeAgentToken(db: DatabaseSync, userId: string, id: string): boolean {
   return deleteAgentToken(db, userId, id);
 }
-
-/** Routes an agent token may never call, even though the person behind it can. */
-export function isAgentForbidden(method: string, pathname: string): boolean {
-  return (
-    pathname.startsWith("/api/admin/")
-    || pathname === "/api/me/agent-tokens"
-    || pathname.startsWith("/api/me/agent-tokens/")
-    || (method === "POST" && pathname === "/api/auth/logout")
-    || (method === "POST" && pathname === "/api/me/buzz-token")
-    || (pathname === "/api/me/avatar" && (method === "PUT" || method === "DELETE"))
-  );
-}

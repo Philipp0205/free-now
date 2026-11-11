@@ -109,7 +109,6 @@ import {
   AGENT_TOKEN_PREFIX,
   MAX_AGENT_TOKENS,
   authFromAgentToken,
-  isAgentForbidden,
   issueAgentToken,
   listAgentTokensFor,
   revokeAgentToken,
@@ -131,7 +130,7 @@ import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } f
 import { colorHex } from "./chat-color.js";
 import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
 import { publishSocial, replySocial } from "./socials.js";
-import { openapiJson } from "./openapi.js";
+import { AGENT_ROUTES_ERROR, isAgentAllowed, openapiJson } from "./openapi.js";
 import { llmsTxt } from "./llms-txt.js";
 import { ownStatus, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
 import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
@@ -362,7 +361,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       const retryAfter = Math.max(1, Math.ceil(limits.agent.resetIn(auth.agentTokenId ?? "", now) / 1000));
       throw new HttpError(429, "too many requests", {}, { "retry-after": String(retryAfter) });
     }
-    if (isAgentForbidden(method, pathname)) throw new HttpError(403, "agent tokens cannot do that");
+    if (!isAgentAllowed(method, pathname)) throw new HttpError(403, AGENT_ROUTES_ERROR);
   }
   if (pathname === "/api/me/avatar" || /^\/api\/users\/[^/]+\/avatar$/.test(pathname)) {
     await handleAvatar(req, res, deps, method, pathname, requireUser(user));

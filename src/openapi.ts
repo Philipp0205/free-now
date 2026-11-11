@@ -386,4 +386,18 @@ export function listOperations(doc: { paths: Record<string, object> } = openapi)
   );
 }
 
+/** Each documented operation as a method and a regex, where {param} matches one path segment. */
+const allowed = listOperations().map(({ method, path }) => ({
+  method,
+  re: new RegExp("^" + path.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{[^}]+\}/g, "[^/]+") + "$"),
+}));
+
+export const AGENT_ROUTES_ERROR = "agent tokens can only use routes in /api/openapi.json";
+
+/** True when the method and pathname match an operation in the document. Agent tokens may call only these. */
+export function isAgentAllowed(method: string, pathname: string): boolean {
+  const m = method.toUpperCase();
+  return allowed.some((op) => op.method === m && op.re.test(pathname));
+}
+
 export const openapiJson = JSON.stringify(openapi);
