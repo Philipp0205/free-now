@@ -1536,7 +1536,7 @@ function circleScreen() {
 
 /** Who in this circle is away or busy, in one line. Null when no one is. */
 function awayLine() {
-  const text = circleStatusLine(state.me?.circle?.members, state.me?.user?.id, Date.now(), 3, appTz());
+  const text = circleStatusLine(state.me?.circle?.members, state.me?.user?.id, Date.now(), 3, viewerTz());
   return text ? el("p", { class: "away-line", text }) : null;
 }
 
@@ -2406,7 +2406,7 @@ function statusPanel() {
       el("h3", { text: "Your status" }),
       el("p", { class: "status-summary" }, [
         el("span", { class: "status-card-mark", "aria-hidden": "true", text: statusBadge(status.type) }),
-        el("span", { text: statusLine(status, Date.now(), appTz()) }),
+        el("span", { text: statusLine(status, Date.now(), viewerTz()) }),
       ]),
       el("p", {
         class: "help",
@@ -3188,7 +3188,7 @@ function memberAvailability(id) {
 }
 
 function availabilityLine(availability, from = Date.now()) {
-  const text = availabilityText(availability, from, appTz());
+  const text = availabilityText(availability, from, viewerTz());
   if (!text) return null;
   return el("p", { class: `avail-line ${availability.state}` }, [
     el("span", { class: "avail-dot", "aria-hidden": "true" }),
@@ -3290,7 +3290,7 @@ function memberRow(member) {
   const self = member.id === state.me.user.id;
   const reach = reachText(member.reach);
   const line = [self ? "You" : "", reach].filter(Boolean).join(" · ");
-  const status = statusLine(member.status, Date.now(), appTz());
+  const status = statusLine(member.status, Date.now(), viewerTz());
   return el("div", { class: "row member-row" }, [
     el("button", {
       class: "member-open",
@@ -3331,7 +3331,7 @@ function openMemberMenu(member) {
 function statusCard(person) {
   const status = activeStatus(person?.status);
   if (!status) return null;
-  const until = statusUntilText(status.until, Date.now(), appTz());
+  const until = statusUntilText(status.until, Date.now(), viewerTz());
   return el("div", { class: "status-card", "data-status": status.type }, [
     el("p", { class: "status-card-head" }, [
       el("span", { class: "status-card-mark", "aria-hidden": "true", text: statusBadge(status.type) }),
@@ -5109,6 +5109,11 @@ function appTz() {
   return state.meta?.tz || "Europe/Berlin";
 }
 
+/** This device's zone. Busy-until and availability clocks are shown in it, whatever zone the setter used. */
+function viewerTz() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || appTz();
+}
+
 /** Today, Tomorrow, or Pick a date. `bag` is state for a new plan, or the edit session. */
 function planDayBlock(bag, prefix) {
   const dayKey = prefix === "plan" ? "planDay" : "day";
@@ -5256,7 +5261,7 @@ function busyAtBlock() {
   const busy = people.filter((person) => person.state === "busy" && names.has(person.id) && person.id !== self);
   if (!busy.length) return node;
   const parts = busy.map((person) => Number.isFinite(person.until)
-    ? `${names.get(person.id)} until ${untilText(person.until, from, appTz())}`
+    ? `${names.get(person.id)} until ${untilText(person.until, from, viewerTz())}`
     : names.get(person.id));
   node.append(
     el("span", { class: "avail-dot", "aria-hidden": "true" }),
@@ -6671,9 +6676,9 @@ function guestLine(text, person, kind, event) {
 }
 
 function guestDetailRow(text, person, kind, event) {
-  const status = statusLine(person?.status, Date.now(), appTz());
+  const status = statusLine(person?.status, Date.now(), viewerTz());
   const availability = person.id === state.me.user.id ? null : memberAvailability(person.id);
-  const busyText = availability ? availabilityText(availability, Date.now(), appTz()) : "";
+  const busyText = availability ? availabilityText(availability, Date.now(), viewerTz()) : "";
   const reply = busyText
     ? el("div", { class: "reply-line" }, [
         el("span", { text }),

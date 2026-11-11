@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
+import { circleStatusLine, statusLine } from "../../public/status.js";
 import { SIZES, UA, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 
@@ -16,8 +17,8 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(SHOTS, name) });
 }
 
-async function phone(token: string, width = 412, height = 915) {
-  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId: ZONE });
+async function phone(token: string, width = 412, height = 915, timezoneId = ZONE) {
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId });
   await skipWhatsNew(context);
   await context.route("https://server.arcgisonline.com/**", (route) => route.fulfill({ status: 204, body: "" }));
   const page = await context.newPage();
@@ -234,6 +235,36 @@ test("the You tab and a friend's Circle row fit at phone sizes", async () => {
       await friend.page.locator(".member-row", { hasText: "Philipp" }).locator(".status-line").waitFor();
       assert.ok((await overflow(friend.page)) <= 0, `Circle has no sideways scroll at ${width}px`);
       await shot(friend.page, `friend-circle-${width}.png`);
+    } finally {
+      await friend.context.close();
+    }
+  }
+});
+
+test("a friend reads Busy until in their own time zone", async () => {
+  const { phil, bea } = await seed();
+  // Far enough ahead to be a clock time for sure, whatever hour the run starts.
+  const until = Date.now() + 3 * 3_600_000;
+  await hangry.call("PUT", "/api/me/status", phil.token, { type: "busy", until, timezone: "Europe/Lisbon" });
+  const now = Date.now();
+  const status = { type: "busy", text: null, place: null, until };
+  const clocks: Record<string, { row: string; away: string }> = {};
+  for (const zone of ["Europe/Berlin", "Europe/Lisbon"]) {
+    clocks[zone] = {
+      row: statusLine(status, now, zone) as string,
+      away: circleStatusLine([{ id: phil.user.id, name: "Philipp", status }], "", now, 3, zone) as string,
+    };
+  }
+  assert.notEqual(clocks["Europe/Berlin"].row, clocks["Europe/Lisbon"].row, "Lisbon and Berlin read a different clock");
+  for (const zone of ["Europe/Berlin", "Europe/Lisbon"]) {
+    const friend = await phone(bea.token, 412, 915, zone);
+    try {
+      await tab(friend.page, "Circle");
+      const row = friend.page.locator(".member-row", { hasText: "Philipp" });
+      await row.locator(".status-badge[aria-label='Busy']").waitFor();
+      assert.equal(await row.locator(".status-line").innerText(), clocks[zone].row);
+      assert.equal(await friend.page.locator(".away-line").innerText(), clocks[zone].away);
+      await shot(friend.page, `friend-circle-${zone.split("/")[1].toLowerCase()}.png`);
     } finally {
       await friend.context.close();
     }

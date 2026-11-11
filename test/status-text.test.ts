@@ -74,6 +74,24 @@ test("circle line groups by type, says You, caps names and shows a lone end day"
   assert.equal(circleStatusLine(members, "", UNTIL + 1), "Busy: Alex");
 });
 
+test("one UTC instant reads as a different clock, and day word, in each viewer's zone", () => {
+  const lisbon = "Europe/Lisbon";
+  const berlin = "Europe/Berlin";
+  // 18:00 in Lisbon is 18:00Z in winter, which is 19:00 in Berlin.
+  const six = Date.parse("2026-11-09T18:00:00Z");
+  assert.equal(untilText(six, NOW, lisbon), "until 18:00");
+  assert.equal(untilText(six, NOW, berlin), "until 19:00");
+  assert.equal(statusLine({ type: "busy", text: null, place: null, until: six }, NOW, lisbon), "Busy · until 18:00");
+  assert.equal(statusLine({ type: "busy", text: null, place: null, until: six }, NOW, berlin), "Busy · until 19:00");
+  // 23:30Z is still today in Lisbon and already tomorrow in Berlin.
+  const late = Date.parse("2026-11-09T23:30:00Z");
+  assert.equal(untilText(late, NOW, lisbon), "until 23:30");
+  assert.equal(untilText(late, NOW, berlin), "until tomorrow 00:30");
+  const member = [{ id: "a", name: "Alex", status: { type: "busy", until: late } }];
+  assert.equal(circleStatusLine(member, "", NOW, 3, lisbon), "Busy: Alex, until 23:30");
+  assert.equal(circleStatusLine(member, "", NOW, 3, berlin), "Busy: Alex, until tomorrow 00:30");
+});
+
 test("untilText reads an end of day as a date and any other instant as a clock", () => {
   const at = (iso: string) => Date.parse(iso);
   // NOW is Mon 9 Nov 2026 12:00 Berlin.

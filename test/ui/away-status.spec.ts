@@ -9,7 +9,7 @@ import { skipWhatsNew } from "./whats-new-seen.js";
 const hangry = useHangry();
 
 async function phone(token: string, width = 412, height = 915) {
-  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
+  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId: "Europe/Berlin" });
   await skipWhatsNew(context);
   await context.route("https://server.arcgisonline.com/**", (route) => route.fulfill({ status: 204, body: "" }));
   const page = await context.newPage();
