@@ -2,6 +2,8 @@
 export type RateLimiter = {
   /** Counts one request. False once the key is over the limit for this window. */
   hit(key: string, now: number): boolean;
+  /** Milliseconds until this key's current window ends. 0 when it has none. */
+  resetIn(key: string, now: number): number;
   size(): number;
 };
 
@@ -40,6 +42,10 @@ export function createRateLimiter(options: { limit: number; windowMs: number; ma
       }
       window.count += 1;
       return window.count <= limit;
+    },
+    resetIn(key, now) {
+      const window = windows.get(key);
+      return window ? Math.max(0, window.start + windowMs - now) : 0;
     },
     size: () => windows.size,
   };

@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v77";
+const APP_VERSION = "hangry-v80";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -164,6 +164,8 @@ const state = {
   calendarFeed: null,
   /** Calendar availability on the You tab: syncStatus from the server plus { loaded, busy, draft, error }. */
   calendarSync: null,
+  /** Assistant tokens on the You tab: { loaded, failed, tokens, busy, draft, secret }. secret is set only right after making one. */
+  agentTokens: null,
   /** Busy people at a later time on the create sheet: { at, people: [{ id, state, until }] }. */
   busyAt: null,
   /** The "I'm in" tap waiting on the owner's own calendar for that day. */
@@ -900,6 +902,7 @@ function clearSession() {
   state.pastDays = null;
   state.calendarFeed = null;
   state.calendarSync = null;
+  state.agentTokens = null;
   state.busyAt = null;
 }
 
@@ -1146,6 +1149,7 @@ function personalAlerts() {
 
 function shell() {
   forgetShownFeedLink();
+  forgetShownAgentToken();
   const phone = el("div", { class: "phone" });
   if (state.chat) {
     phone.append(chatScreen());
@@ -2578,6 +2582,7 @@ function youScreen() {
     ]),
     calendarFeedPanel(),
     calendarSyncPanel(),
+    agentTokensPanel(),
     el("div", { class: "panel panel-rows" }, [
       el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
         el("div", { class: "grow" }, [
@@ -2782,6 +2787,130 @@ function onRevokeCalendarFeed() {
         await api("/api/me/calendar-feed", { method: "DELETE", circle: null });
         state.calendarFeed = { loaded: true, active: false, createdAt: null };
         state.error = "Calendar feed is off";
+      });
+    },
+  };
+  render();
+}
+
+/** Assistant tokens: an outside assistant acts as this person. The full token shows once, right after making it. */
+function agentTokensPanel() {
+  if (!state.agentTokens) void loadAgentTokens();
+  const data = state.agentTokens || { loaded: false };
+  const wrap = (kids) => el("section", { class: "panel agent-tokens", "aria-label": "Assistant tokens" }, [
+    el("h3", { text: "Assistant tokens" }),
+    el("p", { text: "A token lets an assistant act as you: read your circles, set your status, create plans and say you are in. Friends see those actions as you. You can revoke a token at any time and it stops working at once. The full token is shown only once, so copy it now." }),
+    ...kids,
+  ]);
+  if (!data.loaded) return wrap([el("p", { class: "help", text: "Loading…" })]);
+  const tokens = data.tokens || [];
+  return wrap([
+    data.secret ? agentTokenSecret(data.secret) : null,
+    el("form", { class: "stack", novalidate: "", onsubmit: (event) => { event.preventDefault(); void onCreateAgentToken(); } }, [
+      el("label", { class: "field" }, [
+        el("span", { text: "Token name" }),
+        el("input", {
+          id: "agent-token-name",
+          type: "text",
+          maxlength: "40",
+          autocomplete: "off",
+          placeholder: "Grok Bot",
+          value: data.draft || "",
+          oninput: (event) => { state.agentTokens.draft = event.target.value; },
+        }),
+      ]),
+      el("button", { class: "btn secondary", type: "submit", text: data.busy ? "Creating…" : "Create token", disabled: data.busy }),
+    ]),
+    data.failed ? el("p", { class: "help", text: "Could not load your tokens." }) : null,
+    tokens.length || data.failed ? null : el("p", { class: "help", text: "No tokens yet. Name one after the assistant you want to use it with." }),
+    tokens.length ? el("ul", { class: "agent-token-list" }, tokens.map(agentTokenRow)) : null,
+  ]);
+}
+
+function agentTokenSecret(secret) {
+  return el("div", { class: "stack agent-token-once" }, [
+    el("p", { class: "agent-token-secret", text: secret }),
+    el("p", { class: "help", text: "It will not be shown again. Copy it now and keep it private." }),
+    el("button", { class: "btn secondary", type: "button", text: "Copy", onclick: () => { void copyAgentToken(secret); } }),
+  ]);
+}
+
+function agentTokenRow(token) {
+  const used = token.lastUsedAt ? `Last used ${feedDate(token.lastUsedAt)}` : "Not used yet";
+  return el("li", { class: "agent-token-row" }, [
+    el("div", { class: "grow" }, [
+      el("strong", { text: token.name }),
+      el("p", { class: "help", text: `${token.tokenPrefix}… · Made ${feedDate(token.createdAt)} · ${used}` }),
+    ]),
+    el("button", {
+      class: "text-btn danger",
+      type: "button",
+      text: "Revoke",
+      "aria-label": `Revoke ${token.name}`,
+      onclick: () => onRevokeAgentToken(token),
+    }),
+  ]);
+}
+
+async function copyAgentToken(secret) {
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(secret);
+    copied = true;
+  } catch {
+    copied = copyWithSelection(secret);
+  }
+  state.error = copied ? "Token copied" : "Copy failed. Press and hold the token to copy it.";
+  render();
+  scheduleErrorClear();
+}
+
+/** The token shows once. Once the You screen is not on show, it is gone for good. */
+function forgetShownAgentToken() {
+  if (!state.agentTokens?.secret) return;
+  if (state.tab === "you" && !state.chat && !state.past) return;
+  state.agentTokens = { ...state.agentTokens, secret: "" };
+}
+
+async function loadAgentTokens() {
+  state.agentTokens = { loaded: false };
+  try {
+    const data = await api("/api/me/agent-tokens", { circle: null });
+    if (!state.agentTokens || state.agentTokens.loaded) return;
+    state.agentTokens = { loaded: true, tokens: data.tokens, draft: "" };
+  } catch {
+    state.agentTokens = { loaded: true, failed: true, tokens: [], draft: "" };
+  }
+  document.querySelector(".agent-tokens")?.replaceWith(agentTokensPanel());
+}
+
+async function onCreateAgentToken() {
+  const data = state.agentTokens;
+  if (!data?.loaded || data.busy) return;
+  data.busy = true;
+  render();
+  await run(async () => {
+    try {
+      const made = await api("/api/me/agent-tokens", { method: "POST", body: { name: data.draft || "" }, circle: null });
+      const list = await api("/api/me/agent-tokens", { circle: null });
+      state.agentTokens = { loaded: true, tokens: list.tokens, draft: "", secret: made.token };
+    } finally {
+      if (state.agentTokens) state.agentTokens.busy = false;
+    }
+  });
+}
+
+function onRevokeAgentToken(token) {
+  state.confirm = {
+    title: `Revoke ${token.name}?`,
+    body: "It stops working at once. Anything using it loses access until you make a new token.",
+    confirmLabel: "Revoke",
+    action: async () => {
+      await run(async () => {
+        await api(`/api/me/agent-tokens/${encodeURIComponent(token.id)}`, { method: "DELETE", circle: null });
+        const list = await api("/api/me/agent-tokens", { circle: null });
+        state.agentTokens = { ...state.agentTokens, tokens: list.tokens, secret: "" };
+        state.error = "Token revoked";
       });
     },
   };
