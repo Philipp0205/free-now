@@ -10,6 +10,15 @@
     ]
   },
   {
+    "id": "2026-11-11-google-return",
+    "date": "2026-11-11",
+    "title": "Google Calendar connects without a second login",
+    "bullets": [
+      "After you connect Google Calendar, Hangry says it is connected as soon as you come back to the app.",
+      "If a browser page opens while you are not signed in, it tells you to go back to Hangry instead of asking you to log in again."
+    ]
+  },
+  {
     "id": "2026-11-11-reaction-notify",
     "date": "2026-11-11",
     "title": "Get notified when friends react",

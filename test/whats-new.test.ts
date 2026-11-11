@@ -66,6 +66,20 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
+test("the Google return entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-google-return")!;
+  assert.ok(top, "google return entry");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Google Calendar connects without a second login");
+  assert.equal(top.bullets.length, 2);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /says it is connected as soon as you come back/);
+  assert.match(text, /go back to Hangry/);
+  assert.match(text, /not signed in/);
+  for (const jargon of ["OAuth", "Custom Tab", "localStorage", "PWA"]) assert.ok(!text.includes(jargon), jargon);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
 test("the reaction notification entry is kept, in plain words without an em dash", () => {
   const top = RAW.find((item) => item.id === "2026-11-11-reaction-notify")!;
   assert.ok(top, "reaction notification entry");
@@ -94,6 +108,7 @@ test("the privacy policy entry is the newest, in plain words without an em dash"
   assert.match(text, /do not sell your data/);
   assert.match(text, /Ask in the app/);
   for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014") && line.length <= 140, line);
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-google-return"), "google return entry is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-11-reaction-notify"), "older entries are kept");
 });
 
