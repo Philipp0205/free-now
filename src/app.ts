@@ -328,6 +328,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       await serveWelcome(req, res);
       return;
     }
+    if (pathname === "/privacy" || pathname === "/privacy/") {
+      await servePrivacy(req, res);
+      return;
+    }
     const feed = matchPath(pathname, /^\/cal\/([^/]+)\.ics$/);
     if (feed) {
       if (!limits.feed.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
@@ -2631,6 +2635,14 @@ async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, 
 /** The public landing page. Static: same bytes for everyone, no session, no user data. */
 async function serveWelcome(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const data = await fs.promises.readFile(path.join(PUBLIC_DIR, "welcome.html"));
+  res.writeHead(200, staticHeaders(".html", data.length));
+  if (req.method === "HEAD") res.end();
+  else res.end(data);
+}
+
+/** The public privacy policy. Static like /welcome: same bytes for everyone, no session, no user data. */
+async function servePrivacy(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const data = await fs.promises.readFile(path.join(PUBLIC_DIR, "privacy.html"));
   res.writeHead(200, staticHeaders(".html", data.length));
   if (req.method === "HEAD") res.end();
   else res.end(data);

@@ -81,11 +81,27 @@ test("the settings menu entry is the newest, in plain words without an em dash",
     assert.ok(line.length <= 140, line);
     assert.ok(!line.includes("\u2014"), line);
   }
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-privacy"), "privacy entry is kept");
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-google-return"), "google return entry is kept");
+});
+
+test("the Google return entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-google-return")!;
+  assert.ok(top, "google return entry");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Google Calendar connects without a second login");
+  assert.equal(top.bullets.length, 2);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /says it is connected as soon as you come back/);
+  assert.match(text, /go back to Hangry/);
+  assert.match(text, /not signed in/);
+  for (const jargon of ["OAuth", "Custom Tab", "localStorage", "PWA"]) assert.ok(!text.includes(jargon), jargon);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
 });
 
 test("the reaction notification entry is kept, in plain words without an em dash", () => {
   const top = RAW.find((item) => item.id === "2026-11-11-reaction-notify")!;
-  assert.equal(top.id, "2026-11-11-reaction-notify");
+  assert.ok(top, "reaction notification entry");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Get notified when friends react");
   assert.equal(top.bullets.length, 3);
@@ -96,6 +112,24 @@ test("the reaction notification entry is kept, in plain words without an em dash
   assert.match(text, /your own reactions/);
   assert.match(text, /muted the chat/);
   for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the privacy policy entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-privacy")!;
+  assert.ok(top, "privacy policy entry");
+  assert.equal(top.id, "2026-11-11-privacy");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "A public privacy policy");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /\/privacy/);
+  assert.match(text, /calendar and assistant tokens/);
+  assert.match(text, /do not sell your data/);
+  assert.match(text, /Ask in the app/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014") && line.length <= 140, line);
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-google-return"), "google return entry is kept");
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-reaction-notify"), "older entries are kept");
 });
 
 test("the Connect Google Calendar entry is kept, in plain words", () => {
@@ -450,7 +484,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v85");
+  assert.equal(cache?.[1], "hangry-v87");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

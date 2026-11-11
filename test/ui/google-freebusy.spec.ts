@@ -320,3 +320,77 @@ test("at 360: ?calendar=google lands on You with the connected panel", { timeout
     await page.context().close();
   }
 });
+
+/** What Android does after Google: a browser tab with no Hangry session. */
+async function bareTab(h: Hangry, route: string) {
+  const context = await h.browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: UA });
+  await skipWhatsNew(context);
+  const page = await context.newPage();
+  await page.goto(`${h.baseUrl}${route}`);
+  return page;
+}
+
+async function noLoginForm(page: Page) {
+  await page.getByText("Go back to Hangry.").waitFor();
+  assert.equal(await page.getByLabel("Your name").count(), 0, "no name field");
+  assert.equal(await page.getByRole("button", { name: "Continue" }).count(), 0, "no Continue button");
+  assert.equal(await page.getByText("A private circle", { exact: false }).count(), 0, "no login lede");
+  assert.equal(await page.locator("input").count(), 0, "no inputs at all");
+  assert.equal(new URL(page.url()).search, "", "calendar param is stripped");
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(wide <= 1, `page scrolls sideways by ${wide}px`);
+}
+
+test("at 360: ?calendar=google with no session says connected and go back, with no login form", { timeout: 120_000 }, async () => {
+  busyNow();
+  const { alex } = await seed(on, "ret");
+  await connectViaApi(on, alex.token);
+  const page = await bareTab(on, "/?calendar=google");
+  try {
+    await page.getByText("Google Calendar connected.").waitFor();
+    await noLoginForm(page);
+    assert.equal(await page.getByText("Could not connect", { exact: false }).count(), 0);
+    await shot(page, "return-no-session", 360);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("at 360: ?calendar=google-error with no session says it failed and go back, with no login form", { timeout: 120_000 }, async () => {
+  const page = await bareTab(on, "/?calendar=google-error");
+  try {
+    await page.getByText("Could not connect Google Calendar.").waitFor();
+    await noLoginForm(page);
+    assert.equal(await page.getByText("Google Calendar connected", { exact: false }).count(), 0);
+    await shot(page, "return-error-no-session", 360);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("at 360: a signed-in page left on You notices Google connected when it comes back", { timeout: 120_000 }, async () => {
+  busyNow();
+  const { alex, friends } = await seed(on, "vis");
+  const page = await phone(on, 360, 640, alex.token, friends.id);
+  try {
+    const panel = await openYou(page);
+    await panel.getByRole("button", { name: "Connect Google Calendar" }).waitFor();
+    await connectViaApi(on, alex.token);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.locator(".toast", { hasText: "Google Calendar connected" }).waitFor();
+    await panel.getByText("Connected: Google").waitFor();
+    assert.equal(new URL(page.url()).pathname, "/");
+    await shot(page, "return-visible", 360);
+
+    // Already connected: later app switches stay quiet.
+    await page.waitForFunction(() => !document.querySelector(".toast"), undefined, { timeout: 8000 });
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForTimeout(600);
+    assert.equal(await page.locator(".toast").count(), 0, "no second toast");
+  } finally {
+    await page.context().close();
+  }
+});

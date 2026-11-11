@@ -1,4 +1,4 @@
-const CACHE = "hangry-v85";
+const CACHE = "hangry-v87";
 /** Wait before each ack retry. One first try, then up to three more. */
 const ACK_DELAYS = [1000, 3000, 9000];
 const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/calendar-feed.js", "/calendar-month.js", "/freebusy.js", "/status.js", "/mentions.js", "/whats-new.json", "/map.js", "/map-pin.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
@@ -21,6 +21,8 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || event.request.method !== "GET") return;
   // Calendar feeds carry a private token and plan details: never cache them.
   if (url.pathname.startsWith("/cal/")) return;
+  // Search Console checks this file and the privacy page: a failed fetch must never answer with the app shell.
+  if (url.pathname === "/googlee48df27048aaa965.html" || url.pathname === "/privacy" || url.pathname === "/privacy/") return;
   // Basemap archives are read in byte ranges: never cache them (a 206 cannot go in the Cache API).
   if (url.pathname.startsWith("/tiles/") || event.request.headers.has("range")) return;
   // Share pages carry a plan title: never keep them, fall back to the app shell offline.

@@ -253,6 +253,8 @@ railway.json    Dockerfile builder and health check
 
 `/welcome` is a static public page about Hangry (`public/welcome.html`, `public/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it. Its example map is 15 fixed OpenStreetMap tiles of central Stuttgart (`tile.openstreetmap.org`, loaded lazily by the visitor's browser, with OSM attribution) and four pink free-now pins for made-up friends at real squares. It does not use the app's map code or `MAP_TILE_URL`.
 
+Google Search Console verification uses `public/googlee48df27048aaa965.html`, served at `/googlee48df27048aaa965.html`, and a `google-site-verification` meta tag in `public/index.html`. Leave both in place. Google re-checks them. The service worker does not intercept that file, and `public/robots.txt` allows it and the homepage. `/privacy` is the public privacy policy (`public/privacy.html`), a static page like `/welcome`.
+
 ## Location
 
 Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Hangry does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
