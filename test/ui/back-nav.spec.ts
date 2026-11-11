@@ -175,7 +175,7 @@ for (const [width, height] of SIZES) {
       await atRest(page);
 
       // Plain tabs.
-      for (const [name, title] of [["Map", "Map"], ["Circle", "Circle"]] as const) {
+      for (const [name, title] of [["Events", "Events"], ["Circle", "Circle"]] as const) {
         await tab(page, name).click();
         await heading(page, title).waitFor();
         await back(page);

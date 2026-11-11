@@ -2,14 +2,21 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
+import type { CalendarNet } from "../../src/freebusy.js";
 import { createNoopPushSender, type PushSender } from "../../src/push.js";
 
 /** Android Chrome on a Pixel 8. */
 export const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
+/** The Events tab (formerly Map) opens on Calendar by default; this opens it and switches to the live map. */
+export async function openEventsMap(page: Page): Promise<void> {
+  await page.locator(".tabbar").getByRole("button", { name: "Events", exact: true }).click();
+  await page.locator(".events-view").getByRole("button", { name: "Map", exact: true }).click();
+}
+
 /** The three phone sizes we check UI at. */
 export const SIZES = [[320, 568], [360, 640], [412, 915]] as const;
 
@@ -24,6 +31,8 @@ export type ServerOptions = {
   env?: Record<string, string>;
   /** Runs first on close(), before the server stops. */
   beforeClose?: () => Promise<void>;
+  /** Fake DNS and HTTP for the calendar availability import. */
+  calendarNet?: CalendarNet;
 };
 
 export type Server = { baseUrl: string; db: DatabaseSync; close: () => Promise<void> };
@@ -43,6 +52,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<Server> {
     push: opts.push ?? createNoopPushSender(),
     config: { ...config, dbPath: ":memory:" },
     now: opts.now ?? (() => Date.now()),
+    calendarNet: opts.calendarNet,
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

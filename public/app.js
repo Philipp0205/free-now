@@ -3,14 +3,22 @@ import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, t
 import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, shortDate, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
 import { bindMap } from "./map.js";
-import { goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
+import { cardCrowd, goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
+import { PLAN_DURATION_MS, availabilityText, dayEvents, eventOverlaps, eventTimeText, untilText } from "./freebusy.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
+import { CIRCLE_COLORS, WEEKDAY_LABELS, circleColor, eventCrowd, freeOnDay, gridRange, monthGrid, monthStart, monthTitle, shiftMonth } from "./calendar-month.js";
 
 const TOKEN_KEY = "fn_token";
 const CIRCLE_KEY = "fn_circle";
+const MAP_ALL_KEY = "hangry-map-all";
+/**
+ * The Events tab (formerly Map) shows the month calendar or the map: "calendar" (default) or "map".
+ * v2: the old "hangry-events-view" key is ignored, so everyone lands on Calendar once.
+ */
+const EVENTS_VIEW_KEY = "hangry-events-view-v2";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
@@ -19,7 +27,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v63";
+const APP_VERSION = "hangry-v72";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -33,6 +41,14 @@ let menuJustOpened = null;
 /** Pops we caused ourselves via history.go() and must not treat as Back. */
 let ignoreSheetPop = 0;
 let closingFromPop = false;
+/**
+ * Every refresh() is numbered when it starts. The 3s poll, a switch and an action can overlap, and their
+ * answers can land in any order. Only the newest answer for the circle on screen is applied, see refreshIsStale.
+ */
+let refreshSeq = 0;
+let refreshApplied = 0;
+/** Refreshes numbered below this were asked for a circle we have since left. */
+let refreshFloor = 0;
 
 const state = {
   booting: true,
@@ -41,6 +57,20 @@ const state = {
   me: null,
   socials: [],
   plans: [],
+  /** Map scope: true shows every circle's places, false only the selected circle. */
+  mapAllCircles: localStorage.getItem(MAP_ALL_KEY) === "1",
+  mapSocials: [],
+  mapPlans: [],
+  /** Events tab: "calendar" or "map". Same circle scope (mapAllCircles) for both. */
+  eventsView: readEventsView(),
+  /** First of the month the calendar shows, and the picked day. Set on first show. */
+  calMonth: "",
+  calDay: "",
+  /** The month's events, kept apart from Home and the map. calendarKey names what is loaded. */
+  calendarPlans: [],
+  calendarSocials: [],
+  calendarKey: "",
+  calendarLoading: false,
   notifications: [],
   tab: "home",
   sheet: null,
@@ -122,6 +152,12 @@ const state = {
   feedbackBusy: false,
   /** Calendar feed on the You tab: { loaded, active, createdAt, url, webcalUrl, busy }. url is set only right after making one. */
   calendarFeed: null,
+  /** Calendar availability on the You tab: syncStatus from the server plus { loaded, busy, draft, error }. */
+  calendarSync: null,
+  /** Busy people at a later time on the create sheet: { at, people: [{ id, state, until }] }. */
+  busyAt: null,
+  /** The "I'm in" tap waiting on the owner's own calendar for that day. */
+  calendarCheckBusy: "",
   feedbackSent: false,
 };
 
@@ -156,6 +192,7 @@ const ICONS = {
   person: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 19.2c.8-2.8 3.2-4.2 6.4-4.2s5.6 1.4 6.4 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   add: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="11" r="2.1" fill="currentColor"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14.5" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 3.5v4M15.5 3.5v4M4 10.5h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.5 14.2h.01M12 14.2h.01M15.5 14.2h.01M8.5 17h.01M12 17h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   people: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8.5" r="2.8" stroke="currentColor" stroke-width="1.8"/><path d="M3.8 18.5c.6-2.6 2.6-4 5.2-4s4.6 1.4 5.2 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M15.2 6.2a2.6 2.6 0 0 1 0 5M17 14.7c1.6.5 2.7 1.8 3.2 3.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5 15 12l-6 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.2 16.2 5 19.2c-.3.4.1 1 .6.8l3.2-.9A7.2 7.2 0 1 0 7.2 16.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
@@ -383,8 +420,9 @@ function friendlyMessage(raw, status) {
 }
 
 async function refresh({ initial = false } = {}) {
+  const seq = ++refreshSeq;
   if (state.token && state.me && !state.me.circle) {
-    await refreshPersonalAlerts();
+    await refreshPersonalAlerts(seq);
     return;
   }
   if (!state.token || !state.me?.circle) return;
@@ -404,6 +442,7 @@ async function refresh({ initial = false } = {}) {
       state.chat ? api(chatTargetUrl(state.chat)) : Promise.resolve(null),
     ]);
   } catch (error) {
+    if (refreshIsStale(seq)) return;
     if (error.status === 401) return;
     if (error.status === 404 && state.circleId) {
       const moved = await releaseMissingCircle();
@@ -416,8 +455,14 @@ async function refresh({ initial = false } = {}) {
     }
     return;
   }
+  // A late answer for the circle we left, or one older than what is on screen, would repaint old data
+  // and banner alerts that were already seen.
+  if (refreshIsStale(seq)) return;
+  refreshApplied = seq;
   state.socials = socials.socials;
   state.plans = plans.plans;
+  if (state.tab === "map" && state.eventsView === "calendar") await loadCalendar({ force: true });
+  else if (state.tab === "map" && state.mapAllCircles) await refreshMapAll();
   state.notifications = notifications.notifications;
   state.me = me;
   applyAlertUnread(notifications.unreadByCircle);
@@ -428,6 +473,8 @@ async function refresh({ initial = false } = {}) {
   const signature = JSON.stringify({
     socials: state.socials,
     plans: state.plans,
+    mapAll: state.mapAllCircles ? [state.mapSocials, state.mapPlans] : null,
+    calendar: state.eventsView === "calendar" ? [state.calendarKey, state.calendarSocials, state.calendarPlans] : null,
     notifications: state.notifications.map((note) => [note.id, note.readAt]),
     members: state.me?.circle?.members ?? null,
     circles: state.me?.circles ?? null,
@@ -453,6 +500,11 @@ async function refresh({ initial = false } = {}) {
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
 }
 
+/** True when refresh number `seq` was asked for a circle we have left, or a newer one already landed. */
+function refreshIsStale(seq) {
+  return seq < refreshFloor || seq < refreshApplied;
+}
+
 async function releaseMissingCircle() {
   const previous = state.circleId;
   rememberCircle("");
@@ -473,6 +525,7 @@ async function releaseMissingCircle() {
   adoptCircle(me);
   state.socials = [];
   state.plans = [];
+  forgetMapAll();
   state.notifications = [];
   state.chat = null;
   state.chatThread = null;
@@ -733,6 +786,7 @@ function bindKeyboard() {
 bindKeyboard();
 
 function rememberCircle(id) {
+  if ((id || "") !== state.circleId) refreshFloor = refreshSeq + 1;
   state.circleId = id || "";
   if (state.circleId) localStorage.setItem(CIRCLE_KEY, state.circleId);
   else localStorage.removeItem(CIRCLE_KEY);
@@ -745,9 +799,23 @@ function adoptCircle(me) {
 }
 
 function circleHeader(path, options) {
-  if (!state.circleId || options.circle === null || options.token === null) return {};
+  if (options.circle === null || options.token === null) return {};
+  if (typeof options.circle === "string" && options.circle) return { "x-circle": options.circle };
+  if (!state.circleId) return {};
   if (/^\/api\/(meta|auth\/|invites\/|buzz\/|plans\/share\/)/.test(path)) return {};
+  const owned = mapEventCircle(path);
+  if (owned) return { "x-circle": owned };
   return { "x-circle": state.circleId };
+}
+
+/** With All circles on, an event route goes to the circle the event lives in. */
+function mapEventCircle(path) {
+  if (!state.mapAllCircles) return "";
+  const match = /^\/api\/(socials|plans)\/([^/?]+)/.exec(path);
+  if (!match) return "";
+  const list = match[1] === "plans" ? [...state.mapPlans, ...state.calendarPlans] : [...state.mapSocials, ...state.calendarSocials];
+  const item = list.find((row) => row.id === match[2]);
+  return item ? actingCircle(item) : "";
 }
 
 async function api(path, options = {}) {
@@ -809,11 +877,14 @@ function clearSession() {
   state.me = null;
   state.socials = [];
   state.plans = [];
+  forgetMapAll();
   state.notifications = [];
   state.bootstrappedNotifs = false;
   state.past = false;
   state.pastDays = null;
   state.calendarFeed = null;
+  state.calendarSync = null;
+  state.busyAt = null;
 }
 
 function render() {
@@ -824,11 +895,15 @@ function render() {
   const chatLog = document.querySelector(".chat-log");
   const chatY = chatLog?.scrollTop ?? 0;
   const chatNearEnd = chatLog ? chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 48 : true;
+  const calY = document.querySelector(".cal")?.scrollTop ?? 0;
   document.getElementById("app").replaceChildren(view());
   menuJustOpened = null;
   pageEntrance = false;
   const sheetScroll = document.querySelector(".sheet-scroll");
   if (sheetScroll) sheetScroll.scrollTop = sheetY;
+  // The month scrolls inside the Events tab, so a refresh render keeps its place.
+  const cal = document.querySelector(".cal");
+  if (cal) cal.scrollTop = calY;
   const nextLog = document.querySelector(".chat-log");
   if (nextLog) nextLog.scrollTop = state.chatStick || chatNearEnd ? nextLog.scrollHeight : chatY;
   state.chatStick = false;
@@ -1271,7 +1346,6 @@ function pastCard(event) {
 
 function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
-  const people = [social.creator, ...social.joined.filter((person) => person.reply !== "declined")];
   const upcoming = social.startsAt && social.startsAt > Date.now();
   const menuOpen = state.cardMenu === `social:${social.id}`;
   return el("article", {
@@ -1291,7 +1365,7 @@ function socialCard(social) {
         "aria-label": "Open details",
         onclick: () => openEventDetail("social", social),
       }, [
-        el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+        avatarStack(social),
         el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
         el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
         replySummary(social),
@@ -1306,7 +1380,6 @@ function socialCard(social) {
 
 function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
-  const people = [plan.creator, ...plan.joined];
   const menuOpen = state.cardMenu === `plan:${plan.id}`;
   return el("article", {
     class: [
@@ -1326,7 +1399,7 @@ function planCard(plan) {
         "aria-label": "Open details",
         onclick: () => openEventDetail("plan", plan),
       }, [
-        el("div", { class: "avatars" }, people.map((person) => avatar(person))),
+        avatarStack(plan),
         el("h3", { text: plan.note }),
         el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
         planCirclesLine(plan),
@@ -1487,7 +1560,7 @@ function noteNewestAlert() {
  * Someone in no circle still has their own alerts (for example "Your suggestion is live").
  * The server answers with personal alerts only when no circle is named.
  */
-async function refreshPersonalAlerts() {
+async function refreshPersonalAlerts(seq) {
   let data;
   try {
     // No x-circle header: a stale remembered circle would turn this into a 404.
@@ -1495,7 +1568,8 @@ async function refreshPersonalAlerts() {
   } catch {
     return;
   }
-  if (state.me?.circle) return;
+  if (state.me?.circle || refreshIsStale(seq)) return;
+  refreshApplied = seq;
   state.notifications = Array.isArray(data?.notifications) ? data.notifications : [];
   noteNewestAlert();
   const signature = JSON.stringify({
@@ -1831,6 +1905,53 @@ function buzzNote(code) {
   ]);
 }
 
+function flicPanel(code) {
+  const circles = state.me?.circles || [];
+  const current = state.me?.circle;
+  // With more than one circle the link names the circle on screen, like buzzNote.
+  const aimed = circles.length > 1 && current;
+  const link = `${location.origin}/api/buzz/${encodeURIComponent(code)}${aimed ? `?circle=${encodeURIComponent(current.id)}` : ""}`;
+  return el("div", { class: "panel" }, [
+    el("button", {
+      class: "text-btn",
+      type: "button",
+      text: state.showButton ? "Hide button setup" : "Set up a Flic button",
+      onclick: () => {
+        state.showButton = !state.showButton;
+        render();
+      },
+    }),
+    state.showButton
+      ? el("div", {}, [
+          el("p", {
+            class: "help",
+            text: aimed
+              ? `One press tells ${current.name} you're free now.`
+              : "One press tells your circle you're free now.",
+          }),
+          el("pre", { class: "curl", text: link }),
+          el("ol", { class: "guide-reenable" }, [
+            "In the Flic app, open your button and choose Push.",
+            "Add the Internet Request action.",
+            "Paste this link as the URL, set the method to POST, and save.",
+            "Optional: add the same link under Hold with the method DELETE. Holding the button then ends your social.",
+          ].map((line) => el("li", { text: line }))),
+          el("p", {
+            class: "help",
+            style: "margin-top: 12px",
+            text: "Keep this link private. It contains your recovery code, and anyone with it can post as you.",
+          }),
+          el("button", {
+            class: "btn secondary",
+            type: "button",
+            text: "Copy link",
+            onclick: () => copyText(link, "Button link copied"),
+          }),
+        ])
+      : null,
+  ]);
+}
+
 function youScreen() {
   const code = state.me.user.buzzToken;
   const hasPhoto = Boolean(state.me.user.avatarRev);
@@ -1881,6 +2002,7 @@ function youScreen() {
         : null,
     ]),
     calendarFeedPanel(),
+    calendarSyncPanel(),
     el("div", { class: "panel panel-rows" }, [
       el("button", { class: "row nav-row", type: "button", onclick: () => { void openWhatsNewList(); } }, [
         el("div", { class: "grow" }, [
@@ -1929,6 +2051,7 @@ function youScreen() {
           ])
         : null,
     ]),
+    flicPanel(code),
     el("div", { class: "panel stack" }, [
       el("button", { class: "btn danger", type: "button", text: "Leave circle", onclick: onLeave }),
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),
@@ -2090,10 +2213,184 @@ function onRevokeCalendarFeed() {
   render();
 }
 
+const CALENDAR_SYNC_STEPS = [
+  "Google Calendar on a computer: Settings, pick your calendar, Integrate calendar, then copy Secret address in iCal format.",
+  "Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, then copy the ICS link.",
+  "iCloud: in the Calendar app tap the info button next to a calendar, turn on Public Calendar, then Share Link.",
+];
+
+/** Import side of calendars: friends see busy or free, never titles. The link never comes back from the server. */
+function calendarSyncPanel() {
+  if (!state.calendarSync) void loadCalendarSync();
+  const sync = state.calendarSync || { loaded: false };
+  const head = [
+    el("h3", { text: "Calendar availability" }),
+    el("p", { text: "Friends in circles you pick see when you're busy or free. They never see what is in your calendar." }),
+  ];
+  const wrap = (kids) => el("section", { class: "panel calendar-sync", "aria-label": "Calendar availability" }, [...head, ...kids]);
+  if (!sync.loaded) return wrap([el("p", { class: "help", text: "Loading…" })]);
+  const error = sync.error ? el("p", { class: "time-error sync-error", role: "alert", text: sync.error }) : null;
+  if (!sync.connected) {
+    return wrap([
+      el("form", { class: "stack", novalidate: "", onsubmit: (event) => { event.preventDefault(); void onConnectCalendar(); } }, [
+        el("label", { class: "field" }, [
+          el("span", { text: "Private calendar link" }),
+          el("input", {
+            id: "calendar-sync-url",
+            class: "calendar-url",
+            type: "url",
+            inputmode: "url",
+            autocomplete: "off",
+            autocapitalize: "off",
+            spellcheck: "false",
+            placeholder: "https://… .ics",
+            value: sync.draft || "",
+            oninput: (event) => { state.calendarSync.draft = event.target.value; },
+          }),
+        ]),
+        error,
+        el("button", { class: "btn secondary", type: "submit", text: sync.busy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
+      ]),
+      el("p", { class: "help sync-note", text: "It stays off for every circle until you turn one on. Hangry keeps the link encrypted and never shows it again." }),
+      el("ul", { class: "feed-steps" }, CALENDAR_SYNC_STEPS.map((line) => el("li", { text: line }))),
+    ]);
+  }
+  const circles = sync.circles || [];
+  const shared = new Set(sync.sharedCircleIds || []);
+  return wrap([
+    el("p", { class: "sync-host", text: `Connected: ${sync.host || "calendar"}` }),
+    syncStatusLine(sync),
+    error,
+    el("p", { class: "sheet-label sync-label", text: "Show busy or free in" }),
+    el("div", { class: "sync-circles" }, circles.map((circle) => el("label", { class: "share-toggle" }, [
+      el("input", {
+        type: "checkbox",
+        checked: shared.has(circle.id),
+        disabled: sync.busy,
+        onchange: (event) => { void onShareCalendar(circle.id, event.target.checked); },
+      }),
+      el("span", { text: circle.name }),
+    ]))),
+    shared.size ? null : el("p", { class: "help sync-note", text: "Off everywhere. Tick a circle to share." }),
+    el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
+    el("div", { class: "feed-manage" }, [
+      el("button", { class: "text-btn", type: "button", text: "Check now", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
+      el("button", { class: "text-btn danger", type: "button", text: "Remove", disabled: sync.busy, onclick: onRemoveCalendar }),
+    ]),
+  ]);
+}
+
+function syncStatusLine(sync) {
+  if (sync.lastSyncOk === false) {
+    return el("div", { class: "sync-status bad" }, [
+      el("p", { class: "help", text: `${sync.lastError || "The last check failed"}. Friends see your last good copy for up to a day.` }),
+      el("button", { class: "text-btn", type: "button", text: "Try again", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
+    ]);
+  }
+  if (!sync.lastSyncAt) return el("p", { class: "help sync-status", text: "Checking your calendar…" });
+  const today = zonedParts(Date.now(), appTz()).day;
+  const day = zonedParts(sync.lastSyncAt, appTz()).day;
+  const when = day === today ? clock(sync.lastSyncAt) : `${feedDate(sync.lastSyncAt)} ${clock(sync.lastSyncAt)}`;
+  return el("p", { class: "help sync-status", text: `Last checked ${when}. Hangry checks about every 20 minutes.` });
+}
+
+function paintCalendarSync() {
+  const node = document.querySelector(".calendar-sync");
+  if (node) node.replaceWith(calendarSyncPanel());
+  else render();
+}
+
+function applyCalendarSync(data, extra = {}) {
+  state.calendarSync = { loaded: true, ...data, draft: "", busy: false, error: "", ...extra };
+  if (state.me?.user) state.me.user.calendarConnected = Boolean(data.connected);
+}
+
+async function loadCalendarSync() {
+  state.calendarSync = { loaded: false };
+  try {
+    const data = await api("/api/me/calendar-sync", { circle: null });
+    if (!state.calendarSync || state.calendarSync.loaded) return;
+    applyCalendarSync(data);
+  } catch {
+    state.calendarSync = { loaded: true, connected: false, circles: [], sharedCircleIds: [], draft: "" };
+  }
+  document.querySelector(".calendar-sync")?.replaceWith(calendarSyncPanel());
+}
+
+/** Shows the server's short reason in the panel, never the link itself. */
+function calendarSyncError(error) {
+  if (error?.status === 400 && error.data?.error) return String(error.data.error);
+  if (error?.status === 429) return "That's a lot at once. Try again in a minute.";
+  return isNetworkFailure(error) ? "You're offline. Try again." : "Something went wrong. Try again.";
+}
+
+async function calendarSyncCall(path, options, after) {
+  const draft = state.calendarSync?.draft || "";
+  state.calendarSync = { ...(state.calendarSync || { loaded: true }), busy: true, error: "" };
+  paintCalendarSync();
+  try {
+    const data = await api(path, { ...options, circle: null });
+    applyCalendarSync(data);
+    after?.(data);
+  } catch (error) {
+    state.calendarSync = { ...state.calendarSync, busy: false, draft, error: calendarSyncError(error) };
+  }
+  paintCalendarSync();
+}
+
+async function onConnectCalendar() {
+  const url = (document.getElementById("calendar-sync-url")?.value || state.calendarSync?.draft || "").trim();
+  if (!url) {
+    state.calendarSync = { ...state.calendarSync, error: "Paste your private calendar link first." };
+    paintCalendarSync();
+    return;
+  }
+  state.calendarSync.draft = url;
+  await calendarSyncCall("/api/me/calendar-sync", { method: "PUT", body: { url } });
+}
+
+async function onRefreshCalendar() {
+  await calendarSyncCall("/api/me/calendar-sync/refresh", { method: "POST", body: {} });
+}
+
+async function onShareCalendar(circleId, on) {
+  const ids = new Set(state.calendarSync?.sharedCircleIds || []);
+  if (on) ids.add(circleId);
+  else ids.delete(circleId);
+  await calendarSyncCall("/api/me/calendar-sync", { method: "PATCH", body: { sharedCircleIds: [...ids] } });
+}
+
+function onRemoveCalendar() {
+  state.confirm = {
+    title: "Remove calendar?",
+    body: "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
+    confirmLabel: "Remove",
+    action: async () => {
+      await calendarSyncCall("/api/me/calendar-sync", { method: "DELETE" });
+    },
+  };
+  render();
+}
+
+/** Busy or free right now for a member who shares with this circle, from the circle payload. */
+function memberAvailability(id) {
+  return state.me?.circle?.members?.find((member) => member.id === id)?.availability || null;
+}
+
+function availabilityLine(availability, from = Date.now()) {
+  const text = availabilityText(availability, from, appTz());
+  if (!text) return null;
+  return el("p", { class: `avail-line ${availability.state}` }, [
+    el("span", { class: "avail-dot", "aria-hidden": "true" }),
+    el("span", { text }),
+  ]);
+}
+
 function tabbar(fresh = false) {
   const tabs = [
     ["home", "Now", "home"],
-    ["map", "Map", "map"],
+    // The Events tab (formerly Map): the id stays "map" so routing and hashes do not move.
+    ["map", "Events", "calendar"],
     ["chat", "Chat", "chat"],
     ["circle", "Circle", "compass"],
     ["you", "You", "person"],
@@ -2191,6 +2488,7 @@ function memberRow(member) {
         member.admin ? el("span", { class: "admin-badge", text: "Admin" }) : null,
       ]),
       line ? el("p", { text: line }) : null,
+      self ? null : availabilityLine(member.availability),
     ]),
     youAreAdmin() && !self
       ? el("button", {
@@ -2260,10 +2558,10 @@ function confirmRemoveMember(member) {
   render();
 }
 
-function openEventDetail(kind, item) {
+function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
   state.cardMenu = null;
-  state.eventDetail = { kind, id: item.id };
+  state.eventDetail = { kind, id: item.id, from };
   state.sheet = "event-detail";
   render();
 }
@@ -2271,8 +2569,19 @@ function openEventDetail(kind, item) {
 function eventDetailItem() {
   const detail = state.eventDetail;
   if (!detail) return null;
-  if (detail.kind === "plan") return state.plans.find((row) => row.id === detail.id) || null;
-  return state.socials.find((row) => row.id === detail.id) || null;
+  return findEvent(detail.kind, detail.id);
+}
+
+/** An event by id from Home, then the map, then the calendar month. */
+function findEvent(kind, id) {
+  const lists = kind === "plan"
+    ? [state.plans, mapEvents().plans, state.calendarPlans]
+    : [state.socials, mapEvents().socials, state.calendarSocials];
+  for (const list of lists) {
+    const found = list.find((row) => row.id === id);
+    if (found) return found;
+  }
+  return null;
 }
 
 function eventDetailSheet() {
@@ -2292,19 +2601,18 @@ function eventDetailSheet() {
   }
   const kind = detail.kind;
   const title = item.note || (kind === "plan" ? "Plan" : "Free now");
-  const when = kind === "plan"
-    ? `${item.whenLabel}${item.time ? ` · ${item.time}` : ""}`
-    : (item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt));
-  const people = kind === "plan"
-    ? [item.creator, ...item.joined]
-    : [item.creator, ...item.joined.filter((person) => person.reply !== "declined")];
-  const unique = [];
-  const seen = new Set();
-  for (const person of people) {
-    if (!person?.id || seen.has(person.id)) continue;
-    seen.add(person.id);
-    unique.push(person);
-  }
+  const calendar = detail.from === "calendar";
+  const over = calendar && (kind === "plan" ? calPlanOver(item) : calSocialOver(item));
+  const mine = item.creator?.id === state.me.user.id;
+  let when;
+  if (kind === "plan") when = `${item.whenLabel}${item.time ? ` · ${item.time}` : ""}${over ? " · Ended" : ""}`;
+  else if (over) when = `${shortDate(calSocialDay(item), calToday())} · ${clock(item.startsAt ?? item.createdAt)} · Ended`;
+  else when = item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt);
+  const crowd = cardCrowd(item.creator, item.joined);
+  const line = (person) => (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
+  const personRow = (text, person) => over
+    ? el("div", { class: "guest-row" }, [avatar(person), el("p", { class: "reply-line", text })])
+    : guestDetailRow(text, person, kind, item);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-label": "Details" }, [
@@ -2314,16 +2622,23 @@ function eventDetailSheet() {
         el("p", { class: "help", text: `${when} · ${item.creator.name}` }),
       ]),
       el("div", { class: "sheet-scroll" }, [
+        calendar ? mapCircleLine(item) : null,
+        calendar && kind === "plan" ? planCirclesLine(item) : null,
         kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         deliveryLine(kind, item),
+        calendar ? el("div", { class: "detail-actions" }, [
+          chatRow(kind, item),
+          over ? null : cardActions(kind, item, { locked: mine }),
+        ]) : null,
         el("h3", { class: "members-title", text: "Who's in" }),
-        el("div", { class: "list" }, unique.map((person) => {
-          const line = person.id === item.creator.id
-            ? `${person.name} · host`
-            : (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
-          return guestDetailRow(line, person, kind, item);
-        })),
+        el("div", { class: "list" }, crowd.people.map((person) => personRow(
+          person.id === item.creator.id ? `${person.name} · host` : line(person), person,
+        ))),
+        crowd.cant.length ? el("h3", { class: "members-title", text: "Can't make it" }) : null,
+        crowd.cant.length ? el("div", { class: "list cant-list" }, crowd.cant.map((person) => (
+          personRow(line(person), person)
+        ))) : null,
       ]),
     ]),
   ]);
@@ -2501,9 +2816,7 @@ function arrivalSheet() {
         event.preventDefault();
         const value = document.getElementById("arrival-time")?.value || pick.value;
         const kind = pick.kind;
-        const item = kind === "plan"
-          ? state.plans.find((row) => row.id === pick.id)
-          : state.socials.find((row) => row.id === pick.id);
+        const item = findEvent(kind, pick.id);
         state.arrivalPick = null;
         state.sheet = null;
         if (item && value) chooseArrival(kind, item, value);
@@ -3155,6 +3468,7 @@ function sheet() {
         el("div", { class: "sheet-form" }, [
           whenBlock(),
           planning ? null : timeBlock(),
+          planning ? null : busyAtBlock(),
           sheetField(planning ? "Plan" : "Note (optional)", "sheet-note", state.noteDraft, (value) => {
             state.noteDraft = value;
             paintSummary();
@@ -3170,10 +3484,14 @@ function sheet() {
               class: "sheet-control",
               type: "time",
               value: state.planTime,
-              oninput: (event) => { state.planTime = event.target.value; },
+              oninput: (event) => {
+                state.planTime = event.target.value;
+                paintBusyAt();
+              },
             }),
             planTimeError(),
           ]) : null,
+          planning ? busyAtBlock() : null,
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
         ]),
@@ -3305,13 +3623,399 @@ function canEnableNotifications(signals, guide) {
   return false;
 }
 
+/** The events the map shows: every circle when All circles is on, else the selected one. */
+function mapEvents() {
+  if (state.mapAllCircles) return { socials: state.mapSocials, plans: state.mapPlans };
+  return { socials: state.socials, plans: state.plans };
+}
+
+function forgetMapAll() {
+  state.mapSocials = [];
+  state.mapPlans = [];
+  state.calendarSocials = [];
+  state.calendarPlans = [];
+  state.calendarKey = "";
+}
+
+async function refreshMapAll() {
+  try {
+    const [socials, plans] = await Promise.all([
+      api("/api/socials?all=1", { circle: null }),
+      api("/api/plans?all=1", { circle: null }),
+    ]);
+    state.mapSocials = socials.socials || [];
+    state.mapPlans = plans.plans || [];
+  } catch (error) {
+    if (error.status === 401) return;
+    if (isNetworkFailure(error) || error.status >= 500) noteConnectionProblem(error);
+  }
+}
+
+/** The circle an event lives in, so In, chat and share hit its home circle from the All map. */
+function actingCircle(item) {
+  const mine = new Set((state.me?.circles || []).map((circle) => circle.id));
+  if (item?.circleId && (!mine.size || mine.has(item.circleId))) return item.circleId;
+  const shared = (item?.circles || []).find((circle) => mine.has(circle.id));
+  return shared?.id || state.circleId;
+}
+
+async function setMapAll(on) {
+  if (state.mapAllCircles === on) return;
+  state.mapAllCircles = on;
+  try {
+    localStorage.setItem(MAP_ALL_KEY, on ? "1" : "0");
+  } catch {
+    /* storage off */
+  }
+  if (on && state.eventsView !== "calendar") await refreshMapAll();
+  if (state.eventsView === "calendar") await loadCalendar();
+  // A fresh map fits to the new set of pins.
+  destroyLiveMap();
+  mapWrap = null;
+  render();
+  refreshPins();
+}
+
+function mapScopeControl() {
+  if ((state.me?.circles || []).length < 2) return null;
+  const all = state.mapAllCircles;
+  return el("div", { class: "map-scope segment", role: "group", "aria-label": "Map scope" }, [
+    el("button", {
+      type: "button",
+      class: all ? "" : "on",
+      "aria-pressed": all ? "false" : "true",
+      text: "This circle",
+      onclick: () => void setMapAll(false),
+    }),
+    el("button", {
+      type: "button",
+      class: all ? "on" : "",
+      "aria-pressed": all ? "true" : "false",
+      text: "All circles",
+      onclick: () => void setMapAll(true),
+    }),
+  ]);
+}
+
+function mapCircleLine(item) {
+  if (!state.mapAllCircles || !item) return null;
+  if (item.circles && item.circles.length >= 2) return null;
+  if (!item.circleName) return null;
+  return el("p", { class: "map-card-circle", text: item.circleName });
+}
+
+function readEventsView() {
+  try {
+    return localStorage.getItem(EVENTS_VIEW_KEY) === "map" ? "map" : "calendar";
+  } catch {
+    return "calendar";
+  }
+}
+
+async function setEventsView(view) {
+  if (state.eventsView === view) return;
+  state.eventsView = view;
+  try {
+    localStorage.setItem(EVENTS_VIEW_KEY, view);
+  } catch {
+    /* storage off */
+  }
+  state.cardMenu = null;
+  // Leaving the map tears it down the same way leaving the tab does; coming back builds a fresh one.
+  destroyLiveMap();
+  mapWrap = null;
+  if (view === "calendar") calFade = "grid";
+  render();
+  if (view === "calendar") await loadCalendar();
+  else if (state.mapAllCircles) await refreshMapAll();
+  if (state.tab !== "map" || state.eventsView !== view) return;
+  render();
+  if (view === "map") refreshPins();
+}
+
+/** One short row: Map / Calendar, then This circle / All circles when there is more than one circle. */
+function eventsControls() {
+  const calendar = state.eventsView === "calendar";
+  const scope = mapScopeControl();
+  // With the scope switch beside it the view switch is icons only; on its own it has room for the words.
+  const viewButton = (name, view, on) => el("button", {
+    type: "button",
+    class: on ? "on" : "",
+    "aria-pressed": on ? "true" : "false",
+    "aria-label": name,
+    onclick: () => void setEventsView(view),
+  }, [icon(view), scope ? null : el("span", { class: "events-view-label", text: name, "aria-hidden": "true" })]);
+  return el("div", { class: scope ? "events-controls scoped" : "events-controls" }, [
+    el("div", { class: "events-view segment", role: "group", "aria-label": "Show" }, [
+      viewButton("Map", "map", !calendar),
+      viewButton("Calendar", "calendar", calendar),
+    ]),
+    scope,
+  ]);
+}
+
+/** Set by a month or day change; the next render fades that part in once. */
+let calFade = "";
+/** Bumped per month fetch, so an older answer never lands over a newer month. */
+let calendarSeq = 0;
+
+/** Your circles get the palette in order, so two of them never share a colour (up to eight). */
+function calColor(circleId) {
+  const index = (state.me?.circles || []).findIndex((circle) => circle.id === circleId);
+  return index >= 0 ? CIRCLE_COLORS[index % CIRCLE_COLORS.length] : circleColor(circleId);
+}
+
+function calToday() {
+  return zonedParts(Date.now(), appTz()).day;
+}
+
+function ensureCalendarMonth() {
+  if (state.calMonth) return;
+  const today = calToday();
+  state.calMonth = monthStart(today);
+  state.calDay = today;
+}
+
+function calendarKeyFor() {
+  const range = gridRange(state.calMonth);
+  const scope = state.mapAllCircles && (state.me?.circles || []).length >= 2 ? "all" : state.circleId || "";
+  return { range, scope, key: `${scope}|${range.from}|${range.to}` };
+}
+
+/** The visible grid's events, padding days included. Kept apart from Home and the map. */
+async function loadCalendar({ force = false } = {}) {
+  ensureCalendarMonth();
+  const { range, scope, key } = calendarKeyFor();
+  if (!force && key === state.calendarKey) return;
+  const seq = ++calendarSeq;
+  state.calendarLoading = true;
+  const query = `from=${range.from}&to=${range.to}`;
+  try {
+    const data = scope === "all"
+      ? await api(`/api/calendar-month?${query}&all=1`, { circle: null })
+      : await api(`/api/calendar-month?${query}`);
+    if (seq !== calendarSeq) return;
+    state.calendarPlans = data.plans || [];
+    state.calendarSocials = data.socials || [];
+    state.calendarKey = key;
+  } catch (error) {
+    if (error.status === 401) return;
+    if (isNetworkFailure(error) || error.status >= 500) noteConnectionProblem(error);
+  } finally {
+    if (seq === calendarSeq) state.calendarLoading = false;
+  }
+}
+
+function calSocialDay(social) {
+  return social.day || zonedParts(social.startsAt ?? social.createdAt, appTz()).day;
+}
+
+function calSocialOver(social) {
+  return !(Number(social.expiresAt) > Date.now());
+}
+
+function calPlanOver(plan) {
+  return Boolean(plan.endedAt) || !planOpen(plan);
+}
+
+/** Every loaded event, by day, in time order (a plan with no time comes last). */
+function calendarByDay() {
+  const days = new Map();
+  const add = (day, entry) => {
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(entry);
+  };
+  for (const plan of state.calendarPlans) {
+    add(plan.forDate, { kind: "plan", item: plan, at: plan.time || "~", over: calPlanOver(plan) });
+  }
+  for (const social of state.calendarSocials) {
+    add(calSocialDay(social), { kind: "social", item: social, at: clock(social.startsAt ?? social.createdAt), over: calSocialOver(social) });
+  }
+  for (const list of days.values()) list.sort((a, b) => a.at.localeCompare(b.at) || a.item.id.localeCompare(b.item.id));
+  return days;
+}
+
+function goCalMonth(first, day = "") {
+  const today = calToday();
+  state.calMonth = first;
+  state.calDay = day || (monthStart(today) === first ? today : first);
+  calFade = "grid";
+  render();
+  void loadCalendar().then(() => {
+    if (state.tab === "map" && state.eventsView === "calendar") render();
+  });
+}
+
+function pickCalDay(day) {
+  if (monthStart(day) !== state.calMonth) {
+    goCalMonth(monthStart(day), day);
+    return;
+  }
+  if (state.calDay === day) return;
+  state.calDay = day;
+  calFade = "list";
+  render();
+}
+
+function calendarScreen() {
+  ensureCalendarMonth();
+  const today = calToday();
+  const { key } = calendarKeyFor();
+  const ready = state.calendarKey === key;
+  const byDay = ready ? calendarByDay() : new Map();
+  const fade = calFade;
+  calFade = "";
+  const grid = monthGrid(state.calMonth);
+  const monthCount = grid.reduce((sum, cell) => sum + (cell.inMonth ? (byDay.get(cell.day)?.length || 0) : 0), 0);
+  const cells = grid.map((cell) => {
+    const events = byDay.get(cell.day) || [];
+    // Two events fit as two stacks; with more, the second slot says how many others there are.
+    const stacked = events.length > CAL_CELL_STACKS ? events.slice(0, CAL_CELL_STACKS - 1) : events;
+    const moreEvents = events.length - stacked.length;
+    const classes = ["cal-cell"];
+    if (!cell.inMonth) classes.push("pad");
+    if (cell.day === today) classes.push("today");
+    if (cell.day === state.calDay) classes.push("on");
+    const date = Number(cell.day.slice(8, 10));
+    const label = `${shortDate(cell.day, today)}${cell.day === today ? ", today" : ""}${events.length ? `, ${events.length} ${events.length === 1 ? "event" : "events"}` : ""}`;
+    return el("button", {
+      class: classes.join(" "),
+      type: "button",
+      "data-day": cell.day,
+      "aria-label": label,
+      "aria-pressed": cell.day === state.calDay ? "true" : "false",
+      "aria-current": cell.day === today ? "date" : null,
+      onclick: () => pickCalDay(cell.day),
+    }, [
+      el("span", { class: "cal-num", text: String(date) }),
+      events.length ? el("span", { class: "cal-stacks", "aria-hidden": "true" }, [
+        ...stacked.map((entry) => crowdStack(entry, CAL_CELL_FACES, 16, "cal-stack")),
+        moreEvents ? el("span", { class: "cal-more", text: `+${moreEvents}` }) : null,
+      ]) : null,
+    ]);
+  });
+  const dayEvents = byDay.get(state.calDay) || [];
+  let below;
+  if (!ready) below = el("p", { class: "cal-quiet", text: "Loading…" });
+  else if (!monthCount && monthStart(state.calDay) === state.calMonth) {
+    below = el("div", { class: "cal-empty" }, [
+      el("h2", { text: "Nothing planned this month." }),
+      el("p", { text: "Plans and hangouts from your circle show up here on their day." }),
+    ]);
+  } else {
+    below = el("section", { class: "cal-day", "aria-label": shortDate(state.calDay, today) }, [
+      el("h2", { class: "cal-day-title", text: state.calDay === today ? `Today · ${shortDate(state.calDay, today)}` : shortDate(state.calDay, today) }),
+      dayEvents.length
+        ? el("div", { class: "cal-list" }, dayEvents.map(calendarRow))
+        : el("p", { class: "cal-quiet", text: "Nothing on this day." }),
+      calFreeLine(state.calDay, dayEvents),
+    ]);
+  }
+  return el("div", { class: "cal" }, [
+    el("div", { class: "cal-head" }, [
+      el("h2", { class: "cal-title", text: monthTitle(state.calMonth), "aria-live": "polite" }),
+      el("button", {
+        class: "text-btn cal-today",
+        type: "button",
+        text: "Today",
+        onclick: () => goCalMonth(monthStart(today), today),
+      }),
+      el("button", {
+        class: "icon-btn cal-nav prev",
+        type: "button",
+        "aria-label": "Previous month",
+        onclick: () => goCalMonth(shiftMonth(state.calMonth, -1)),
+      }, [icon("chevron")]),
+      el("button", {
+        class: "icon-btn cal-nav",
+        type: "button",
+        "aria-label": "Next month",
+        onclick: () => goCalMonth(shiftMonth(state.calMonth, 1)),
+      }, [icon("chevron")]),
+    ]),
+    el("div", { class: fade === "grid" ? "cal-panel cal-fade" : "cal-panel" }, [
+      el("div", { class: "cal-week", "aria-hidden": "true" }, WEEKDAY_LABELS.map((name) => el("span", { text: name }))),
+      el("div", { class: "cal-grid" }, cells),
+    ]),
+    el("div", { class: fade ? "cal-below cal-fade" : "cal-below" }, [below]),
+  ]);
+}
+
+/** Faces per event in a month cell, and event stacks per cell, so a 320px grid never overflows. */
+const CAL_CELL_FACES = 2;
+const CAL_CELL_STACKS = 2;
+/** Faces per event in the day list. */
+const CAL_ROW_FACES = 4;
+
+/** Who is in on one event: overlapping faces, then +N. The first face is ringed in the circle's colour. */
+function crowdStack(entry, cap, size, cls) {
+  const { faces, more, total } = eventCrowd(entry.item, cap);
+  const names = faces.map((face) => face.person.name).filter(Boolean);
+  const label = more ? `${names.join(", ")} and ${more} more` : names.join(", ");
+  return el("span", {
+    class: ["avatars", "cal-crowd", cls, entry.over ? "over" : ""].filter(Boolean).join(" "),
+    style: `--cal-ring: ${calColor(entry.item.circleId)}`,
+    "data-in": String(total),
+    "aria-label": cls === "cal-stack" ? null : `${label} ${total === 1 ? "is" : "are"} in`,
+    role: cls === "cal-stack" ? null : "img",
+  }, [
+    ...faces.map((face) => avatar(face.person, size, "cal-face")),
+    more ? el("span", { class: "avatar cal-face cal-face-more", text: `+${more}` }) : null,
+  ]);
+}
+
+/** Friends free that day but not on an event. Empty until a later change fills freeOnDay in. */
+function calFreeLine(day, events) {
+  const free = freeOnDay(day, events, state.me?.circle?.members ?? []);
+  if (!free.length) return null;
+  return el("div", { class: "cal-free" }, free.map((person) => avatar(person, 24)));
+}
+
+/** One event under the grid: title, when, host, the circle when All circles is on, and who is in. */
+function calendarRow(entry) {
+  const { kind, item, over } = entry;
+  const title = item.note || (kind === "plan" ? "Plan" : "Free now");
+  let when;
+  if (kind === "plan") when = item.time || "";
+  else if (!over && (!item.startsAt || item.startsAt <= Date.now())) when = "Free now";
+  else if (!over) when = `from ${clock(item.startsAt)}`;
+  else when = clock(item.startsAt ?? item.createdAt);
+  const bits = [when, item.creator?.name];
+  if (state.mapAllCircles && (state.me?.circles || []).length >= 2 && item.circleName) bits.push(item.circleName);
+  if (over) bits.push("Ended");
+  return el("button", {
+    class: over ? "cal-event over" : "cal-event",
+    type: "button",
+    "data-kind": kind,
+    "data-id": item.id,
+    onclick: () => openEventDetail(kind, item, "calendar"),
+  }, [
+    el("span", { class: "cal-dot", "aria-hidden": "true", style: `background: ${calColor(item.circleId)}` }),
+    el("span", { class: "cal-event-copy" }, [
+      el("strong", { text: title }),
+      el("span", { text: bits.filter(Boolean).join(" · ") }),
+    ]),
+    crowdStack(entry, CAL_ROW_FACES, 24, "cal-row-crowd"),
+  ]);
+}
+
 function mapScreen() {
+  if (state.eventsView === "calendar") {
+    destroyLiveMap();
+    mapWrap = null;
+    return el("div", { class: "map-screen calendar-view" }, [
+      screenHeader("Events"),
+      eventsControls(),
+      calendarScreen(),
+    ]);
+  }
   const pins = collectPins();
   if (!pins.length) {
     destroyLiveMap();
     mapWrap = null;
     return el("div", { class: "map-screen" }, [
-      screenHeader("Map"),
+      screenHeader("Events"),
+      eventsControls(),
       el("div", { class: "map-empty" }, [
         el("h2", { text: "No places yet" }),
         el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
@@ -3325,14 +4029,16 @@ function mapScreen() {
     ]);
   }
   return el("div", { class: "map-screen" }, [
-    screenHeader("Map"),
+    screenHeader("Events"),
+    eventsControls(),
     mapWrap,
   ]);
 }
 
 function collectPins() {
   const pins = [];
-  for (const social of state.socials) {
+  const events = mapEvents();
+  for (const social of events.socials) {
     if (!social.location) continue;
     const mine = social.creator.id === state.me.user.id;
     const place = audiencePlace(social.place);
@@ -3355,7 +4061,7 @@ function collectPins() {
       label: pinLabel("social", social, Date.now(), appTz()),
     });
   }
-  for (const plan of state.plans) {
+  for (const plan of events.plans) {
     if (!plan.location) continue;
     const mine = plan.creator.id === state.me.user.id;
     const place = audiencePlace(plan.place);
@@ -3658,6 +4364,77 @@ function timeBlock() {
   ]);
 }
 
+/** The moment the create sheet is about: now, the later start, or a timed plan. Null for an untimed plan. */
+function sheetBusyAt(now = Date.now()) {
+  if (state.sheet === "plan") {
+    const day = chosenPlanDay();
+    if (!day || !/^\d{2}:\d{2}$/.test(state.planTime || "")) return null;
+    const at = clockInstant(day, state.planTime);
+    return Number.isFinite(at) ? at : null;
+  }
+  if (state.whenMode !== "later") return "now";
+  if (state.startChoice === "+60") return Math.floor((now + 3600000) / 60000) * 60000;
+  if (!/^\d{2}:\d{2}$/.test(state.startChoice)) return null;
+  const range = planDayRange(now, appTz());
+  const tomorrow = offeringTomorrow(now) && state.startChoice === nextLaterSlot(now, appTz());
+  const at = clockInstant(tomorrow ? range.tomorrow : range.today, state.startChoice);
+  return Number.isFinite(at) ? at : null;
+}
+
+let busyAtTimer = 0;
+
+/**
+ * "Busy then: Alex until 15:30". Only people who share their calendar with this circle, and
+ * only busy or free: the server never sends what is in anyone's calendar.
+ */
+function busyAtBlock() {
+  const at = sheetBusyAt();
+  const node = el("div", { class: "busy-at", "aria-live": "polite" });
+  if (at === null) return node;
+  const self = state.me?.user?.id;
+  let people;
+  let from = Date.now();
+  if (at === "now") {
+    people = (state.me?.circle?.members || [])
+      .filter((member) => member.id !== self && member.availability)
+      .map((member) => ({ id: member.id, ...member.availability }));
+  } else if (state.busyAt?.at === at) {
+    people = state.busyAt.people;
+    from = at;
+  } else {
+    clearTimeout(busyAtTimer);
+    busyAtTimer = setTimeout(() => { void loadBusyAt(at); }, 250);
+    return node;
+  }
+  const names = new Map((state.me?.circle?.members || []).map((member) => [member.id, member.name]));
+  const busy = people.filter((person) => person.state === "busy" && names.has(person.id) && person.id !== self);
+  if (!busy.length) return node;
+  const parts = busy.map((person) => Number.isFinite(person.until)
+    ? `${names.get(person.id)} until ${untilText(person.until, from, appTz())}`
+    : names.get(person.id));
+  node.append(
+    el("span", { class: "avail-dot", "aria-hidden": "true" }),
+    el("span", { text: `${at === "now" ? "Busy now" : "Busy then"}: ${parts.join(", ")}` }),
+  );
+  return node;
+}
+
+async function loadBusyAt(at) {
+  let people = [];
+  try {
+    const data = await api(`/api/circles/availability?at=${at}`);
+    people = Array.isArray(data?.people) ? data.people : [];
+  } catch {
+    people = [];
+  }
+  state.busyAt = { at, people };
+  paintBusyAt();
+}
+
+function paintBusyAt() {
+  document.querySelector(".busy-at")?.replaceWith(busyAtBlock());
+}
+
 function pushLine(name, place, fromTime, note) {
   const spot = place.trim();
   const when = fromTime.trim();
@@ -3771,13 +4548,18 @@ function maybeLine(person, mine) {
   return mine ? "You're maybe" : `${person.name} is maybe`;
 }
 
-/** Shown in the who-row: in, maybe, and can't. Only in counts as In. */
-function answered(person) {
-  return inReply(person) || person.reply === "maybe" || person.reply === "declined";
+/** The card's faces: host first, then everyone In or Maybe. Can't stays in the details. */
+function avatarStack(item) {
+  const crowd = cardCrowd(item.creator, item.joined);
+  return el("div", { class: "avatars" }, [
+    ...crowd.stack.map((person) => avatar(person)),
+    crowd.more ? el("span", { class: "avatar avatar-more", text: `+${crowd.more}`, "aria-label": `${crowd.more} more` }) : null,
+  ]);
 }
 
+/** Shown in the who-row: in and maybe. Can't is only in the details. */
 function replySummary(social) {
-  const people = social.joined.filter(answered);
+  const people = cardCrowd(social.creator, social.joined).listed;
   return whoRow("social", social, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
 }
 
@@ -3817,9 +4599,10 @@ function inToggle(kind, item, { locked = false } = {}) {
       if (hostLocked && inNow) return;
       state.cardMenu = null;
       tick();
-      state.inPop = { key: `${kind}:${item.id}`, on: !inNow, startedAt: 0, until: Date.now() + 10_000 };
-      if (inNow) void leaveEvent(kind, item);
-      else void sendReply(kind, item, "in");
+      if (inNow) {
+        state.inPop = { key: `${kind}:${item.id}`, on: false, startedAt: 0, until: Date.now() + 10_000 };
+        void leaveEvent(kind, item);
+      } else void joinIn(kind, item);
     },
   });
   if (pop) node.addEventListener("animationend", () => {
@@ -3865,6 +4648,84 @@ function tick() {
   } catch {
     /* no vibration here */
   }
+}
+
+function joinNow(kind, item) {
+  state.inPop = { key: `${kind}:${item.id}`, on: true, startedAt: 0, until: Date.now() + 10_000 };
+  void sendReply(kind, item, "in");
+}
+
+/** The stretch of time the hangout covers, for the overlap highlight. Untimed plans have none. */
+function hangoutWindow(kind, item, now = Date.now()) {
+  if (kind === "plan") {
+    if (!/^\d{2}:\d{2}$/.test(item.time || "")) return null;
+    const start = clockInstant(item.forDate, item.time);
+    return Number.isFinite(start) ? { start, end: start + PLAN_DURATION_MS } : null;
+  }
+  const start = item.startsAt && item.startsAt > now ? item.startsAt : now;
+  return Number.isFinite(item.expiresAt) && item.expiresAt > start ? { start, end: item.expiresAt } : null;
+}
+
+function hangoutDay(kind, item, now = Date.now()) {
+  if (kind === "plan") return /^\d{4}-\d{2}-\d{2}$/.test(item.forDate || "") ? item.forDate : "";
+  return zonedParts(item.startsAt && item.startsAt > now ? item.startsAt : now, appTz()).day;
+}
+
+/**
+ * I'm in, with a look at your own calendar first. Only for someone who connected one, and
+ * only when that day has events. No events, or no answer, joins straight away.
+ */
+async function joinIn(kind, item) {
+  const day = hangoutDay(kind, item);
+  if (!state.me?.user?.calendarConnected || !day) {
+    joinNow(kind, item);
+    return;
+  }
+  const key = `${kind}:${item.id}`;
+  if (state.calendarCheckBusy === key) return;
+  state.calendarCheckBusy = key;
+  let events = [];
+  try {
+    const data = await api(`/api/me/calendar-sync/day?date=${day}`, { circle: null });
+    if (data?.connected === false && state.me?.user) state.me.user.calendarConnected = false;
+    events = dayEvents(data?.events);
+  } catch {
+    events = [];
+  } finally {
+    state.calendarCheckBusy = "";
+  }
+  if (!events.length) {
+    joinNow(kind, item);
+    return;
+  }
+  const span = hangoutWindow(kind, item);
+  const clash = events.some((event) => eventOverlaps(event, span));
+  const today = planDayRange(Date.now(), appTz()).today;
+  const label = dayLabel(day, today) || day;
+  state.confirm = {
+    title: clash ? "This clashes with your calendar" : `Your calendar ${label === "Today" || label === "Tomorrow" ? label.toLowerCase() : `on ${label}`}`,
+    body: span
+      ? (clash ? "Highlighted events overlap. Only you can see this." : "Nothing overlaps. Only you can see this.")
+      : "Only you can see this.",
+    confirmLabel: "I'm in",
+    confirmClass: "btn",
+    extra: calendarCheckList(events, day, span),
+    action: async () => joinNow(kind, item),
+  };
+  render();
+}
+
+function calendarCheckList(events, day, span) {
+  const dayStart = clockInstant(day, "00:00");
+  const dayEnd = clockInstant(addDays(day, 1), "00:00");
+  return el("ul", { class: "cal-check", "aria-label": "Your events that day" }, events.map((event) => {
+    const hit = eventOverlaps(event, span);
+    return el("li", { class: hit ? "cal-event clash" : "cal-event" }, [
+      el("span", { class: "cal-time", text: eventTimeText(event, dayStart, dayEnd, appTz()) }),
+      el("span", { class: "cal-title", text: event.title || "Busy" }),
+      hit ? el("span", { class: "cal-flag", text: "Overlaps" }) : null,
+    ]);
+  }));
 }
 
 async function leaveEvent(kind, item) {
@@ -4876,11 +5737,12 @@ function consumeDeepLink() {
 
 function mapCard(pin) {
   const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, pin)) : "";
+  const events = mapEvents();
   const social = pin.kind === "social"
-    ? state.socials.find((item) => item.id === pin.id) || { id: pin.id, startsAt: null, joined: [] }
+    ? events.socials.find((item) => item.id === pin.id) || { id: pin.id, startsAt: null, joined: [] }
     : null;
   const plan = pin.kind === "plan"
-    ? state.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
+    ? events.plans.find((item) => item.id === pin.id) || { id: pin.id, joined: [] }
     : null;
   const item = social?.creator ? social : plan?.creator ? plan : null;
   const kind = social?.creator ? "social" : plan?.creator ? "plan" : pin.kind;
@@ -4914,12 +5776,13 @@ function mapCard(pin) {
     }, [
       el("p", { text: pin.note }),
       el("p", { class: "map-card-time", text: distance ? `${pin.time} · ${distance}` : pin.time }),
+      mapCircleLine(item),
       planCirclesLine(plan),
       plan ? planDescription(plan) : null,
       social && !own ? replySummary(social) : null,
       social ? removedNote(social) : null,
       plan && !own ? (plan.removedBy ? removedNote(plan) : (
-        (plan.joined.find((person) => person.id === state.me.user.id) && el("p", {
+        (plan.joined.find((person) => person.id === state.me.user.id && person.reply !== "declined") && el("p", {
           class: "reply-line",
           text: planReplyLine(plan.joined.find((person) => person.id === state.me.user.id)),
         }))
@@ -4948,7 +5811,7 @@ function planReplyLine(person) {
 }
 
 function planReplySummary(plan) {
-  const people = plan.joined.filter(answered);
+  const people = cardCrowd(plan.creator, plan.joined).listed;
   return whoRow("plan", plan, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
 }
 
@@ -4962,7 +5825,14 @@ function guestLine(text, person, kind, event) {
 }
 
 function guestDetailRow(text, person, kind, event) {
-  const line = el("p", { class: "reply-line", text });
+  const availability = person.id === state.me.user.id ? null : memberAvailability(person.id);
+  const busyText = availability ? availabilityText(availability, Date.now(), appTz()) : "";
+  const line = busyText
+    ? el("div", { class: "reply-line" }, [
+        el("span", { text }),
+        el("span", { class: `avail-tag ${availability.state}`, text: busyText }),
+      ])
+    : el("p", { class: "reply-line", text });
   if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) {
     return el("div", { class: "guest-row" }, [avatar(person), line]);
   }
@@ -5082,6 +5952,8 @@ function showOnMap(kind, id) {
   }
   state.focusPin = `${kind}:${id}`;
   state.tab = "map";
+  // A pin focus needs the map, so this shows it for now without changing the saved view.
+  state.eventsView = "map";
   state.sheet = null;
   render();
 }
@@ -5648,7 +6520,7 @@ document.addEventListener("pointerdown", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  // An open pin card sits above the Map tab but below every sheet, menu and chat.
+  // An open pin card sits above the Events tab but below every sheet, menu and chat.
   if (mapCardOnTop()) {
     event.preventDefault();
     closeMapCard();
@@ -5659,7 +6531,7 @@ document.addEventListener("keydown", (event) => {
   dismissTopOverlay();
 });
 
-/** The pin card is the topmost thing on screen: nothing above the Map tab is open. */
+/** The pin card is the topmost thing on screen: nothing above the Events tab is open. */
 function mapCardOnTop() {
   if (state.tab !== "map" || !shellShown() || !mapCardOpen()) return false;
   return currentOverlayDepth() === tabLayers();
@@ -5703,6 +6575,18 @@ async function onTab(id) {
     }
   }
   render();
+  if (id === "map" && state.eventsView === "calendar") {
+    await loadCalendar({ force: true });
+    if (state.tab === "map") render();
+    return;
+  }
+  if (id === "map" && state.mapAllCircles) {
+    await refreshMapAll();
+    if (state.tab === "map") {
+      render();
+      refreshPins();
+    }
+  }
 }
 
 function circleNameSheet() {
@@ -5957,6 +6841,7 @@ function confirmSheet() {
         el("h2", { text: pending.title }),
       ]),
       el("p", { class: "help sheet-body", text: pending.body }),
+      pending.extra ? el("div", { class: "sheet-extra" }, [pending.extra]) : null,
       pending.copy ? el("p", { class: "code-block", text: pending.copy }) : null,
       confirmActions([
         pending.copy
@@ -5968,7 +6853,7 @@ function confirmSheet() {
             })
           : null,
         el("button", {
-          class: "btn danger",
+          class: pending.confirmClass || "btn danger",
           type: "button",
           text: pending.confirmLabel,
           onclick: () => {
@@ -6338,6 +7223,7 @@ function onDeleteCircle() {
         state.chatThread = null;
         state.socials = [];
         state.plans = [];
+        forgetMapAll();
         state.notifications = [];
         state.past = false;
         state.pastDays = null;
@@ -6359,6 +7245,7 @@ async function onLeave() {
     state.tab = "home";
     state.socials = [];
     state.plans = [];
+    forgetMapAll();
     state.notifications = [];
     // Alerts start over: the next list only remembers its newest, it does not banner old ones.
     state.bootstrappedNotifs = false;

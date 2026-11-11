@@ -3,7 +3,7 @@ import test from "node:test";
 import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
 
 const LONG = "Meet at the side door, not the front. Bring a jacket because we sit outside until late. "
   + "Menu is at https://example.com/menu and we split the bill. Text me if you run late, I will save you a seat.";
@@ -82,7 +82,7 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
     await desc.click({ position: { x: 10, y: 5 } });
     assert.equal(await desc.getAttribute("aria-expanded"), "false");
 
-    await page.locator(".tabbar").getByRole("button", { name: /^Map/ }).click();
+    await openEventsMap(page);
     const pin = page.locator(".leaflet-marker-icon.pin").first();
     await pin.waitFor({ timeout: 10_000 });
     await page.waitForTimeout(500);
