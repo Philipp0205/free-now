@@ -11,6 +11,16 @@
     ]
   },
   {
+    "id": "2026-11-11-assistant-tokens",
+    "date": "2026-11-11",
+    "title": "Let an assistant act for you",
+    "bullets": [
+      "On the You tab, make a named token for an assistant. Copy it right away, it is shown only once. Revoke it any time.",
+      "With it, an assistant can read your circles, set your status, make plans and say you are in, as you.",
+      "Friends see those actions as you, so only share a token with an assistant you trust."
+    ]
+  },
+  {
     "id": "2026-11-11-chat-caret",
     "date": "2026-11-11",
     "title": "Tap to move the cursor while typing in chat",

@@ -2334,6 +2334,26 @@ html.kb-open .sheet .help { margin-top: 0; }
 .calendar-feed .feed-manage { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
 .calendar-feed .feed-manage .text-btn { min-height: 44px; padding: 8px 4px; }
 
+.agent-tokens .agent-token-secret {
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #1c1c1e;
+  overflow-wrap: anywhere;
+  -webkit-user-select: all;
+  user-select: all;
+  -webkit-touch-callout: default;
+}
+.agent-tokens .agent-token-once .help { margin: 0; }
+.agent-tokens .agent-token-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.agent-tokens .agent-token-row { display: flex; align-items: center; gap: 12px; }
+.agent-tokens .agent-token-row .grow { min-width: 0; overflow-wrap: anywhere; }
+.agent-tokens .agent-token-row .help { margin: 2px 0 0; }
+.agent-tokens .agent-token-row .text-btn { min-height: 44px; padding: 8px 4px; }
+
 /* Calendar view on the Events tab: a month grid, then the picked day's events. */
 /* The month and the day list scroll above the tab bar, so the last row is never under it. */
 .cal { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 12px 24px; }
