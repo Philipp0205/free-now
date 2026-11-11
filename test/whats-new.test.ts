@@ -50,8 +50,24 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is the faster map, in plain words", () => {
+test("the reaction notification entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-11-reaction-notify");
+  assert.equal(top.date, "2026-11-11");
+  assert.equal(top.title, "Get notified when friends react");
+  assert.equal(top.bullets.length, 3);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /reacts to your chat message/);
+  assert.match(text, /which emoji/);
+  assert.match(text, /short bit of your message/);
+  assert.match(text, /your own reactions/);
+  assert.match(text, /muted the chat/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the faster map entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-09-faster-map")!;
+  assert.ok(top, "faster map entry");
   assert.equal(top.id, "2026-11-09-faster-map");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Faster map");
@@ -355,7 +371,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v75");
+  assert.equal(cache?.[1], "hangry-v76");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
