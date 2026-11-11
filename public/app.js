@@ -1,4 +1,4 @@
-import { installGuide, installPrompt, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
+import { installGuide, installPrompt, installReminderDue, joinInstallStep, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "./install-guide.js";
 import { FIELD_REVEAL_MS, KEYBOARD_OFFSET_MIN, keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "./keyboard.js";
 import { addDays, clockText, dayLabel, isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, planDayChoice, planDayDate, planDayRange, shortDate, zonedParts } from "./when.js";
 import { audiencePlace, formatDistance, haversine, isMapsLink, looksLikeUrl } from "./place.js";
@@ -22,10 +22,12 @@ const EVENTS_VIEW_KEY = "hangry-events-view-v2";
 const SHARE_KEY = "fn_share_location";
 const INSTALLED_KEY = "fn_installed";
 const INSTALL_LATER_KEY = "fn_install_later";
+/** Set once the install step after joining a circle was closed, so it never comes back. */
+const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v71";
+const APP_VERSION = "hangry-v72";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -91,6 +93,7 @@ const state = {
   pushReminder: null,
   pushSnooze: false,
   installSheet: false,
+  joinInstall: false,
   installPillHidden: false,
   onboarding: false,
   pushOn: false,
@@ -208,6 +211,7 @@ window.addEventListener("appinstalled", () => {
   localStorage.setItem(INSTALLED_KEY, "1");
   state.installEvent = null;
   state.installSheet = false;
+  state.joinInstall = false;
   void considerReminders();
 });
 
@@ -279,6 +283,7 @@ async function boot() {
         state.me = await api("/api/me");
         history.replaceState(null, "", "/");
         state.pendingCode = "";
+        noteInviteJoin();
       } catch (error) {
         state.error = error.message;
       }
@@ -867,6 +872,7 @@ function clearSession() {
   state.whatsNewChecked = false;
   rememberCircle("");
   state.token = null;
+  state.joinInstall = false;
   state.displayReported = false;
   state.me = null;
   state.socials = [];
@@ -984,7 +990,12 @@ function view() {
     root.append(shell());
   }
   if (state.installOpen) root.append(installGuideView());
-  if (state.onboarding && !state.sheet && !state.confirm && !state.installOpen) {
+  const joinSheet = state.joinInstall && state.me?.circle && !state.sheet && !state.confirm && !state.installOpen
+    ? joinInstallSheet()
+    : null;
+  if (joinSheet) {
+    root.append(joinSheet);
+  } else if (state.onboarding && !state.sheet && !state.confirm && !state.installOpen) {
     root.append(onboardingSheet());
   }
   if (state.banner) root.append(banner(state.banner));
@@ -3201,6 +3212,7 @@ function canShowWhatsNew() {
     && !state.sheet
     && !state.confirm
     && !state.onboarding
+    && !state.joinInstall
     && !state.installOpen
     && !state.installSheet
     && !state.chat
@@ -6247,7 +6259,7 @@ function closeSheet() {
 }
 
 function sheetIsOpen() {
-  return Boolean(state.sheet || state.confirm || state.onboarding || state.installSheet || state.installOpen);
+  return Boolean(state.sheet || state.confirm || state.onboarding || state.joinInstall || state.installSheet || state.installOpen);
 }
 
 /** Tabs other than Now that Back leaves for Now. Alerts is its own layer (closeAlerts). */
@@ -6260,7 +6272,7 @@ function currentOverlayDepth() {
   if (state.cardMenu) depth += 1;
   if (state.installOpen) depth += 1;
   // Onboarding waits behind an open sheet (see view), so it only counts once the sheet is gone.
-  if (state.onboarding && !state.sheet) depth += 1;
+  if ((state.onboarding || state.joinInstall) && !state.sheet) depth += 1;
   if (state.installSheet) depth += 1;
   if (state.sheet) depth += 1;
   if (!shellShown()) return depth;
@@ -6306,6 +6318,10 @@ function dismissTopOverlay() {
   if (state.installOpen) {
     state.installOpen = false;
     render();
+    return;
+  }
+  if (state.joinInstall && !state.sheet) {
+    dismissJoinInstall();
     return;
   }
   if (state.onboarding && !state.sheet) {
@@ -6642,6 +6658,7 @@ async function onStart(event) {
     if (data.circle) {
       history.replaceState(null, "", "/");
       state.pendingCode = "";
+      noteInviteJoin();
     } else if (state.pendingCode) {
       try {
         const joined = await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
@@ -6649,6 +6666,7 @@ async function onStart(event) {
         state.me = await api("/api/me");
         history.replaceState(null, "", "/");
         state.pendingCode = "";
+        noteInviteJoin();
       } catch (error) {
         state.codeDraft = state.pendingCode;
         state.error = error.message;
@@ -6706,6 +6724,7 @@ async function onJoinCircle(event) {
     state.sheet = null;
     state.me = await api("/api/me");
     if (state.pendingCode) history.replaceState(null, "", "/");
+    noteInviteJoin();
     await refresh({ initial: true });
   });
   void considerReminders();
@@ -6998,6 +7017,12 @@ async function considerReminders() {
     return;
   }
   state.pushOn = await devicePushOn();
+  if (state.joinInstall) {
+    // The install step after a join goes first; the usual reminder waits until it is closed.
+    state.onboarding = false;
+    render();
+    return;
+  }
   const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
   const due = reminderDue();
   const denied = "Notification" in window && Notification.permission === "denied";
@@ -7098,9 +7123,71 @@ async function onInstall() {
   if (choice?.outcome === "accepted") {
     localStorage.setItem(INSTALLED_KEY, "1");
     state.installSheet = false;
+    if (state.joinInstall) {
+      localStorage.setItem(JOIN_INSTALL_KEY, "1");
+      state.joinInstall = false;
+    }
   }
   render();
   void considerReminders();
+}
+
+function joinInstallSignals() {
+  return joinInstallStep(currentSignals(), { canPrompt: Boolean(state.installEvent) });
+}
+
+/** Just joined a circle from an invite: offer the install step once, unless this phone has it or said Not now. */
+function noteInviteJoin() {
+  if (localStorage.getItem(JOIN_INSTALL_KEY) === "1" || isInstalled()) return;
+  if (!joinInstallSignals()) return;
+  state.joinInstall = true;
+  state.onboarding = false;
+}
+
+function dismissJoinInstall() {
+  localStorage.setItem(JOIN_INSTALL_KEY, "1");
+  state.joinInstall = false;
+  // Same as Not now on the usual sheet: nothing else pops up now, and that reminder comes back softly after three days.
+  state.pushSnooze = true;
+  localStorage.setItem(INSTALL_LATER_KEY, String(Date.now()));
+  render();
+  void considerReminders();
+}
+
+function joinInstallSheet() {
+  const step = joinInstallSignals();
+  if (!step) return null;
+  const actions = [];
+  if (step.offerInstall) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: () => { void onInstall(); } }));
+  }
+  if (step.copyLink) {
+    const where = step.kind === "ios-other" ? "Safari" : "Chrome";
+    actions.push(el("button", {
+      class: step.offerInstall ? "btn secondary" : "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.origin + "/", `Link copied. Open it in ${where}.`),
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Not now", onclick: dismissJoinInstall }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Not now", onclick: dismissJoinInstall }),
+    el("div", { class: "sheet join-install", role: "dialog", "aria-modal": "true", "aria-labelledby": "join-install-title" }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { id: "join-install-title", text: step.title }),
+        el("p", { class: "help", text: step.lede }),
+      ]),
+      step.steps.length
+        ? el("ol", { class: "guide-steps" }, step.steps.map((line, index) => el("li", {}, [
+            el("span", { class: "n", text: String(index + 1) }),
+            el("strong", { text: line }),
+          ])))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 async function onRotateBuzz() {

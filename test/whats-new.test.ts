@@ -50,8 +50,24 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the newest entry is who's in on the card, in plain words", () => {
+test("the newest entry is installing Hangry after joining a circle, in plain words", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-10-invite-install");
+  assert.equal(top.date, "2026-11-10");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /join a circle/);
+  assert.match(text, /iPhone/);
+  assert.match(text, /Share, then Add to Home Screen/);
+  assert.match(text, /Android/);
+  assert.match(text, /Install app/);
+  for (const line of [top.title, ...top.bullets]) assert.ok(!line.includes("\u2014"), line);
+});
+
+test("the card who's in entry is kept, in plain words", () => {
+  const top = RAW.find((item) => item.id === "2026-11-10-card-whos-in")!;
+  assert.ok(top, "card who's in entry");
   assert.equal(top.id, "2026-11-10-card-whos-in");
   assert.equal(top.date, "2026-11-10");
   assert.equal(top.title, "See who's in on the card");
@@ -291,7 +307,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v71");
+  assert.equal(cache?.[1], "hangry-v72");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
