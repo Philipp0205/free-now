@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-12-friends-view",
+    "date": "2026-11-12",
+    "title": "See what friends see",
+    "bullets": [
+      "You > Availability & calendar has a new \"See what friends see\" page with your busy times by day.",
+      "It shows who they are shared with, and never any event names.",
+      "Spot a wrong block? Fix it in your calendar, then tap Check now."
+    ]
+  },
+  {
     "id": "2026-11-11-settings-menu",
     "date": "2026-11-11",
     "title": "Settings, split into pages",

@@ -7,10 +7,10 @@ import { cardCrowd, goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
-import { PLAN_DURATION_MS, availabilityText, dayEvents, eventOverlaps, eventTimeText, untilText } from "./freebusy.js";
+import { PLAN_DURATION_MS, availabilityText, busyByDay, busySpanText, dayEvents, eventOverlaps, eventTimeText, sourceLabel, untilText } from "./freebusy.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 import { REACTIONS, findMentions, insertMention, mentionAt, mentionMatches, toggledReactions } from "./mentions.js";
-import { STATUS_PLACE_MAX, STATUS_TEXT_MAX, activeStatus, busyUntilPresets, circleStatusLine, statusBadge, statusLabel, statusLine, statusToday, statusUntilDay, untilFromClock, untilText as statusUntilText } from "./status.js";
+import { STATUS_PLACE_MAX, STATUS_TEXT_MAX, activeStatus, busyUntilPresets, circleStatusLine, statusBadge, statusLabel, statusLine, statusShort, statusToday, statusUntilDay, untilFromClock, untilText as statusUntilText } from "./status.js";
 import { CIRCLE_COLORS, WEEKDAY_LABELS, circleColor, eventCrowd, freeOnDay, gridRange, monthGrid, monthStart, monthTitle, shiftMonth } from "./calendar-month.js";
 
 const TOKEN_KEY = "fn_token";
@@ -164,6 +164,8 @@ const state = {
   calendarFeed: null,
   /** Calendar availability on the You tab: syncStatus from the server plus { loaded, busy, draft, error }. */
   calendarSync: null,
+  /** "See what friends see" on the Availability & calendar screen: { open, loaded, data, error, busy }. data is the preview from the server. */
+  busyPreview: null,
   /** Assistant tokens on the You tab: { loaded, failed, tokens, busy, draft, secret }. secret is set only right after making one. */
   agentTokens: null,
   /** Open You sub-screen: null (the menu) or one of YOU_SECTIONS ids. */
@@ -913,6 +915,7 @@ function clearSession() {
   state.pastDays = null;
   state.calendarFeed = null;
   state.calendarSync = null;
+  state.busyPreview = null;
   state.agentTokens = null;
   state.youSection = null;
   state.busyAt = null;
@@ -2812,6 +2815,7 @@ function openYouSection(id) {
 
 function closeYouSection() {
   state.youSection = null;
+  state.busyPreview = null;
   render();
 }
 
@@ -2858,10 +2862,11 @@ function youScreen() {
 }
 
 function youSectionScreen(id) {
+  if (id === "availability" && state.busyPreview?.open) return busyPreviewScreen();
   const section = YOU_SECTIONS.find((item) => item.id === id);
   const bodies = {
     profile: profileSection,
-    availability: () => [statusPanel(), busyHoursPanel(), calendarFeedPanel(), calendarSyncPanel()],
+    availability: () => [statusPanel(), friendsViewPanel(), busyHoursPanel(), calendarFeedPanel(), calendarSyncPanel()],
     notifications: notificationsSection,
     assistants: () => [agentTokensPanel()],
     account: accountSection,
@@ -2873,6 +2878,159 @@ function youSectionScreen(id) {
       alertsBell(),
     ]),
     ...bodies[id](),
+  ]);
+}
+
+/** One tap from Availability & calendar to what friends see. Shown with or without a calendar: weekly hours and status count too. */
+function friendsViewPanel() {
+  return el("div", { class: "panel panel-rows" }, [
+    youMenuRow("See what friends see", "Your busy times, without event names", openBusyPreview),
+  ]);
+}
+
+function openBusyPreview() {
+  state.busyPreview = { open: true, loaded: false, data: null, error: "", busy: false };
+  render();
+  void loadBusyPreview();
+}
+
+function closeBusyPreview() {
+  state.busyPreview = null;
+  render();
+}
+
+async function loadBusyPreview() {
+  const view = state.busyPreview;
+  if (!view) return;
+  try {
+    const data = await api("/api/me/calendar-sync/preview", { circle: null });
+    if (state.busyPreview !== view) return;
+    view.data = data;
+    view.error = "";
+  } catch {
+    if (state.busyPreview !== view) return;
+    view.error = "Could not load. Try again.";
+  }
+  view.loaded = true;
+  view.busy = false;
+  render();
+}
+
+function retryBusyPreview() {
+  const view = state.busyPreview;
+  if (!view) return;
+  view.loaded = false;
+  view.error = "";
+  render();
+  void loadBusyPreview();
+}
+
+/** Same Check now as the calendar panel, then the preview and the panel's own state both show the new copy. */
+async function onCheckBusyPreview() {
+  const view = state.busyPreview;
+  if (!view || view.busy) return;
+  view.busy = true;
+  view.refreshError = "";
+  render();
+  await onRefreshCalendar();
+  if (state.busyPreview !== view) return;
+  view.refreshError = state.calendarSync?.error || "";
+  await loadBusyPreview();
+}
+
+/** Calendar blocks only count when a circle gets them. Weekly hours and the status go to every circle. */
+function previewBlocks(data) {
+  const calendar = data.sharedCircles.length ? data.calendar.map((span) => ({ ...span, source: data.source })) : [];
+  return [...calendar, ...data.weekly.map((span) => ({ ...span, source: "weekly" }))];
+}
+
+function previewRow(time, tag) {
+  return el("li", { class: "bp-row" }, [
+    el("span", { class: "bp-time", text: time }),
+    tag ? el("span", { class: "bp-tag", text: tag }) : null,
+  ]);
+}
+
+function previewSync(data) {
+  if (data.lastSyncOk === false) {
+    const reason = state.calendarSync?.lastError || "The last check failed";
+    return el("p", { class: "help bp-note bad", text: `${reason}. Friends see your last good copy for up to a day.` });
+  }
+  if (!data.lastSyncAt) return null;
+  const today = zonedParts(Date.now(), appTz()).day;
+  const day = zonedParts(data.lastSyncAt, appTz()).day;
+  const when = day === today ? clock(data.lastSyncAt) : `${feedDate(data.lastSyncAt)} ${clock(data.lastSyncAt)}`;
+  return el("p", { class: "help bp-note", text: `Last checked ${when}.` });
+}
+
+function busyPreviewBody(view) {
+  if (view.error) {
+    return [el("div", { class: "panel bp-state", role: "alert" }, [
+      el("p", { class: "time-error", text: view.error }),
+      el("button", { class: "btn secondary", type: "button", text: "Try again", onclick: retryBusyPreview }),
+    ])];
+  }
+  if (!view.loaded || !view.data) return [el("div", { class: "panel" }, [el("p", { class: "help", text: "Loading…" })])];
+  const data = view.data;
+  const tz = viewerTz();
+  const now = Date.now();
+  const today = zonedParts(now, tz).day;
+  const shared = data.sharedCircles.map((circle) => circle.name);
+  const status = activeStatus(data.status, now);
+  const days = busyByDay(previewBlocks(data), tz, now);
+  const outOfDate = data.connected && (data.stale || !data.lastSyncAt);
+
+  const who = [];
+  if (data.connected && shared.length) {
+    who.push(el("p", { class: "bp-shared", text: `Shared with: ${shared.join(", ")}` }));
+  } else if (data.connected) {
+    who.push(el("p", { class: "bp-shared", text: "Not shared with any circle. Friends see none of your calendar busy times." }));
+    who.push(el("p", { class: "help", text: "Turn a circle on in Availability & calendar." }));
+  }
+  who.push(el("p", { class: "help", text: "Your weekly hours and your status are shown to everyone in your circles." }));
+
+  const times = [];
+  if (status) {
+    times.push(el("ul", { class: "bp-list" }, [previewRow(statusShort(status, now, tz), status.source === "schedule" ? "Weekly hours" : "Status")]));
+  }
+  for (const group of days) {
+    times.push(el("h3", { class: "bp-day", text: dayLabel(group.day, today) }));
+    times.push(el("ul", { class: "bp-list" }, group.spans.map((span) => previewRow(busySpanText(span, tz), sourceLabel(span.source)))));
+  }
+  if (outOfDate) times.push(el("p", { class: "time-error bp-stale", text: "Your calendar is out of date, so friends see nothing from it. Tap Check now." }));
+  else if (!status && !days.length) times.push(el("p", { class: "help bp-empty", text: "Nothing busy. Friends see you as free." }));
+
+  const foot = [];
+  if (data.connected) {
+    foot.push(previewSync(data));
+    if (view.refreshError) foot.push(el("p", { class: "time-error sync-error", role: "alert", text: view.refreshError }));
+    foot.push(el("button", {
+      class: "text-btn",
+      type: "button",
+      text: view.busy ? "Checking…" : "Check now",
+      disabled: view.busy,
+      onclick: () => { void onCheckBusyPreview(); },
+    }));
+    foot.push(el("p", { class: "help bp-note", text: "Something wrong? Fix it in your calendar, then tap Check now. Changes show here within a minute." }));
+  }
+  return [
+    el("div", { class: "panel" }, [
+      el("p", { class: "bp-intro", text: "This is what friends in your circles see. They never see event names." }),
+      ...who,
+    ]),
+    el("section", { class: "panel bp-times", "aria-label": "Busy times" }, times),
+    foot.length ? el("div", { class: "panel bp-foot" }, foot) : null,
+  ];
+}
+
+function busyPreviewScreen() {
+  return el("div", { class: "you-section busy-preview" }, [
+    el("header", { class: "chat-head" }, [
+      el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closeBusyPreview }),
+      el("h1", { text: "What friends see" }),
+      alertsBell(),
+    ]),
+    ...busyPreviewBody(state.busyPreview),
   ]);
 }
 
@@ -3461,6 +3619,7 @@ function landCalendar() {
   state.tab = "you";
   state.youSection = "availability";
   state.calendarSync = null;
+  state.busyPreview = null;
   state.error = calendarLanding === "google" ? "Google Calendar connected" : "Could not connect Google Calendar. Try again.";
 }
 
@@ -7489,6 +7648,7 @@ function currentOverlayDepth() {
   if (state.chat) depth += 1;
   if (state.past) depth += 1;
   if (state.tab === "you" && state.youSection) depth += 1;
+  if (state.tab === "you" && state.busyPreview?.open) depth += 1;
   return depth + tabLayers();
 }
 
@@ -7560,6 +7720,10 @@ function dismissTopOverlay() {
   }
   if (state.past) {
     closePast();
+    return;
+  }
+  if (state.tab === "you" && state.busyPreview?.open) {
+    closeBusyPreview();
     return;
   }
   if (state.tab === "you" && state.youSection) {
@@ -7797,6 +7961,7 @@ async function onTab(id) {
   }
   state.tab = id;
   state.youSection = null;
+  state.busyPreview = null;
   state.sheet = null;
   state.focusPlan = "";
   state.mapHistory = false;

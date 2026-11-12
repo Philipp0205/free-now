@@ -64,3 +64,70 @@ export function dayEvents(events, max = 20) {
     .sort((a, b) => a.start - b.start || a.end - b.end)
     .slice(0, max);
 }
+
+const SOURCE_LABELS = { google: "Google", ics: "Calendar link", weekly: "Weekly hours" };
+
+/** The small tag on a busy row: where friends' view of that span comes from. */
+export function sourceLabel(source) {
+  return SOURCE_LABELS[source] || "";
+}
+
+/** The instant a YYYY-MM-DD day starts in `tz`, found by nudging a UTC guess until the clock reads 00:00. */
+function dayStartMs(day, tz) {
+  const [year, month, date] = day.split("-").map(Number);
+  const target = Date.UTC(year, month - 1, date);
+  let at = target;
+  for (let i = 0; i < 3; i += 1) {
+    const parts = zonedParts(at, tz);
+    const [y, m, d] = parts.day.split("-").map(Number);
+    const diff = Date.UTC(y, m - 1, d, parts.hour, parts.minute) - target;
+    if (diff === 0) break;
+    at -= diff;
+  }
+  return at;
+}
+
+/**
+ * Busy spans [{start, end, source}] grouped by local day in `tz`, for `days` days from today.
+ * A span over midnight is split, one piece per day, flagged fromEarlier / untilLater. Spans that
+ * have ended are dropped. Days with nothing busy are left out. Sorted by day, then start.
+ */
+export function busyByDay(blocks, tz = "Europe/Berlin", now = Date.now(), days = 7) {
+  const today = zonedParts(now, tz).day;
+  const limit = addDays(today, days);
+  const groups = new Map();
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (!block || !Number.isFinite(block.start) || !Number.isFinite(block.end)) continue;
+    if (block.end <= now || block.end <= block.start) continue;
+    const last = zonedParts(block.end - 1, tz).day;
+    for (let day = zonedParts(block.start, tz).day; day <= last && day < limit; day = addDays(day, 1)) {
+      if (day < today) continue;
+      const dayStart = dayStartMs(day, tz);
+      const dayEnd = dayStartMs(addDays(day, 1), tz);
+      const start = Math.max(block.start, dayStart);
+      const end = Math.min(block.end, dayEnd);
+      const piece = {
+        start,
+        end,
+        source: block.source,
+        allDay: start <= dayStart && end >= dayEnd,
+        fromEarlier: block.start < dayStart,
+        untilLater: block.end > dayEnd,
+      };
+      if (!groups.has(day)) groups.set(day, []);
+      groups.get(day).push(piece);
+    }
+  }
+  return [...groups.keys()].sort().map((day) => ({
+    day,
+    spans: groups.get(day).sort((a, b) => a.start - b.start || a.end - b.end),
+  }));
+}
+
+/** "09:00 to 11:30", "until 11:30", "from 20:00" or "All day" for one piece from busyByDay. */
+export function busySpanText(span, tz = "Europe/Berlin") {
+  if (span.allDay) return "All day";
+  if (span.fromEarlier) return `until ${clockAt(span.end, tz)}`;
+  if (span.untilLater || clockAt(span.end, tz) === "00:00") return `from ${clockAt(span.start, tz)}`;
+  return `${clockAt(span.start, tz)} to ${clockAt(span.end, tz)}`;
+}

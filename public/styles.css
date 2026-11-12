@@ -2498,3 +2498,23 @@ html.kb-open .sheet .help { margin-top: 0; }
 .cal-check .cal-event .cal-flag { grid-column: 2; color: #ffd60a; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 /* The phone already pads for the notch, so the sub-screen header does not add it again. */
 .you-section .chat-head { padding-top: 6px; }
+
+/* What friends see: the owner's own busy times, by day. */
+.busy-preview .panel p { margin: 0 0 8px; }
+.busy-preview .panel p:last-child { margin-bottom: 0; }
+.busy-preview .bp-intro { color: #fff; font-size: 15px; }
+.busy-preview .bp-shared { color: #fff; overflow-wrap: anywhere; }
+.busy-preview .bp-day { margin: 14px 0 4px; font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.busy-preview .bp-times h3:first-child, .busy-preview .bp-list + .bp-day:first-child { margin-top: 0; }
+.busy-preview .bp-list { list-style: none; margin: 0; padding: 0; }
+.busy-preview .bp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.busy-preview .bp-row:last-child { border-bottom: 0; }
+.busy-preview .bp-time { color: #fff; font-size: 16px; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+.busy-preview .bp-tag { flex: none; color: var(--muted); font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); white-space: nowrap; }
+.busy-preview .bp-stale, .busy-preview .bp-empty { margin-top: 12px; }
+.busy-preview .bp-times > :first-child.bp-stale, .busy-preview .bp-times > :first-child.bp-empty { margin-top: 0; }
+.busy-preview .bp-note.bad { color: #ffb3ad; }
+.busy-preview .bp-foot .text-btn { padding: 8px 4px; }
+.busy-preview .bp-foot .bp-note { margin-top: 4px; }
+.busy-preview .bp-state { display: grid; gap: 12px; justify-items: start; }
+.busy-preview .bp-state p { margin: 0; }
