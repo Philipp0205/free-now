@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-12-chat-wrap",
+    "date": "2026-11-12",
+    "title": "Long chat messages wrap",
+    "bullets": [
+      "The message box now wraps long text onto new lines and grows as you type, instead of scrolling sideways.",
+      "Enter still sends. Shift+Enter starts a new line."
+    ]
+  },
+  {
     "id": "2026-11-12-friends-view",
     "date": "2026-11-12",
     "title": "See what friends see",
