@@ -179,3 +179,8 @@ test("the notification badge is a bold solid silhouette that fills most of the c
   assert.equal(pixels[centre + 3], 255, "solid in the middle");
   assert.equal(pixels[3], 0, "clear in the corner");
 });
+
+test("the worker caches buzzer.js with the shell", () => {
+  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(SOURCE)?.[1] ?? "[]") as string[];
+  assert.ok(shell.includes("/buzzer.js"));
+});

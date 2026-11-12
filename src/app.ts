@@ -76,6 +76,7 @@ import {
   listPushSubs,
   listSocialJoins,
   markPushDelivered,
+  markSocialBuzzed,
   markPushSeen,
   recordDisplay,
   setWhatsNewSeen,
@@ -491,7 +492,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
     const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));
-    sendJson(res, result.created ? 201 : 200, { social: result.social });
+    // Marks the social as Flic-driven on every press, a re-notify of a live one included.
+    const buzzedAt = deps.now();
+    markSocialBuzzed(deps.db, result.social.id, buzzedAt);
+    sendJson(res, result.created ? 201 : 200, { social: { ...result.social, buzzedAt } });
     return;
   }
 
@@ -1790,6 +1794,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     note: social.note,
     createdAt: social.created_at,
     startsAt: social.starts_at,
+    buzzedAt: social.buzzed_at ?? null,
     expiresAt: social.expires_at,
     place: social.place ?? "",
     location: pointPayload(social.lat, social.lng),
