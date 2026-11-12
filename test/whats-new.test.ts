@@ -75,6 +75,19 @@ test("the chat wrap entry is in the changelog, in plain words without an em dash
     assert.ok(line.length <= 140, line);
     assert.ok(!line.includes("\u2014"), line);
   }
+  assert.ok(RAW.some((item) => item.id === "2026-11-12-blocked-wording"), "blocked wording entry is kept");
+});
+
+test("the blocked wording entry stays in the changelog, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-12-blocked-wording");
+  assert.ok(top, "blocked wording entry");
+  assert.equal(top.title, "Clearer busy times");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  assert.match(top.bullets.join(" "), /Blocked from 09:00 to 10:00/);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= 140, line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
   assert.ok(RAW.some((item) => item.id === "2026-11-12-friends-view"), "friends view entry is kept");
 });
 

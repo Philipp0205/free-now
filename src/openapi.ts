@@ -361,6 +361,7 @@ export const openapi = {
         properties: {
           ...eventFields,
           startsAt: nullable({ type: "integer" }),
+          buzzedAt: nullable({ type: "integer" }),
           expiresAt: { type: "integer" },
         },
       },

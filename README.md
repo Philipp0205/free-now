@@ -79,6 +79,8 @@ The full link is on the You tab, under **Set up a Flic button**.
 3. Paste the link as the URL, set the method to POST, and save. Leave the body empty, or send `{"note":"Rooftop coffee??"}` with content type `application/json`.
 4. Optional: under **Hold**, add the same link with the method DELETE. Holding the button then ends the social.
 
+Each press also stamps the social with `buzzedAt` (set only by this link, never by the app). Open apps in the circle, and the presser's own, play a full-screen buzzer animation for it, cycling through four. **Test buzzer** in the same panel plays the next one locally without sending anything.
+
 Without a Flic Hub, the request is sent by the phone the button is paired with, so that phone has to be in Bluetooth range and online.
 
 The token is a bearer secret. Anyone with it can start a social as that user. It is stored in SQLite so the You tab can show it again; keep the database file private.
