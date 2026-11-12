@@ -9,7 +9,7 @@ import {
   normalizeEntries,
   unseenEntries,
   validId,
-} from "../public/whats-new.js";
+} from "../public/js/whats-new.js";
 import { api, withApp } from "./http.js";
 
 const read = (file: string) => fs.readFileSync(new URL(file, import.meta.url), "utf8");
@@ -541,19 +541,19 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v92");
+  assert.equal(cache?.[1], "hangry-v93");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
-  assert.ok(paths.includes("/whats-new.js"));
+  assert.ok(paths.includes("/js/whats-new.js"));
   assert.ok(paths.includes("/whats-new.json"));
-  assert.ok(paths.includes("/map-pin.js"));
+  assert.ok(paths.includes("/js/map-pin.js"));
   assert.ok(paths.includes("/vendor/leaflet/leaflet.js"));
   assert.ok(paths.includes("/vendor/leaflet/leaflet.css"));
-  assert.ok(paths.includes("/status.js"));
-  assert.ok(paths.includes("/mentions.js"));
-  assert.ok(paths.includes("/calendar-month.js"));
-  assert.ok(paths.includes("/freebusy.js"));
-  const app = read("../public/app.js");
+  assert.ok(paths.includes("/js/status.js"));
+  assert.ok(paths.includes("/js/mentions.js"));
+  assert.ok(paths.includes("/js/calendar-month.js"));
+  assert.ok(paths.includes("/js/freebusy.js"));
+  const app = read("../public/js/app.js");
   assert.equal(/const APP_VERSION = "([^"]+)"/.exec(app)?.[1], cache?.[1]);
 });
 
@@ -597,7 +597,7 @@ test("whats-new.json is served as JSON", async () => {
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /^application\/json/);
     assert.deepEqual(await response.json(), RAW);
-    const module = await fetch(`http://127.0.0.1:${port}/whats-new.js`);
+    const module = await fetch(`http://127.0.0.1:${port}/js/whats-new.js`);
     assert.equal(module.status, 200);
     assert.match(module.headers.get("content-type") ?? "", /^text\/javascript/);
   });

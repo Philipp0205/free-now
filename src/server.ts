@@ -2,11 +2,11 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { clearExpiredLocations, HISTORY_DAYS, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
-import { syncCalendarFeeds } from "./freebusy.js";
-import { startPmtilesFetch } from "./pmtiles-fetch.js";
-import { createNoopPushSender, createWebPushSender } from "./push.js";
-import { sendStartReminders } from "./remind.js";
-import { addDays, isoDate } from "./time.js";
+import { syncCalendarFeeds } from "./calendar/freebusy.js";
+import { startPmtilesFetch } from "./map/pmtiles-fetch.js";
+import { createNoopPushSender, createWebPushSender } from "./push/push.js";
+import { sendStartReminders } from "./push/remind.js";
+import { addDays, isoDate } from "./lib/time.js";
 
 const config = loadConfig();
 const db = openDb(config.dbPath);

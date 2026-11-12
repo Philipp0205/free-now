@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installGuide, installPrompt, joinInstallStep, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/install-guide.js";
+import { installGuide, installPrompt, joinInstallStep, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/js/install-guide.js";
 
 const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const IOS_INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 320.0.0.0";

@@ -244,16 +244,29 @@ The hostname is not decided yet. When it is, point it at Railway like this:
 ## Layout
 
 ```
-src/            HTTP API, SQLite, Web Push
-public/         the PWA (HTML, CSS, service worker, manifest, icons)
-test/           circle → social → push → join → expiry
+src/            server.ts, app.ts (HTTP API), config.ts, db.ts (SQLite)
+  calendar/     calendar feeds, ICS, Google free/busy
+  chat/         plan chat, colors, reply push
+  push/         Web Push, reminders, VAPID keys
+  social/       plans, socials, status, join codes
+  map/          geocoding, PMTiles basemap
+  admin/        admin queries, feedback, agent tokens, OpenAPI
+  lib/          time, rate limit, client key, avatars
+public/         the PWA
+  js/           client modules (app.js and helpers)
+  css/          styles.css, welcome.css
+  icons/ backgrounds/ vendor/
+                images and third-party files
+                HTML pages, sw.js, manifest and whats-new.json stay at the root
+test/           unit tests by area (calendar, chat, push, social, map, admin, lib),
+                shared helpers (http.ts, fake-google.ts, fixtures/) and ui/ specs
 Dockerfile      Railway and docker compose
 railway.json    Dockerfile builder and health check
 ```
 
 `POST /api/buzz/<token>` is the only unauthenticated write, and the token is the credential. Everything else uses `Authorization: Bearer <device token>`.
 
-`/welcome` is a static public page about Hangry (`public/welcome.html`, `public/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it. Its example map is 15 fixed OpenStreetMap tiles of central Stuttgart (`tile.openstreetmap.org`, loaded lazily by the visitor's browser, with OSM attribution) and four pink free-now pins for made-up friends at real squares. It does not use the app's map code or `MAP_TILE_URL`.
+`/welcome` is a static public page about Hangry (`public/welcome.html`, `public/css/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it. Its example map is 15 fixed OpenStreetMap tiles of central Stuttgart (`tile.openstreetmap.org`, loaded lazily by the visitor's browser, with OSM attribution) and four pink free-now pins for made-up friends at real squares. It does not use the app's map code or `MAP_TILE_URL`.
 
 Google Search Console verification uses `public/googlee48df27048aaa965.html`, served at `/googlee48df27048aaa965.html`, and a `google-site-verification` meta tag in `public/index.html`. Leave both in place. Google re-checks them. The service worker does not intercept that file, and `public/robots.txt` allows it and the homepage. `/privacy` is the public privacy policy (`public/privacy.html`), a static page like `/welcome`.
 

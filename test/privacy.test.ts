@@ -72,7 +72,7 @@ test("the policy has no script, no dashes or parentheses, and no invented email"
   assert.doesNotMatch(PRIVACY, /@|mailto:/, "no email address");
   assert.match(PRIVACY, /href="\/welcome"[^>]*aria-label="Hangry home"/);
   assert.match(PRIVACY, /href="\/">Open Hangry</);
-  assert.match(PRIVACY, /href="\/welcome\.css"/);
+  assert.match(PRIVACY, /href="\/css\/welcome\.css"/);
   assert.match(PRIVACY, /<h1>Privacy<\/h1>/);
 });
 

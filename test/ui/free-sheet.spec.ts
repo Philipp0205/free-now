@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Locator, Page } from "playwright-core";
-import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
+import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
 

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import { addDays } from "../../src/time.js";
-import { statusToday } from "../../public/status.js";
+import { addDays } from "../../src/lib/time.js";
+import { statusToday } from "../../public/js/status.js";
 import { SIZES, UA, openEventsMap, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 

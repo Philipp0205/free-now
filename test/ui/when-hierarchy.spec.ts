@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import { addDays, dayLabel, isoDate } from "../../src/time.js";
+import { addDays, dayLabel, isoDate } from "../../src/lib/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
+import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { useHangry } from "./harness.js";
 

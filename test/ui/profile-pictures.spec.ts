@@ -10,7 +10,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
-import { createNoopPushSender } from "../../src/push.js";
+import { createNoopPushSender } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openYouSection } from "./harness.js";
 

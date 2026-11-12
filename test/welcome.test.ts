@@ -91,7 +91,7 @@ test("the landing page holds no private data and links to the app", () => {
   assert.match(WELCOME, /href="\/"[^>]*>Open Hangry</);
   assert.match(WELCOME, /href="\/"[^>]*>Get started</);
   assert.match(WELCOME, /Example/);
-  assert.match(WELCOME, /href="\/welcome\.css"/);
+  assert.match(WELCOME, /href="\/css\/welcome\.css"/);
 });
 
 test("the PWA still starts at / and the worker never caches /welcome as the shell", () => {
@@ -194,7 +194,7 @@ test("/welcome keeps its static, no-referrer headers while tiles opt in per imag
     const page = await get(port, "/welcome");
     assert.equal(page.headers.get("referrer-policy"), "no-referrer");
     assert.equal(page.headers.get("x-frame-options"), "DENY");
-    const css = await get(port, "/welcome.css");
+    const css = await get(port, "/css/welcome.css");
     assert.equal(css.status, 200);
     assert.match(css.text, /\.wl-map-canvas/);
   });

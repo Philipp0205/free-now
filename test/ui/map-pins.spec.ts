@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import zlib from "node:zlib";
 import type { Page } from "playwright-core";
-import { shortDate } from "../../public/when.js";
+import { shortDate } from "../../public/js/when.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openEventsMap, openYouSection, useHangry } from "./harness.js";
 

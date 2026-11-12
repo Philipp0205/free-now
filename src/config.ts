@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { configuredAdminToken } from "./admin-query.js";
-import { readPmtilesHeader, type PmtilesInfo } from "./pmtiles.js";
-import { safeUrl, type PmtilesSource } from "./pmtiles-fetch.js";
-import { assertTimeZone } from "./time.js";
+import { configuredAdminToken } from "./admin/admin-query.js";
+import { readPmtilesHeader, type PmtilesInfo } from "./map/pmtiles.js";
+import { safeUrl, type PmtilesSource } from "./map/pmtiles-fetch.js";
+import { assertTimeZone } from "./lib/time.js";
 
 export type VapidConfig = {
   publicKey: string;

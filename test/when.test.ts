@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, zonedParts } from "../public/when.js";
+import { isLaterToday, minLaterClock, nextLaterDay, nextLaterSlot, zonedParts } from "../public/js/when.js";
 
 const UTC = "UTC";
 const BERLIN = "Europe/Berlin";

@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { CHAT_COLORS, chooseColor } from "./chat-color.js";
-import { addDays, isTimeZone } from "./time.js";
+import { CHAT_COLORS, chooseColor } from "./chat/chat-color.js";
+import { addDays, isTimeZone } from "./lib/time.js";
 
 export type UserRow = {
   id: string;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cardCrowd } from "../public/map-pin.js";
+import { cardCrowd } from "../public/js/map-pin.js";
 
 const person = (id: string, reply?: string) => ({ id, name: id, color: "#336699", avatarRev: null, reply });
 const ids = (list: Array<{ id: string }>) => list.map((p) => p.id);

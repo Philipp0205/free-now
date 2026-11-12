@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Locator, Page } from "playwright-core";
-import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
+import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { UA, useHangry } from "./harness.js";

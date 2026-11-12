@@ -1,7 +1,7 @@
-const CACHE = "hangry-v92";
+const CACHE = "hangry-v93";
 /** Wait before each ack retry. One first try, then up to three more. */
 const ACK_DELAYS = [1000, 3000, 9000];
-const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/calendar-feed.js", "/calendar-month.js", "/freebusy.js", "/status.js", "/buzzer.js", "/mentions.js", "/whats-new.json", "/map.js", "/map-pin.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
+const SHELL = ["/", "/css/styles.css", "/js/app.js", "/js/keyboard.js", "/js/install-guide.js", "/js/when.js", "/js/place.js", "/js/push-sheet.js", "/js/whats-new.js", "/js/card-grad.js", "/js/calendar-feed.js", "/js/calendar-month.js", "/js/freebusy.js", "/js/status.js", "/js/buzzer.js", "/js/mentions.js", "/whats-new.json", "/js/map.js", "/js/map-pin.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
