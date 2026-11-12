@@ -159,6 +159,7 @@ import {
   disconnectCalendar,
   isConnected,
   ownDayEvents,
+  ownFriendView,
   setSharedCircles,
   syncStatus,
   syncUser,
@@ -1731,6 +1732,12 @@ async function handleCalendarSync(
     limit();
     await syncUser(fb, me.id);
     sendJson(res, 200, syncStatus(deps.db, me.id, deps.config));
+    return;
+  }
+  if (pathname === "/api/me/calendar-sync/preview" && method === "GET") {
+    // What friends see of the signed-in owner's own busy times. Busy spans only, never titles.
+    const now = deps.now();
+    sendJson(res, 200, { now, ...ownFriendView(deps.db, me.id, now) });
     return;
   }
   if (pathname === "/api/me/calendar-sync/day" && method === "GET") {

@@ -15,7 +15,7 @@ import {
   type BusySchedule,
   type StatusRow,
 } from "./db.js";
-import { endOfDay, isCalendarDate, isoDate, isTimeZone, zonedDateTime, zonedParts } from "./time.js";
+import { addDays, endOfDay, isCalendarDate, isoDate, isTimeZone, zonedDateTime, zonedParts } from "./time.js";
 
 /** Until instants use the user's stored timezone when present, else Europe/Berlin. */
 export const STATUS_TZ = "Europe/Berlin";
@@ -75,6 +75,35 @@ export function scheduleStatus(schedule: BusySchedule | undefined | null, now: n
   }
   if (end == null) return null;
   return { type: "busy", text: null, place: null, until: zonedDateTime(day, end, schedule.timezone), source: "schedule" };
+}
+
+/**
+ * Weekly busy hours as [start, end) epoch ms for today and the next 6 days in the schedule's zone.
+ * Ended blocks are dropped, a running one starts at `now`, overlaps are merged.
+ */
+export function expandBusyHours(schedule: BusySchedule | undefined | null, now: number, days = 7): Array<{ start: number; end: number }> {
+  if (!schedule || !isTimeZone(schedule.timezone)) return [];
+  const today = isoDate(now, schedule.timezone);
+  const spans: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < days; i++) {
+    const day = addDays(today, i);
+    const [year, month, date] = day.split("-").map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay() || 7;
+    for (const block of schedule.blocks) {
+      if (!block.days.includes(weekday)) continue;
+      const end = zonedDateTime(day, block.end, schedule.timezone);
+      if (end <= now) continue;
+      spans.push({ start: Math.max(now, zonedDateTime(day, block.start, schedule.timezone)), end });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+    else merged.push({ ...span });
+  }
+  return merged;
 }
 
 function clockMinutes(hhmm: string): number {

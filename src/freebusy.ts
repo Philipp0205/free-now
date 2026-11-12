@@ -27,7 +27,9 @@ import {
   revokeGoogleToken,
   type GoogleConfig,
 } from "./google-calendar.js";
+import { getBusyHours } from "./db.js";
 import { FREEBUSY_WINDOW_MS, parseIcs } from "./ics-parse.js";
+import { expandBusyHours, ownStatus, type PersonStatus } from "./status.js";
 import { addDays, zonedDateTime } from "./time.js";
 
 const MINUTE = 60_000;
@@ -672,6 +674,9 @@ export function syncStatus(db: DatabaseSync, userId: string, config: GoogleConfi
 
 export type Availability = { state: "busy" | "free"; until: number | null } | null;
 
+/** The one gate for showing a calendar_sync row (alias `s`) to friends. Bind `now - STALE_AFTER_MS` once. */
+const FRIENDS_SEE_SYNC = "s.last_ok_at IS NOT NULL AND s.last_ok_at >= ? AND s.window_end IS NOT NULL";
+
 /**
  * Busy or free at `at` for each member who shares their calendar with this circle, as seen by
  * `viewerId` (who must be in the circle too). Nothing for stale data or past the synced window.
@@ -684,7 +689,7 @@ export function circleAvailability(db: DatabaseSync, circleId: string, viewerId:
        JOIN calendar_sync s ON s.user_id = sh.user_id
        JOIN memberships owner ON owner.user_id = sh.user_id AND owner.circle_id = sh.circle_id
        JOIN memberships viewer ON viewer.user_id = ? AND viewer.circle_id = sh.circle_id
-       WHERE sh.circle_id = ? AND s.last_ok_at IS NOT NULL AND s.last_ok_at >= ? AND s.window_end IS NOT NULL`,
+       WHERE sh.circle_id = ? AND ${FRIENDS_SEE_SYNC}`,
     )
     .all(viewerId, circleId, now - STALE_AFTER_MS) as Array<{ user_id: string; window_end: number; last_ok_at: number }>;
   const next = db.prepare("SELECT start_ms, end_ms FROM calendar_busy WHERE user_id = ? AND end_ms > ? ORDER BY start_ms ASC LIMIT 1");
@@ -696,6 +701,60 @@ export function circleAvailability(db: DatabaseSync, circleId: string, viewerId:
     else out.set(owner.user_id, { state: "free", until: span ? cap(span.start_ms) : null });
   }
   return out;
+}
+
+export type OwnFriendView = {
+  connected: boolean;
+  source: "google" | "ics" | null;
+  lastSyncAt: number | null;
+  lastSyncOk: boolean | null;
+  stale: boolean;
+  sharedCircles: Array<{ id: string; name: string }>;
+  calendar: Array<{ start: number; end: number }>;
+  weekly: Array<{ start: number; end: number }>;
+  status: PersonStatus | null;
+};
+
+/**
+ * Owner only: what friends can see of the person's own busy times. Busy spans only, no titles
+ * (calendar_event is never read). Uses the same gate as circleAvailability, so a stale or
+ * unsynced calendar shows nothing here either.
+ */
+export function ownFriendView(db: DatabaseSync, userId: string, now: number): OwnFriendView {
+  const row = db
+    .prepare(
+      `SELECT s.source, s.last_sync_at, s.last_ok, s.window_end, (${FRIENDS_SEE_SYNC}) AS visible
+       FROM calendar_sync s WHERE s.user_id = ?`,
+    )
+    .get(now - STALE_AFTER_MS, userId) as
+    | { source: string; last_sync_at: number | null; last_ok: number | null; window_end: number | null; visible: number }
+    | undefined;
+  const sharedCircles = (db
+    .prepare(
+      `SELECT c.id, c.name FROM calendar_share sh JOIN circles c ON c.id = sh.circle_id
+       JOIN memberships m ON m.circle_id = sh.circle_id AND m.user_id = sh.user_id
+       WHERE sh.user_id = ? ORDER BY m.joined_at ASC, c.name ASC`,
+    )
+    .all(userId) as Array<{ id: string; name: string }>).map((c) => ({ id: c.id, name: c.name }));
+  const visible = Boolean(row?.visible);
+  const calendar: Array<{ start: number; end: number }> = [];
+  if (row && visible && row.window_end !== null) {
+    const spans = db
+      .prepare("SELECT start_ms, end_ms FROM calendar_busy WHERE user_id = ? AND end_ms > ? AND start_ms < ? ORDER BY start_ms ASC")
+      .all(userId, now, row.window_end) as Array<{ start_ms: number; end_ms: number }>;
+    for (const span of spans) calendar.push({ start: span.start_ms, end: Math.min(span.end_ms, row.window_end) });
+  }
+  return {
+    connected: Boolean(row),
+    source: row ? (row.source === "google" ? "google" : "ics") : null,
+    lastSyncAt: row?.last_sync_at ?? null,
+    lastSyncOk: row?.last_ok == null ? null : Boolean(row.last_ok),
+    stale: Boolean(row) && !visible,
+    sharedCircles,
+    calendar,
+    weekly: expandBusyHours(getBusyHours(db, userId), now),
+    status: ownStatus(db, userId, now),
+  };
 }
 
 // ---------- the owner's own titles ----------

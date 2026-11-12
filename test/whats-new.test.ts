@@ -66,9 +66,25 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the settings menu entry is the newest, in plain words without an em dash", () => {
+test("the friends view entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-11-settings-menu");
+  assert.equal(top.id, "2026-11-12-friends-view");
+  assert.equal(top.date, "2026-11-12");
+  assert.equal(top.title, "See what friends see");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /Availability & calendar/);
+  assert.match(text, /Check now/);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= 140, line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
+  assert.ok(RAW.some((item) => item.id === "2026-11-11-settings-menu"), "settings menu entry is kept");
+});
+
+test("the settings menu entry stays in the changelog, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-11-settings-menu");
+  assert.ok(top, "settings menu entry");
   assert.equal(top.date, "2026-11-11");
   assert.equal(top.title, "Settings, split into pages");
   assert.ok(top.title.length <= 60);
@@ -484,7 +500,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v87");
+  assert.equal(cache?.[1], "hangry-v88");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));
