@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { replyLogText } from "../src/chat.js";
-import { planReplyBody, replyPushBody } from "../src/notify.js";
-import { normalizeReply } from "../src/socials.js";
+import { replyLogText } from "../src/chat/chat.js";
+import { planReplyBody, replyPushBody } from "../src/push/notify.js";
+import { normalizeReply } from "../src/social/socials.js";
 import { api, withApp } from "./http.js";
 
 async function circleOfTwo(port: number) {

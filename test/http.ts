@@ -4,8 +4,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
-import type { CalendarNet } from "../src/freebusy.js";
-import type { PushPayload, PushSender } from "../src/push.js";
+import type { CalendarNet } from "../src/calendar/freebusy.js";
+import type { PushPayload, PushSender } from "../src/push/push.js";
 
 // Shared by the route tests. Not a test file: `npm test` only runs `test/*.test.ts`.
 

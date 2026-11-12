@@ -6,7 +6,7 @@ import { chromium } from "playwright-core";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
-import { createNoopPushSender } from "../src/push.js";
+import { createNoopPushSender } from "../src/push/push.js";
 
 test("the page loads in Chrome without a page error", { timeout: 60_000 }, async () => {
   const db = openDb(":memory:");

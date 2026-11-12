@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Client and server copies of the same rules. None of these modules opens a DB or starts a server on import.
-import { addDays as clientAddDays, dayLabel as clientDayLabel, shortDate as clientShortDate, PLAN_DAYS_AHEAD as CLIENT_DAYS_AHEAD } from "../public/when.js";
-import { audiencePlace as clientAudiencePlace, isMapsLink, looksLikeUrl as clientLooksLikeUrl } from "../public/place.js";
-import { addDays as serverAddDays, dayLabel as serverDayLabel, shortDate as serverShortDate } from "../src/time.js";
-import { PLAN_DAYS_AHEAD as SERVER_DAYS_AHEAD } from "../src/plans.js";
-import { audiencePlace as serverAudiencePlace } from "../src/notify.js";
-import { isMapsLinkInput, looksLikeUrl as serverLooksLikeUrl } from "../src/geocode.js";
+import { addDays as clientAddDays, dayLabel as clientDayLabel, shortDate as clientShortDate, PLAN_DAYS_AHEAD as CLIENT_DAYS_AHEAD } from "../public/js/when.js";
+import { audiencePlace as clientAudiencePlace, isMapsLink, looksLikeUrl as clientLooksLikeUrl } from "../public/js/place.js";
+import { addDays as serverAddDays, dayLabel as serverDayLabel, shortDate as serverShortDate } from "../src/lib/time.js";
+import { PLAN_DAYS_AHEAD as SERVER_DAYS_AHEAD } from "../src/social/plans.js";
+import { audiencePlace as serverAudiencePlace } from "../src/push/notify.js";
+import { isMapsLinkInput, looksLikeUrl as serverLooksLikeUrl } from "../src/map/geocode.js";
 
 test("addDays matches on client and server", () => {
   const days = ["2026-01-31", "2026-02-28", "2026-03-29", "2026-10-25", "2026-12-31", "2027-01-01", "2028-02-28", "2028-02-29", "2028-03-01"];

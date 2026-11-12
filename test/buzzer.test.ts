@@ -11,7 +11,7 @@ import {
   fitText,
   nextBuzzIndex,
   pickBuzz,
-} from "../public/buzzer.js";
+} from "../public/js/buzzer.js";
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));

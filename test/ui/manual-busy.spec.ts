@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import { circleStatusLine, statusLine } from "../../public/status.js";
+import { circleStatusLine, statusLine } from "../../public/js/status.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 

@@ -37,7 +37,7 @@ async function open(reducedMotion?: "reduce") {
 
 const play = (page: Page, animation: string, name = "Alex") =>
   page.evaluate(`(async () => {
-    const m = await import("/buzzer.js");
+    const m = await import("/js/buzzer.js");
     window.__ended = 0;
     return m.playBuzzer({ name: ${JSON.stringify(name)}, animation: ${JSON.stringify(animation)}, onEnd: () => { window.__ended += 1; } });
   })()`) as Promise<boolean>;

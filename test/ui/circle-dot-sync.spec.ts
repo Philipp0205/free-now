@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import { flushChatNotices } from "../../src/chat.js";
+import { flushChatNotices } from "../../src/chat/chat.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, useHangry } from "./harness.js";
 

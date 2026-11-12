@@ -15,7 +15,7 @@ import {
   noteAdminFailure,
   readSchema,
   runReadQuery,
-} from "./admin-query.js";
+} from "./admin/admin-query.js";
 import { MAP_PMTILES_ATTRIBUTION, MAP_PMTILES_URL, type Config } from "./config.js";
 import {
   addMember,
@@ -97,15 +97,15 @@ import {
   type SocialRow,
   type UserRow,
 } from "./db.js";
-import { isMapsLinkInput, looksLikeUrl, resolveMapsLink, reverseLookup, searchPlaces } from "./geocode.js";
-import { extractBuzzSecret, humanCode } from "./code.js";
-import { audiencePlace, eventTitle, notifyUsers } from "./notify.js";
-import type { PushSender } from "./push.js";
-import { pushSummaryForPlan, pushSummaryForViewer, reachForCircle, type PushSummary } from "./push-status.js";
-import { clientKey } from "./client-key.js";
-import { MAX_RANGE_BYTES, serveRangeFile } from "./range-file.js";
-import { createArchiveCheck, pmtilesHeadBytes, type PmtilesInfo } from "./pmtiles.js";
-import { createRateLimiter, type RateLimiter } from "./rate-limit.js";
+import { isMapsLinkInput, looksLikeUrl, resolveMapsLink, reverseLookup, searchPlaces } from "./map/geocode.js";
+import { extractBuzzSecret, humanCode } from "./social/code.js";
+import { audiencePlace, eventTitle, notifyUsers } from "./push/notify.js";
+import type { PushSender } from "./push/push.js";
+import { pushSummaryForPlan, pushSummaryForViewer, reachForCircle, type PushSummary } from "./push/push-status.js";
+import { clientKey } from "./lib/client-key.js";
+import { MAX_RANGE_BYTES, serveRangeFile } from "./map/range-file.js";
+import { createArchiveCheck, pmtilesHeadBytes, type PmtilesInfo } from "./map/pmtiles.js";
+import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.js";
 import {
   AGENT_NAME_MAX,
   AGENT_TOKEN_LIMIT,
@@ -116,7 +116,7 @@ import {
   listAgentTokensFor,
   revokeAgentToken,
   type RequestAuth,
-} from "./agent-tokens.js";
+} from "./admin/agent-tokens.js";
 import {
   FEEDBACK_LIMIT,
   cleanAppVersion,
@@ -128,18 +128,18 @@ import {
   listFeedback,
   updateFeedback,
   type FeedbackStatus,
-} from "./feedback.js";
-import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat.js";
-import { colorHex } from "./chat-color.js";
-import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./time.js";
-import { publishSocial, replySocial } from "./socials.js";
-import { AGENT_ROUTES_ERROR, isAgentAllowed, openapiJson } from "./openapi.js";
-import { llmsTxt } from "./llms-txt.js";
-import { ownStatus, saveBusyHours, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./status.js";
-import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./plans.js";
+} from "./admin/feedback.js";
+import { ChatError, closeEventChat, recordEventLine, replyLogText, routeChat } from "./chat/chat.js";
+import { colorHex } from "./chat/chat-color.js";
+import { addDays, clockLabel, dayLabel, daysBetween, isCalendarDate, isoDate, shortDate, zonedDateTime } from "./lib/time.js";
+import { publishSocial, replySocial } from "./social/socials.js";
+import { AGENT_ROUTES_ERROR, isAgentAllowed, openapiJson } from "./admin/openapi.js";
+import { llmsTxt } from "./admin/llms-txt.js";
+import { ownStatus, saveBusyHours, saveStatus, StatusError, visibleStatuses, type PersonStatus } from "./social/status.js";
+import { assertPlanClock, joinPlan, newPlanNotice, PLAN_DAYS_AHEAD, publishPlan, readPlanDate, remindAgainAt, remindPlan, replyPlan } from "./social/plans.js";
 import { clearPlanShareId } from "./db.js";
-import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./avatar.js";
-import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./plan-share.js";
+import { AVATAR_MAX_BYTES, avatarFile, avatarMime, readAvatarBody, removeAvatarFile, writeAvatarFile } from "./lib/avatar.js";
+import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta, sharePreview } from "./social/plan-share.js";
 import {
   calendarFileName,
   FEED_LIMIT,
@@ -151,7 +151,7 @@ import {
   revokeFeed,
   uidHost,
   type CalendarContext,
-} from "./calendar.js";
+} from "./calendar/calendar.js";
 import {
   CalendarError,
   circleAvailability,
@@ -165,8 +165,8 @@ import {
   syncStatus,
   syncUser,
   type CalendarNet,
-} from "./freebusy.js";
-import { consumeGoogleState, googleEnabled, startGoogleAuth } from "./google-calendar.js";
+} from "./calendar/freebusy.js";
+import { consumeGoogleState, googleEnabled, startGoogleAuth } from "./calendar/google-calendar.js";
 
 export type AppDeps = {
   db: DatabaseSync;

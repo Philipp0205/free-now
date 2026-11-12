@@ -30,7 +30,7 @@ Both use the same event shape and the same UID, so a plan does not show up twice
 
 ### Adding the feed on each platform
 
-`calendarPlatform(userAgent)` in `public/calendar-feed.js` picks `apple`, `android`, or `other`. iPadOS reports itself as a Mac, so "Macintosh" counts as Apple (a real Mac opens `webcal://` in Calendar too).
+`calendarPlatform(userAgent)` in `public/js/calendar-feed.js` picks `apple`, `android`, or `other`. iPadOS reports itself as a Mac, so "Macintosh" counts as Apple (a real Mac opens `webcal://` in Calendar too).
 
 | Platform | Buttons | Steps shown |
 | --- | --- | --- |
@@ -88,7 +88,7 @@ Never included: other guests' names, emails, attendees, chat, invite codes, shar
 
 Plan times are wall-clock times in `APP_TZ`. They are turned into UTC instants with the same rule the app uses, so they are correct across daylight saving changes without a `VTIMEZONE` block. `X-WR-TIMEZONE` is only a display hint.
 
-Daylight saving edge cases follow RFC 5545 (section 3.3.5), and the app's own clock rule (`zonedDateTime` in `src/time.ts`) gives the same instant:
+Daylight saving edge cases follow RFC 5545 (section 3.3.5), and the app's own clock rule (`zonedDateTime` in `src/lib/time.ts`) gives the same instant:
 
 - **Time that does not exist** (spring forward, for example 02:30 on 2026-03-29 in Europe/Berlin): it is read with the offset from before the gap, so it lands at 03:30 local (`DTSTART:20260329T013000Z`). Because that is not what the host typed, `DESCRIPTION` adds: "Planned for 02:30, a time that does not exist on this day because clocks move forward. Shown at 03:30." The note is added whenever the start, turned back into wall time in `APP_TZ`, differs from the plan's time.
 - **Time that happens twice** (fall back, for example 02:30 on 2026-10-25 in Europe/Berlin): the first occurrence is used, which is still summer time (`DTSTART:20261025T003000Z`, 02:30 CEST). No note is added, since the wall time is what the host typed.

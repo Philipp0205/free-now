@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "../public/keyboard.js";
+import { keyboardIsOpen, keyboardOffset, tabbarOverlapsKeyboard } from "../public/js/keyboard.js";
 
 test("keyboard offset is innerHeight minus visual height minus offsetTop", () => {
   assert.equal(keyboardOffset(800, 500, 0), 300);
@@ -98,7 +98,7 @@ test("bottom nav hides only when the keyboard overlaps it", () => {
 
 test("viewport meta and sheet css opt into the keyboard inset", () => {
   const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
-  const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  const css = fs.readFileSync(new URL("../public/css/styles.css", import.meta.url), "utf8");
   assert.match(html, /name="viewport"[^>]*interactive-widget=resizes-content/);
   assert.match(css, /--kb-offset/);
   assert.match(css, /100dvh/);

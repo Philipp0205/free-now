@@ -290,8 +290,8 @@ test("serves the installable shell", async () => {
     assert.match(html, /<title>Hangry<\/title>/);
     assert.match(html, /manifest\.webmanifest/);
     assert.match(html, /apple-mobile-web-app-capable/);
-    assert.match(html, /src="\/app\.js"/);
-    const client = await fetch(`${origin}/app.js`);
+    assert.match(html, /src="\/js\/app\.js"/);
+    const client = await fetch(`${origin}/js/app.js`);
     assert.match(await client.text(), /serviceWorker\.register/);
 
     const join = await fetch(`${origin}/join/AB12CD34`);

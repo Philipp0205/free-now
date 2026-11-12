@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import type { PushPayload, PushSender, PushSubscription } from "../../src/push.js";
-import { addDays, isoDate, shortDate } from "../../src/time.js";
+import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
+import { addDays, isoDate, shortDate } from "../../src/lib/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
 

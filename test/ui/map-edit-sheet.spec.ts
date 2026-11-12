@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Page } from "playwright-core";
-import { FIELD_REVEAL_MS } from "../../public/keyboard.js";
+import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";

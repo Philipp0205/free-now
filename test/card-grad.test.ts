@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { GRADIENT_COUNT, gradientClass, gradientIndex } from "../public/card-grad.js";
+import { GRADIENT_COUNT, gradientClass, gradientIndex } from "../public/js/card-grad.js";
 
-const CSS = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+const CSS = fs.readFileSync(new URL("../public/css/styles.css", import.meta.url), "utf8");
 
 type Rgb = [number, number, number];
 

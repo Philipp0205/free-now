@@ -1,0 +1,490 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { CACHE_MAX, isMapsLinkInput, looksLikeUrl, parseMapsLink, parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../../src/map/geocode.js";
+import { api, withApp } from "../http.js";
+
+const STUTTGART = { lat: 48.7784, lng: 9.18 };
+
+test("place search parses Photon and Nominatim hits", () => {
+  const photon = parsePhoton({
+    features: [{
+      geometry: { coordinates: [13.404954, 52.520008] },
+      properties: { name: "Café Einstein", street: "Unter den Linden", city: "Berlin", osm_key: "amenity", osm_value: "cafe" },
+    }],
+  });
+  assert.equal(photon[0].name, "Café Einstein");
+  assert.equal(photon[0].address, "Unter den Linden, Berlin");
+  assert.equal(photon[0].lat, 52.520008);
+  assert.equal(photon[0].osmKey, "amenity");
+
+  const nominatim = parseNominatim([{
+    lat: "52.5163",
+    lon: "13.3777",
+    name: "Brandenburg Gate",
+    display_name: "Brandenburg Gate, Pariser Platz, Berlin, Germany",
+    class: "tourism",
+    type: "attraction",
+  }]);
+  assert.equal(nominatim[0].name, "Brandenburg Gate");
+  assert.equal(nominatim[0].address, "Pariser Platz, Berlin");
+  assert.equal(nominatim[0].lat, 52.5163);
+  assert.equal(nominatim[0].lng, 13.3777);
+  assert.deepEqual(parseNominatim({ display_name: "nope" }), []);
+});
+
+test("nearby bars outrank same-name villages", () => {
+  const candidates: PlaceCandidate[] = [
+    { name: "Ratto", address: "Punjab", lat: 30.8614, lng: 76.3688, osmKey: "place", osmValue: "village", osmId: "village" },
+    { name: "RATTO Bistrobar", address: "Cottastraße 4, Stuttgart-Süd", lat: 48.7674, lng: 9.1708, osmKey: "amenity", osmValue: "bar", osmId: "bar" },
+    { name: "Schlossplatz", address: "the path", lat: 48.7784, lng: 9.18, osmKey: "highway", osmValue: "path", osmId: "path" },
+    { name: "Schlossplatz", address: "the square", lat: 48.7784, lng: 9.1801, osmKey: "place", osmValue: "square", osmId: "square" },
+  ];
+  const ratto = rankPlaces(candidates.filter((hit) => /ratto/i.test(hit.name)), STUTTGART, "Ratto");
+  assert.equal(ratto.length, 1);
+  assert.equal(ratto[0].name, "RATTO Bistrobar");
+  assert.ok((ratto[0].distanceM ?? 99999) < 5000);
+
+  const platz = rankPlaces(candidates.filter((hit) => hit.name === "Schlossplatz"), STUTTGART, "Schlossplatz");
+  assert.equal(platz.length, 1);
+  assert.equal(platz[0].address, "the square");
+});
+
+test("Schlossplatz keeps the square 20 m away and merges the duplicate spellings", () => {
+  const hits = rankPlaces([
+    { name: "Schloßplatz", address: "Neuhausen auf den Fildern", lat: 48.6831, lng: 9.2776, osmKey: "leisure", osmValue: "park", osmId: "park" },
+    { name: "Schlossplatz", address: "Stuttgart-Mitte", lat: 48.77855, lng: 9.17995, osmKey: "place", osmValue: "square", osmId: "square" },
+    { name: "Schlossplatz", address: "Stuttgart-Mitte", lat: 48.7782, lng: 9.1802, osmKey: "highway", osmValue: "path", osmId: "path" },
+    { name: "Schlossplatz", address: "Stuttgart-Mitte", lat: 48.779, lng: 9.179, osmKey: "railway", osmValue: "stop", osmId: "stop" },
+    { name: "Schloßplatz", address: "Stuttgart-Mitte", lat: 48.7786, lng: 9.18, osmKey: "highway", osmValue: "bus_stop", osmId: "bus" },
+  ], STUTTGART, "Schlossplatz");
+  assert.equal(hits[0].address, "Stuttgart-Mitte");
+  assert.ok((hits[0].distanceM ?? 999) < 100);
+  assert.equal(hits.filter((hit) => hit.address === "Stuttgart-Mitte").length, 1);
+  assert.equal(hits[1]?.address, "Neuhausen auf den Fildern");
+  assert.ok((hits[1]?.distanceM ?? 0) > 10_000);
+  assert.ok(hits.every((hit) => (hit.distanceM ?? 0) <= 50_000));
+});
+
+test("a known location drops places more than 50 km away", () => {
+  const hits = rankPlaces([
+    { name: "RATTO Bistrobar", address: "Cottastraße 4, Stuttgart-Süd", lat: 48.7674, lng: 9.1708, osmKey: "amenity", osmValue: "bar", osmId: "bar" },
+    { name: "Ratto", address: "Borbona, Rieti", lat: 42.5124, lng: 13.1644, osmKey: "waterway", osmValue: "river", osmId: "river" },
+    { name: "Ratto", address: "Khamanon Tahsil, Fatehgarh Sahib", lat: 30.8614, lng: 76.3688, osmKey: "place", osmValue: "village", osmId: "village" },
+  ], STUTTGART, "Ratto");
+  assert.deepEqual(hits.map((hit) => hit.name), ["RATTO Bistrobar"]);
+});
+
+test("without a location the search only applies a Germany bias", async () => {
+  const urls: string[] = [];
+  const hits = await searchPlaces("Ratto", null, async (url) => {
+    urls.push(url);
+    if (url.includes("photon")) {
+      return { features: [{ geometry: { coordinates: [9.17, 48.77] }, properties: { name: "RATTO Bistrobar", city: "Stuttgart", osm_key: "amenity", osm_value: "bar" } }] };
+    }
+    return [{ lat: "48.77", lon: "9.17", name: "RATTO Bistrobar", display_name: "RATTO Bistrobar, Stuttgart", class: "amenity", type: "bar", address: { city: "Stuttgart" } }];
+  });
+  assert.match(urls[0], /bbox=5\.8663,47\.2701,15\.0419,55\.0815/);
+  assert.doesNotMatch(urls[0], /[?&]lat=/);
+  assert.match(urls[1], /countrycodes=de/);
+  assert.doesNotMatch(urls[1], /viewbox=/);
+  assert.equal(hits[0].name, "RATTO Bistrobar");
+  assert.equal(hits[0].distanceM, null);
+});
+
+test("Ratto with a Stuttgart centre comes back as the local bar", async () => {
+  const urls: string[] = [];
+  const hits = await searchPlaces("Ratto", STUTTGART, async (url) => {
+    urls.push(url);
+    if (url.includes("photon.komoot.io")) {
+      return {
+        features: [{
+          geometry: { coordinates: [9.1708506, 48.7674143] },
+          properties: {
+            name: "RATTO Bistrobar",
+            osm_key: "amenity",
+            osm_value: "bar",
+            osm_type: "node",
+            osm_id: 42,
+            street: "Cottastraße",
+            housenumber: "4",
+            district: "Stuttgart-Süd",
+            city: "Stuttgart",
+          },
+        }],
+      };
+    }
+    return [
+      {
+        lat: "48.7674143",
+        lon: "9.1708506",
+        name: "RATTO Bistrobar",
+        class: "amenity",
+        type: "bar",
+        osm_id: 42,
+        display_name: "RATTO Bistrobar, 4, Cottastraße, Stuttgart",
+        address: { house_number: "4", road: "Cottastraße", city_district: "Stuttgart-Süd", city: "Stuttgart" },
+      },
+      {
+        lat: "30.861366",
+        lon: "76.368766",
+        name: "Ratto",
+        class: "place",
+        type: "village",
+        osm_id: 7,
+        display_name: "Ratto, Punjab, India",
+        address: { village: "Ratto", state: "Punjab" },
+      },
+    ];
+  });
+  assert.match(urls[0], /bbox=/);
+  assert.match(urls[0], /lat=48\.7784/);
+  assert.match(urls[0], /location_bias_scale=/);
+  assert.match(urls[1], /viewbox=/);
+  assert.match(urls[1], /bounded=0/);
+  assert.equal(hits[0].name, "RATTO Bistrobar");
+  assert.match(hits[0].address, /Cottastraße/);
+  assert.match(hits[0].address, /Stuttgart/);
+  assert.ok(hits[0].lat > 48.7 && hits[0].lat < 48.8);
+  assert.ok((hits[0].distanceM ?? 0) > 0 && (hits[0].distanceM ?? 99999) < 5000);
+  assert.deepEqual(hits.map((hit) => hit.name), ["RATTO Bistrobar"]);
+  assert.equal(urls.length, 2, "a strong local match never runs the national search");
+});
+
+const BERLIN = { lat: 52.52, lng: 13.405 };
+const MUNICH = { lat: 48.137, lng: 11.575 };
+const KREIS = { lat: 48.7608, lng: 9.1619 };
+
+const kreisPhoton = {
+  geometry: { coordinates: [KREIS.lng, KREIS.lat] },
+  properties: {
+    name: "Weinhandlung Kreis", osm_key: "shop", osm_value: "wine", osm_type: "N", osm_id: 501,
+    street: "Böheimstraße", housenumber: "43", postcode: "70199", district: "Heslach", city: "Stuttgart",
+  },
+};
+const kreisNominatim = {
+  lat: String(KREIS.lat), lon: String(KREIS.lng), name: "Weinhandlung Kreis", class: "shop", type: "wine", osm_id: 501,
+  display_name: "Weinhandlung Kreis, 43, Böheimstraße, Heslach, Süd, Stuttgart, Baden-Württemberg, 70199, Deutschland",
+  address: { house_number: "43", road: "Böheimstraße", suburb: "Heslach", city: "Stuttgart" },
+};
+const housePhoton = {
+  geometry: { coordinates: [KREIS.lng, KREIS.lat] },
+  properties: { osm_key: "place", osm_value: "house", osm_type: "N", osm_id: 502, street: "Böheimstraße", housenumber: "43", postcode: "70199", district: "Heslach", city: "Stuttgart" },
+};
+
+/** Fake Photon and Nominatim. A URL with lat= (Photon) or viewbox= (Nominatim) is the local search. */
+function fakeProviders(payloads: { local: [unknown, unknown]; national: [unknown, unknown] }) {
+  const urls: string[] = [];
+  const fetchJson = async (url: string) => {
+    urls.push(url);
+    const scope = /[?&]lat=|viewbox=/.test(url) ? payloads.local : payloads.national;
+    return url.includes("photon.komoot.io") ? scope[0] : scope[1];
+  };
+  return { urls, fetchJson };
+}
+
+test("a far origin with no local hits falls back to the Germany-wide search", async () => {
+  const fake = fakeProviders({
+    local: [{ features: [] }, []],
+    national: [{ features: [kreisPhoton] }, [kreisNominatim]],
+  });
+  const hits = await searchPlaces("Weinhandlung Kreis", BERLIN, fake.fetchJson);
+  assert.equal(hits[0]?.name, "Weinhandlung Kreis");
+  assert.match(hits[0].address, /Böheimstraße 43/);
+  assert.equal(hits[0].lat, KREIS.lat);
+  assert.ok((hits[0].distanceM ?? 0) > 400_000, "distance is still measured from the origin");
+  assert.equal(fake.urls.length, 4);
+  assert.match(fake.urls[0], /lat=52\.52/);
+  assert.match(fake.urls[1], /viewbox=/);
+  assert.match(fake.urls[2], /bbox=5\.8663,47\.2701,15\.0419,55\.0815/);
+  assert.match(fake.urls[3], /countrycodes=de/);
+
+  fake.urls.length = 0;
+  assert.deepEqual(await searchPlaces("Weinhandlung Kreis", BERLIN, fake.fetchJson), hits);
+  assert.equal(fake.urls.length, 0, "the merged answer is cached per origin");
+  const unbiased = await searchPlaces("Weinhandlung Kreis", null, fake.fetchJson);
+  assert.equal(unbiased[0]?.name, "Weinhandlung Kreis");
+  assert.equal(unbiased[0].distanceM, null);
+  assert.equal(fake.urls.length, 0, "the fallback fills the shared Germany-wide cache");
+
+  const munich = await searchPlaces("Weinhandlung Kreis", MUNICH, fake.fetchJson);
+  assert.equal(munich[0]?.name, "Weinhandlung Kreis");
+  assert.equal(fake.urls.length, 2, "a second far origin reuses the cached national search");
+});
+
+test("a street address far from the origin is found, with or without the city", async () => {
+  for (const query of ["Böheimstraße 43", "Böheimstraße 43, Stuttgart", "boheimstrasse 43"]) {
+    const fake = fakeProviders({
+      local: [{ features: [] }, []],
+      national: [{ features: [housePhoton] }, [kreisNominatim]],
+    });
+    const hits = await searchPlaces(query, MUNICH, fake.fetchJson);
+    assert.ok(hits.length >= 1, query);
+    assert.ok(hits.every((hit) => Math.abs(hit.lat - KREIS.lat) < 0.001), query);
+    assert.ok(hits.some((hit) => hit.name === "Böheimstraße 43"), query);
+    assert.equal(fake.urls.length, 4, query);
+  }
+});
+
+test("an explicit far address outranks weak nearby matches", async () => {
+  const fake = fakeProviders({
+    local: [
+      { features: [{
+        geometry: { coordinates: [11.56, 48.14] },
+        properties: { name: "Stuttgarter Straße", osm_key: "highway", osm_value: "residential", city: "München", housenumber: "43" },
+      }] },
+      [],
+    ],
+    national: [{ features: [housePhoton] }, []],
+  });
+  const hits = await searchPlaces("Böheimstraße 43 Stuttgart", MUNICH, fake.fetchJson);
+  assert.deepEqual(hits.map((hit) => hit.name), ["Böheimstraße 43", "Stuttgarter Straße"]);
+  assert.ok((hits[0].distanceM ?? 0) > 150_000);
+  assert.ok((hits[1].distanceM ?? 99999) < 5_000);
+  assert.equal(fake.urls.length, 4);
+
+  const weak = fakeProviders({
+    local: [{ features: [{
+      geometry: { coordinates: [11.57, 48.135] },
+      properties: { name: "Weinhandlung am Markt", osm_key: "shop", osm_value: "wine", city: "München" },
+    }] }, []],
+    national: [{ features: [kreisPhoton] }, []],
+  });
+  const wine = await searchPlaces("Weinhandlung Kreis Heslach", MUNICH, weak.fetchJson);
+  assert.deepEqual(wine.map((hit) => hit.name), ["Weinhandlung Kreis", "Weinhandlung am Markt"]);
+});
+
+test("a near origin keeps the local ordering and never runs the national search", async () => {
+  const neighbour = {
+    geometry: { coordinates: [9.17, 48.77] },
+    properties: { name: "Weinhandlung Kreis Lager", osm_key: "building", osm_value: "yes", city: "Stuttgart" },
+  };
+  const fake = fakeProviders({
+    local: [{ features: [neighbour, kreisPhoton] }, [kreisNominatim]],
+    national: [{ features: [] }, []],
+  });
+  const near = { lat: 48.7616, lng: 9.163 };
+  const hits = await searchPlaces("Weinhandlung Kreis", near, fake.fetchJson);
+  assert.deepEqual(hits, rankPlaces([...parsePhoton({ features: [neighbour, kreisPhoton] }), ...parseNominatim([kreisNominatim])], near, "Weinhandlung Kreis"));
+  assert.deepEqual(hits.map((hit) => hit.name), ["Weinhandlung Kreis", "Weinhandlung Kreis Lager"]);
+  assert.ok((hits[0].distanceM ?? 99999) < 200);
+  assert.equal(fake.urls.length, 2);
+});
+
+test("the fallback keeps the result cap", async () => {
+  const many = Array.from({ length: 10 }, (_, idx) => ({
+    geometry: { coordinates: [9 + idx * 0.1, 50 + idx * 0.1] },
+    properties: { name: `Capstadt Weinhaus ${idx}`, osm_key: "shop", osm_value: "wine", city: `Ort ${idx}` },
+  }));
+  const fake = fakeProviders({ local: [{ features: [] }, []], national: [{ features: many }, []] });
+  const hits = await searchPlaces("Capstadt Weinhaus", BERLIN, fake.fetchJson);
+  assert.equal(hits.length, 6);
+
+  const typo = fakeProviders({ local: [{ features: [] }, []], national: [{ features: [kreisPhoton] }, []] });
+  const fuzzy = await searchPlaces("Weinhandlug Kreiss", BERLIN, typo.fetchJson);
+  assert.deepEqual(fuzzy.map((hit) => hit.name), ["Weinhandlung Kreis"], "with nothing local, weak national hits still show");
+});
+
+test("reverse geocoding keeps a Photon venue and falls back to Nominatim", async () => {
+  const venueUrls: string[] = [];
+  const venue = await reversePlace(48.76741, 9.17085, async (url) => {
+    venueUrls.push(url);
+    return {
+      features: [{
+        geometry: { coordinates: [9.17085, 48.76741] },
+        properties: { name: "RATTO Bistrobar", osm_key: "amenity", osm_value: "bar" },
+      }],
+    };
+  });
+  assert.equal(venue, "RATTO Bistrobar");
+  assert.deepEqual(venueUrls, ["https://photon.komoot.io/reverse?lon=9.17085&lat=48.76741"]);
+
+  const streetUrls: string[] = [];
+  const street = await reversePlace(52.52001, 13.40495, async (url) => {
+    streetUrls.push(url);
+    if (url.includes("photon.komoot.io")) return { features: [] };
+    return { address: { road: "Schlossplatz", suburb: "Stuttgart-Mitte", city: "Stuttgart" } };
+  });
+  assert.equal(street, "Near Schlossplatz, Stuttgart-Mitte");
+  assert.deepEqual(streetUrls, [
+    "https://photon.komoot.io/reverse?lon=13.40495&lat=52.52001",
+    "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=52.52001&lon=13.40495",
+  ]);
+});
+
+const BAGEL = "https://www.google.com/maps/place/jomi+Bagel+Deli,+Johannesstra%C3%9Fe+65/";
+const BAGEL_DE = "https://www.google.de/maps/place/jomi+Bagel+Deli,+Johannesstra%C3%9Fe+65/";
+const CONSENT = `https://consent.google.com/m?continue=${encodeURIComponent(BAGEL)}&gl=DE`;
+
+test("maps links resolve a short link, coordinates, and reject other hosts", async () => {
+  const fetched: string[] = [];
+  const searched: string[] = [];
+  const fetchImpl = async (url: string) => {
+    fetched.push(url);
+    if (url === "https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8") {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? BAGEL_DE : null) },
+        body: { cancel: async () => {}, text: async () => { throw new Error("body was read"); } },
+      };
+    }
+    if (url === "https://maps.app.goo.gl/consent") {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? CONSENT : null) },
+        body: { cancel: async () => {} },
+      };
+    }
+    if (url.includes("consent.google.com") || url.includes("/maps")) {
+      return {
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? CONSENT : null) },
+        body: { cancel: async () => {} },
+      };
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  const fetchJson = async (url: string) => {
+    searched.push(url);
+    if (url.includes("photon.komoot.io/reverse")) {
+      return { features: [{ geometry: { coordinates: [9.18, 48.7784] }, properties: { name: "Schlossplatz", osm_key: "amenity", osm_value: "cafe" } }] };
+    }
+    if (url.includes("photon.komoot.io")) {
+      return { features: [{ geometry: { coordinates: [9.183, 48.775] }, properties: { name: "jomi Bagel Deli", city: "Stuttgart", osm_key: "amenity", osm_value: "cafe" } }] };
+    }
+    return [];
+  };
+
+  const bagel = await resolveMapsLink("https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8", fetchJson, fetchImpl);
+  assert.equal(bagel[0]?.name, "jomi Bagel Deli");
+  assert.ok(searched.some((url) => decodeURIComponent(url).includes("jomi Bagel Deli")));
+  assert.deepEqual(fetched, ["https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8"]);
+
+  const consent = await resolveMapsLink("https://maps.app.goo.gl/consent", fetchJson, fetchImpl);
+  assert.equal(consent[0]?.name, "jomi Bagel Deli");
+  assert.deepEqual(fetched.filter((url) => url.includes("consent.google")), []);
+
+  searched.length = 0;
+  const again = await resolveMapsLink("https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8", fetchJson, fetchImpl);
+  assert.equal(again[0]?.name, "jomi Bagel Deli");
+  assert.equal(searched.length, 0);
+
+  const fetchesBeforePins = fetched.length;
+  const at = await resolveMapsLink("https://www.google.com/maps/@48.7784,9.18,17z", fetchJson, fetchImpl);
+  assert.equal(at.length, 1);
+  assert.equal(at[0].lat, 48.7784);
+  assert.equal(at[0].lng, 9.18);
+  assert.equal(at[0].name, "Schlossplatz");
+
+  const pin = await resolveMapsLink("https://www.google.com/maps/place/Cafe+Ada/@48.1,9.1,17z/data=!3d48.7674!4d9.1708", fetchJson, fetchImpl);
+  assert.equal(pin.length, 1);
+  assert.equal(pin[0].name, "Cafe Ada");
+  assert.equal(pin[0].lat, 48.7674);
+  assert.equal(pin[0].lng, 9.1708);
+  assert.equal(fetched.length, fetchesBeforePins);
+
+  const de = await resolveMapsLink("https://www.google.de/maps/@52.52,13.405,15z", fetchJson, fetchImpl);
+  assert.equal(de[0]?.lat, 52.52);
+  assert.equal(fetched.length, fetchesBeforePins);
+
+  const before = fetched.length;
+  const rejected = await resolveMapsLink("https://evil.example/maps/place/Secret", fetchJson, fetchImpl);
+  assert.deepEqual(rejected, []);
+  assert.equal(fetched.length, before);
+  assert.deepEqual(await resolveMapsLink("http://www.google.com/maps/place/Cafe", fetchJson, fetchImpl), []);
+  assert.deepEqual(await resolveMapsLink("https://goo.gl/not-maps", fetchJson, fetchImpl), []);
+  assert.deepEqual(await resolveMapsLink("https://www.google.evil/maps/place/Cafe", fetchJson, fetchImpl), []);
+});
+
+test("maps link recognition takes google.com without www and maps.google.com", () => {
+  for (const link of [
+    "https://www.google.com/maps/place/Cafe+Ada/",
+    "https://google.com/maps/place/Cafe+Ada/@48.7674,9.1708,17z",
+    "https://google.de/maps/@52.52,13.405,15z",
+    "https://maps.google.com/maps?q=48.7674,9.1708",
+    "https://maps.google.com/?q=48.7674,9.1708",
+    "https://maps.google.de/maps/place/Cafe+Ada/",
+    "https://maps.app.goo.gl/L9qMNeDJHDcZEnRs8",
+    "https://goo.gl/maps/abc",
+  ]) {
+    assert.equal(isMapsLinkInput(link), true, link);
+  }
+  for (const other of [
+    "https://example.com/maps/place/Cafe",
+    "https://google.com/search?q=cafe",
+    "https://www.google.com/",
+    "https://maps.google.evil/maps/place/Cafe",
+    "https://google.evil/maps/place/Cafe",
+    "https://notgoogle.com/maps/place/Cafe",
+    "http://google.com/maps/place/Cafe",
+    "https://goo.gl/not-maps",
+    "Cafe Ada",
+  ]) {
+    assert.equal(isMapsLinkInput(other), false, other);
+  }
+  assert.deepEqual(parseMapsLink("https://google.com/maps/place/Cafe+Ada/@48.7674,9.1708,17z"), { lat: 48.7674, lng: 9.1708, name: "Cafe Ada" });
+  assert.deepEqual(parseMapsLink("https://maps.google.com/?q=48.7674,9.1708"), { lat: 48.7674, lng: 9.1708, name: "" });
+  assert.equal(looksLikeUrl("https://example.com"), true);
+  assert.equal(looksLikeUrl(" HTTP://example.com "), true);
+  assert.equal(looksLikeUrl("Cafe https://x"), false);
+  assert.equal(looksLikeUrl("Cafe Ada"), false);
+});
+
+test("geocode never sends a pasted non-Maps URL upstream as search text", async () => {
+  const original = globalThis.fetch;
+  const upstream: string[] = [];
+  await withApp(async ({ port }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url instanceof Request ? url.url : url);
+      if (href.startsWith(`http://127.0.0.1:${port}`)) return original(url, init);
+      upstream.push(href);
+      return new Response("[]", { status: 200 });
+    }) as typeof fetch;
+    try {
+      for (const pasted of ["https://example.com/some/page", "http://example.com/x"]) {
+        const body = await api(port, "GET", `/api/geocode?q=${encodeURIComponent(pasted)}`, { token: alex.token, status: 200 });
+        assert.deepEqual(body.results, []);
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+  assert.deepEqual(upstream, []);
+});
+
+test("geocode logs the upstream status and not the query", async () => {
+  const logs: string[] = [];
+  const previous = console.log;
+  const original = globalThis.fetch;
+  console.log = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+  globalThis.fetch = (async (url: string) => {
+    if (String(url).includes("photon")) return new Response("nope", { status: 503 });
+    const error = new Error("timed out");
+    error.name = "TimeoutError";
+    throw error;
+  }) as typeof fetch;
+  try {
+    await searchPlaces("Cafe Secret Name", null);
+  } finally {
+    console.log = previous;
+    globalThis.fetch = original;
+  }
+  assert.ok(logs.includes("geocode upstream photon status=503"));
+  assert.ok(logs.includes("geocode upstream nominatim status=timeout"));
+  assert.ok(logs.every((line) => !line.includes("Secret") && !line.includes("Cafe")));
+});
+
+test("place search cache drops the oldest query past CACHE_MAX", async () => {
+  let calls = 0;
+  const fetchJson = async () => {
+    calls += 1;
+    return null;
+  };
+  for (let i = 0; i <= CACHE_MAX; i += 1) await searchPlaces(`cap query ${i}`, null, fetchJson);
+  calls = 0;
+  await searchPlaces(`cap query ${CACHE_MAX}`, null, fetchJson);
+  assert.equal(calls, 0, "recent query is served from cache");
+  await searchPlaces("cap query 0", null, fetchJson);
+  assert.ok(calls > 0, "oldest query was evicted and fetched again");
+});

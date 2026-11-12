@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { devices, type Page } from "playwright-core";
-import { FIELD_REVEAL_MS, keyboardOffset } from "../../public/keyboard.js";
+import { FIELD_REVEAL_MS, keyboardOffset } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { useHangry } from "./harness.js";

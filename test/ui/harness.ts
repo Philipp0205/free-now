@@ -6,8 +6,8 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
-import type { CalendarNet } from "../../src/freebusy.js";
-import { createNoopPushSender, type PushSender } from "../../src/push.js";
+import type { CalendarNet } from "../../src/calendar/freebusy.js";
+import { createNoopPushSender, type PushSender } from "../../src/push/push.js";
 
 /** Android Chrome on a Pixel 8. */
 export const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";

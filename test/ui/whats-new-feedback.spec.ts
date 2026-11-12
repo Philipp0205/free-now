@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
 
 /** The build label app.js sends with feedback, so a version bump does not break this test. */
-const APP_VERSION = /const APP_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.resolve("public/app.js"), "utf8"))?.[1] ?? "";
+const APP_VERSION = /const APP_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.resolve("public/js/app.js"), "utf8"))?.[1] ?? "";
 
 const ENTRIES = JSON.parse(
   fs.readFileSync(new URL("../../public/whats-new.json", import.meta.url), "utf8"),
@@ -165,7 +165,7 @@ test("Send feedback checks the text, sends it with the circle, and says thanks",
     const row = hangry.db.prepare("SELECT * FROM feedback WHERE user_id = ?").get(eli.user.id) as Record<string, unknown>;
     assert.equal(row.text, "The map pins could be bigger.\nThanks!");
     assert.equal(row.circle_id, eli.circleId);
-    assert.ok(APP_VERSION, "APP_VERSION found in public/app.js");
+    assert.ok(APP_VERSION, "APP_VERSION found in public/js/app.js");
     assert.equal(row.app_version, APP_VERSION);
 
     await done.getByRole("button", { name: "Done" }).click();

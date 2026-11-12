@@ -5,12 +5,12 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { avatarKind } from "../src/avatar.js";
+import { avatarKind } from "../src/lib/avatar.js";
 import { createApp } from "../src/app.js";
 import { avatarDirFor, loadConfig } from "../src/config.js";
 import { getPlan, openDb } from "../src/db.js";
-import { shareMeta, sharePreview } from "../src/plan-share.js";
-import { createNoopPushSender } from "../src/push.js";
+import { shareMeta, sharePreview } from "../src/social/plan-share.js";
+import { createNoopPushSender } from "../src/push/push.js";
 import { api } from "./http.js";
 
 /** Modernizr's 1×1 lossless WebP: a real, decodable image in 38 bytes. */
