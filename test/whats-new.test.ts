@@ -66,9 +66,21 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the blocked wording entry is the newest, in plain words without an em dash", () => {
+test("the chat wrap entry is in the changelog, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-12-blocked-wording");
+  assert.equal(top.id, "2026-11-12-chat-wrap");
+  assert.equal(top.title, "Long chat messages wrap");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= 140, line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
+  assert.ok(RAW.some((item) => item.id === "2026-11-12-blocked-wording"), "blocked wording entry is kept");
+});
+
+test("the blocked wording entry stays in the changelog, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-12-blocked-wording");
+  assert.ok(top, "blocked wording entry");
   assert.equal(top.title, "Clearer busy times");
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   assert.match(top.bullets.join(" "), /Blocked from 09:00 to 10:00/);
@@ -513,7 +525,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v90");
+  assert.equal(cache?.[1], "hangry-v91");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/whats-new.js"));

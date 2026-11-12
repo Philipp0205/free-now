@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-12-chat-wrap",
+    "date": "2026-11-12",
+    "title": "Long chat messages wrap",
+    "bullets": [
+      "The message box now wraps long text onto new lines and grows as you type, instead of scrolling sideways.",
+      "Enter still sends. Shift+Enter starts a new line."
+    ]
+  },
+  {
     "id": "2026-11-12-blocked-wording",
     "date": "2026-11-12",
     "title": "Clearer busy times",
@@ -108,7 +117,7 @@
       "Pins, cards and the live buzz work just like before."
     ]
   },
-{
+  {
     "id": "2026-11-09-chat-mentions-reactions",
     "date": "2026-11-11",
     "title": "Mentions, reactions and replies in chat",
@@ -152,9 +161,9 @@
   {
     "id": "2026-11-10-zurich-map",
     "date": "2026-11-10",
-    "title": "Dark map in Zürich too",
+    "title": "Dark map in Z\u00fcrich too",
     "bullets": [
-      "The detailed dark street map now covers Zürich and the lake, the same way it already covers Stuttgart.",
+      "The detailed dark street map now covers Z\u00fcrich and the lake, the same way it already covers Stuttgart.",
       "The stretch between the two cities is covered as well.",
       "Outside this area you still see the regular street map. There is nothing to reinstall."
     ]
@@ -264,7 +273,7 @@
     "date": "2026-11-08",
     "title": "Smoother menus and tabs",
     "bullets": [
-      "The ⋯ menu on cards now opens with a quick, soft pop, and its items react when you press them.",
+      "The \u22ef menu on cards now opens with a quick, soft pop, and its items react when you press them.",
       "Switching tabs fades the new page in gently. With Reduce motion on, both stay instant."
     ]
   },
@@ -319,7 +328,7 @@
     "date": "2026-11-07",
     "title": "Share a plan with more circles",
     "bullets": [
-      "Tap ⋯ on your plan and choose Share with other circles.",
+      "Tap \u22ef on your plan and choose Share with other circles.",
       "It stays one plan with one chat and guest list. Only the newly added circles get a notification."
     ]
   },
@@ -346,7 +355,7 @@
     "date": "2026-11-07",
     "title": "Plans in your calendar",
     "bullets": [
-      "Tap ⋯ on a plan and choose Add to calendar to save it as a calendar file. That copy does not update.",
+      "Tap \u22ef on a plan and choose Add to calendar to save it as a calendar file. That copy does not update.",
       "Want it to stay in sync? Turn on Calendar feed on the You tab and add the private link to your calendar app.",
       "Reset the link or turn it off any time. Your calendar app decides how often it checks for changes, which can take hours."
     ]
@@ -356,7 +365,7 @@
     "date": "2026-11-06",
     "title": "Nudge your friends",
     "bullets": [
-      "Tap ⋯ on a plan and choose Remind friends to send the notification again to people who have not answered yet or said maybe.",
+      "Tap \u22ef on a plan and choose Remind friends to send the notification again to people who have not answered yet or said maybe.",
       "You can remind once an hour per plan."
     ]
   },
@@ -365,7 +374,7 @@
     "date": "2026-11-06",
     "title": "Say maybe",
     "bullets": [
-      "Not sure yet? Open ⋯ on a plan and tap Maybe.",
+      "Not sure yet? Open \u22ef on a plan and tap Maybe.",
       "Friends see you're a maybe in Who's in."
     ]
   },
@@ -428,7 +437,7 @@
     "date": "2026-11-05",
     "title": "Profile pictures",
     "bullets": [
-      "Add a photo on the You tab — friends see it on cards and in the circle.",
+      "Add a photo on the You tab \u2014 friends see it on cards and in the circle.",
       "No photo? Initials stay as they are."
     ]
   },
@@ -437,8 +446,8 @@
     "date": "2026-11-05",
     "title": "Clearer place search",
     "bullets": [
-      "You'll see Searching… while places load, and a note if nothing turns up.",
-      "Enter in the place field searches — it no longer saves the plan."
+      "You'll see Searching\u2026 while places load, and a note if nothing turns up.",
+      "Enter in the place field searches \u2014 it no longer saves the plan."
     ]
   },
   {
@@ -464,7 +473,7 @@
     "date": "2026-11-05",
     "title": "Turn notifications off",
     "bullets": [
-      "You → Notifications now has a Turn off button.",
+      "You \u2192 Notifications now has a Turn off button.",
       "This phone stops getting pushes. Turn them back on any time."
     ]
   },
@@ -473,7 +482,7 @@
     "date": "2026-11-05",
     "title": "Clearer plan cards",
     "bullets": [
-      "One tap I'm in — tap again to undo. Hosts stay In.",
+      "One tap I'm in \u2014 tap again to undo. Hosts stay In.",
       "Chat sits on the card with the last message and an unread badge.",
       "Share, pick a time, Can't, Edit and End live under the menu."
     ]
@@ -484,7 +493,7 @@
     "title": "Circle dots match Alerts",
     "bullets": [
       "A red dot on a circle means that circle has unread alerts.",
-      "Open Alerts in that circle to mark them read — the dot clears.",
+      "Open Alerts in that circle to mark them read \u2014 the dot clears.",
       "Plan chats, new members and ended plans show up in Alerts too."
     ]
   },
@@ -513,7 +522,7 @@
     "title": "Heads-up when plans move",
     "bullets": [
       "When a plan changes day, time or place, your circle gets a push. People who said they can't come are left alone.",
-      "The push shows the new date and time, like Fri 7 Nov · 20:00.",
+      "The push shows the new date and time, like Fri 7 Nov \u00b7 20:00.",
       "Fixing a typo in the title or description stays quiet."
     ]
   },
