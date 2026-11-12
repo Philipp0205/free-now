@@ -432,6 +432,22 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
 }
 
 /**
+ * The small steps sheet for browsers with no install prompt of their own (Settings row, install banner).
+ * Steps come from installPrompt; only a computer, which that helper keeps quiet, gets the generic menu steps.
+ */
+export function installHowTo(signals) {
+  const prompt = installPrompt(signals);
+  const desktop = Boolean(prompt.quiet);
+  return {
+    kind: prompt.kind,
+    title: prompt.title,
+    lede: desktop ? "Add Hangry to your home screen or desktop so it opens like an app." : prompt.lede,
+    steps: desktop ? ["Open the browser menu.", "Choose Install app or Add to Home screen."] : prompt.steps,
+    copyLink: prompt.copyLink,
+  };
+}
+
+/**
  * The install step right after someone joins a circle from an invite.
  * Null when there is nothing to show: already installed, or a computer.
  * Steps come from installPrompt so both sheets say the same thing.

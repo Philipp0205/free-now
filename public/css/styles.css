@@ -1738,6 +1738,47 @@ html.kb-open .sheet .help { margin-top: 0; }
   .orb.live, .banner { animation: none; }
 }
 
+/* A slim, in-flow bar at the top of the app: no scrim, nothing covered, gone when closed or installed. */
+.install-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 6px 4px 6px 10px;
+  border-radius: 16px;
+  background: #1c1c1e;
+  color: #fff;
+  animation: banner-in 0.18s ease;
+}
+.install-bar img { width: 28px; height: 28px; border-radius: 8px; flex: none; }
+.install-bar .copy { min-width: 0; flex: 1; text-align: left; }
+.install-bar .copy strong { display: block; font-size: 14px; font-weight: 650; }
+.install-bar .copy span { display: block; margin-top: 1px; color: #d1d1d6; font-size: 13px; }
+.install-bar button { appearance: none; border: 0; font: inherit; flex: none; }
+.install-bar .install-go {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+  font-size: 14px;
+  font-weight: 650;
+}
+.install-bar .install-close {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.install-bar .install-close .icon, .install-bar .install-close svg { width: 20px; height: 20px; }
+.install-steps .stack { margin-top: 16px; }
+@media (prefers-reduced-motion: reduce) {
+  .install-bar { animation: none; }
+}
+
 .share-toggle {
   display: flex;
   align-items: center;

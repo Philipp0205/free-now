@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installGuide, installPrompt, joinInstallStep, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/js/install-guide.js";
+import { installGuide, installHowTo, installPrompt, joinInstallStep, installReminderDue, needsInstallForPush, pushReminder, pushTestMessage, readInstallSignals } from "../public/js/install-guide.js";
 
 const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const IOS_INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 320.0.0.0";
@@ -290,5 +290,34 @@ test("the post-join install step uses the same steps per browser and skips insta
   assert.equal(joinInstallStep(signals("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")), null);
   for (const step of [ios, menu, prompted]) {
     for (const line of [step?.title ?? "", step?.lede ?? "", ...(step?.steps ?? [])]) assert.ok(!line.includes("\u2014"), line);
+  }
+});
+
+test("the install steps sheet reuses the install prompt steps and has a generic fallback for computers", () => {
+  const signals = (userAgent: string, extra: Record<string, unknown> = {}) => readInstallSignals({ userAgent, notificationPermission: "default", ...extra });
+
+  const ios = installHowTo(signals(IOS_SAFARI));
+  assert.equal(ios.kind, "ios");
+  assert.deepEqual(ios.steps, installPrompt(signals(IOS_SAFARI)).steps);
+  assert.match(ios.steps.join(" "), /Share button/);
+  assert.match(ios.steps.join(" "), /Add to Home Screen/);
+  assert.equal(ios.copyLink, false);
+
+  const other = installHowTo(signals(IOS_CHROME));
+  assert.equal(other.kind, "ios-other");
+  assert.equal(other.copyLink, true);
+  assert.match(other.steps.join(" "), /Share, then Add to Home Screen/);
+
+  const chrome = installHowTo(signals(ANDROID_CHROME));
+  assert.deepEqual(chrome.steps, installPrompt(signals(ANDROID_CHROME)).steps);
+  assert.match(chrome.steps.join(" "), /Install app or Add to Home screen/);
+  assert.equal(installHowTo(signals(ANDROID_FIREFOX)).kind, "firefox");
+
+  const desktop = installHowTo(signals("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"));
+  assert.ok(desktop.steps.length > 0, "a computer still gets steps");
+  assert.match(desktop.steps.join(" "), /Install app or Add to Home screen/);
+
+  for (const how of [ios, other, chrome, desktop]) {
+    for (const line of [how.title, how.lede, ...how.steps]) assert.ok(!line.includes("\u2014"), line);
   }
 });

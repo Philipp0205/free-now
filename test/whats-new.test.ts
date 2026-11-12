@@ -66,9 +66,26 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the chat read alerts entry is the newest, in plain words without an em dash", () => {
+test("the install app entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-12-chat-read-alerts");
+  assert.equal(top.id, "2026-11-12-install-app");
+  assert.equal(top.date, "2026-11-12");
+  assert.equal(top.title, "Install Hangry from You > Account");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  const text = [top.title, ...top.bullets].join(" ");
+  assert.match(text, /Install app/);
+  assert.match(text, /home screen/);
+  assert.match(text, /comes back/);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= (line === top.title ? 60 : 140), line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
+  assert.ok(RAW.some((item) => item.id === "2026-11-12-chat-read-alerts"), "chat read alerts entry is kept");
+});
+
+test("the chat read alerts entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-12-chat-read-alerts")!;
+  assert.ok(top, "chat read alerts entry");
   assert.equal(top.date, "2026-11-12");
   assert.equal(top.title, "Reading a chat clears its alerts");
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
@@ -541,7 +558,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v93");
+  assert.equal(cache?.[1], "hangry-v95");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/js/whats-new.js"));
