@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-12-install-app",
+    "date": "2026-11-12",
+    "title": "Install Hangry from You > Account",
+    "bullets": [
+      "You > Account now has an Install app row. Tap it to add Hangry to your home screen, or to see the steps for your browser.",
+      "If Hangry is not installed, a small prompt shows when you open the app. Close it and it comes back next time you open Hangry."
+    ]
+  },
+  {
     "id": "2026-11-12-chat-read-alerts",
     "date": "2026-11-12",
     "title": "Reading a chat clears its alerts",
