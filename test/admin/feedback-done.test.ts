@@ -266,14 +266,15 @@ test("untrusted feedback text is stored as plain text and the client renders ale
     assert.equal(note.body, body, "JSON carries the text as is; it is never HTML");
   }, ENV);
   // The alert list and banner set note.title/body through textContent (el's "text"), never innerHTML.
-  const app = fs.readFileSync(new URL("../../public/js/app.js", import.meta.url), "utf8");
-  const card = /function alertCard\(note\) \{[\s\S]*?\n\}/.exec(app)?.[0] ?? "";
+  const client = (name: string) => fs.readFileSync(new URL(`../../public/js/${name}.js`, import.meta.url), "utf8");
+  const alerts = client("alerts");
+  const card = /function alertCard\(note\) \{[\s\S]*?\n\}/.exec(alerts)?.[0] ?? "";
   assert.match(card, /el\("h3", \{ text: note\.title \}\)/);
   assert.match(card, /el\("p", \{ text: note\.body \}\)/);
   assert.equal(/innerHTML|insertAdjacentHTML/.test(card), false);
-  assert.match(app, /state\.notifications\.map\(alertCard\)/);
-  assert.match(app, /else if \(key === "text"\) node\.textContent = String\(value\);/);
-  assert.match(app, /function openNotification\(note\) \{\n  if \(note\.kind === "feedback-done"\) \{[^}]*void openWhatsNewList\(\);/);
+  assert.match(alerts, /state\.notifications\.map\(alertCard\)/);
+  assert.match(client("lib"), /else if \(key === "text"\) node\.textContent = String\(value\);/);
+  assert.match(alerts, /function openNotification\(note\) \{\n  if \(note\.kind === "feedback-done"\) \{[^}]*void openWhatsNewList\(\);/);
 });
 
 test("only the operator token can mark done; app users and bad tokens send nothing", async () => {
@@ -343,11 +344,14 @@ test("zero-circle submitter reads their alert with no circle named; unrelated pe
 });
 
 test("client: zero-circle refresh loads personal alerts, setup lists them, and the banner opens What's new", () => {
-  const app = fs.readFileSync(new URL("../../public/js/app.js", import.meta.url), "utf8");
+  const client = (name: string) => fs.readFileSync(new URL(`../../public/js/${name}.js`, import.meta.url), "utf8");
+  const session = client("session");
+  const render = client("render");
+  const alerts = client("alerts");
   // refresh() no longer bails out without a circle.
-  assert.match(app, /async function refresh\(\{ initial = false \} = \{\}\) \{\n  const seq = \+\+refreshSeq;\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(seq\);/);
-  assert.match(app, /api\("\/api\/notifications", \{ circle: null \}\)/);
-  assert.match(app, /root\.append\(setup\(\)\);\n    if \(state\.sheet === "whats-new"\) root\.append\(whatsNewSheet\(\)\);/);
-  assert.match(app, /personalAlerts\(\),\n  \]\);/);
-  assert.match(app, /if \(note\.kind === "feedback-done"\) \{\n      openNotification\(note\);/);
+  assert.match(session, /export async function refresh\(\{ initial = false \} = \{\}\) \{\n  const seq = \+\+refreshSeq;\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(seq\);/);
+  assert.match(session, /api\("\/api\/notifications", \{ circle: null \}\)/);
+  assert.match(render, /root\.append\(setup\(\)\);\n    if \(state\.sheet === "whats-new"\) root\.append\(whatsNewSheet\(\)\);/);
+  assert.match(render, /personalAlerts\(\),\n  \]\);/);
+  assert.match(alerts, /if \(note\.kind === "feedback-done"\) \{\n      openNotification\(note\);/);
 });

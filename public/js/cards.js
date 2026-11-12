@@ -1,0 +1,281 @@
+import { gradientClass } from "./card-grad.js";
+import { state } from "./state.js";
+import { render } from "./render.js";
+import { chatRow } from "./chat.js";
+import { youAreAdmin } from "./members.js";
+import { canShareCircles, endManaged, mapsUrl, openAdminEdit, openArrivalPicker, openEventDetail, openShareCircles, planCirclesLine } from "./event-sheets.js";
+import { clock, el, icon, remaining } from "./lib.js";
+import { inReply } from "./composer.js";
+import { arrivalDefault, arriveClock, avatarStack, inToggle, replySummary, sendReply } from "./replies.js";
+import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
+import { placeLine, planReplySummary, removedNote } from "./map-card.js";
+
+/** Card menu opened by the latest ⋯ tap; its next render plays the open animation once. */
+let menuJustOpened = null;
+/** render() calls this once the open animation has had its render. */
+export function clearMenuJustOpened() {
+  menuJustOpened = null;
+}
+
+export function socialCard(social) {
+  const mine = social.creator.id === state.me.user.id;
+  const upcoming = social.startsAt && social.startsAt > Date.now();
+  const menuOpen = state.cardMenu === `social:${social.id}`;
+  return el("article", {
+    class: [
+      state.focusSocial === social.id ? "card card-now focused" : upcoming ? "card card-now later" : "card card-now",
+      menuOpen ? "menu-open" : "",
+    ].filter(Boolean).join(" "),
+    "data-social": social.id,
+  }, [
+    el("div", { class: "card-bg", onclick: () => openEventDetail("social", social) }),
+    cardOverflow("social", social),
+    el("div", { class: "card-copy" }, [
+      el("div", {
+        class: "card-body",
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Open details",
+        onclick: () => openEventDetail("social", social),
+      }, [
+        avatarStack(social),
+        el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
+        el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
+        replySummary(social),
+        placeLine(social.location, social.place, { kind: "social", id: social.id }),
+        removedNote(social),
+      ]),
+      chatRow("social", social),
+      social.removedBy ? null : inToggle("social", social, { locked: mine }),
+    ]),
+  ]);
+}
+
+export function planCard(plan) {
+  const mine = plan.creator.id === state.me.user.id;
+  const menuOpen = state.cardMenu === `plan:${plan.id}`;
+  return el("article", {
+    class: [
+      state.focusPlan === plan.id ? "card card-plan focused" : "card card-plan",
+      `card-grad ${gradientClass(plan.id)}`,
+      menuOpen ? "menu-open" : "",
+    ].filter(Boolean).join(" "),
+    "data-plan": plan.id,
+  }, [
+    el("div", { class: "card-bg", onclick: () => openEventDetail("plan", plan) }),
+    cardOverflow("plan", plan),
+    el("div", { class: "card-copy" }, [
+      el("div", {
+        class: "card-body",
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Open details",
+        onclick: () => openEventDetail("plan", plan),
+      }, [
+        avatarStack(plan),
+        el("h3", { text: plan.note }),
+        el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
+        planCirclesLine(plan),
+        planDescription(plan),
+        planReplySummary(plan),
+        placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
+        removedNote(plan),
+      ]),
+      chatRow("plan", plan),
+      cardActions("plan", plan, { locked: mine }),
+    ]),
+  ]);
+}
+
+export function planDescription(plan) {
+  const text = (plan?.description || "").trim();
+  if (!text) return null;
+  const open = state.openDescriptions.has(plan.id);
+  const toggle = (event) => {
+    event.stopPropagation();
+    if (event.target.closest("a")) return;
+    const next = !state.openDescriptions.has(plan.id);
+    if (next) state.openDescriptions.add(plan.id);
+    else state.openDescriptions.delete(plan.id);
+    document.querySelectorAll(`.plan-desc[data-plan="${plan.id}"]`).forEach((node) => {
+      node.classList.toggle("open", next);
+      node.setAttribute("aria-expanded", String(next));
+    });
+  };
+  return el("p", {
+    class: open ? "plan-desc open" : "plan-desc",
+    "data-plan": plan.id,
+    role: "button",
+    tabindex: "0",
+    "aria-expanded": String(open),
+    onclick: toggle,
+    onkeydown: (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggle(event);
+    },
+  }, linkify(text));
+}
+
+/** Plain text with http(s) links made tappable. Built as nodes, so nothing is parsed as HTML. */
+export function linkify(text) {
+  const parts = [];
+  let last = 0;
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"]+/g)) {
+    const url = match[0].replace(/[.,!?;:)\]]+$/, "");
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    parts.push(el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: url }));
+    last = match.index + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+function canManageEvent(item) {
+  return Boolean(item?.creator) && (item.creator.id === state.me.user.id || adminOver(item));
+}
+
+/** Admins manage events of their own circle. A shared plan belongs to its home circle (circles[0]). */
+export function adminOver(item) {
+  const home = item?.circles?.[0]?.id;
+  return youAreAdmin() && (!home || home === state.me?.circle?.id);
+}
+
+function cardMenuKey(kind, item) {
+  return `${kind}:${item.id}`;
+}
+
+export function placeOpenCardMenus() {
+  const gap = 8;
+  const tabbar = document.querySelector(".tabbar");
+  const tabTop = tabbar ? tabbar.getBoundingClientRect().top : window.innerHeight;
+  const floor = Math.min(window.innerHeight, tabTop > 0 ? tabTop : window.innerHeight) - gap;
+  document.querySelectorAll(".card-menu").forEach((menu) => {
+    const more = menu.parentElement?.querySelector(".card-more");
+    if (!more) return;
+    menu.classList.remove("drop-up");
+    menu.style.maxHeight = "";
+    menu.style.right = "";
+    const btn = more.getBoundingClientRect();
+    const natural = menu.scrollHeight;
+    const below = floor - btn.bottom - 4;
+    const above = btn.top - 4 - gap;
+    let room = below;
+    if (natural > below && above > below) {
+      menu.classList.add("drop-up");
+      room = above;
+    }
+    if (natural > room) menu.style.maxHeight = `${Math.max(88, Math.floor(room))}px`;
+    // The open animation scales from the right edge, so measure the left from there at full width.
+    const left = menu.getBoundingClientRect().right - menu.offsetWidth;
+    if (left < gap) menu.style.right = `${Math.floor(left - gap)}px`;
+  });
+}
+
+export function cardOverflow(kind, item, { onMap = false } = {}) {
+  if (!item?.id) return null;
+  const key = cardMenuKey(kind, item);
+  const open = state.cardMenu === key;
+  const hostish = canManageEvent(item);
+  const mine = item.joined?.find((person) => person.id === state.me.user.id);
+  const inNow = Boolean(mine) && inReply(mine);
+  const declined = mine?.reply === "declined";
+  const maybe = mine?.reply === "maybe";
+  const isHost = item.creator?.id === state.me.user.id;
+  const chosen = arriveClock(mine);
+  const preset = arrivalDefault(kind, item);
+  const label = item.note || (kind === "plan" ? "plan" : "free post");
+  const items = [];
+  if (kind === "plan") {
+    if (canShareCircles(item)) {
+      items.push({
+        text: "Share with other circles",
+        action: () => { state.cardMenu = null; openShareCircles(item); },
+      });
+    }
+    if (!item.removedBy && planOpen(item)) {
+      items.push({
+        text: "Remind friends",
+        muted: remindCooling(item),
+        action: () => { state.cardMenu = null; void remindFriends(item); },
+      });
+      items.push({
+        text: "Add to calendar",
+        action: () => { state.cardMenu = null; void addPlanToCalendar(item); },
+      });
+    }
+  }
+  if (!isHost && !item.removedBy) {
+    items.push({
+      text: chosen ? `Arriving ${chosen}` : "Pick arrival time",
+      action: () => {
+        state.cardMenu = null;
+        openArrivalPicker(kind, item, chosen || preset);
+      },
+    });
+    items.push({
+      text: "Maybe",
+      action: () => { state.cardMenu = null; void sendReply(kind, item, "maybe"); },
+      on: maybe,
+    });
+    items.push({
+      text: "Can't make it",
+      action: () => { state.cardMenu = null; void sendReply(kind, item, "declined"); },
+      on: declined,
+    });
+  }
+  /* Map card already has a quiet Open in Maps link; keep the menu item on plan cards only. */
+  if (!onMap && kind === "plan" && item.location) {
+    items.push({
+      text: "Open in Maps",
+      action: () => {
+        state.cardMenu = null;
+        const url = mapsUrl(item.location.lat, item.location.lng, item.place || item.note);
+        if (url) window.open(url, "_blank", "noopener");
+      },
+    });
+  }
+  if (hostish) {
+    items.push({
+      text: "Edit",
+      action: () => { state.cardMenu = null; openAdminEdit(kind, item); },
+    });
+    items.push({
+      text: kind === "plan" ? "End plan" : "End",
+      danger: true,
+      action: () => { state.cardMenu = null; endManaged(kind, item); },
+    });
+  }
+  return el("div", { class: "card-overflow" }, [
+    el("button", {
+      class: "card-more",
+      type: "button",
+      "data-menu": key,
+      "aria-label": `More for ${label}`,
+      "aria-expanded": String(open),
+      "aria-haspopup": "menu",
+      onclick: (event) => {
+        event.stopPropagation();
+        state.cardMenu = open ? null : key;
+        menuJustOpened = state.cardMenu;
+        render();
+      },
+    }, [icon("more")]),
+    open ? el("div", {
+      class: menuJustOpened === key ? "card-menu menu-in" : "card-menu",
+      role: "menu",
+      onclick: (event) => event.stopPropagation(),
+    }, items.map((row) => el("button", {
+      type: "button",
+      role: "menuitem",
+      class: [row.danger ? "danger" : "", row.on ? "on" : "", row.muted ? "muted" : ""].filter(Boolean).join(" "),
+      // Still tappable while muted, so a tap can say when it works again.
+      "aria-disabled": row.muted ? "true" : null,
+      text: row.text,
+      onclick: (event) => {
+        event.stopPropagation();
+        row.action();
+      },
+    }))) : null,
+  ]);
+}
