@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-12-chat-read-alerts",
+    "date": "2026-11-12",
+    "title": "Reading a chat clears its alerts",
+    "bullets": [
+      "When you open a chat, that chat's alerts are marked read, so the dots on the bell and on those rows go away.",
+      "Alerts from other chats and events stay unread until you open the Alerts tab."
+    ]
+  },
+  {
     "id": "2026-11-12-chat-wrap",
     "date": "2026-11-12",
     "title": "Long chat messages wrap",

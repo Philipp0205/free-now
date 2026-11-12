@@ -8,6 +8,7 @@ import {
   isCircleAdmin,
   listMembers,
   listPlanAudience,
+  markChatNotificationsRead,
   planInCircle,
   type MemberRow,
 } from "./db.js";
@@ -196,7 +197,9 @@ function unreadTotals(deps: ChatDeps, userId: string): Record<string, number> {
 
 export function readThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, requestedCircle: string | null = null) {
   const access = accessThread(deps, userId, kind, refId, false, requestedCircle);
-  markRead(deps.db, access.chat.id, userId, deps.now());
+  const now = deps.now();
+  markRead(deps.db, access.chat.id, userId, now);
+  markChatAlertsRead(deps.db, access.chat, userId, now);
   return threadPayload(deps, access, userId);
 }
 
@@ -219,6 +222,7 @@ export async function postThread(
     "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, reply_to) VALUES (?, ?, ?, ?, 'text', ?, ?)",
   ).run(id, access.chat.id, userId, text, now, parent?.id ?? null);
   markRead(deps.db, access.chat.id, userId, now);
+  markChatAlertsRead(deps.db, access.chat, userId, now);
   const pinged = await notifyMentions(deps, access.chat, id, userId, userName, text);
   if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, text, parent.user_id, pinged)) pinged.add(author);
   scheduleChatNotice(deps, access.chat.id, userId, userName, text, pinged);
@@ -877,6 +881,11 @@ function markRead(db: DatabaseSync, chatId: string, userId: string, now: number)
     `INSERT INTO chat_reads (user_id, chat_id, read_at) VALUES (?, ?, ?)
      ON CONFLICT(user_id, chat_id) DO UPDATE SET read_at = excluded.read_at`,
   ).run(userId, chatId, now);
+}
+
+/** Reading a chat also reads its Alerts. Only circle chat is scoped to its circle, since its ref is the same everywhere. */
+function markChatAlertsRead(db: DatabaseSync, chat: ChatRow, userId: string, now: number): void {
+  markChatNotificationsRead(db, userId, chatRef(chat), chat.kind === "circle" ? chat.circle_id : null, now);
 }
 
 function unreadCount(db: DatabaseSync, chatId: string, userId: string): number {

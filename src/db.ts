@@ -2049,6 +2049,20 @@ export function markNotificationsRead(db: DatabaseSync, userId: string, circleId
   ).run(readAt, userId, circleId);
 }
 
+/**
+ * Reading one chat reads that chat's alerts only. Circle chats all share ref_id "circle", so they are scoped
+ * by circle. A plan or free-post chat is one conversation across every circle it is linked to.
+ */
+export function markChatNotificationsRead(db: DatabaseSync, userId: string, ref: string, circleId: string | null, readAt: number): void {
+  if (circleId == null) {
+    db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND kind = 'chat' AND ref_id = ? AND read_at IS NULL")
+      .run(readAt, userId, ref);
+    return;
+  }
+  db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND kind = 'chat' AND ref_id = ? AND circle_id = ? AND read_at IS NULL")
+    .run(readAt, userId, ref, circleId);
+}
+
 function dropPlanLinks(db: DatabaseSync, whereSql: string, ...params: Array<string | number>): void {
   db.prepare(`DELETE FROM plan_circles WHERE plan_id IN (SELECT id FROM plans WHERE ${whereSql})`).run(...params);
 }

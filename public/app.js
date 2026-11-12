@@ -30,7 +30,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v91";
+const APP_VERSION = "hangry-v92";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -526,7 +526,10 @@ async function refresh({ initial = false } = {}) {
   applyAlertUnread(notifications.unreadByCircle);
   state.chatSummary = summary;
   if (state.chat) forgetOpenUnread(state.chat);
-  if (thread?.chat) state.chatThread = thread.chat;
+  if (thread?.chat) {
+    state.chatThread = thread.chat;
+    if (state.chat) markChatAlertsRead(state.chat);
+  }
   noteNewestAlert();
   const signature = JSON.stringify({
     socials: state.socials,
@@ -1709,6 +1712,48 @@ async function markAlertsRead() {
   persistCachedState();
 }
 
+/** The alert ref a chat target uses, matching chatRef on the server. */
+function chatAlertRef(target) {
+  return target.kind === "circle" ? "circle" : `${target.kind}:${target.id}`;
+}
+
+/**
+ * Reading a chat reads that chat's Alerts on the server. Mirror it here so the bell badge and circle dots
+ * drop now, without POST /api/notifications/read (that would clear unrelated alerts too).
+ */
+function markChatAlertsRead(target) {
+  const circleId = state.me?.circle?.id;
+  const ref = chatAlertRef(target);
+  const readAt = Date.now();
+  let cleared = 0;
+  state.notifications = state.notifications.map((note) => {
+    if (note.readAt || note.kind !== "chat" || note.refId !== ref) return note;
+    if (target.kind === "circle" && note.circleId !== circleId) return note;
+    cleared += 1;
+    return { ...note, readAt };
+  });
+  const current = state.me?.circles?.find((circle) => circle.id === circleId);
+  if (current && cleared) current.alertUnread = Math.max(0, (current.alertUnread || 0) - cleared);
+  if (cleared) {
+    state.signature = "";
+    persistCachedState();
+  }
+}
+
+/** After a chat call succeeded: clear its alerts here, then take the server's per-circle totals (a GET marks nothing). */
+async function syncChatAlerts(target) {
+  markChatAlertsRead(target);
+  try {
+    const data = await api("/api/notifications");
+    applyAlertUnread(data.unreadByCircle);
+    state.signature = "";
+    persistCachedState();
+    if (!state.sheet && !isTyping()) render();
+  } catch {
+    /* the next poll brings the totals */
+  }
+}
+
 function forgetOpenUnread(target) {
   const summary = state.chatSummary;
   if (!summary || !target) return;
@@ -1746,6 +1791,7 @@ async function openChat(target) {
     const chat = (await api(chatTargetUrl(target))).chat;
     // Another tab was tapped while this loaded; that tap wins.
     if (state.chat === target) state.chatThread = chat;
+    void syncChatAlerts(target);
   });
 }
 
@@ -2314,6 +2360,7 @@ async function sendChat(event) {
   state.chatQueue = { target, text, replyTo };
   try {
     state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: replyTo ? { text, replyTo } : { text } })).chat;
+    void syncChatAlerts(target);
     state.chatQueue = null;
     state.chatDraft = unsentTail(state.chatDraft, text);
     sentReply(replyTo);
