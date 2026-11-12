@@ -124,10 +124,10 @@ export function busyByDay(blocks, tz = "Europe/Berlin", now = Date.now(), days =
   }));
 }
 
-/** "09:00 to 11:30", "until 11:30", "from 20:00" or "All day" for one piece from busyByDay. */
+/** "Blocked from 09:00 to 11:30", "Blocked until 11:30", "Blocked from 20:00" or "Blocked all day" for one piece from busyByDay. */
 export function busySpanText(span, tz = "Europe/Berlin") {
-  if (span.allDay) return "All day";
-  if (span.fromEarlier) return `until ${clockAt(span.end, tz)}`;
-  if (span.untilLater || clockAt(span.end, tz) === "00:00") return `from ${clockAt(span.start, tz)}`;
-  return `${clockAt(span.start, tz)} to ${clockAt(span.end, tz)}`;
+  if (span.allDay) return "Blocked all day";
+  if (span.fromEarlier) return `Blocked until ${clockAt(span.end, tz)}`;
+  if (span.untilLater || clockAt(span.end, tz) === "00:00") return `Blocked from ${clockAt(span.start, tz)}`;
+  return `Blocked from ${clockAt(span.start, tz)} to ${clockAt(span.end, tz)}`;
 }
