@@ -42,6 +42,7 @@ export type SocialRow = {
   place: string;
   starts_at: number | null;
   reminded_at: number | null;
+  buzzed_at: number | null;
 };
 
 export type DueStartReminder = {
@@ -174,7 +175,8 @@ CREATE TABLE IF NOT EXISTS socials (
   lng REAL,
   place TEXT NOT NULL DEFAULT '',
   starts_at INTEGER,
-  reminded_at INTEGER
+  reminded_at INTEGER,
+  buzzed_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS social_joins (
@@ -389,6 +391,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "socials", "place", "place TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "socials", "starts_at", "starts_at INTEGER");
   ensureColumn(db, "socials", "reminded_at", "reminded_at INTEGER");
+  ensureColumn(db, "socials", "buzzed_at", "buzzed_at INTEGER");
   ensureColumn(db, "social_joins", "reply", "reply TEXT NOT NULL DEFAULT 'join'");
   ensureColumn(db, "social_joins", "eta_min", "eta_min INTEGER");
   ensureColumn(db, "social_joins", "arrive_at", "arrive_at INTEGER");
@@ -1385,6 +1388,11 @@ export function markSocialReminded(db: DatabaseSync, socialId: string, remindedA
   db.prepare("UPDATE socials SET reminded_at = ? WHERE id = ?").run(remindedAt, socialId);
 }
 
+/** Stamps a social as started or re-pressed through the Flic link. */
+export function markSocialBuzzed(db: DatabaseSync, socialId: string, buzzedAt: number): void {
+  db.prepare("UPDATE socials SET buzzed_at = ? WHERE id = ?").run(buzzedAt, socialId);
+}
+
 export function rotateInvite(db: DatabaseSync, circleId: string, code: string, expiresAt: number): void {
   db.prepare("UPDATE circles SET invite_code = ?, invite_expires_at = ? WHERE id = ?").run(code, expiresAt, circleId);
   clearCircleRemovals(db, circleId);
@@ -2090,7 +2098,7 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 
 const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, s.note,
-         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at
+         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at, s.buzzed_at
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;

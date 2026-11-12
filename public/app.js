@@ -7,6 +7,7 @@ import { cardCrowd, goingCrowd, pinLabel, socialPinState } from "./map-pin.js";
 import { nextPushDetail, pushTitle } from "./push-sheet.js";
 import { gradientClass } from "./card-grad.js";
 import { calendarFeedSteps, calendarPlatform } from "./calendar-feed.js";
+import { consumeBuzz, nextBuzzIndex, playBuzzer, buzzerPlaying } from "./buzzer.js";
 import { PLAN_DURATION_MS, availabilityText, busyByDay, busySpanText, dayEvents, eventOverlaps, eventTimeText, sourceLabel, untilText } from "./freebusy.js";
 import { SEEN_KEY, formatEntryDate, latestId, newerSeen, normalizeEntries, unseenEntries } from "./whats-new.js";
 import { REACTIONS, findMentions, insertMention, mentionAt, mentionMatches, toggledReactions } from "./mentions.js";
@@ -29,7 +30,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v88";
+const APP_VERSION = "hangry-v90";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -450,6 +451,31 @@ function friendlyMessage(raw, status) {
   return "Something went wrong. Try again.";
 }
 
+/**
+ * Plays the full-screen buzzer for a fresh Flic press in state.socials. The seen marker always
+ * moves up, so a hidden page or a busy overlay skips the buzz without replaying it later. The
+ * overlay lives outside the app root, and nothing here may break refresh().
+ */
+function noteBuzz() {
+  try {
+    const buzz = consumeBuzz(state.socials, localStorage);
+    if (!buzz || document.hidden || buzzerPlaying()) return;
+    playBuzzer({ name: buzz.name, animation: nextBuzzIndex(localStorage) });
+  } catch {
+    /* the overlay is a nicety */
+  }
+}
+
+/** The Test buzzer button: plays the next animation here. Nothing is sent. */
+function testBuzzer() {
+  try {
+    if (buzzerPlaying()) return;
+    playBuzzer({ name: state.me.user.name, animation: nextBuzzIndex(localStorage) });
+  } catch {
+    /* the overlay is a nicety */
+  }
+}
+
 async function refresh({ initial = false } = {}) {
   const seq = ++refreshSeq;
   if (state.token && state.me && !state.me.circle) {
@@ -491,6 +517,7 @@ async function refresh({ initial = false } = {}) {
   if (refreshIsStale(seq)) return;
   refreshApplied = seq;
   state.socials = socials.socials;
+  noteBuzz();
   state.plans = plans.plans;
   if (state.tab === "map" && state.eventsView === "calendar") await loadCalendar({ force: true });
   else if (state.tab === "map" && state.mapAllCircles) await refreshMapAll();
@@ -2789,12 +2816,21 @@ function flicPanel(code) {
             style: "margin-top: 12px",
             text: "Keep this link private. It contains your recovery code, and anyone with it can post as you.",
           }),
-          el("button", {
-            class: "btn secondary",
-            type: "button",
-            text: "Copy link",
-            onclick: () => copyText(link, "Button link copied"),
-          }),
+          el("div", { class: "stack" }, [
+            el("button", {
+              class: "btn secondary",
+              type: "button",
+              text: "Copy link",
+              onclick: () => copyText(link, "Button link copied"),
+            }),
+            el("button", {
+              class: "btn secondary",
+              type: "button",
+              text: "Test buzzer",
+              onclick: testBuzzer,
+            }),
+            el("p", { class: "help", style: "margin: 0", text: "Plays the next buzzer animation here. Nothing is sent." }),
+          ]),
         ])
       : null,
   ]);

@@ -2518,3 +2518,12 @@ html.kb-open .sheet .help { margin-top: 0; }
 .busy-preview .bp-foot .bp-note { margin-top: 4px; }
 .busy-preview .bp-state { display: grid; gap: 12px; justify-items: start; }
 .busy-preview .bp-state p { margin: 0; }
+
+/* The Flic buzzer: a full-screen overlay drawn on a canvas. Tap anywhere to dismiss. */
+.buzzer { position: fixed; inset: 0; z-index: 9999; background: transparent; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; overflow: hidden; }
+.buzzer canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.buzzer-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+.buzzer.reduced { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; background: rgba(48, 6, 28, 0.94); color: #fff; opacity: 0; transition: opacity 0.5s ease; }
+.buzzer.reduced.show { opacity: 1; }
+.buzzer.reduced .buzzer-name { font-size: 40px; font-weight: 800; line-height: 1.1; max-width: 100%; overflow-wrap: anywhere; }
+.buzzer.reduced .buzzer-sub { font-size: 22px; font-weight: 500; color: #d1d1d6; }
