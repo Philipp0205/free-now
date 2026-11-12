@@ -29,7 +29,7 @@ const JOIN_INSTALL_KEY = "fn_join_install_done";
 /** Set when the person turned notifications off here, so we do not nag them to turn them back on. */
 const PUSH_OFF_KEY = "hangry.pushOff";
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-const APP_VERSION = "hangry-v87";
+const APP_VERSION = "hangry-v88";
 const FEEDBACK_MAX = 2000;
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -2990,15 +2990,15 @@ function busyPreviewBody(view) {
   who.push(el("p", { class: "help", text: "Your weekly hours and your status are shown to everyone in your circles." }));
 
   const times = [];
-  if (status) {
-    times.push(el("ul", { class: "bp-list" }, [previewRow(statusShort(status, now, tz), status.source === "schedule" ? "Weekly hours" : "Status")]));
-  }
+  // A weekly-hours status is already one of the day rows below.
+  const manual = status && status.source !== "schedule" ? status : null;
+  if (manual) times.push(el("ul", { class: "bp-list" }, [previewRow(statusShort(manual, now, tz), "Status")]));
   for (const group of days) {
     times.push(el("h3", { class: "bp-day", text: dayLabel(group.day, today) }));
     times.push(el("ul", { class: "bp-list" }, group.spans.map((span) => previewRow(busySpanText(span, tz), sourceLabel(span.source)))));
   }
   if (outOfDate) times.push(el("p", { class: "time-error bp-stale", text: "Your calendar is out of date, so friends see nothing from it. Tap Check now." }));
-  else if (!status && !days.length) times.push(el("p", { class: "help bp-empty", text: "Nothing busy. Friends see you as free." }));
+  else if (!manual && !days.length) times.push(el("p", { class: "help bp-empty", text: "Nothing busy. Friends see you as free." }));
 
   const foot = [];
   if (data.connected) {
