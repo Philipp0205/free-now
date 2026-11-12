@@ -102,7 +102,7 @@ for (const [width, height] of SIZES) {
 
 async function readComposer(page: Page) {
   return page.evaluate(() => {
-    const el = document.getElementById("chat-input") as HTMLInputElement | null;
+    const el = document.getElementById("chat-input") as HTMLTextAreaElement | null;
     return {
       active: document.activeElement?.id || document.activeElement?.tagName || "",
       value: el?.value ?? "",

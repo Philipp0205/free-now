@@ -945,7 +945,10 @@ function render() {
     chatLogTop = nextLog.scrollTop;
   }
   state.chatStick = false;
-  if (state.chat) stickChatLog();
+  if (state.chat) {
+    growComposer(document.getElementById("chat-input"));
+    stickChatLog();
+  }
   if (state.focusSheet) {
     state.focusSheet = false;
     document.getElementById("sheet-note")?.focus({ preventScroll: true });
@@ -1758,18 +1761,19 @@ function chatScreen() {
       ? el("p", { class: "chat-closed", text: "This chat is closed." })
       : el("form", { class: "chat-compose", onsubmit: sendChat }, [
           replyPreview(),
-          el("input", {
+          withDraft(el("textarea", {
             id: "chat-input",
             class: "sheet-control",
-            type: "text",
+            rows: "1",
             maxlength: "1000",
             placeholder: "Message",
-            value: state.chatDraft,
             autocomplete: "off",
+            enterkeyhint: "send",
             "aria-autocomplete": "list",
             "aria-controls": "mention-list",
             oninput: (event) => {
               state.chatDraft = event.target.value;
+              growComposer(event.target);
               noteMentionTyping(event.target);
             },
             onkeydown: onComposerKey,
@@ -1778,7 +1782,7 @@ function chatScreen() {
               state.chatMention = null;
               paintMentions();
             },
-          }),
+          })),
           el("button", { class: "btn chat-send", type: "submit", text: "Send" }),
           mentionPicker(),
         ]),
@@ -1824,9 +1828,31 @@ function noteMentionTyping(input) {
   paintMentions();
 }
 
+const COMPOSER_MAX = 136;
+
+/** The draft is the textarea's value, not child text, so it never reads as page text. */
+function withDraft(input) {
+  input.value = state.chatDraft;
+  return input;
+}
+
+/** Fits the composer to its text: one line up to about five, then it scrolls. */
+function growComposer(input) {
+  if (!input) return;
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, COMPOSER_MAX)}px`;
+}
+
 function onComposerKey(event) {
   const people = mentionChoices();
-  if (!people.length) return;
+  if (!people.length) {
+    // A textarea would add a newline; Enter sends, Shift+Enter breaks the line.
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+      event.preventDefault();
+      event.target.form?.requestSubmit();
+    }
+    return;
+  }
   const pick = state.chatMention;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
@@ -1851,6 +1877,7 @@ function chooseMention(person) {
   if (!input || !pick) return;
   const next = insertMention(input.value, pick.start, input.selectionStart ?? input.value.length, person.name);
   input.value = next.text;
+  growComposer(input);
   state.chatDraft = next.text;
   state.chatMention = null;
   paintMentions();
