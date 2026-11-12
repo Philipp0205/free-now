@@ -1,4 +1,4 @@
-const CACHE = "hangry-v91";
+const CACHE = "hangry-v92";
 /** Wait before each ack retry. One first try, then up to three more. */
 const ACK_DELAYS = [1000, 3000, 9000];
 const SHELL = ["/", "/styles.css", "/app.js", "/keyboard.js", "/install-guide.js", "/when.js", "/place.js", "/push-sheet.js", "/whats-new.js", "/card-grad.js", "/calendar-feed.js", "/calendar-month.js", "/freebusy.js", "/status.js", "/buzzer.js", "/mentions.js", "/whats-new.json", "/map.js", "/map-pin.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
