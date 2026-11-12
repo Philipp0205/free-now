@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-12-blocked-wording",
+    "date": "2026-11-12",
+    "title": "Clearer busy times",
+    "bullets": [
+      "On See what friends see, each busy time now reads \"Blocked from 09:00 to 10:00\".",
+      "All-day blocks say \"Blocked all day\"."
+    ]
+  },
+  {
     "id": "2026-11-12-friends-view",
     "date": "2026-11-12",
     "title": "See what friends see",

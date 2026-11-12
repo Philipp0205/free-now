@@ -168,8 +168,8 @@ for (const [width, height] of SIZES) {
       await times.getByRole("heading", { name: "Tomorrow" }).waitFor();
       const text = await times.innerText();
       assert.match(text, /today/i, "today's block is listed");
-      assert.ok(text.includes("11:00 to 12:00"), "tomorrow 11:00 to 12:00 is listed, the block Bea sees as busy until 12:00");
-      assert.ok(text.includes("15:00 to 16:00"));
+      assert.ok(text.includes("Blocked from 11:00 to 12:00"), "tomorrow 11:00 to 12:00 is listed, the block Bea sees as busy until 12:00");
+      assert.ok(text.includes("Blocked from 15:00 to 16:00"));
       assert.ok(text.includes(`to ${busyUntil}`), `today's block ends at ${busyUntil}`);
       assert.ok(text.includes("Calendar link"), "source tag");
       await page.getByText("Last checked", { exact: false }).waitFor();
