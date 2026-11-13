@@ -248,6 +248,13 @@ CREATE TABLE IF NOT EXISTS busy_hours (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS buzz_circles (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  press TEXT NOT NULL,
+  circle_id TEXT NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, press)
+);
+
 CREATE INDEX IF NOT EXISTS idx_membership_circle ON memberships(circle_id);
 CREATE INDEX IF NOT EXISTS idx_socials_circle ON socials(circle_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_plans_circle ON plans(circle_id, for_date);
@@ -793,6 +800,24 @@ export function clearBusyHours(db: DatabaseSync, userId: string): void {
   db.prepare("DELETE FROM busy_hours WHERE user_id = ?").run(userId);
 }
 
+/** The circle each Flic press posts in, by press. A press with no row uses the default circle. */
+export function getBuzzCircles(db: DatabaseSync, userId: string): Record<string, string> {
+  const rows = all<{ press: string; circle_id: string }>(db, "SELECT press, circle_id FROM buzz_circles WHERE user_id = ?", userId);
+  return Object.fromEntries(rows.map((row) => [row.press, row.circle_id]));
+}
+
+/** Sets the circle for one press, or clears it (back to the default) when circleId is null. */
+export function setBuzzCircle(db: DatabaseSync, userId: string, press: string, circleId: string | null): void {
+  if (circleId === null) {
+    db.prepare("DELETE FROM buzz_circles WHERE user_id = ? AND press = ?").run(userId, press);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO buzz_circles (user_id, press, circle_id) VALUES (?, ?, ?)
+     ON CONFLICT(user_id, press) DO UPDATE SET circle_id = excluded.circle_id`,
+  ).run(userId, press, circleId);
+}
+
 /** Schedules of the viewer and everyone sharing a circle with them. One query, for visibleStatuses. */
 export function listVisibleBusyHours(db: DatabaseSync, viewerId: string): Map<string, BusySchedule> {
   const rows = all<BusyHoursRow>(
@@ -1153,7 +1178,8 @@ export type CircleDeleteResult = {
  *
  * Tables that reference circle_id:
  * memberships, socials, plans, plan_circles, notifications, circle_removals, chats, push_deliveries,
- * calendar_share (not counted; it also goes with its membership by ON DELETE CASCADE).
+ * calendar_share (not counted; it also goes with its membership by ON DELETE CASCADE),
+ * buzz_circles (not counted; goes with the circle by ON DELETE CASCADE).
  * plan_circles also loses every link of a plan whose home is this circle.
  * feedback is the exception: its rows stay and circle_id is set to NULL.
  *

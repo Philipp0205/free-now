@@ -936,6 +936,18 @@ pre.curl {
   word-break: break-all;
 }
 label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.flic-press { margin: 14px 0 0; }
+.flic-press .help { margin: 6px 0 0; }
+.flic-press pre.curl { margin: 8px 0; }
+.flic-select {
+  width: 100%;
+  background: #1c1c1e;
+  border: 0;
+  border-radius: 14px;
+  padding: 14px;
+  font-size: 16px;
+  color: #fff;
+}
 input[type="text"], input[type="url"], input[type="time"] {
   width: 100%;
   background: #1c1c1e;

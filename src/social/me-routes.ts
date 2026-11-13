@@ -21,6 +21,7 @@ import {
   listCirclesForUser,
   recordDisplay,
   rotateBuzzToken,
+  setBuzzCircle,
   setWhatsNewSeen,
   sharesCircle,
   updateUserName,
@@ -38,7 +39,7 @@ import { clientKey } from "../lib/client-key.js";
 import type { AuthedRouteContext } from "../lib/context.js";
 import { HttpError, firstHeader, matchPath, safeDecode, sendEmpty, sendJson } from "../lib/http.js";
 import { cleanLabel, parseId } from "../lib/validate.js";
-import { mePayload } from "./circles.js";
+import { BUZZ_PRESSES, buzzCirclesFor, mePayload, requireCircle } from "./circles.js";
 import { humanCode } from "./code.js";
 import { StatusError, ownStatus, saveBusyHours, saveStatus } from "./status.js";
 
@@ -144,6 +145,19 @@ export async function handleMeRoutes(ctx: AuthedRouteContext): Promise<boolean> 
     const buzzToken = humanCode();
     rotateBuzzToken(deps.db, me.id, buzzToken);
     sendJson(res, 200, { buzzToken });
+    return true;
+  }
+
+  if (method === "PUT" && pathname === "/api/me/buzz-circles") {
+    // Check every circle first so one bad id writes nothing.
+    const next = BUZZ_PRESSES.map((press) => {
+      const value = body[press];
+      if (value == null) return [press, null] as const;
+      if (typeof value !== "string" || !value) throw new HttpError(400, `${press} must be a circle id or null`);
+      return [press, requireCircle(deps, me.id, value).id] as const;
+    });
+    for (const [press, circleId] of next) setBuzzCircle(deps.db, me.id, press, circleId);
+    sendJson(res, 200, { buzzCircles: buzzCirclesFor(deps.db, me.id) });
     return true;
   }
 

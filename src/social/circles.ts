@@ -8,6 +8,7 @@ import {
   type CircleRow,
   type UserRow,
   getBusyHours,
+  getBuzzCircles,
   getCircleByCode,
   getUserById,
   insertCircle,
@@ -25,6 +26,15 @@ import { ownStatus, visibleStatuses } from "./status.js";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+export const BUZZ_PRESSES = ["single", "double", "hold"] as const;
+export type BuzzPress = (typeof BUZZ_PRESSES)[number];
+
+/** The circle id each Flic press posts in, null where the press uses the default circle. */
+export function buzzCirclesFor(db: DatabaseSync, userId: string): Record<BuzzPress, string | null> {
+  const stored = getBuzzCircles(db, userId);
+  return { single: stored.single ?? null, double: stored.double ?? null, hold: stored.hold ?? null };
+}
 
 export function requireCircle(deps: AppDeps, userId: string, requested: string | null = null): CircleRow {
   const circles = listCirclesForUser(deps.db, userId);
@@ -116,7 +126,7 @@ export function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRo
       timezone: row?.timezone ?? null,
       busyHours: getBusyHours(deps.db, user.id),
       // The recovery code would let an agent token take over the account.
-      ...(agent ? {} : { buzzToken: user.buzz_token }),
+      ...(agent ? {} : { buzzToken: user.buzz_token, buzzCircles: buzzCirclesFor(deps.db, user.id) }),
       whatsNewSeen: user.whats_new_seen ?? null,
       calendarConnected: isConnected(deps.db, user.id),
     },
