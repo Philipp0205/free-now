@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-13-chats-open-on-bad-signal",
+    "date": "2026-11-13",
+    "title": "Event chats open again on a weak connection",
+    "bullets": [
+      "Tapping an event chat now opens it right away, so the app no longer looks stuck when your signal is poor.",
+      "Slow requests give up after a short wait, and the chat fills in once your connection is back."
+    ]
+  },
+  {
     "id": "2026-11-13-admin-end-events",
     "date": "2026-11-13",
     "title": "Admins can end events from the details",

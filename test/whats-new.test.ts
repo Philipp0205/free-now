@@ -66,9 +66,22 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the admin end events entry is the newest, in plain words without an em dash", () => {
+test("the chats on a weak connection entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-13-admin-end-events");
+  assert.equal(top.id, "2026-11-13-chats-open-on-bad-signal");
+  assert.equal(top.date, "2026-11-13");
+  assert.equal(top.title, "Event chats open again on a weak connection");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= (line === top.title ? 60 : 140), line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
+  assert.ok(RAW.some((item) => item.id === "2026-11-13-admin-end-events"), "admin end events entry is kept");
+});
+
+test("the admin end events entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-13-admin-end-events")!;
+  assert.ok(top, "admin end events entry");
   assert.equal(top.date, "2026-11-13");
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   const text = [top.title, ...top.bullets].join(" ");
@@ -82,7 +95,7 @@ test("the admin end events entry is the newest, in plain words without an em das
   assert.ok(RAW.some((item) => item.id === "2026-11-12-install-app"), "install app entry is kept");
 });
 
-test("the install app entry is in the changelog, in plain words without an em dash", () => {
+test("the install app entry is kept, in plain words without an em dash", () => {
   const top = RAW.find((item) => item.id === "2026-11-12-install-app")!;
   assert.ok(top, "install app entry");
   assert.equal(top.date, "2026-11-12");
@@ -574,7 +587,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v97");
+  assert.equal(cache?.[1], "hangry-v98");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/js/whats-new.js"));

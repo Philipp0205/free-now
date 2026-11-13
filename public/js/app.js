@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { refreshPins, rememberViewerLocation, warmMap } from "./map-card.js";
-import { adoptCircle, api, clearSession, friendlyMessage, noteConnectionProblem, refresh, rememberCircle, restoreCachedState, scheduleOfflineRetry } from "./session.js";
+import { adoptCircle, api, clearSession, friendlyMessage, noteConnectionProblem, pollRefresh, refresh, rememberCircle, restoreCachedState, scheduleOfflineRetry } from "./session.js";
 import { bindKeyboard } from "./keyboard-ui.js";
 import { render } from "./render.js";
 import { checkGoogleReturn, landCalendar } from "./calendar-sync.js";
@@ -9,7 +9,7 @@ import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install
 import { scheduleErrorClear } from "./lib.js";
 
 /** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v97";
+export const APP_VERSION = "hangry-v98";
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -20,7 +20,7 @@ setInterval(() => {
   // A later buzzer turns live, and a live one ends, without a new answer from the server.
   if (!document.hidden && state.me?.user) refreshPins();
   if (!document.hidden && state.token) {
-    refresh().catch((error) => {
+    pollRefresh().catch((error) => {
       if (error?.status === 401) return;
       noteConnectionProblem(error);
       render();

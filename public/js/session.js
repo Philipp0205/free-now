@@ -20,6 +20,10 @@ let refreshSeq = 0;
 let refreshApplied = 0;
 /** Refreshes numbered below this were asked for a circle we have since left. */
 let refreshFloor = 0;
+/** True while a poll tick's refresh has not settled. The next tick skips, so stalled requests cannot pile up. */
+let pollPending = false;
+/** A GET that has not answered by then is dropped as a network failure, so it frees its connection. */
+const API_GET_TIMEOUT_MS = 15000;
 
 const deepLinkParams = new URLSearchParams(location.search);
 const planFocus = deepLinkParams.get("plan");
@@ -242,6 +246,17 @@ export async function refresh({ initial = false } = {}) {
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
 }
 
+/** The 3s poll. Skips while the previous poll refresh is still pending; explicit refresh() calls always run. */
+export async function pollRefresh() {
+  if (pollPending) return;
+  pollPending = true;
+  try {
+    await refresh();
+  } finally {
+    pollPending = false;
+  }
+}
+
 /** True when refresh number `seq` was asked for a circle we have left, or a newer one already landed. */
 function refreshIsStale(seq) {
   return seq < refreshFloor || seq < refreshApplied;
@@ -322,23 +337,31 @@ function mapEventCircle(path) {
 
 export async function api(path, options = {}) {
   const token = options.token === undefined ? state.token : options.token;
+  const method = options.method ?? "GET";
+  // Only reads time out. Aborting a write that already reached the server could send it twice.
+  const controller = method === "GET" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), API_GET_TIMEOUT_MS) : 0;
   let response;
+  let text;
   try {
     response = await fetch(path, {
-    method: options.method ?? "GET",
-    headers: {
-      ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...circleHeader(path, options),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+      method,
+      headers: {
+        ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...circleHeader(path, options),
+      },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: controller?.signal,
+    });
+    text = await response.text();
   } catch {
     const error = new Error("You're offline. Retrying…");
     error.status = 0;
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  const text = await response.text();
   let data = null;
   if (text) {
     try {
