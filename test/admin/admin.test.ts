@@ -156,6 +156,41 @@ test("an admin can edit or end someone else's free post and plan", async () => {
   });
 });
 
+test("an admin ends someone else's plan and free post, and a plain member gets 403 on both", async () => {
+  await withApp(async ({ port, sent }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Bea", code: created.circle.inviteCode },
+      status: 201,
+    });
+    const sam = await api(port, "POST", "/api/auth/start", {
+      body: { name: "Sam", code: created.circle.inviteCode },
+      status: 201,
+    });
+    await api(port, "POST", "/api/push/subscribe", {
+      token: bea.token,
+      body: { endpoint: "https://push.example/bea", keys: { p256dh: "p", auth: "a" } },
+      status: 204,
+    });
+    const social = await api(port, "POST", "/api/socials", { token: bea.token, body: { note: "Coffee" }, status: 201 });
+    const plan = await api(port, "POST", "/api/plans", { token: bea.token, body: { note: "Bouldering" }, status: 201 });
+
+    for (const path of [`/api/socials/${social.social.id}`, `/api/plans/${plan.plan.id}`]) {
+      const denied = await api(port, "DELETE", path, { token: sam.token, status: 403 });
+      assert.equal(denied.error, "Only the host can do that.");
+    }
+    assert.equal((await api(port, "GET", "/api/plans", { token: sam.token })).plans.length, 1);
+
+    await api(port, "DELETE", `/api/plans/${plan.plan.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Alex ended Bouldering");
+    await api(port, "DELETE", `/api/socials/${social.social.id}`, { token: alex.token, status: 204 });
+    assert.equal(sent.at(-1)?.body, "Alex ended Coffee");
+    assert.equal((await api(port, "GET", "/api/plans", { token: bea.token })).plans.length, 0);
+    assert.equal((await api(port, "GET", "/api/socials", { token: sam.token })).socials.length, 0);
+  });
+});
+
 test("host and admin can change every event, and a member cannot", async () => {
   await withApp(async ({ port, sent }) => {
     const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
