@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
 import type { Page, Route } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
@@ -26,7 +28,7 @@ async function seed() {
   return { uma, circle };
 }
 
-async function openApp(token: string, circleId: string, clock = false) {
+async function openApp(token: string, circleId: string, clock = false, baseUrl = hangry.baseUrl) {
   const context = await hangry.browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
@@ -43,7 +45,7 @@ async function openApp(token: string, circleId: string, clock = false) {
   await context.route("https://*.tile.openstreetmap.org/**", (route) => route.fulfill({ status: 204, body: "" }));
   const page = await context.newPage();
   if (clock) await page.clock.install();
-  await page.goto(hangry.baseUrl);
+  await page.goto(baseUrl);
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
   await page.locator(".tabbar").waitFor();
@@ -164,5 +166,45 @@ test("held chat GETs time out, many open and close cycles work, and a chat opens
     await shot(page, "5-social-chat-after-release");
   } finally {
     await page.context().close();
+  }
+});
+
+test("six API GETs that never answer do not leave event chats stuck", { timeout: 80_000 }, async () => {
+  const { uma, circle } = await seed();
+  // A real socket in front of the app. Chrome allows 6 connections per host on HTTP/1.1, so six dead GETs fill them all.
+  let stallLeft = 0;
+  const target = new URL(hangry.baseUrl);
+  const proxy = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url?.startsWith("/api/") && stallLeft > 0) {
+      stallLeft -= 1;
+      req.on("error", () => {});
+      return;
+    }
+    const upstream = http.request({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers: req.headers }, (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(res);
+    });
+    upstream.on("error", () => res.destroy());
+    req.pipe(upstream);
+  });
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", () => resolve()));
+  const page = await openApp(uma.token, circle.id, false, `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`);
+  try {
+    stallLeft = 6;
+    // Poll ticks and tab taps while the network is dead.
+    for (const name of ["Events", "Circle", "You", "Now"]) {
+      await page.locator(".tabbar").getByRole("button", { name }).click();
+      await page.waitForTimeout(1500);
+    }
+    await planRow(page).click();
+    await shot(page, "6-stalled-network");
+    // The stalled GETs give up after 15 seconds and the thread arrives once the network answers again.
+    await page.getByText("Bring plates").waitFor({ timeout: 45_000 });
+    await page.locator("#chat-input").waitFor();
+    await shot(page, "7-opened-after-stall");
+  } finally {
+    await page.context().close();
+    proxy.closeAllConnections();
+    await new Promise<void>((resolve) => proxy.close(() => resolve()));
   }
 });
