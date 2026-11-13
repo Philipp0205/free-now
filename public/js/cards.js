@@ -131,7 +131,7 @@ export function linkify(text) {
   return parts;
 }
 
-function canManageEvent(item) {
+export function canManageEvent(item) {
   return Boolean(item?.creator) && (item.creator.id === state.me.user.id || adminOver(item));
 }
 

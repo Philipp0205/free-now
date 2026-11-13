@@ -5,7 +5,7 @@ import { audiencePlace } from "./place.js";
 import { emptyWhereSession, state } from "./state.js";
 import { api, isNetworkFailure, refresh } from "./session.js";
 import { render } from "./render.js";
-import { linkify } from "./cards.js";
+import { canManageEvent, linkify } from "./cards.js";
 import { chatRow } from "./chat.js";
 import { deliveryLine } from "./push-install.js";
 import { calPlanOver, calSocialDay, calSocialOver, calToday, mapCircleLine, mapEvents } from "./events.js";
@@ -100,6 +100,14 @@ export function eventDetailSheet() {
           personRow(line(person), person)
         ))) : null,
       ]),
+      !over && canManageEvent(item) ? el("div", { class: "sheet-dock" }, [
+        el("button", {
+          class: "btn danger",
+          type: "button",
+          text: kind === "plan" ? "End plan" : "End",
+          onclick: () => endManaged(kind, item),
+        }),
+      ]) : null,
     ]),
   ]);
 }
@@ -396,6 +404,7 @@ export function endManaged(kind, item) {
     action: async () => {
       await run(async () => {
         await api(`/api/${kind}s/${item.id}`, { method: "DELETE" });
+        if (state.sheet === "event-detail") closeSheet();
         await refresh({ initial: true });
       });
     },

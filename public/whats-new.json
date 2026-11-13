@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-13-admin-end-events",
+    "date": "2026-11-13",
+    "title": "Admins can end events from the details",
+    "bullets": [
+      "Open an event and circle admins and hosts now see an End button there, as well as in the ⋯ menu on the card.",
+      "When an admin ends someone else's hangout, it disappears for everyone and the host is told."
+    ]
+  },
+  {
     "id": "2026-11-12-install-app",
     "date": "2026-11-12",
     "title": "Install Hangry from You > Account",
