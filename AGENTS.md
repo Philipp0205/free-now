@@ -15,6 +15,12 @@ Before reporting a change done, run all three from the repo root and report pass
 - `npm test` runs `node:test` via tsx on `test/**/*.test.ts`. It talks to a real Hangry server with in-memory SQLite (`withApp` in `test/http.ts`, or `openDb(":memory:")`).
 - `npm run test:ui` already uses `--test-concurrency=1`; do not raise it. `useHangry` in `test/ui/harness.ts` starts the real app on `127.0.0.1` with a random port and an in-memory db, then launches headless Chrome through `playwright-core` (Chrome channel, else `/usr/bin/google-chrome`). Specs seed fake users through the real API, log in, and drive the UI at `SIZES` 320x568, 360x640 and 412x915, plus 1280x800 when the desktop layout matters.
 
+Full `scripts/check.sh` takes about 30 minutes, mostly `test:ui`.
+
+- Run it once, after your last edit, with a bash timeout of at least 2700000 ms (45 min).
+- If it fails, fix the cause and rerun only the failing file (`npx tsx --test test/ui/<name>.spec.ts` or `npx tsx --test test/<name>.test.ts`) until it passes. Then run the full check one final time.
+- If a single UI spec fails in the full run but passes alone without changes, report it as a flake with its name and size. Do not start another full run for it.
+
 ## UI specs and screenshots
 
 Every UI change needs a `test/ui/*.spec.ts` that asserts visible behavior and writes screenshots to gitignored `test/ui/screenshots/<feature>/`. Use fake data only: no real names, tokens, recovery codes, or production data. Mask secrets in shots (the calendar specs mask the feed URL). Read the PNGs before claiming the UI is done.
