@@ -67,6 +67,7 @@ function canShowWhatsNew() {
     && !state.joinInstall
     && !state.installOpen
     && !state.installSheet
+    && !state.installSteps
     && !state.chat
     && !state.past
     && !state.offline

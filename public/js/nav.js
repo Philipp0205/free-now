@@ -8,7 +8,7 @@ import { closeYouSection } from "./you.js";
 import { closeBusyPreview } from "./busy-preview.js";
 import { loadCalendar, refreshMapAll } from "./events.js";
 import { closeSheet } from "./sheets.js";
-import { dismissJoinInstall } from "./push-install.js";
+import { closeInstallSteps, dismissJoinInstall } from "./push-install.js";
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
 let overlayHistoryDepth = 0;
@@ -29,6 +29,7 @@ function currentOverlayDepth() {
   // Onboarding waits behind an open sheet (see view), so it only counts once the sheet is gone.
   if ((state.onboarding || state.joinInstall) && !state.sheet) depth += 1;
   if (state.installSheet) depth += 1;
+  if (state.installSteps) depth += 1;
   if (state.sheet) depth += 1;
   if (!shellShown()) return depth;
   if (state.circleMenu) depth += 1;
@@ -89,6 +90,10 @@ function dismissTopOverlay() {
   if (state.installSheet) {
     state.installSheet = false;
     render();
+    return;
+  }
+  if (state.installSteps) {
+    closeInstallSteps();
     return;
   }
   if (state.sheet) {

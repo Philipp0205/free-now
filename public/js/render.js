@@ -11,7 +11,7 @@ import { forgetShownAgentToken, youScreen } from "./you.js";
 import { forgetShownFeedLink } from "./calendar-sync.js";
 import { whatsNewSheet } from "./whats-new-ui.js";
 import { confirmSheet, liftSheetToast, sheet, sheetIsOpen } from "./sheets.js";
-import { installGuideView, joinInstallSheet, onboardingSheet } from "./push-install.js";
+import { installBar, installBarShown, installGuideView, installStepsSheet, joinInstallSheet, onboardingSheet } from "./push-install.js";
 import { mapScreen } from "./events.js";
 import { whereBag } from "./where.js";
 import { TIME_LATER_ERROR } from "./composer.js";
@@ -142,6 +142,7 @@ function view() {
   } else if (state.onboarding && !state.sheet && !state.confirm && !state.installOpen) {
     root.append(onboardingSheet());
   }
+  if (state.installSteps && state.me?.circle && !state.confirm && !state.installOpen) root.append(installStepsSheet());
   if (state.banner) root.append(banner(state.banner));
   if (state.confirm) root.append(confirmSheet());
   if (state.error && state.error !== TIME_LATER_ERROR && !RETRY_NOTE.has(state.error)) {
@@ -286,6 +287,7 @@ function shell() {
     return phone;
   }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
+  if (installBarShown()) phone.append(installBar());
   // Only an explicit tab bar switch fades in; sheet closes, Back and the 3s refresh renders never do.
   const freshTab = pageEntrance;
   const screens = { home, map: mapScreen, circle: circleScreen, alerts: alertsScreen, you: youScreen };

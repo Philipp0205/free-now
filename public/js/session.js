@@ -355,6 +355,7 @@ export async function api(path, options = {}) {
       state.confirm = null;
       state.onboarding = false;
       state.installSheet = false;
+      state.installSteps = false;
       state.pushReminder = null;
       if (!state.booting) render();
     }
@@ -375,6 +376,8 @@ export function clearSession() {
   rememberCircle("");
   state.token = null;
   state.joinInstall = false;
+  state.installSteps = false;
+  state.remindersChecked = false;
   state.displayReported = false;
   state.me = null;
   state.socials = [];

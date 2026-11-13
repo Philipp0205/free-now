@@ -8,7 +8,7 @@ import { buzzNote, flicPanel, onRotateBuzz } from "./flic.js";
 import { busyHoursPanel, statusPanel } from "./status-ui.js";
 import { busyPreviewScreen, friendsViewPanel } from "./busy-preview.js";
 import { calendarFeedPanel, calendarSyncPanel, copyWithSelection, feedDate } from "./calendar-sync.js";
-import { notificationStatusLabel, onInstall, onTestPush, openNotifications } from "./push-install.js";
+import { isInstalled, notificationStatusLabel, onInstall, onTestPush, openNotifications } from "./push-install.js";
 import { openFeedback, openWhatsNewList } from "./whats-new-ui.js";
 import { copyText, el, field, icon, run, scheduleErrorClear, viewerTz } from "./lib.js";
 import { avatar, onRemovePhoto, pickPhoto } from "./avatars.js";
@@ -185,11 +185,29 @@ function accountSection() {
         : null,
     ]),
     flicPanel(code),
+    installPanel(),
     el("div", { class: "panel stack" }, [
       el("button", { class: "btn danger", type: "button", text: "Leave circle", onclick: onLeave }),
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),
     ]),
   ];
+}
+
+function installPanel() {
+  const installed = isInstalled();
+  return el("div", { class: "panel" }, [
+    el("button", {
+      class: "row install-row",
+      type: "button",
+      disabled: installed,
+      onclick: () => { void onInstall(); },
+    }, [
+      el("div", { class: "grow" }, [
+        el("h3", { text: "Install app" }),
+        el("p", { text: installed ? "Installed" : "Add Hangry to your home screen." }),
+      ]),
+    ]),
+  ]);
 }
 
 /** Assistant tokens: an outside assistant acts as this person. The full token shows once, right after making it. */

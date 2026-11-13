@@ -1,11 +1,11 @@
 import { pushTitle, nextPushDetail } from "./push-sheet.js";
 import { activeStatus, statusLabel } from "./status.js";
-import { readInstallSignals, installGuide, pushTestMessage, installReminderDue, installPrompt, joinInstallStep } from "./install-guide.js";
+import { readInstallSignals, installGuide, installHowTo, pushTestMessage, installPrompt, joinInstallStep } from "./install-guide.js";
 import { INSTALLED_KEY, INSTALL_LATER_KEY, JOIN_INSTALL_KEY, PUSH_OFF_KEY, state } from "./state.js";
 import { api, refresh } from "./session.js";
 import { render } from "./render.js";
 import { avatar } from "./avatars.js";
-import { base64UrlToUint8, copyText, el, run, scheduleErrorClear } from "./lib.js";
+import { base64UrlToUint8, copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { closeSheet } from "./sheets.js";
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -18,6 +18,7 @@ window.addEventListener("appinstalled", () => {
   localStorage.setItem(INSTALLED_KEY, "1");
   state.installEvent = null;
   state.installSheet = false;
+  state.installSteps = false;
   state.joinInstall = false;
   void considerReminders();
 });
@@ -319,15 +320,11 @@ export function reportDisplay() {
   });
 }
 
-function isInstalled() {
+export function isInstalled() {
   if (localStorage.getItem(INSTALLED_KEY) === "1") return true;
   return window.matchMedia("(display-mode: standalone)").matches
     || window.matchMedia("(display-mode: fullscreen)").matches
     || window.navigator.standalone === true;
-}
-
-function installDue() {
-  return installReminderDue(localStorage.getItem(INSTALL_LATER_KEY), Date.now());
 }
 
 async function devicePushOn() {
@@ -353,19 +350,19 @@ export async function considerReminders() {
     return;
   }
   state.pushOn = await devicePushOn();
+  state.remindersChecked = true;
   if (state.joinInstall) {
     // The install step after a join goes first; the usual reminder waits until it is closed.
     state.onboarding = false;
     render();
     return;
   }
-  const prompt = installPrompt(currentSignals(), { canPrompt: Boolean(state.installEvent) });
   const due = reminderDue();
   const denied = "Notification" in window && Notification.permission === "denied";
-  const wantInstall = due && !isInstalled() && installDue() && !prompt.quiet && !denied;
+  // Install has its own slim banner (installBar), so it no longer opens this sheet by itself.
   const wantPush = due && !state.pushOn && !denied && !pushTurnedOff();
   const wantDenied = due && denied;
-  state.onboarding = wantInstall || wantPush || wantDenied;
+  state.onboarding = wantPush || wantDenied;
   state.installSheet = false;
   state.pushReminder = null;
   render();
@@ -452,13 +449,18 @@ function localSubscriptionEndpoint() {
 }
 
 export async function onInstall() {
-  if (!state.installEvent) return;
+  // No native prompt (iOS Safari, Firefox, or Chrome before it offers one): show the steps instead.
+  if (!state.installEvent) {
+    openInstallSteps();
+    return;
+  }
   state.installEvent.prompt();
   const choice = await state.installEvent.userChoice;
   state.installEvent = null;
   if (choice?.outcome === "accepted") {
     localStorage.setItem(INSTALLED_KEY, "1");
     state.installSheet = false;
+    state.installSteps = false;
     if (state.joinInstall) {
       localStorage.setItem(JOIN_INSTALL_KEY, "1");
       state.joinInstall = false;
@@ -470,6 +472,91 @@ export async function onInstall() {
 
 function joinInstallSignals() {
   return joinInstallStep(currentSignals(), { canPrompt: Boolean(state.installEvent) });
+}
+
+/**
+ * The slim install prompt: every fresh load while Hangry is not running as the installed app.
+ * Closing it lasts for this page only (state, not storage), so a reload brings it back.
+ * It waits for the reminder check, so it never flashes up and then stacks with the onboarding sheet.
+ */
+export function installBarShown() {
+  return Boolean(state.token && state.me?.circle)
+    && state.remindersChecked
+    && !state.installBannerDismissed
+    && !isInstalled()
+    && !state.sheet
+    && !state.confirm
+    && !state.onboarding
+    && !state.joinInstall
+    && !state.installSheet
+    && !state.installOpen
+    && !state.installSteps;
+}
+
+export function installBar() {
+  return el("div", { class: "install-bar", role: "region", "aria-label": "Install Hangry" }, [
+    el("img", { src: "/icons/icon-192.png", alt: "" }),
+    el("span", { class: "copy" }, [
+      el("strong", { text: "Install Hangry" }),
+      el("span", { text: "One tap from your home screen." }),
+    ]),
+    el("button", { class: "install-go", type: "button", text: "Install", onclick: () => { void onInstall(); } }),
+    el("button", {
+      class: "install-close",
+      type: "button",
+      "aria-label": "Close install prompt",
+      onclick: () => {
+        state.installBannerDismissed = true;
+        render();
+      },
+    }, [icon("close")]),
+  ]);
+}
+
+function openInstallSteps() {
+  state.installSteps = true;
+  render();
+}
+
+export function closeInstallSteps() {
+  state.installSteps = false;
+  render();
+}
+
+/** Steps for browsers that offer no install prompt. Same copy as the other install sheets (installHowTo). */
+export function installStepsSheet() {
+  const how = installHowTo(currentSignals());
+  const actions = [];
+  if (state.installEvent) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Install app", onclick: () => { void onInstall(); } }));
+  }
+  if (how.copyLink) {
+    const where = how.kind === "ios-other" ? "Safari" : "Chrome";
+    actions.push(el("button", {
+      class: "btn",
+      type: "button",
+      text: "Copy link",
+      onclick: () => copyText(location.origin + "/", `Link copied. Open it in ${where}.`),
+    }));
+  }
+  actions.push(el("button", { class: "btn ghost", type: "button", text: "Close", onclick: closeInstallSteps }));
+  return el("div", {}, [
+    el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeInstallSteps }),
+    el("div", { class: "sheet join-install install-steps", role: "dialog", "aria-modal": "true", "aria-labelledby": "install-steps-title" }, [
+      el("div", { class: "sheet-head" }, [
+        el("div", { class: "grabber" }),
+        el("h2", { id: "install-steps-title", text: how.title }),
+        el("p", { class: "help", text: how.lede }),
+      ]),
+      how.steps.length
+        ? el("ol", { class: "guide-steps" }, how.steps.map((line, index) => el("li", {}, [
+            el("span", { class: "n", text: String(index + 1) }),
+            el("strong", { text: line }),
+          ])))
+        : null,
+      el("div", { class: "stack" }, actions),
+    ]),
+  ]);
 }
 
 /** Just joined a circle from an invite: offer the install step once, unless this phone has it or said Not now. */
