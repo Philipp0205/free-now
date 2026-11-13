@@ -188,6 +188,8 @@ for (const [width, height] of VIEWS) {
       await call("POST", `/api/socials?circle=${a.id}`, bea.token, { note: "Coffee" });
       const fresh = await listFor(a.id);
       assert.equal(fresh.length, 2);
+      // The poll skips while one is held, so the newer refresh is the app coming back to the front.
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
       const coffee = fresh[0];
       assert.match(coffee.body, /Coffee/);
       const shown = page.locator(".banner", { hasText: "Coffee" });

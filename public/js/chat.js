@@ -14,8 +14,9 @@ export async function openChat(target) {
   state.chatStick = true;
   state.chatReplyTo = null;
   forgetOpenUnread(target);
-  // Show the chat screen (Loading…) at once. The thread fills in when the GET lands, or on the next poll.
-  render();
+  // Event chats show their screen (Loading…) at once. The thread fills in when the GET lands, or on the next poll.
+  // The circle Chat tab keeps the tab bar while it loads, so a later tab tap wins.
+  if (target.kind !== "circle") render();
   await run(async () => {
     const chat = (await api(chatTargetUrl(target))).chat;
     // Another tab was tapped while this loaded; that tap wins.
