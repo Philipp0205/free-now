@@ -184,3 +184,10 @@ test("the worker caches buzzer.js with the shell", () => {
   const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(SOURCE)?.[1] ?? "[]") as string[];
   assert.ok(shell.includes("/js/buzzer.js"));
 });
+
+test("the worker caches every module under public/js with the shell", () => {
+  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(SOURCE)?.[1] ?? "[]") as string[];
+  const modules = fs.readdirSync(new URL("../public/js/", import.meta.url)).filter((name) => name.endsWith(".js"));
+  assert.ok(modules.length > 0);
+  for (const name of modules) assert.ok(shell.includes(`/js/${name}`), `/js/${name} is in SHELL`);
+});

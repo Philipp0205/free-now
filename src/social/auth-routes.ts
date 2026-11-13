@@ -1,0 +1,121 @@
+import crypto from "node:crypto";
+import type { AppDeps } from "../app.js";
+import { colorHex } from "../chat/chat-color.js";
+import {
+  addMember,
+  getActiveSocialByCreator,
+  getUserByBuzzToken,
+  getUserById,
+  insertSession,
+  insertUser,
+  listCirclesForUser,
+  markSocialBuzzed,
+} from "../db.js";
+import { randomToken, sha256 } from "../lib/auth.js";
+import { clientKey } from "../lib/client-key.js";
+import type { RouteContext } from "../lib/context.js";
+import { HttpError, matchPath, safeDecode, sendEmpty, sendJson } from "../lib/http.js";
+import { isoDate } from "../lib/time.js";
+import { cleanCode, cleanLabel, cleanNote, readPlace, readPoint, readStart } from "../lib/validate.js";
+import { circlePayload, notifyMemberJoined, requireCircle, requireLiveInvite } from "./circles.js";
+import { extractBuzzSecret, humanCode } from "./code.js";
+import { endSocial } from "./events.js";
+import { sharePreview } from "./plan-share.js";
+import { publishSocial } from "./socials.js";
+
+export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
+  const { req, res, deps, limits, method, pathname, user, body, requested } = ctx;
+  if (method === "POST" && pathname === "/api/auth/start") {
+    const name = cleanLabel(body.name, "name", 24);
+    const now = deps.now();
+    const rawCode = body.code == null || body.code === "" ? "" : cleanCode(body.code);
+    const invited = rawCode ? requireLiveInvite(deps.db, rawCode, now) : undefined;
+    const token = randomToken();
+    const buzzToken = humanCode();
+    const id = crypto.randomUUID();
+    insertUser(deps.db, {
+      id,
+      name,
+      token_hash: sha256(token),
+      buzz_token: buzzToken,
+      created_at: now,
+    });
+    if (invited) {
+      addMember(deps.db, invited.id, id, now);
+      await notifyMemberJoined(deps, invited, { id, name });
+    }
+    sendJson(res, 201, {
+      token,
+      buzzToken,
+      user: { id, name, color: colorHex(id, getUserById(deps.db, id)?.color), avatarRev: null, whatsNewSeen: null },
+      circle: invited ? circlePayload(deps, req, invited, id) : null,
+    });
+    return true;
+  }
+
+  const sharedPlan = matchPath(pathname, /^\/api\/plans\/share\/([^/]+)$/);
+  if (sharedPlan && method === "GET") {
+    if (!limits.share.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
+    const today = isoDate(deps.now(), deps.config.tz);
+    sendJson(res, 200, sharePreview(deps.db, safeDecode(sharedPlan[1]), user?.id ?? null, today));
+    return true;
+  }
+
+  const invitePreview = matchPath(pathname, /^\/api\/invites\/([^/]+)$/);
+  if (invitePreview && method === "GET") {
+    const circle = requireLiveInvite(deps.db, decodeURIComponent(invitePreview[1]), deps.now());
+    sendJson(res, 200, { name: circle.name });
+    return true;
+  }
+
+  if (method === "POST" && pathname === "/api/auth/recover") {
+    const secret = extractBuzzSecret(typeof body.token === "string" ? body.token : "");
+    const existing = secret ? getUserByBuzzToken(deps.db, secret) : undefined;
+    if (!existing) throw new HttpError(401, "unknown recovery code");
+    const token = randomToken();
+    insertSession(deps.db, crypto.randomUUID(), existing.id, sha256(token), deps.now());
+    sendJson(res, 200, {
+      token,
+      buzzToken: existing.buzz_token,
+      user: { id: existing.id, name: existing.name, color: colorHex(existing.id, existing.color), avatarRev: existing.avatar_rev || null },
+    });
+    return true;
+  }
+
+  if (pathname.startsWith("/api/buzz/")) {
+    if (method !== "POST" && method !== "DELETE") throw new HttpError(405, "method not allowed");
+    let token = pathname.slice("/api/buzz/".length);
+    try {
+      token = decodeURIComponent(token);
+    } catch {
+      throw new HttpError(404, "unknown token");
+    }
+    const buzzer = token ? getUserByBuzzToken(deps.db, token) : undefined;
+    if (!buzzer) throw new HttpError(404, "unknown token");
+    if (method === "DELETE") {
+      // Ends the social in the circle a POST would post to.
+      // Ending with nothing live is still a success, so a second hold is harmless.
+      const circle = requireCircle(deps, buzzer.id, requested ?? buzzCircle(deps, buzzer.id));
+      const live = getActiveSocialByCreator(deps.db, buzzer.id, circle.id, deps.now());
+      if (live) await endSocial(deps, buzzer, live.id, circle.id);
+      sendEmpty(res, 204);
+      return true;
+    }
+    // A bare buzz keeps the live note. Only a note field in the body replaces it.
+    const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
+    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));
+    // Marks the social as Flic-driven on every press, a re-notify of a live one included.
+    const buzzedAt = deps.now();
+    markSocialBuzzed(deps.db, result.social.id, buzzedAt);
+    sendJson(res, result.created ? 201 : 200, { social: { ...result.social, buzzedAt } });
+    return true;
+  }
+  return false;
+}
+
+/** A buzz with no circle posts to the circle joined last, so the bare link still works. */
+function buzzCircle(deps: AppDeps, userId: string): string | null {
+  const circles = listCirclesForUser(deps.db, userId);
+  if (circles.length <= 1) return null;
+  return circles[circles.length - 1].id;
+}
