@@ -66,9 +66,22 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the Flic circle per press entry is the newest, in plain words without an em dash", () => {
+test("the Plan for this day button entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-13-flic-circle-per-press");
+  assert.equal(top.id, "2026-11-14-plan-for-day-button");
+  assert.equal(top.date, "2026-11-14");
+  assert.equal(top.bullets.length, 2);
+  assert.match([top.title, ...top.bullets].join(" "), /Plan for this day/);
+  for (const line of [top.title, ...top.bullets]) {
+    assert.ok(line.length <= (line === top.title ? 60 : 140), line);
+    assert.ok(!line.includes("\u2014"), line);
+  }
+  assert.ok(RAW.some((item) => item.id === "2026-11-13-flic-circle-per-press"), "Flic entry is kept");
+});
+
+test("the Flic circle per press entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-13-flic-circle-per-press")!;
+  assert.ok(top, "Flic entry");
   assert.equal(top.date, "2026-11-13");
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 3);
   const text = [top.title, ...top.bullets].join(" ");
@@ -604,7 +617,7 @@ test("entry dates read as a short day, month, and year", () => {
 test("the service worker caches the changelog and matches the app's build label", () => {
   const sw = read("../public/sw.js");
   const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v100");
+  assert.equal(cache?.[1], "hangry-v101");
   const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
   const paths = JSON.parse(shell) as string[];
   assert.ok(paths.includes("/js/whats-new.js"));

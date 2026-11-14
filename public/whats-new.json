@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-14-plan-for-day-button",
+    "date": "2026-11-14",
+    "title": "Plan for this day is easier to find",
+    "bullets": [
+      "In the Events calendar, Plan for this day is now a big pink button right under the day you picked.",
+      "You no longer have to scroll past the day's events to start a plan."
+    ]
+  },
+  {
     "id": "2026-11-13-flic-circle-per-press",
     "date": "2026-11-13",
     "title": "Pick the circle each Flic press posts in",

@@ -45,6 +45,29 @@ async function signUp(name: string) {
 
 const scrollTop = (page: Page) => page.evaluate(() => document.scrollingElement!.scrollTop);
 
+test("at 390x844: Plan for this day is visible above the tab bar without scrolling", { timeout: 90_000 }, async () => {
+  const { host, circle } = await signUp("Dana");
+  const page = await phone(390, 844, host.token, circle.id);
+  try {
+    await page.locator(".tabbar").getByRole("button", { name: "Events", exact: true }).click();
+    await page.locator(".cal-grid").waitFor();
+    await page.locator('.cal-cell[data-day="2026-11-12"]').click();
+    const add = page.getByRole("button", { name: "Plan for this day", exact: true });
+    await add.waitFor();
+    const box = await add.boundingBox();
+    const bar = await page.locator(".tabbar").boundingBox();
+    assert.ok(box && bar, "button and tab bar have boxes");
+    assert.equal(await page.evaluate(() => document.scrollingElement!.scrollTop), 0, "page is not scrolled");
+    assert.ok(box.y >= 0, `button top ${box.y} is on screen`);
+    assert.ok(box.y + box.height <= bar.y, `button bottom ${box.y + box.height} clears the tab bar at ${bar.y}`);
+    assert.ok(box.height >= 48, `button is ${box.height}px tall`);
+    assert.ok(box.width >= 390 - 40, `button is ${box.width}px wide`);
+    await shot(page, "calendar-day-button-390x844");
+  } finally {
+    await page.context().close();
+  }
+});
+
 for (const [width, height] of SIZES) {
   test(`at ${width}: the plan note placeholder suggests the tacos`, { timeout: 90_000 }, async () => {
     const { host, circle } = await signUp("Tess");
@@ -74,6 +97,10 @@ for (const [width, height] of SIZES) {
       // Today and later can, also when the month is empty.
       await page.locator('.cal-cell[data-day="2026-11-12"]').click();
       await add.waitFor();
+      // Prominent: a big tap target at every size.
+      const box = await add.boundingBox();
+      assert.ok(box, "button has a box");
+      assert.ok(box.height >= 44, `button is ${box.height}px tall`);
       await shot(page, "calendar-day-button");
       await add.click();
       await page.locator("#plan-date").waitFor();
