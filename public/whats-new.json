@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-14-invite-finds-account",
+    "date": "2026-11-14",
+    "title": "Invite links find your account",
+    "bullets": [
+      "Opening an invite link on a device where you are signed out now offers I already have an account.",
+      "Enter your recovery code there and you sign in to your own account and join the circle in one step.",
+      "No more duplicate accounts when you tap an invite link from a chat."
+    ]
+  },
+  {
     "id": "2026-11-14-plan-for-day-button",
     "date": "2026-11-14",
     "title": "Plan for this day is easier to find",

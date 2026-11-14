@@ -164,7 +164,7 @@ test("signed out: the login view links to /welcome quietly, an invite link does 
   assert.equal(await page.getByRole("link", { name: "What is Hangry?" }).count(), 0, "the invite screen stays focused");
   assert.equal(await page.getByRole("link", { name: "Privacy" }).getAttribute("href"), "/privacy", "the legal link stays");
 
-  await page.getByRole("button", { name: "I have a recovery code" }).waitFor();
+  await page.getByRole("button", { name: "I already have an account" }).waitFor();
   await page.goto(`${hangry.baseUrl}/`);
   await page.getByRole("button", { name: "I have a recovery code" }).click();
   await page.locator("#recover-code").waitFor();
