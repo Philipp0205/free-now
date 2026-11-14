@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-13-flic-circle-per-press",
+    "date": "2026-11-13",
+    "title": "Pick the circle each Flic press posts in",
+    "bullets": [
+      "With 2 or more circles, You > Account > Set up a Flic button lets you pick a circle for a single click, a double click and a hold.",
+      "Use one click for one circle and a double click for another. Each has its own link to copy.",
+      "Holding the button ends your social in the circle you chose for hold."
+    ]
+  },
+  {
     "id": "2026-11-13-calendar-plans-and-scroll",
     "date": "2026-11-13",
     "title": "Plan from the calendar, and Back keeps your place",

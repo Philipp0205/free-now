@@ -4,6 +4,7 @@ import { colorHex } from "../chat/chat-color.js";
 import {
   addMember,
   getActiveSocialByCreator,
+  getBuzzCircles,
   getUserByBuzzToken,
   getUserById,
   insertSession,
@@ -17,14 +18,14 @@ import type { RouteContext } from "../lib/context.js";
 import { HttpError, matchPath, safeDecode, sendEmpty, sendJson } from "../lib/http.js";
 import { isoDate } from "../lib/time.js";
 import { cleanCode, cleanLabel, cleanNote, readPlace, readPoint, readStart } from "../lib/validate.js";
-import { circlePayload, notifyMemberJoined, requireCircle, requireLiveInvite } from "./circles.js";
+import { BUZZ_PRESSES, circlePayload, notifyMemberJoined, requireCircle, requireLiveInvite } from "./circles.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
 import { endSocial } from "./events.js";
 import { sharePreview } from "./plan-share.js";
 import { publishSocial } from "./socials.js";
 
 export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
-  const { req, res, deps, limits, method, pathname, user, body, requested } = ctx;
+  const { req, res, deps, limits, url, method, pathname, user, body, requested } = ctx;
   if (method === "POST" && pathname === "/api/auth/start") {
     const name = cleanLabel(body.name, "name", 24);
     const now = deps.now();
@@ -92,10 +93,15 @@ export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
     }
     const buzzer = token ? getUserByBuzzToken(deps.db, token) : undefined;
     if (!buzzer) throw new HttpError(404, "unknown token");
+    const press = url.searchParams.get("press") ?? "single";
+    if (!(BUZZ_PRESSES as readonly string[]).includes(press)) throw new HttpError(400, "press must be single, double or hold");
+    // An explicit ?circle= wins, then the circle mapped to this press, then the default circle.
+    // A mapped circle the user has left is rejected by requireCircle, never swapped for another.
+    const target = requested ?? getBuzzCircles(deps.db, buzzer.id)[press] ?? buzzCircle(deps, buzzer.id);
     if (method === "DELETE") {
-      // Ends the social in the circle a POST would post to.
+      // Ends the social in the circle a POST of the same press would post to.
       // Ending with nothing live is still a success, so a second hold is harmless.
-      const circle = requireCircle(deps, buzzer.id, requested ?? buzzCircle(deps, buzzer.id));
+      const circle = requireCircle(deps, buzzer.id, target);
       const live = getActiveSocialByCreator(deps.db, buzzer.id, circle.id, deps.now());
       if (live) await endSocial(deps, buzzer, live.id, circle.id);
       sendEmpty(res, 204);
@@ -103,7 +109,7 @@ export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
     }
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
-    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested ?? buzzCircle(deps, buzzer.id));
+    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), target);
     // Marks the social as Flic-driven on every press, a re-notify of a live one included.
     const buzzedAt = deps.now();
     markSocialBuzzed(deps.db, result.social.id, buzzedAt);

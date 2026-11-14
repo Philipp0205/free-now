@@ -66,18 +66,19 @@ curl -X POST http://localhost:3000/api/buzz/YOUR_TOKEN \
 
 A POST with an empty body is also fine — the note is optional. The token is on the You tab. Pressing it again refreshes the two-hour timer. The same note will not push more than once every 30 seconds, so a bouncy button does not spam the circle. Changing the note can notify again after 15 seconds.
 
-One circle needs no extra argument. With more than one circle, a buzz that does not name a circle posts to the circle you joined last. The You tab shows a link for the circle you are looking at: `/api/buzz/<token>?circle=<id>`.
+One circle needs no extra argument. With more than one circle, a buzz that does not name a circle posts to the circle you joined last, unless you mapped that press to a circle (below). `?circle=<id>` always wins, and a circle you are not in is a 404.
 
-`DELETE` on the same URL ends the live social in the circle a POST would post to. It answers 204 even when nothing is live.
+Add `?press=single|double|hold` to say which Flic click this is. No `press` means `single`, so older links keep working. Any other value is a 400. You can map each press to a circle with `PUT /api/me/buzz-circles` and a body like `{"single":"<id>","double":"<id>","hold":null}` (`null` or a missing press means the default circle). It answers `{"buzzCircles":{...}}`, and a circle you are not in is a 404 that saves nothing. If you later leave a mapped circle, that press answers 404 and posts nowhere.
+
+`DELETE` on the same URL ends the live social in the circle a POST of the same press would post to. It answers 204 even when nothing is live.
 
 ### Flic button
 
-The full link is on the You tab, under **Set up a Flic button**.
+With one circle, the You tab shows one link under **Set up a Flic button**. With two or more it shows a row for **Single click**, **Double click** and **Hold**, each with a circle picker, its own link (`?press=...`) and a Copy button.
 
 1. In the Flic app, open the button and choose **Push**.
-2. Add the **Internet Request** action.
-3. Paste the link as the URL, set the method to POST, and save. Leave the body empty, or send `{"note":"Rooftop coffee??"}` with content type `application/json`.
-4. Optional: under **Hold**, add the same link with the method DELETE. Holding the button then ends the social.
+2. Under **Click** and **Double click**, add the **Internet Request** action. Paste that row's link as the URL, set the method to POST, and save. Leave the body empty, or send `{"note":"Rooftop coffee??"}` with content type `application/json`.
+3. Under **Hold**, add the Hold row's link with the method DELETE. Holding the button then ends the social in that circle.
 
 Each press also stamps the social with `buzzedAt` (set only by this link, never by the app). Open apps in the circle, and the presser's own, play a full-screen buzzer animation for it, cycling through four. **Test buzzer** in the same panel plays the next one locally without sending anything.
 
