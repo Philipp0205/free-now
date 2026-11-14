@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-13-calendar-plans-and-scroll",
+    "date": "2026-11-13",
+    "title": "Plan from the calendar, and Back keeps your place",
+    "bullets": [
+      "Pick a day in the Events calendar and tap Plan for this day to start a plan with that date filled in.",
+      "Back from an event, its chat or a place now returns you to where you were scrolled.",
+      "The plan note hint now suggests Amanda's inviting everyone for free tacos."
+    ]
+  },
+  {
     "id": "2026-11-13-chats-open-on-bad-signal",
     "date": "2026-11-13",
     "title": "Event chats open again on a weak connection",

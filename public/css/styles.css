@@ -2490,6 +2490,7 @@ html.kb-open .sheet .help { margin-top: 0; }
 .cal-event-copy span { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-event.over .cal-event-copy strong { color: rgba(255, 255, 255, 0.6); }
 .cal-quiet { margin: 8px 4px; color: var(--muted); }
+.cal-add { margin-top: 12px; }
 .cal-empty { margin: 8px 4px; }
 .cal-empty h2 { margin: 0 0 6px; font-size: 20px; letter-spacing: -0.02em; }
 .cal-empty p { margin: 0; color: var(--muted); line-height: 1.4; }

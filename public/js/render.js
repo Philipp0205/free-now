@@ -22,6 +22,10 @@ import { onCreateCircle, onJoinCircle } from "./circles.js";
 
 /** Set by a tab bar tap that changes the page; the next render fades that page in once, then clears it. */
 let pageEntrance = false;
+/** Page scroll per tab, saved while the page is uncovered, so Back from a sheet, chat or place returns to it. */
+const tabY = new Map();
+// The overlay entries are pushed while the page is covered and saved at scroll 0; the browser would restore that after Back.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
 export function render() {
   const activeId = state.focusSheet ? null : document.activeElement?.id || null;
@@ -32,6 +36,10 @@ export function render() {
   const chatY = chatLog?.scrollTop ?? 0;
   const chatNearEnd = chatLog ? chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 48 : true;
   const calY = document.querySelector(".cal")?.scrollTop ?? 0;
+  const shownTab = document.querySelector("[data-page]")?.dataset.page ?? null;
+  const wasCovered = !shownTab || document.documentElement.classList.contains("sheet-open");
+  if (shownTab && !wasCovered) tabY.set(shownTab, y);
+  const freshTab = pageEntrance;
   document.getElementById("app").replaceChildren(view());
   clearMenuJustOpened();
   pageEntrance = false;
@@ -66,7 +74,6 @@ export function render() {
       }
     }
   }
-  if (!state.sheet && document.scrollingElement) document.scrollingElement.scrollTop = y;
   if (state.tab === "map") queueMicrotask(() => { mountMap().catch(() => {}); });
   const picking = state.sheet === "free" || state.sheet === "plan" || state.sheet === "admin-edit";
   const bag = whereBag();
@@ -80,6 +87,12 @@ export function render() {
   }
   if (bag.whereResults.length && picking) queueMicrotask(() => revealWhereResults());
   document.documentElement.classList.toggle("sheet-open", sheetIsOpen());
+  if (!state.chat && !state.past && !sheetIsOpen() && document.scrollingElement) {
+    // Back from a sheet, chat or place: the document scroll collapsed while covered, so use the saved one.
+    // This runs after sheet-open is toggled off, or the collapsed document would clamp it to 0.
+    const switched = (wasCovered || shownTab !== state.tab) && !freshTab;
+    document.scrollingElement.scrollTop = switched ? tabY.get(state.tab) ?? 0 : y;
+  }
   anchorOpenSheet();
   bindSheetSwipe();
   liftSheetToast();

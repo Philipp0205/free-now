@@ -68,7 +68,7 @@ export function sheet() {
             state.noteDraft = value;
             paintSummary();
           }, {
-            placeholder: planning ? "Walk and dinner with Alvin?" : "Rooftop coffee??",
+            placeholder: planning ? "Amanda's inviting everyone for free tacos" : "Rooftop coffee??",
             maxlength: "80",
           }),
           planning ? planDateField() : null,
@@ -107,7 +107,7 @@ export function sheet() {
   ]);
 }
 
-export function openSheet(name) {
+export function openSheet(name, { planDate = "" } = {}) {
   state.sheet = name;
   state.error = "";
   if (name === "free" || name === "plan") {
@@ -129,7 +129,7 @@ export function openSheet(name) {
     state.placeDraft = "";
     state.planTime = "";
     state.planDay = "pick";
-    state.planDate = "";
+    state.planDate = name === "plan" ? planDate : "";
     state.planWhere = emptyWhereSession();
   }
   if (name === "plan") {

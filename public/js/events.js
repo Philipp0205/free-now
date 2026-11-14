@@ -1,5 +1,5 @@
 import { CIRCLE_COLORS, circleColor, monthStart, gridRange, monthGrid, monthTitle, shiftMonth, WEEKDAY_LABELS, eventCrowd, freeOnDay } from "./calendar-month.js";
-import { zonedParts, shortDate } from "./when.js";
+import { zonedParts, shortDate, planDayRange } from "./when.js";
 import { audiencePlace } from "./place.js";
 import { activeStatus } from "./status.js";
 import { socialPinState, pinLabel, goingCrowd } from "./map-pin.js";
@@ -9,6 +9,7 @@ import { api, isNetworkFailure, noteConnectionProblem } from "./session.js";
 import { render } from "./render.js";
 import { screenHeader } from "./circles.js";
 import { openEventDetail } from "./event-sheets.js";
+import { openSheet } from "./sheets.js";
 import { appTz, clock, colorFor, el, icon, initial, remaining } from "./lib.js";
 import { planOpen } from "./plan-share.js";
 import { avatar, avatarKey, avatarUrls, loadAvatar } from "./avatars.js";
@@ -242,6 +243,13 @@ function pickCalDay(day) {
   render();
 }
 
+/** "Plan for this day" opens the plan sheet on the picked day, only where the date input allows it. */
+function planForDay(day) {
+  const { min, max } = planDayRange(Date.now(), appTz());
+  if (day < min || day > max) return null;
+  return el("button", { class: "btn ghost cal-add", type: "button", text: "Plan for this day", onclick: () => openSheet("plan", { planDate: day }) });
+}
+
 function calendarScreen() {
   ensureCalendarMonth();
   const today = calToday();
@@ -286,6 +294,7 @@ function calendarScreen() {
     below = el("div", { class: "cal-empty" }, [
       el("h2", { text: "Nothing planned this month." }),
       el("p", { text: "Plans and hangouts from your circle show up here on their day." }),
+      planForDay(state.calDay),
     ]);
   } else {
     below = el("section", { class: "cal-day", "aria-label": shortDate(state.calDay, today) }, [
@@ -294,6 +303,7 @@ function calendarScreen() {
         ? el("div", { class: "cal-list" }, dayEvents.map(calendarRow))
         : el("p", { class: "cal-quiet", text: "Nothing on this day." }),
       calFreeLine(state.calDay, dayEvents),
+      planForDay(state.calDay),
     ]);
   }
   return el("div", { class: "cal" }, [
