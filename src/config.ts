@@ -44,6 +44,7 @@ export type Config = {
   googleClientSecret: string | null;
   /** Google endpoints. Defaults are the real ones; the GOOGLE_OAUTH_* overrides exist for tests. */
   googleUrls: GoogleUrls;
+  footMassageUserId: string | null;
 };
 
 export type GoogleUrls = { auth: string; token: string; freebusy: string; revoke: string };
@@ -84,6 +85,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     adminToken: configuredAdminToken(env.ADMIN_TOKEN),
     calendarSyncKey: readCalendarSyncKey(env.CALENDAR_SYNC_KEY),
     ...readGoogle(env),
+    footMassageUserId: env.EASTER_EGG_FOOT_MASSAGE_USER_ID?.trim() || null,
   };
 }
 

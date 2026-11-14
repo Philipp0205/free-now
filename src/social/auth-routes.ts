@@ -20,6 +20,7 @@ import { isoDate } from "../lib/time.js";
 import { cleanCode, cleanLabel, cleanNote, readPlace, readPoint, readStart } from "../lib/validate.js";
 import { BUZZ_PRESSES, circlePayload, notifyMemberJoined, requireCircle, requireLiveInvite } from "./circles.js";
 import { extractBuzzSecret, humanCode } from "./code.js";
+import { footMassageEgg } from "./easter-egg.js";
 import { endSocial } from "./events.js";
 import { sharePreview } from "./plan-share.js";
 import { publishSocial } from "./socials.js";
@@ -106,6 +107,13 @@ export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
       if (live) await endSocial(deps, buzzer, live.id, circle.id);
       sendEmpty(res, 204);
       return true;
+    }
+    if (press === "hold") {
+      const plan = await footMassageEgg(deps, buzzer);
+      if (plan) {
+        sendJson(res, 201, { plan });
+        return true;
+      }
     }
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
