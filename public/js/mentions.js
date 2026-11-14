@@ -5,6 +5,9 @@ export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 const NAME_MAX = 24;
 
+/** The Goblin takes gripes in any chat. Not an account, so it is added to the picker here. Same name and color as src/chat/goblin.ts. */
+export const GOBLIN = { id: "goblin", name: "Goblin", color: "#4f8410" };
+
 /**
  * Every `@Name` in the text that names one of `names`, case-insensitive. Longest name wins,
  * so "@Alexandra" is never read as "@Alex". Same rule as findMentions in src/chat/chat.ts.

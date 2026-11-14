@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-14-meet-the-goblin",
+    "date": "2026-11-14",
+    "title": "Meet the Goblin",
+    "bullets": [
+      "Type @Goblin in any chat, then say what bugs you. The Goblin files it as feedback.",
+      "It answers right in the chat so you know your gripe landed."
+    ]
+  },
+  {
     "id": "2026-11-14-invite-finds-account",
     "date": "2026-11-14",
     "title": "Invite links find your account",

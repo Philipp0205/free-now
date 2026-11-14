@@ -1,4 +1,5 @@
-import { mentionMatches, mentionAt, insertMention, findMentions, REACTIONS, toggledReactions } from "./mentions.js";
+import { mentionMatches, mentionAt, insertMention, findMentions, GOBLIN, REACTIONS, toggledReactions } from "./mentions.js";
+import { APP_VERSION } from "./app.js";
 import { zonedParts, clockText } from "./when.js";
 import { state } from "./state.js";
 import { api, isNetworkFailure, noteConnectionProblem, scheduleOfflineRetry } from "./session.js";
@@ -92,11 +93,11 @@ export function chatScreen() {
   ]);
 }
 
-/** Who can be tagged: the chat's people, never you. */
+/** Who can be tagged: the chat's people, never you, and the Goblin. */
 function mentionChoices() {
   const pick = state.chatMention;
   if (!pick) return [];
-  return mentionMatches(state.chatThread?.participants || [], pick.query, state.me?.user?.id);
+  return mentionMatches([...(state.chatThread?.participants || []), GOBLIN], pick.query, state.me?.user?.id);
 }
 
 function mentionPicker() {
@@ -112,7 +113,7 @@ function mentionPicker() {
       // Keeps focus (and the keyboard) on the composer.
       onmousedown: (event) => event.preventDefault(),
       onclick: () => chooseMention(person),
-    }, [el("span", { class: "mention-dot", "aria-hidden": "true" }), el("span", { text: person.name })])));
+    }, [person.id === GOBLIN.id ? el("span", { class: "goblin-face", "aria-hidden": "true", text: "👺" }) : el("span", { class: "mention-dot", "aria-hidden": "true" }), el("span", { text: person.name })])));
 }
 
 /** Swaps the list in place, so typing never rebuilds the composer under the keyboard. */
@@ -194,6 +195,7 @@ function messageText(text) {
   const colors = new Map();
   for (const message of thread?.messages || []) if (message.color && message.name) colors.set(message.name.toLowerCase(), message.color);
   for (const person of thread?.participants || []) colors.set(person.name.toLowerCase(), person.color);
+  colors.set(GOBLIN.name.toLowerCase(), GOBLIN.color);
   const hits = findMentions(text, [...colors.keys()]);
   if (!hits.length) return el("p", { text });
   const me = (state.me?.user?.name || "").trim().toLowerCase();
@@ -490,10 +492,10 @@ function systemLine(message) {
 
 function messageRow(message) {
   const accent = message.system ? "" : message.color || "";
-  const live = canReact();
-  const replyable = canReply();
+  const live = canReact() && !message.goblin;
+  const replyable = canReply() && !message.goblin;
   return el("article", {
-    class: message.mine ? "chat-msg mine" : "chat-msg",
+    class: message.mine ? "chat-msg mine" : message.goblin ? "chat-msg goblin" : "chat-msg",
     "data-color": accent || null,
     "data-id": message.id,
     style: accent ? `--person:${accent}` : null,
@@ -505,7 +507,7 @@ function messageRow(message) {
     oncontextmenu: live ? (event) => { if (prefersTouchUi()) event.preventDefault(); } : null,
   }, [
     el("header", {}, [
-      el("strong", { text: message.mine ? "You" : message.name }),
+      el("strong", { text: message.mine ? "You" : message.goblin ? `👺 ${message.name}` : message.name }),
       live
         ? el("button", {
             class: "chat-react-btn",
@@ -584,6 +586,11 @@ function unsentTail(typed, sent) {
   return typed;
 }
 
+/** The build label rides along so a @Goblin gripe is filed like the feedback form's. */
+function chatBody(text, replyTo) {
+  return replyTo ? { text, replyTo, appVersion: APP_VERSION } : { text, appVersion: APP_VERSION };
+}
+
 async function sendChat(event) {
   event.preventDefault();
   if (!state.chat || state.chatQueue) return;
@@ -594,7 +601,7 @@ async function sendChat(event) {
   const replyTo = state.chatReplyTo?.id || null;
   state.chatQueue = { target, text, replyTo };
   try {
-    state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: replyTo ? { text, replyTo } : { text } })).chat;
+    state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: chatBody(text, replyTo) })).chat;
     void syncChatAlerts(target);
     state.chatQueue = null;
     state.chatDraft = unsentTail(state.chatDraft, text);
@@ -623,7 +630,7 @@ export async function flushChatQueue() {
   const queued = state.chatQueue;
   if (!queued) return;
   try {
-    const body = queued.replyTo ? { text: queued.text, replyTo: queued.replyTo } : { text: queued.text };
+    const body = chatBody(queued.text, queued.replyTo);
     const thread = (await api(chatTargetUrl(queued.target), { method: "POST", body })).chat;
     state.chatQueue = null;
     state.chatDraft = unsentTail(state.chatDraft, queued.text);

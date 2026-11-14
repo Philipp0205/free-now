@@ -45,7 +45,7 @@ for (const layout of LAYOUTS) {
       await input.pressSequentially("See you @");
       const list = page.locator(".mention-list");
       await list.waitFor();
-      assert.deepEqual(await list.locator(".mention-option").allTextContents(), ["Ada", "Alexandra", "Bea"], "everyone but you");
+      assert.deepEqual(await list.locator(".mention-option").allTextContents(), ["Ada", "Alexandra", "Bea", "👺Goblin"], "everyone but you, then the Goblin");
       await input.pressSequentially("a");
       assert.deepEqual(await list.locator(".mention-option").allTextContents(), ["Ada", "Alexandra"], "filters as you type");
       if (layout.name === "mobile") {

@@ -13,6 +13,7 @@ import {
   type MemberRow,
 } from "../db.js";
 import { colorHex } from "./chat-color.js";
+import { fileGripe, gripeText, GOBLIN_COLOR, GOBLIN_NAME, type GoblinAsk } from "./goblin.js";
 import { notifyUsers } from "../push/notify.js";
 import type { PushSender } from "../push/push.js";
 import { isoDate } from "../lib/time.js";
@@ -97,6 +98,7 @@ export async function routeChat(
   pathname: string,
   body: Record<string, unknown>,
   requestedCircle: string | null = null,
+  ask: GoblinAsk = { appVersion: null, allow: () => true },
 ): Promise<{ status: number; body: unknown } | null> {
   if (method === "GET" && pathname === "/api/chats") {
     const circleId = pickCircle(deps, user.id, requestedCircle, null);
@@ -104,7 +106,7 @@ export async function routeChat(
   }
   if (pathname === "/api/circles/chat") {
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "", requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo, ask) } };
   }
   const mute = /^\/api\/chats\/([^/]+)\/mute$/.exec(pathname);
   if (mute && method === "POST") {
@@ -128,13 +130,13 @@ export async function routeChat(
   if (social) {
     const id = decodeURIComponent(social[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo, ask) } };
   }
   const plan = /^\/api\/plans\/([^/]+)\/chat$/.exec(pathname);
   if (plan) {
     const id = decodeURIComponent(plan[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo, ask) } };
   }
   return null;
 }
@@ -156,7 +158,7 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
          FROM messages m
          LEFT JOIN users u ON u.id = m.user_id
          WHERE m.chat_id = ? AND m.deleted_at IS NULL
-         ORDER BY m.created_at DESC LIMIT 1`,
+         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1`,
         row.id,
       );
       const preview = last && last.kind === "text" ? last.body : last?.body || "";
@@ -165,7 +167,7 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
         id: row.ref_id,
         unread: unreadCount(deps.db, row.id, userId),
         preview: preview.slice(0, 80),
-        previewBy: last && last.kind === "text" ? (last.name || "") : "",
+        previewBy: last && last.kind === "text" ? (last.name || "") : last?.kind === "goblin" ? GOBLIN_NAME : "",
       };
     }),
     unreadByCircle: unreadTotals(deps, userId),
@@ -212,6 +214,7 @@ export async function postThread(
   raw: unknown,
   requestedCircle: string | null = null,
   replyRaw: unknown = null,
+  ask: GoblinAsk = { appVersion: null, allow: () => true },
 ): Promise<ReturnType<typeof threadPayload>> {
   const text = cleanText(raw);
   const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
@@ -225,7 +228,17 @@ export async function postThread(
   markChatAlertsRead(deps.db, access.chat, userId, now);
   const pinged = await notifyMentions(deps, access.chat, id, userId, userName, text);
   if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, text, parent.user_id, pinged)) pinged.add(author);
-  scheduleChatNotice(deps, access.chat.id, userId, userName, text, pinged);
+  const goblin = findMentions(text, [GOBLIN_NAME]);
+  if (goblin.length === 0) {
+    scheduleChatNotice(deps, access.chat.id, userId, userName, text, pinged);
+  } else {
+    // A gripe for the Goblin: filed as feedback, answered in the thread, and nobody is pinged about it.
+    const circleId = inCircle(deps, userId, access.chat.circle_id) ? access.chat.circle_id : null;
+    const reply = fileGripe(deps.db, ask, { userId, circleId, rest: gripeText(text, goblin), now });
+    deps.db.prepare(
+      "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at) VALUES (?, ?, ?, ?, 'goblin', ?)",
+    ).run(crypto.randomUUID(), access.chat.id, userId, reply, now);
+  }
   return threadPayload(deps, access, userId);
 }
 
@@ -668,7 +681,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color, m.reply_to
      FROM messages m JOIN users u ON u.id = m.user_id
      WHERE m.chat_id = ? AND m.deleted_at IS NULL
-     ORDER BY m.created_at ASC
+     ORDER BY m.created_at ASC, m.rowid ASC
      LIMIT 200`,
     access.chat.id,
   );
@@ -686,12 +699,13 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     muted: isMuted(deps.db, access.chat.id, userId),
     messages: messages.map((message) => ({
       id: message.id,
-      name: message.name,
+      name: message.kind === "goblin" ? GOBLIN_NAME : message.name,
       text: message.body,
       at: message.created_at,
       system: message.kind === "system",
-      mine: message.user_id === userId,
-      color: message.kind === "text" ? colorHex(message.user_id, message.color) : null,
+      goblin: message.kind === "goblin",
+      mine: message.kind !== "goblin" && message.user_id === userId,
+      color: message.kind === "text" ? colorHex(message.user_id, message.color) : message.kind === "goblin" ? GOBLIN_COLOR : null,
       canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
       reactions: reactions.get(message.id) ?? [],
       replyTo: message.reply_to ? quotes.get(message.reply_to) ?? goneQuote(message.reply_to) : null,
@@ -893,7 +907,7 @@ function unreadCount(db: DatabaseSync, chatId: string, userId: string): number {
     db,
     `SELECT COUNT(*) AS n FROM messages m
      LEFT JOIN chat_reads r ON r.chat_id = m.chat_id AND r.user_id = ?
-     WHERE m.chat_id = ? AND m.deleted_at IS NULL AND m.user_id != ?
+     WHERE m.chat_id = ? AND m.deleted_at IS NULL AND m.user_id != ? AND m.kind != 'goblin'
        AND m.created_at > COALESCE(r.read_at, 0)`,
     userId,
     chatId,
