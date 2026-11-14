@@ -1240,6 +1240,7 @@ input[type="text"], input[type="url"], input[type="time"] {
 .mention-option.active { background: #2c2c2e; }
 @media (hover: hover) { .mention-option:hover { background: #2c2c2e; } }
 .mention-dot { flex: none; width: 10px; height: 10px; border-radius: 5px; background: var(--person); }
+.goblin-face { flex: none; font-size: 14px; line-height: 1; margin: 0 -2px; }
 .chat-closed { margin: 0; padding: 16px; text-align: center; color: var(--muted); }
 .chat-compose {
   display: flex;
