@@ -247,7 +247,7 @@ function pickCalDay(day) {
 function planForDay(day) {
   const { min, max } = planDayRange(Date.now(), appTz());
   if (day < min || day > max) return null;
-  return el("button", { class: "btn ghost cal-add", type: "button", text: "Plan for this day", onclick: () => openSheet("plan", { planDate: day }) });
+  return el("button", { class: "btn cal-add", type: "button", text: "Plan for this day", onclick: () => openSheet("plan", { planDate: day }) });
 }
 
 function calendarScreen() {
@@ -293,17 +293,17 @@ function calendarScreen() {
   else if (!monthCount && monthStart(state.calDay) === state.calMonth) {
     below = el("div", { class: "cal-empty" }, [
       el("h2", { text: "Nothing planned this month." }),
-      el("p", { text: "Plans and hangouts from your circle show up here on their day." }),
       planForDay(state.calDay),
+      el("p", { text: "Plans and hangouts from your circle show up here on their day." }),
     ]);
   } else {
     below = el("section", { class: "cal-day", "aria-label": shortDate(state.calDay, today) }, [
       el("h2", { class: "cal-day-title", text: state.calDay === today ? `Today · ${shortDate(state.calDay, today)}` : shortDate(state.calDay, today) }),
+      planForDay(state.calDay),
       dayEvents.length
         ? el("div", { class: "cal-list" }, dayEvents.map(calendarRow))
         : el("p", { class: "cal-quiet", text: "Nothing on this day." }),
       calFreeLine(state.calDay, dayEvents),
-      planForDay(state.calDay),
     ]);
   }
   return el("div", { class: "cal" }, [
