@@ -178,6 +178,7 @@ function calendarReturnScreen() {
 
 function welcome() {
   const recovering = state.sheet === "recover";
+  const inviting = Boolean(state.pendingCode) && !state.inviteError;
   return el("section", { class: "gate" }, [
     el("div", { class: "hero" }, [
       el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
@@ -198,7 +199,14 @@ function welcome() {
           field("Recovery code", "recover-code", state.codeDraft, (value) => {
             state.codeDraft = value;
           }),
-          el("button", { class: "btn", type: "submit", text: "Sign back in" }),
+          inviting
+            ? el("p", { class: "hint", text: "Find it in You, Show recovery code, on the phone where you are signed in." })
+            : null,
+          el("button", {
+            class: "btn",
+            type: "submit",
+            text: inviting ? `Sign in and join${state.invitePreview?.name ? ` ${state.invitePreview.name}` : ""}` : "Sign back in",
+          }),
           el("button", {
             class: "btn ghost",
             type: "button",
@@ -237,9 +245,9 @@ function welcome() {
               })
             : null,
           el("button", {
-            class: "btn ghost",
+            class: inviting ? "btn secondary" : "btn ghost",
             type: "button",
-            text: "I have a recovery code",
+            text: inviting ? "I already have an account" : "I have a recovery code",
             onclick: () => {
               state.sheet = "recover";
               state.codeDraft = "";

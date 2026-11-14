@@ -540,6 +540,22 @@ export async function onRecover(event) {
     state.sheet = null;
     state.me = await api("/api/me");
     adoptCircle(state.me);
+    if (state.pendingCode && !state.inviteError) {
+      try {
+        const joined = await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
+        rememberCircle(joined.circle.id);
+        state.me = await api("/api/me");
+        history.replaceState(null, "", "/");
+        // Closing the recover sheet steps Back onto the /join entry. Clean that one too.
+        const clean = () => history.replaceState(null, "", "/");
+        window.addEventListener("popstate", clean, { once: true });
+        setTimeout(() => window.removeEventListener("popstate", clean), 2000);
+        state.pendingCode = "";
+        noteInviteJoin();
+      } catch (error) {
+        state.error = error.message;
+      }
+    }
     if (state.shareLink) await resolveShareLink();
     state.pushSnooze = false;
     render();
