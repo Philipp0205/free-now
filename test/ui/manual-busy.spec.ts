@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { circleStatusLine, statusLine } from "../../public/js/status.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";

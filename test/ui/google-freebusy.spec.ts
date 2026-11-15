@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { fakeGoogle, type Fake } from "../fake-google.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
@@ -19,7 +19,7 @@ const SECRET_TITLES = ["Tennis lesson", "Dentist", "Team lunch", "Secret Street"
 const fake: Fake = await fakeGoogle();
 const googleEnv: Record<string, string> = {};
 for (const [key, value] of Object.entries(fake.env)) if (value !== undefined) googleEnv[key] = value;
-test.after(async () => {
+test.afterAll(async () => {
   await fake.close();
 });
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { gradientClass } from "../../public/js/card-grad.js";
 import { skipWhatsNew } from "./whats-new-seen.js";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import { test } from "@playwright/test";
 import { devices, type Page } from "playwright-core";
 import { FIELD_REVEAL_MS, keyboardOffset } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";

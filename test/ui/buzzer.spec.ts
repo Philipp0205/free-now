@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
 
