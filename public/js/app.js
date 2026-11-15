@@ -8,8 +8,8 @@ import { resolveShareLink } from "./plan-share.js";
 import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install.js";
 import { scheduleErrorClear } from "./lib.js";
 
-/** Same label as CACHE in sw.js. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v103";
+/** The build label. Sent with feedback so a report names the build it came from. */
+export const APP_VERSION = "hangry-v104";
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});

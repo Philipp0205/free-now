@@ -218,7 +218,8 @@ test("PWA: manifest starts at /, and offline / still opens the cached app after 
       const keys = await caches.keys();
       for (const key of keys) {
         const cache = await caches.open(key);
-        if (await cache.match("/js/app.js")) return;
+        // Workbox keys precached files as /js/app.js?__WB_REVISION__=..., so ignore the query.
+        if (await cache.match("/js/app.js", { ignoreSearch: true })) return;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
