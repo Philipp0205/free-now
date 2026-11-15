@@ -3,7 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark) and (max-width: 719px)" content="#000000" />
+    <meta name="theme-color" media="(prefers-color-scheme: light) and (max-width: 719px)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="description" content="Hangry — let a private circle of friends know you're free." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -15,10 +19,19 @@
     <link vite-ignore rel="manifest" href="/manifest.webmanifest" />
     <link vite-ignore rel="icon" href="/icons/icon-192.png" />
     <link vite-ignore rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link vite-ignore rel="stylesheet" href="/app-kit/ak-tokens.css" />
+    <link vite-ignore rel="stylesheet" href="/app-kit/ak-components.css" />
+    <link vite-ignore rel="stylesheet" href="/app-kit/app-kit.css" />
+    <link vite-ignore rel="stylesheet" href="/app-kit/install-prompt.css" />
     <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body>
     <div id="app"></div>
+    <script vite-ignore src="/app-kit/ak-dom.js"></script>
+    <script vite-ignore src="/app-kit/ak-sheet.js"></script>
+    <script vite-ignore src="/app-kit/ak-donate.js"></script>
+    <script vite-ignore src="/app-kit/theme-color.js"></script>
+    <script vite-ignore src="/app-kit/install-prompt.js"></script>
     <script type="module" src="/js/app.js"></script>
   </body>
 </html>

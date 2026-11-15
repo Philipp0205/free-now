@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-15-donate-accent",
+    "date": "2026-11-15",
+    "title": "A voluntary tip option",
+    "bullets": [
+      "Hangry is free. You can now leave a small tip under You, Account. It is optional and never pops up.",
+      "The install prompt and the Donate button use a slightly deeper pink.",
+      "The new tip button only opens a PayPal link. Nothing is paid inside Hangry."
+    ]
+  },
+  {
     "id": "2026-11-15-faster-loading",
     "date": "2026-11-15",
     "title": "Faster loading, reliable updates",

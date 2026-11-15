@@ -18,6 +18,7 @@ import {
 import { ChatError } from "./chat/chat.js";
 import { handleChatRoutes } from "./chat/routes.js";
 import { type Config, MAP_PMTILES_ATTRIBUTION, MAP_PMTILES_URL } from "./config.js";
+import { healthHandler } from "./app-kit/health.ts";
 import { authFromRequest, requireUser } from "./lib/auth.js";
 import { clientKey } from "./lib/client-key.js";
 import type { AuthedRouteContext, Limits, RouteContext } from "./lib/context.js";
@@ -150,6 +151,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     return;
   }
 
+  if (healthHandler(req, res)) return;
+
   if (pathname === "/api/openapi.json" && (method === "GET" || method === "HEAD")) {
     sendPublic(req, res, "application/json; charset=utf-8", openapiJson);
     return;
@@ -176,11 +179,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   // Feedback reads its own circle and ignores a bad one instead of failing the send.
   // ?all=1 reads every circle the caller is in, so any requested circle is ignored.
   const requested = pathname === "/api/feedback" || isAllCircles(method, pathname, url) ? null : readRequestedCircle(req, url, body);
-
-  if (method === "GET" && pathname === "/api/health") {
-    sendJson(res, 200, { ok: true });
-    return;
-  }
 
   if (method === "GET" && pathname === "/api/meta") {
     sendJson(res, 200, {

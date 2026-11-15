@@ -59,7 +59,6 @@ export const state = {
   pushReminder: null,
   pushSnooze: false,
   installSheet: false,
-  installBannerDismissed: false,
   installSteps: false,
   remindersChecked: false,
   joinInstall: false,

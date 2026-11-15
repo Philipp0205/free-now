@@ -41,7 +41,7 @@ export function healthHandler(
   if (!isHealthRequest(req)) return Promise.resolve(false);
   if (req.method !== "GET" && req.method !== "HEAD") return Promise.resolve(answer(req, res, 200));
   return (async () => {
-    let status = 200;
+    let status: 200 | 503 = 200;
     try {
       await check();
     } catch {

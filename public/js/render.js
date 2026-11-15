@@ -11,7 +11,7 @@ import { forgetShownAgentToken, youScreen } from "./you.js";
 import { forgetShownFeedLink } from "./calendar-sync.js";
 import { whatsNewSheet } from "./whats-new-ui.js";
 import { confirmSheet, liftSheetToast, sheet, sheetIsOpen } from "./sheets.js";
-import { installBar, installBarShown, installGuideView, installStepsSheet, joinInstallSheet, onboardingSheet } from "./push-install.js";
+import { installGuideView, installStepsSheet, joinInstallSheet, onboardingSheet, syncInstallPrompt } from "./push-install.js";
 import { mapScreen } from "./events.js";
 import { whereBag } from "./where.js";
 import { TIME_LATER_ERROR } from "./composer.js";
@@ -103,6 +103,7 @@ export function render() {
     placeOpenCardMenus();
     requestAnimationFrame(() => { if (state.cardMenu) placeOpenCardMenus(); });
   }
+  syncInstallPrompt();
   if (state.focusPlanScroll) {
     state.focusPlanScroll = false;
     const id = state.focusPlan;
@@ -310,7 +311,6 @@ function shell() {
     return phone;
   }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
-  if (installBarShown()) phone.append(installBar());
   // Only an explicit tab bar switch fades in; sheet closes, Back and the 3s refresh renders never do.
   const freshTab = pageEntrance;
   const screens = { home, map: mapScreen, circle: circleScreen, alerts: alertsScreen, you: youScreen };
@@ -352,7 +352,9 @@ function tabbar(fresh = false) {
     }, [
       icon(glyph),
       el("span", { class: "tab-label", text: label }),
-      id === "chat" && unread ? el("span", { class: "badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+      id === "chat" && unread
+        ? el("span", { class: "badge", role: "img", "aria-label": `${unread > 9 ? "9+" : unread} new`, text: unread > 9 ? "9+" : String(unread) })
+        : null,
     ]);
   }));
 }

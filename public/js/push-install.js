@@ -5,23 +5,36 @@ import { INSTALLED_KEY, INSTALL_LATER_KEY, JOIN_INSTALL_KEY, PUSH_OFF_KEY, state
 import { api, refresh } from "./session.js";
 import { render } from "./render.js";
 import { avatar } from "./avatars.js";
-import { base64UrlToUint8, copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
+import { base64UrlToUint8, copyText, el, run, scheduleErrorClear } from "./lib.js";
 import { closeSheet } from "./sheets.js";
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   state.installEvent = event;
+  // The kit's install prompt gets this same event and calls prompt() on it, so Hangry hears about an accepted install here.
+  const prompt = event.prompt?.bind(event);
+  if (prompt) {
+    event.prompt = () => {
+      const shown = prompt();
+      Promise.resolve(event.userChoice).then((choice) => {
+        if (choice?.outcome === "accepted") installedNow();
+      }, () => {});
+      return shown;
+    };
+  }
   render();
 });
 
-window.addEventListener("appinstalled", () => {
+function installedNow() {
   localStorage.setItem(INSTALLED_KEY, "1");
   state.installEvent = null;
   state.installSheet = false;
   state.installSteps = false;
   state.joinInstall = false;
   void considerReminders();
-});
+}
+
+window.addEventListener("appinstalled", installedNow);
 
 export function notificationStatusLabel() {
   if ("Notification" in window && Notification.permission === "denied") return "Blocked";
@@ -359,7 +372,7 @@ export async function considerReminders() {
   }
   const due = reminderDue();
   const denied = "Notification" in window && Notification.permission === "denied";
-  // Install has its own slim banner (installBar), so it no longer opens this sheet by itself.
+  // Install has its own banner (the kit's install prompt), so it no longer opens this sheet by itself.
   const wantPush = due && !state.pushOn && !denied && !pushTurnedOff();
   const wantDenied = due && denied;
   state.onboarding = wantPush || wantDenied;
@@ -474,15 +487,21 @@ function joinInstallSignals() {
   return joinInstallStep(currentSignals(), { canPrompt: Boolean(state.installEvent) });
 }
 
+/** The kit's install prompt remembers a close in sessionStorage under this key. */
+const INSTALL_PROMPT_KEY = "hangry-install-prompt-dismissed";
+let installPromptStarted = false;
+let installPromptWasWanted = false;
+
 /**
- * The slim install prompt: every fresh load while Hangry is not running as the installed app.
- * Closing it lasts for this page only (state, not storage), so a reload brings it back.
+ * Whether the install prompt may show now: every fresh load while Hangry is not running as the installed app.
  * It waits for the reminder check, so it never flashes up and then stacks with the onboarding sheet.
+ * Chat and the past list are full screens of their own, so it stays out of them.
  */
-export function installBarShown() {
+export function installPromptWanted() {
   return Boolean(state.token && state.me?.circle)
     && state.remindersChecked
-    && !state.installBannerDismissed
+    && !state.chat
+    && !state.past
     && !isInstalled()
     && !state.sheet
     && !state.confirm
@@ -493,24 +512,35 @@ export function installBarShown() {
     && !state.installSteps;
 }
 
-export function installBar() {
-  return el("div", { class: "install-bar", role: "region", "aria-label": "Install Hangry" }, [
-    el("img", { src: "/icons/icon-192.png", alt: "" }),
-    el("span", { class: "copy" }, [
-      el("strong", { text: "Install Hangry" }),
-      el("span", { text: "One tap from your home screen." }),
-    ]),
-    el("button", { class: "install-go", type: "button", text: "Install", onclick: () => { void onInstall(); } }),
-    el("button", {
-      class: "install-close",
-      type: "button",
-      "aria-label": "Close install prompt",
-      onclick: () => {
-        state.installBannerDismissed = true;
-        render();
-      },
-    }, [icon("close")]),
-  ]);
+/**
+ * The kit draws and removes the banner itself and only looks at shouldShow when it is asked to.
+ * render() calls this each time, and the kit is only asked again when the answer flips.
+ * Closing it lasts for this page: the kit keeps it in sessionStorage, which a reload would
+ * otherwise keep, so the first call on a page load clears it and the prompt comes back.
+ */
+export function syncInstallPrompt() {
+  const kit = window.AppKit?.installPrompt;
+  if (!kit) return;
+  const wanted = installPromptWanted();
+  if (installPromptStarted && wanted === installPromptWasWanted) return;
+  if (!installPromptStarted) {
+    try {
+      sessionStorage.removeItem(INSTALL_PROMPT_KEY);
+    } catch {
+      /* storage can be blocked */
+    }
+  }
+  installPromptStarted = true;
+  installPromptWasWanted = wanted;
+  kit.init({
+    appName: "Hangry",
+    iconUrl: "/icons/icon-192.png",
+    text: "One tap from your home screen.",
+    closeLabel: "Close install prompt",
+    storageKey: INSTALL_PROMPT_KEY,
+    dismiss: "session",
+    shouldShow: installPromptWanted,
+  });
 }
 
 function openInstallSteps() {
