@@ -22,6 +22,12 @@ Full `scripts/check.sh` takes about 8 to 10 minutes with 4 workers, mostly `test
 - If a single UI spec fails in the full run but passes alone without changes, report it as a flake with its name and size. Do not start another full run for it.
 - Once the full check is green after your last edit, stop testing. Do not rerun it or its parts just to re-confirm.
 
+## Tools
+
+- Search code and logs with the grep tool, find files with the glob tool, and view files with the read tool (use offset/limit for long logs). Do not use `rg`, `grep`, `cat`, `sed -n`, `head`, `tail` or `ls -R` in bash to read or search files. Trimming a command's own output (`scripts/check.sh 2>&1 | tail -80`) is fine.
+- Bash is for running commands (`scripts/check.sh`, `npm`, `npx tsx --test`, git). Keep grep tool searches to `src/` or `test/` paths; searching `dist/` or log files can fail on minified lines over 64 KB.
+- Create new files with the write tool. Never `cat > file`, heredocs or `echo >` into repo files, also not behind `cd ... &&`.
+
 ## UI specs and screenshots
 
 Every UI change needs a `test/ui/*.spec.ts` that asserts visible behavior and writes screenshots to gitignored `test/ui/screenshots/<feature>/`. Use fake data only: no real names, tokens, recovery codes, or production data. Mask secrets in shots (the calendar specs mask the feed URL). Read the PNGs before claiming the UI is done.
