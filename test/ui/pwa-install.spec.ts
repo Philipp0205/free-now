@@ -81,42 +81,48 @@ async function fireInstallPrompt(page: Page, outcome = "dismissed") {
 }
 
 const prompted = (page: Page) => page.evaluate(() => (window as unknown as { prompted?: number }).prompted ?? 0);
-const bar = (page: Page) => page.locator(".install-bar");
+/** The kit's install prompt (AppKit.installPrompt), mounted at the top of the page. */
+const bar = (page: Page) => page.locator("#ak-install-prompt");
+/** Where the kit remembers a close, in sessionStorage (this tab only). */
+const DISMISS_KEY = "hangry-install-prompt-dismissed";
 
 async function signedIn(page: Page) {
   await page.goto(hangry.baseUrl);
   await page.locator("nav.tabbar").waitFor();
 }
 
-/** The bar is a slim strip: no scrim, inside the viewport, and clear of the tab bar. */
+/** The banner is a card in the page flow: no scrim, inside the viewport, clear of the tab bar, easy to tap. */
 async function assertUnobtrusive(page: Page, width: number, height: number) {
   const box = await bar(page).boundingBox();
   const tabs = await page.locator("nav.tabbar").boundingBox();
   assert.ok(box && tabs);
-  assert.ok(box.x >= 0 && box.x + box.width <= width + 0.5, `the bar fits across ${width}`);
-  assert.ok(box.height <= 64, `the bar stays slim, got ${box.height}`);
-  assert.ok(box.y + box.height <= tabs.y, "the bar does not cover the tab bar");
-  assert.ok(box.y + box.height < height / 2, "the bar sits near the top");
-  assert.equal(await page.locator(".scrim").count(), 0, "no scrim behind the bar");
-  assert.equal(await page.locator(".sheet").count(), 0, "the bar is not a sheet");
+  assert.ok(box.x >= 0 && box.x + box.width <= width + 0.5, `the banner fits across ${width}`);
+  assert.ok(box.height <= 180, `the banner stays compact, got ${box.height}`);
+  assert.ok(box.y + box.height <= tabs.y, "the banner does not cover the tab bar");
+  assert.ok(box.y + box.height < height / 2, "the banner sits near the top");
+  assert.equal(await page.locator(".scrim").count(), 0, "no scrim behind the banner");
+  assert.equal(await page.locator(".sheet").count(), 0, "the banner is not a sheet");
   assert.equal(await page.getByText("Install Hangry as an app").count(), 0, "not the join-install sheet");
   const fit = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   assert.equal(fit.scroll, fit.client, `no horizontal scroll at ${width}`);
-  for (const target of [bar(page).getByRole("button", { name: "Install", exact: true }), bar(page).getByRole("button", { name: "Close install prompt" })]) {
+  const targets = [bar(page).getByRole("button", { name: "Close install prompt" })];
+  // Only the native-prompt variant has an Install button.
+  if (await bar(page).getByRole("button", { name: "Install", exact: true }).count()) targets.push(bar(page).getByRole("button", { name: "Install", exact: true }));
+  for (const target of targets) {
     const hit = await target.boundingBox();
     assert.ok(hit && hit.height >= 44 && hit.width >= 44, "comfortable tap targets");
   }
 }
 
 for (const [width, height] of SIZES) {
-  test(`at ${width}: the install bar shows when not installed, closes for this page, and returns on reload`, { timeout: 60_000 }, async () => {
+  test(`at ${width}: the install banner shows when not installed, closes for this page, and returns on reload`, { timeout: 60_000 }, async () => {
     const token = await person();
     const welcomeContext = await phone(width, height);
     const welcome = await welcomeContext.newPage();
     await welcome.goto(hangry.baseUrl);
     await welcome.locator("#name").waitFor();
     await welcome.waitForTimeout(500);
-    assert.equal(await bar(welcome).count(), 0, "no install bar on the welcome screen");
+    assert.equal(await bar(welcome).count(), 0, "no install banner on the welcome screen");
     await welcomeContext.close();
 
     const context = await phone(width, height, { token });
@@ -124,8 +130,17 @@ for (const [width, height] of SIZES) {
     const errors = watch(page);
     await signedIn(page);
     await bar(page).waitFor();
+    assert.equal(await bar(page).getAttribute("data-variant"), "generic", "no browser prompt yet: a hint, no button");
+    assert.equal(await bar(page).getByRole("button", { name: "Install", exact: true }).count(), 0);
     await assertUnobtrusive(page, width, height);
-    await shot(page, `bar-w${width}.png`);
+    await shot(page, `banner-hint-w${width}.png`);
+
+    // The browser offers its prompt: the banner gets a native Install button.
+    await fireInstallPrompt(page);
+    await bar(page).getByRole("button", { name: "Install", exact: true }).waitFor();
+    assert.equal(await bar(page).getAttribute("data-variant"), "install");
+    await assertUnobtrusive(page, width, height);
+    await shot(page, `banner-install-w${width}.png`);
 
     await bar(page).getByRole("button", { name: "Close install prompt" }).click();
     await bar(page).waitFor({ state: "detached" });
@@ -135,7 +150,7 @@ for (const [width, height] of SIZES) {
     await page.waitForTimeout(500);
     assert.equal(await bar(page).count(), 0, "closed for this page");
     assert.equal(await page.evaluate(() => Object.keys(localStorage).filter((key) => /install|banner/i.test(key)).sort().join()), "fn_install_later", "closing writes nothing to localStorage");
-    assert.equal(await page.evaluate(() => sessionStorage.length), 0, "closing writes nothing to sessionStorage");
+    assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), DISMISS_KEY), "1", "the kit remembers the close for this tab only");
 
     await page.reload();
     await page.locator("nav.tabbar").waitFor();
@@ -145,14 +160,14 @@ for (const [width, height] of SIZES) {
   });
 }
 
-test("the setup screen and the notification sheet do not stack with the install bar", { timeout: 60_000 }, async () => {
+test("the setup screen and the notification sheet do not stack with the install banner", { timeout: 60_000 }, async () => {
   const fresh = await call("POST", "/api/auth/start", undefined, { name: "Fake Bea" });
   const setupContext = await phone(360, 640, { token: fresh.token });
   const setup = await setupContext.newPage();
   await setup.goto(hangry.baseUrl);
   await setup.locator("#circle-name").waitFor();
   await setup.waitForTimeout(500);
-  assert.equal(await bar(setup).count(), 0, "no bar while the circle setup is showing");
+  assert.equal(await bar(setup).count(), 0, "no banner while the circle setup is showing");
   await setupContext.close();
 
   const token = await person();
@@ -162,7 +177,7 @@ test("the setup screen and the notification sheet do not stack with the install 
   await page.goto(hangry.baseUrl);
   const sheet = page.getByRole("dialog", { name: "Get started" });
   await sheet.waitFor();
-  assert.equal(await bar(page).count(), 0, "no bar behind the notification sheet");
+  assert.equal(await bar(page).count(), 0, "no banner behind the notification sheet");
   await sheet.getByRole("button", { name: "Not now" }).click();
   await sheet.waitFor({ state: "detached" });
   await bar(page).waitFor();
@@ -171,7 +186,24 @@ test("the setup screen and the notification sheet do not stack with the install 
   await context.close();
 });
 
-test("with the browser prompt ready, the Account row and the bar both call prompt()", { timeout: 60_000 }, async () => {
+test("the banner stays out of chat and the past list, which are full screens of their own", { timeout: 60_000 }, async () => {
+  const token = await person();
+  const context = await phone(360, 640, { token });
+  const page = await context.newPage();
+  const errors = watch(page);
+  await signedIn(page);
+  await bar(page).waitFor();
+  await page.locator(".tabbar").getByRole("button", { name: /^Chat/ }).click();
+  await page.locator(".chat-head, .chat-log").first().waitFor();
+  await bar(page).waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Back", exact: true }).first().click();
+  await page.locator("nav.tabbar").waitFor();
+  await bar(page).waitFor();
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test("with the browser prompt ready, the Account row and the banner both call prompt()", { timeout: 60_000 }, async () => {
   const token = await person();
   const context = await phone(360, 640, { token });
   const page = await context.newPage();
@@ -190,7 +222,7 @@ test("with the browser prompt ready, the Account row and the bar both call promp
   await page.waitForFunction(() => (window as unknown as { prompted?: number }).prompted === 1);
   assert.equal(await page.locator(".sheet").count(), 0, "the native prompt replaces the steps sheet");
 
-  // The browser may offer the prompt again; the bar's Install does the same thing.
+  // The browser may offer the prompt again; the banner's Install does the same thing.
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await page.getByRole("heading", { name: "You", exact: true, level: 1 }).waitFor();
   await page.locator(".tabbar").getByRole("button", { name: "Now", exact: true }).click();
@@ -198,7 +230,7 @@ test("with the browser prompt ready, the Account row and the bar both call promp
   await bar(page).getByRole("button", { name: "Install", exact: true }).click();
   await page.waitForFunction(() => (window as unknown as { prompted?: number }).prompted === 2);
   assert.equal(await page.locator(".sheet").count(), 0);
-  // Accepting installs it: the bar goes and the row reads Installed.
+  // Accepting installs it: the banner goes and the row reads Installed.
   await bar(page).waitFor({ state: "detached" });
   assert.equal(await page.evaluate(() => localStorage.getItem("fn_installed")), "1");
   await openYouSection(page, "Account");
@@ -209,7 +241,7 @@ test("with the browser prompt ready, the Account row and the bar both call promp
   await context.close();
 });
 
-test("iPhone Safari has no prompt: the row and the bar open the steps sheet with Share, then Add to Home Screen", { timeout: 60_000 }, async () => {
+test("iPhone Safari has no prompt: the banner shows the Share steps and the row opens the steps sheet", { timeout: 60_000 }, async () => {
   const token = await person();
   const context = await phone(360, 640, { token, userAgent: IOS_SAFARI });
   const page = await context.newPage();
@@ -217,32 +249,29 @@ test("iPhone Safari has no prompt: the row and the bar open the steps sheet with
   await signedIn(page);
   await bar(page).waitFor();
 
-  const dialog = page.getByRole("dialog", { name: "Install Hangry" });
-  await bar(page).getByRole("button", { name: "Install", exact: true }).click();
-  await dialog.waitFor();
-  assert.equal(await bar(page).count(), 0, "the bar steps aside while the steps are open");
-  const steps = await dialog.locator(".guide-steps li").allInnerTexts();
-  assert.equal(steps.length, 3);
-  assert.match(steps[0], /Tap the Share button/);
-  assert.match(steps[1], /Tap Add to Home Screen/);
-  assert.equal(await dialog.getByRole("button", { name: "Install app" }).count(), 0, "no fake install button without a prompt");
-  assert.equal(await page.getByText("Install Hangry as an app").count(), 0);
-  const box = await dialog.getByRole("button", { name: "Close" }).boundingBox();
-  assert.ok(box && box.y + box.height <= 640 + 0.5 && box.height >= 44, "Close is on screen and easy to tap");
-  await shot(page, "ios-steps-bar-w360.png");
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await dialog.waitFor({ state: "detached" });
-  await bar(page).waitFor();
+  assert.equal(await bar(page).getAttribute("data-variant"), "ios");
+  assert.equal(await bar(page).getByRole("button", { name: "Install", exact: true }).count(), 0, "no fake install button without a prompt");
+  const inline = await bar(page).locator(".ak-ip-steps li").allInnerTexts();
+  assert.equal(inline.length, 2);
+  assert.match(inline[0], /Tap Share/);
+  assert.match(inline[1], /Add to Home Screen/);
+  await assertUnobtrusive(page, 360, 640);
+  await shot(page, "ios-banner-w360.png");
 
+  const dialog = page.getByRole("dialog", { name: "Install Hangry" });
   await openYouSection(page, "Account");
   await page.locator("button.install-row").click();
   await dialog.waitFor();
+  assert.equal(await bar(page).count(), 0, "the banner steps aside while the steps are open");
   const rowSteps = (await dialog.locator(".guide-steps li").allInnerTexts()).join(" ").replace(/\s+/g, " ");
   assert.match(rowSteps, /Share button.*Add to Home Screen/);
   assert.equal(await dialog.getByRole("button", { name: "Install app" }).count(), 0);
+  const box = await dialog.getByRole("button", { name: "Close" }).boundingBox();
+  assert.ok(box && box.y + box.height <= 640 + 0.5 && box.height >= 44, "Close is on screen and easy to tap");
   await shot(page, "ios-steps-row-w360.png");
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
+  await bar(page).waitFor();
   assert.equal(await prompted(page), 0, "no prompt() was ever called");
   assert.deepEqual(errors, []);
   await context.close();
@@ -264,7 +293,7 @@ test("an Android browser without a prompt gets the menu steps from the Account r
   await context.close();
 });
 
-test("installed (standalone): no install bar, and the Account row reads Installed and is disabled", { timeout: 60_000 }, async () => {
+test("installed (standalone): no install banner, and the Account row reads Installed and is disabled", { timeout: 60_000 }, async () => {
   const token = await person();
   const context = await phone(360, 640, { token, standalone: true });
   const page = await context.newPage();
@@ -290,7 +319,7 @@ test("installed (standalone): no install bar, and the Account row reads Installe
   await context.close();
 });
 
-test("at 1280: the bar stays a slim strip on the desktop layout", { timeout: 60_000 }, async () => {
+test("at 1280: the banner stays a compact card on the desktop layout", { timeout: 60_000 }, async () => {
   const token = await person();
   const context = await hangry.browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: UA });
   await skipWhatsNew(context);
@@ -303,9 +332,9 @@ test("at 1280: the bar stays a slim strip on the desktop layout", { timeout: 60_
   await signedIn(page);
   await bar(page).waitFor();
   const box = await bar(page).boundingBox();
-  assert.ok(box && box.width <= 480 && box.height <= 64, "phone-width strip, not full width");
+  assert.ok(box && box.width <= 608 && box.height <= 180, "a capped card, not full width");
   assert.equal(await page.locator(".scrim").count(), 0);
-  await shot(page, "bar-w1280.png");
+  await shot(page, "banner-w1280.png");
   assert.deepEqual(errors, []);
   await context.close();
 });

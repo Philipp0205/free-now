@@ -1,5 +1,6 @@
 import http from "node:http";
 import type { Config } from "../config.js";
+import { HttpError as KitHttpError, SECURITY_HEADERS, readJson as kitReadJson, sendEmpty, sendJson } from "../app-kit/http.ts";
 
 export class HttpError extends Error {
   constructor(
@@ -14,79 +15,34 @@ export class HttpError extends Error {
   }
 }
 
+/** Same limit as before: a JSON body over 32 KiB is a 413. */
+const JSON_MAX_BYTES = 32_768;
+
+/**
+ * The kit reads the body. Its errors are the kit's own HttpError, which the app's error handler
+ * does not know, so they are turned into Hangry's HttpError here (same status, same message).
+ */
 export async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const text = await readBody(req);
-  if (!text.trim()) return {};
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new HttpError(400, "invalid JSON");
+    return await kitReadJson(req, { max: JSON_MAX_BYTES });
+  } catch (error) {
+    if (error instanceof KitHttpError) throw new HttpError(error.status, error.message);
+    throw error;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new HttpError(400, "expected a JSON object");
-  }
-  return parsed as Record<string, unknown>;
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > 32_768) {
-        reject(new HttpError(413, "body too large"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
-  });
-}
-
-export function sendJson(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
-  if (status === 204) {
-    sendEmpty(res, 204);
-    return;
-  }
-  const json = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(json),
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
-    ...headers,
-  });
-  res.end(json);
-}
+export { sendEmpty, sendJson };
 
 /** Static docs: same bytes for everyone, no session, no user data. */
 export function sendPublic(req: http.IncomingMessage, res: http.ServerResponse, type: string, text: string): void {
   res.writeHead(200, {
+    ...SECURITY_HEADERS,
     "content-type": type,
     "content-length": Buffer.byteLength(text),
     "cache-control": "no-cache",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
   });
   if (req.method === "HEAD") res.end();
   else res.end(text);
-}
-
-export function sendEmpty(res: http.ServerResponse, status: number): void {
-  res.writeHead(status, {
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
-  });
-  res.end();
 }
 
 export function safeDecode(value: string): string {

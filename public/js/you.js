@@ -186,11 +186,26 @@ function accountSection() {
     ]),
     flicPanel(code),
     installPanel(),
+    donatePanel(),
     el("div", { class: "panel stack" }, [
       el("button", { class: "btn danger", type: "button", text: "Leave circle", onclick: onLeave }),
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),
     ]),
   ];
+}
+
+const DONATE_URL = "https://www.paypal.me/philippkurrle1";
+
+/** A voluntary tip. Quiet on purpose: one button in Account, no amounts, nothing opens by itself. */
+function donatePanel() {
+  const kit = window.AppKit?.donate;
+  if (!kit) return null;
+  const button = kit.button({ url: DONATE_URL });
+  button.classList.add("ak-btn-secondary");
+  button.addEventListener("click", () => {
+    kit.show({ url: DONATE_URL, appName: "Hangry" });
+  });
+  return el("div", { class: "panel donate-panel" }, [button]);
 }
 
 function installPanel() {

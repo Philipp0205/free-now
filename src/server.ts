@@ -2,6 +2,7 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { clearExpiredLocations, HISTORY_DAYS, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
+import { installGracefulShutdown } from "./app-kit/shutdown.ts";
 import { syncCalendarFeeds } from "./calendar/freebusy.js";
 import { startPmtilesFetch } from "./map/pmtiles-fetch.js";
 import { createNoopPushSender, createWebPushSender } from "./push/push.js";
@@ -77,17 +78,13 @@ server.listen(config.port, "0.0.0.0", () => {
   void startPmtilesFetch(config)?.catch(() => {});
 });
 
-function shutdown(): void {
-  clearInterval(sweepTimer);
-  clearInterval(locationTimer);
-  clearInterval(calendarTimer);
-  clearTimeout(calendarBootTimer);
-  server.close(() => {
+installGracefulShutdown({
+  server,
+  onClose: () => {
+    clearInterval(sweepTimer);
+    clearInterval(locationTimer);
+    clearInterval(calendarTimer);
+    clearTimeout(calendarBootTimer);
     db.close();
-    process.exit(0);
-  });
-  setTimeout(() => process.exit(0), 5000).unref();
-}
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+  },
+});

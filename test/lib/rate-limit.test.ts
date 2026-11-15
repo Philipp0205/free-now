@@ -53,7 +53,8 @@ function fakeRequest(forwarded: string | string[] | undefined, remote = "10.0.0.
 test("the client key is the rightmost forwarded hop, else the socket", () => {
   assert.equal(clientKey(fakeRequest("203.0.113.9, 198.51.100.10")), "198.51.100.10");
   assert.equal(clientKey(fakeRequest("198.51.100.10")), "198.51.100.10");
-  assert.equal(clientKey(fakeRequest(["198.51.100.11", "203.0.113.1"])), "198.51.100.11");
+  // Several header lines are one list, so the last line's last hop is the proxy's.
+  assert.equal(clientKey(fakeRequest(["198.51.100.11", "203.0.113.1"])), "203.0.113.1");
   assert.equal(clientKey(fakeRequest(undefined)), "10.0.0.1");
   assert.equal(clientKey(fakeRequest(" , ")), "10.0.0.1");
   assert.equal(clientKey(fakeRequest("a/b")), "10.0.0.1");
