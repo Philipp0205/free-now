@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-15-faster-loading",
+    "date": "2026-11-15",
+    "title": "Faster loading, reliable updates",
+    "bullets": [
+      "Hangry now opens faster, especially on a slow connection.",
+      "New versions reach your phone reliably, so you stop running an old copy.",
+      "Nothing changes in how the app looks or works."
+    ]
+  },
+  {
     "id": "2026-11-14-meet-the-goblin",
     "date": "2026-11-14",
     "title": "Meet the Goblin",

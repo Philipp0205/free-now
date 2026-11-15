@@ -4,20 +4,30 @@ import test from "node:test";
 import vm from "node:vm";
 import zlib from "node:zlib";
 
-const SOURCE = fs.readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
+import { builtPrecache, readBuilt } from "./built.js";
+
+const SOURCE = fs.readFileSync(new URL("../sw/sw.js", import.meta.url), "utf8");
+const APP = fs.readFileSync(new URL("../public/js/app.js", import.meta.url), "utf8");
+/** The worker source is a module. The sandbox runs it as a script, with the Workbox imports stubbed. */
+const SCRIPT = SOURCE.replace(/^import [^;]+;\n/m, "");
 
 type Reply = number | Error;
 
-/** Runs public/sw.js in a sandbox. fetch answers from `replies` in order; setTimeout fires at once and records the delay. */
-function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void> } = {}) {
+/** Runs sw/sw.js in a sandbox. fetch answers from `replies` in order; setTimeout fires at once and records the delay. */
+function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; cacheKeys?: string[] } = {}) {
   const replies = [...(options.replies ?? [])];
   const fetches: Array<{ url: string; body: string }> = [];
   const delays: number[] = [];
   const handlers: Record<string, (event: unknown) => void> = {};
   const order: string[] = [];
+  const precached: unknown[] = [];
+  const deleted: string[] = [];
   const sandbox: Record<string, unknown> = {
     URL,
     console,
+    precache: (entries: unknown) => { precached.push(entries); },
+    cleanupOutdatedCaches: () => {},
+    matchPrecache: async () => undefined,
     setTimeout: (fn: () => void, ms: number) => {
       delays.push(ms);
       queueMicrotask(fn);
@@ -30,8 +40,9 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void> } =
       if (next instanceof Error) throw next;
       return { status: next };
     },
-    caches: { open: async () => ({ addAll: async () => {} }), keys: async () => [] },
+    caches: { open: async () => ({}), keys: async () => options.cacheKeys ?? [], delete: async (key: string) => { deleted.push(key); return true; } },
     self: {
+      __WB_MANIFEST: [],
       location: { origin: "https://hangry.test" },
       addEventListener: (type: string, fn: (event: unknown) => void) => { handlers[type] = fn; },
       skipWaiting: () => {},
@@ -45,7 +56,7 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void> } =
     },
   };
   vm.createContext(sandbox);
-  vm.runInContext(SOURCE, sandbox);
+  vm.runInContext(SCRIPT, sandbox);
   const retryAck = sandbox.retryAck as (
     send: () => Promise<{ status: number }>,
     wait: (ms: number) => Promise<void>,
@@ -56,7 +67,7 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void> } =
     handlers.push({ data: { json: () => data }, waitUntil: (promise: Promise<unknown>) => { settled = promise; } });
     return { settled };
   }
-  return { retryAck, push, fetches, delays, order };
+  return { retryAck, push, fetches, delays, order, handlers, precached, deleted };
 }
 
 function sender(replies: Reply[]) {
@@ -132,9 +143,32 @@ test("a push without a row id shows the notification and sends no ack", async ()
   assert.deepEqual(worker.order, ["shown"]);
 });
 
-test("the service worker cache moved past v9", () => {
-  const version = Number(/const CACHE = "hangry-v(\d+)"/.exec(SOURCE)?.[1]);
-  assert.ok(version >= 10);
+test("the build label moved to v104 and the worker no longer keeps a cache name of its own", () => {
+  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v104");
+  const version = Number(/export const APP_VERSION = "hangry-v(\d+)"/.exec(APP)?.[1]);
+  assert.ok(version >= 104);
+  assert.doesNotMatch(SOURCE, /const CACHE = /);
+  assert.doesNotMatch(SOURCE, /const SHELL = /);
+});
+
+test("the worker precaches what the build lists, and activate deletes the old hangry-vN caches only", async () => {
+  const worker = loadWorker({ cacheKeys: ["hangry-v103", "hangry-v9", "workbox-precache-v2-https://hangry.test/", "hangry-runtime", "hangry-v1x", "other"] });
+  assert.deepEqual(worker.precached, [[]], "precache() gets self.__WB_MANIFEST");
+  let settled: Promise<unknown> = Promise.resolve();
+  worker.handlers.activate({ waitUntil: (promise: Promise<unknown>) => { settled = promise; } });
+  await settled;
+  assert.deepEqual(worker.deleted.sort(), ["hangry-runtime", "hangry-v103", "hangry-v9"]);
+});
+
+test("the built worker precaches the app shell, the bundle, the changelog, the manifest, the icons and the vendor files", () => {
+  const urls = builtPrecache();
+  for (const url of ["/", "/js/app.js", "/css/styles.css", "/whats-new.json", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/badge-96.png", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js"]) {
+    assert.ok(urls.includes(url), `${url} is precached`);
+  }
+  for (const url of ["/privacy", "/privacy.html", "/welcome", "/welcome.html", "/googlee48df27048aaa965.html", "/sw.js"]) {
+    assert.ok(!urls.includes(url), `${url} is not precached`);
+  }
+  assert.match(readBuilt("sw.js"), /addEventListener\(`push`|addEventListener\("push"/);
 });
 
 /** Reads an RGBA PNG written by scripts/generate-assets.mjs (8-bit, no interlace, filter 0 rows). */
@@ -180,14 +214,14 @@ test("the notification badge is a bold solid silhouette that fills most of the c
   assert.equal(pixels[3], 0, "clear in the corner");
 });
 
-test("the worker caches buzzer.js with the shell", () => {
-  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(SOURCE)?.[1] ?? "[]") as string[];
-  assert.ok(shell.includes("/js/buzzer.js"));
-});
-
-test("the worker caches every module under public/js with the shell", () => {
-  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(SOURCE)?.[1] ?? "[]") as string[];
+test("the built client bundles every module under public/js, buzzer.js included", () => {
+  const bundle = readBuilt("js/app.js");
+  assert.ok(builtPrecache().includes("/js/app.js"), "the bundle is precached");
+  assert.ok(builtPrecache().includes("/js/buzzer.js"), "the buzzer module is precached");
+  // Minified, so check for strings that must survive: the worker registration and an export of the buzzer module.
+  assert.match(bundle, /serviceWorker\.register\(`\/sw\.js`\)|serviceWorker\.register\("\/sw\.js"\)/);
+  assert.match(readBuilt("js/buzzer.js"), /export\s*\{/);
   const modules = fs.readdirSync(new URL("../public/js/", import.meta.url)).filter((name) => name.endsWith(".js"));
   assert.ok(modules.length > 0);
-  for (const name of modules) assert.ok(shell.includes(`/js/${name}`), `/js/${name} is in SHELL`);
+  assert.ok(bundle.length < modules.reduce((sum, name) => sum + fs.statSync(new URL(`../public/js/${name}`, import.meta.url)).size, 0), "the bundle is smaller than the sources");
 });

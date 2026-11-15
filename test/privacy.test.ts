@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { api, withApp } from "./http.js";
+import { builtPrecache } from "./built.js";
 
 const read = (file: string) => fs.readFileSync(new URL(file, import.meta.url), "utf8");
 const PRIVACY = read("../public/privacy.html");
 const INDEX = read("../public/index.html");
-const SW = read("../public/sw.js");
+const SW = read("../sw/sw.js");
 const ROBOTS = read("../public/robots.txt");
 const VERIFY_PATH = "/googlee48df27048aaa965.html";
 const VERIFY_BODY = "google-site-verification: googlee48df27048aaa965.html";
@@ -100,9 +101,9 @@ test("index.html carries the Search Console meta tag", () => {
 });
 
 test("the service worker leaves the verification file and /privacy alone", () => {
-  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(SW)?.[1] ?? "[]") as string[];
+  const shell = builtPrecache();
   for (const pathname of [VERIFY_PATH, "/privacy", "/privacy/"]) {
-    assert.ok(!shell.includes(pathname), `${pathname} is not in SHELL`);
+    assert.ok(!shell.includes(pathname), `${pathname} is not precached`);
     assert.ok(SW.includes(`url.pathname === "${pathname}"`), `${pathname} is skipped`);
   }
   const fetchHandler = SW.slice(SW.indexOf('addEventListener("fetch"'), SW.indexOf('addEventListener("push"'));

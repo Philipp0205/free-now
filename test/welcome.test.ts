@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { api, withApp } from "./http.js";
+import { builtPrecache, servedIndex } from "./built.js";
 
 const WELCOME = fs.readFileSync(new URL("../public/welcome.html", import.meta.url), "utf8");
-const INDEX = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+/** What the server answers `/` with: the built shell after `npm run build`, else the source page. */
+const INDEX = servedIndex();
 const MANIFEST = JSON.parse(fs.readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"));
-const SW = fs.readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
 
 async function get(port: number, pathname: string, init: RequestInit = {}) {
   const response = await fetch(`http://127.0.0.1:${port}${pathname}`, { redirect: "manual", ...init });
@@ -98,9 +99,9 @@ test("the PWA still starts at / and the worker never caches /welcome as the shel
   assert.equal(MANIFEST.start_url, "/");
   assert.equal(MANIFEST.scope, "/");
   assert.equal(MANIFEST.id, "/");
-  const shell = /const SHELL = (\[[^\]]*\]);/.exec(SW)?.[1] ?? "[]";
-  assert.ok(JSON.parse(shell).includes("/"));
-  assert.ok(!JSON.parse(shell).includes("/welcome"), "the landing page is not part of the app shell");
+  const shell = builtPrecache();
+  assert.ok(shell.includes("/"), "the app shell is precached at /");
+  assert.ok(!shell.includes("/welcome") && !shell.includes("/welcome.html"), "the landing page is not part of the app shell");
 });
 
 /** Visible text of the landing page, without tags or comments. */

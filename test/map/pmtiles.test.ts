@@ -9,6 +9,7 @@ import { loadConfig } from "../../src/config.js";
 import { parsePmtilesHeader, pmtilesHeadBytes, type PmtilesInfo } from "../../src/map/pmtiles.js";
 import { MAX_RANGE_BYTES, parseRange, serveRangeFile } from "../../src/map/range-file.js";
 import { api, withApp } from "../http.js";
+import { builtPrecache } from "../built.js";
 
 /** A PMTiles v3 header for a Stuttgart-sized box, z0–15. */
 function pmtilesHeader(options: { magic?: string; version?: number; bounds?: number[]; zoom?: [number, number] } = {}): Buffer {
@@ -305,8 +306,8 @@ test("without MAP_PMTILES_PATH the meta has no vector basemap and /tiles/ is not
 });
 
 test("the service worker leaves /tiles/ and range requests alone and keeps the vendor file", () => {
-  const sw = fs.readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(sw)?.[1] ?? "[]") as string[];
+  const sw = fs.readFileSync(new URL("../../sw/sw.js", import.meta.url), "utf8");
+  const shell = builtPrecache();
   assert.ok(shell.includes("/vendor/protomaps-leaflet/protomaps-leaflet.js"));
   assert.ok(shell.includes("/vendor/leaflet/leaflet.js"));
   assert.ok(shell.includes("/vendor/leaflet/leaflet.css"));
@@ -565,7 +566,7 @@ test("/vendor files are cached for a week; the app shell is still checked every 
         await response.arrayBuffer();
       }
     }
-    for (const file of ["/", "/js/app.js", "/js/map.js", "/css/styles.css", "/sw.js", "/whats-new.json"]) {
+    for (const file of ["/", "/js/app.js", "/css/styles.css", "/sw.js", "/whats-new.json"]) {
       const response = await fetch(`http://127.0.0.1:${port}${file}`);
       assert.equal(response.headers.get("cache-control"), "no-cache", file);
       await response.arrayBuffer();
