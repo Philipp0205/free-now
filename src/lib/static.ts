@@ -4,7 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sendJson } from "./http.js";
 
-export const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
+/** The repo root (or /app in the image). Same depth under tsx (src/lib) and node (dist/lib). */
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** `npm run build` writes the bundled client here, next to the server in dist/. */
+export const CLIENT_DIR = path.join(ROOT_DIR, "dist", "client");
+
+/** The built client when there is one, else the raw sources in public/ (npm start before any build). */
+export const PUBLIC_DIR = fs.existsSync(path.join(CLIENT_DIR, "index.html")) ? CLIENT_DIR : path.join(ROOT_DIR, "public");
 
 /** Leaflet and protomaps-leaflet under /vendor: a week, then checked again. */
 const VENDOR_CACHE = "public, max-age=604800";

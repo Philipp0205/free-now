@@ -1,16 +1,23 @@
-const CACHE = "hangry-v103";
+import { cleanupOutdatedCaches, matchPrecache, precache } from "workbox-precaching";
+
 /** Wait before each ack retry. One first try, then up to three more. */
 const ACK_DELAYS = [1000, 3000, 9000];
-const SHELL = ["/", "/css/styles.css", "/js/app.js", "/js/keyboard.js", "/js/install-guide.js", "/js/when.js", "/js/place.js", "/js/push-sheet.js", "/js/whats-new.js", "/js/card-grad.js", "/js/calendar-feed.js", "/js/calendar-month.js", "/js/freebusy.js", "/js/status.js", "/js/buzzer.js", "/js/mentions.js", "/js/alerts.js", "/js/avatars.js", "/js/busy-preview.js", "/js/calendar-sync.js", "/js/cards.js", "/js/chat.js", "/js/circles.js", "/js/composer.js", "/js/event-sheets.js", "/js/events.js", "/js/flic.js", "/js/home.js", "/js/keyboard-ui.js", "/js/lib.js", "/js/map-card.js", "/js/members.js", "/js/nav.js", "/js/plan-share.js", "/js/push-install.js", "/js/render.js", "/js/replies.js", "/js/session.js", "/js/sheets.js", "/js/state.js", "/js/status-ui.js", "/js/whats-new-ui.js", "/js/where.js", "/js/you.js", "/whats-new.json", "/js/map.js", "/js/map-pin.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css", "/vendor/protomaps-leaflet/protomaps-leaflet.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"];
+/** Pages and files fetched after the install. Workbox owns the precache; this one is ours. */
+const RUNTIME = "hangry-runtime";
+/** Caches of the hand-written worker (hangry-v103 and older). Deleted on activate so phones do not keep them. */
+const OLD_CACHE = /^hangry-v\d+$/;
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+// The Vite build fills in the list: app shell, bundled JS and CSS, whats-new.json, icons, manifest, vendor files.
+precache(self.__WB_MANIFEST);
+cleanupOutdatedCaches();
+
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))),
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => OLD_CACHE.test(key) || key === RUNTIME).map((key) => caches.delete(key)))),
   );
   self.clients.claim();
 });
@@ -27,17 +34,23 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/tiles/") || event.request.headers.has("range")) return;
   // Share pages carry a plan title: never keep them, fall back to the app shell offline.
   if (url.pathname.startsWith("/p/")) {
-    event.respondWith(fetch(event.request).catch(() => caches.match("/")));
+    event.respondWith(fetch(event.request).catch(() => matchPrecache("/")));
     return;
   }
   event.respondWith(
     fetch(event.request)
       .then((response) => {
         const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        caches.open(RUNTIME).then((cache) => cache.put(event.request, copy)).catch(() => {});
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))),
+      .catch(() =>
+        caches
+          .open(RUNTIME)
+          .then((cache) => cache.match(event.request))
+          .then((cached) => cached || matchPrecache(event.request))
+          .then((cached) => cached || matchPrecache("/")),
+      ),
   );
 });
 

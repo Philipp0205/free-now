@@ -34,10 +34,11 @@ Every UI change needs a `test/ui/*.spec.ts` that asserts visible behavior and wr
 
 For user-facing changes:
 
-- Bump `const CACHE = "hangry-vN"` in `public/sw.js` and `const APP_VERSION` in `public/js/app.js` to the same next label. `test/whats-new.test.ts` checks they match and that the service worker caches `/js/whats-new.js` and `/whats-new.json`.
-- Add a newest-first entry to `public/whats-new.json`: `id` matching `^[a-z0-9-]{1,64}$` (usually `YYYY-MM-DD-short-slug`), `date` as `YYYY-MM-DD`, `title` of at most 60 characters, and 2 to 4 bullets of at most 140 characters each. No em dashes. Add or update a test in `test/whats-new.test.ts` for the new entry, and keep older entries.
+- Bump `export const APP_VERSION` in `public/js/app.js` to the next `hangry-vN` label. It is the only build label, and feedback sends it. There is no `CACHE` constant and no hand-maintained `SHELL` list: the service worker source is `sw/sw.js`, and Vite (`vite.config.ts`, vite-plugin-pwa `injectManifest`) builds it into `dist/client/sw.js` with a Workbox precache of the app shell, bundled JS and CSS, `/whats-new.json`, icons, manifest and vendor files. A new build gets new precache revisions, and on activate the worker deletes old `hangry-vN` caches.
+- Add a newest-first entry to `public/whats-new.json`: `id` matching `^[a-z0-9-]{1,64}$` (usually `YYYY-MM-DD-short-slug`), `date` as `YYYY-MM-DD`, `title` of at most 60 characters, and 2 to 4 bullets of at most 140 characters each. No em dashes. Add or update a test in `test/whats-new.test.ts` for the new entry, and keep older entries. `test/whats-new.test.ts` also checks `APP_VERSION` and that the built worker precaches `/whats-new.json`.
+- `npm run build` runs `tsc` (server, `dist/`) then `vite build` (client, `dist/client/`). The server serves `dist/client` when it exists and raw `public/` otherwise. Tests that read the built worker or bundle need the build first. `scripts/check.sh` runs `npm ci`, typecheck, build, `npm test` and `npm run test:ui` in that order, so a partial test run after a source change needs `npm run build` first.
 
-Docs-only or test-only changes do not bump the version or add a What's New entry. Internal folder moves that change public URLs bump the cache label but do not add a What's New entry.
+Docs-only or test-only changes do not bump the version or add a What's New entry. Internal folder moves that change public URLs bump `APP_VERSION` but do not add a What's New entry.
 
 ## Style
 

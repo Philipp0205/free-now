@@ -311,9 +311,12 @@ test("serves the installable shell", async () => {
     assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512" && icon.purpose === "maskable"));
 
     const sw = await fetch(`${origin}/sw.js`);
+    assert.equal(sw.status, 200);
+    assert.equal(sw.headers.get("cache-control"), "no-cache");
     const source = await sw.text();
-    assert.match(source, /title: "Hangry"/);
-    assert.match(source, /addEventListener\("push"/);
+    // The built worker is minified, so the quotes may be backticks.
+    assert.match(source, /title: ?["`]Hangry["`]/);
+    assert.match(source, /addEventListener\(["`]push["`]/);
     assert.match(source, /showNotification/);
 
     const icon = await fetch(`${origin}/icons/icon-192.png`);
