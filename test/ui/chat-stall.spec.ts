@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { Page, Route } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, useHangry } from "./harness.js";

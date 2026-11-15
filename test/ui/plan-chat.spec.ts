@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { Browser, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
@@ -11,7 +11,7 @@ let browser: Browser;
 let baseUrl = "";
 let closeServer: () => Promise<void> = async () => {};
 
-test.before(async () => {
+test.beforeAll(async () => {
   const server = await startServer();
   baseUrl = server.baseUrl;
   closeServer = server.close;
@@ -26,7 +26,7 @@ async function launch(): Promise<Browser> {
   return b;
 }
 
-test.after(async () => {
+test.afterAll(async () => {
   await browser?.close();
   await closeServer();
 });

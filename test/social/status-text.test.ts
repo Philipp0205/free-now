@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import { builtPrecache, readBuilt } from "../built.js";
 import test from "node:test";
 import {
   activeStatus,
@@ -147,8 +147,9 @@ test("busy presets: 1 hour, 2 hours, 6pm and the end of tomorrow", () => {
   assert.equal(untilText(presets[2].until, NOW), "until 18:00");
 });
 
-test("the worker caches status.js with the shell", () => {
-  const sw = fs.readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-  const shell = JSON.parse(/const SHELL = (\[[^\]]*\]);/.exec(sw)?.[1] ?? "[]") as string[];
-  assert.ok(shell.includes("/js/status.js"));
+test("the built client ships the status code, and the worker precaches the bundle that holds it", () => {
+  const bundle = readBuilt("js/app.js");
+  assert.ok(bundle.includes("Until tomorrow"), "busyUntilPresets is in the bundle");
+  assert.ok(bundle.includes("Europe/Berlin"), "STATUS_TZ is in the bundle");
+  assert.ok(builtPrecache().includes("/js/app.js"));
 });

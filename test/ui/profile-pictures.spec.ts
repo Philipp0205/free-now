@@ -4,7 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "@playwright/test";
 import zlib from "node:zlib";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
@@ -152,7 +152,7 @@ async function choosePhoto(page: Page, file: string) {
   await (await chooser).setFiles(file);
 }
 
-test.before(async () => {
+test.beforeAll(async () => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hangry-pp-ui-"));
   const dbFile = path.join(tmpRoot, "ui.sqlite");
   const db = openDb(dbFile);
@@ -172,7 +172,7 @@ test.before(async () => {
   catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
 });
 
-test.after(async () => {
+test.afterAll(async () => {
   await browser?.close();
   await closeServer();
 });

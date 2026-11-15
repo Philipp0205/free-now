@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { UA, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";

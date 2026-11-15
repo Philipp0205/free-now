@@ -11,6 +11,7 @@ import {
   validId,
 } from "../public/js/whats-new.js";
 import { api, withApp } from "./http.js";
+import { builtPrecache, readBuilt } from "./built.js";
 
 const read = (file: string) => fs.readFileSync(new URL(file, import.meta.url), "utf8");
 const RAW = JSON.parse(read("../public/whats-new.json")) as Array<{
@@ -66,9 +67,9 @@ test("the card Share entry is in the changelog, in plain words without an em das
   for (const text of [share.title, ...share.bullets]) assert.ok(!text.includes("\u2014"), text);
 });
 
-test("the Meet the Goblin entry is the newest, in plain words without an em dash", () => {
-  const top = RAW[0];
-  assert.equal(top.id, "2026-11-14-meet-the-goblin");
+test("the Meet the Goblin entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-14-meet-the-goblin")!;
+  assert.ok(top, "Meet the Goblin entry");
   assert.equal(top.date, "2026-11-14");
   assert.equal(top.title, "Meet the Goblin");
   assert.equal(top.bullets.length, 2);
@@ -642,23 +643,33 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the service worker caches the changelog and matches the app's build label", () => {
-  const sw = read("../public/sw.js");
-  const cache = /const CACHE = "(hangry-v(\d+))"/.exec(sw);
-  assert.equal(cache?.[1], "hangry-v103");
-  const shell = /const SHELL = (\[[^\]]*\])/.exec(sw)?.[1] ?? "[]";
-  const paths = JSON.parse(shell) as string[];
-  assert.ok(paths.includes("/js/whats-new.js"));
+test("the build label is hangry-v104 and the built worker precaches the changelog, the bundle and the vendor files", () => {
+  const app = read("../public/js/app.js");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v104");
+  const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
-  assert.ok(paths.includes("/js/map-pin.js"));
+  assert.ok(paths.includes("/js/app.js"));
+  assert.ok(paths.includes("/css/styles.css"));
   assert.ok(paths.includes("/vendor/leaflet/leaflet.js"));
   assert.ok(paths.includes("/vendor/leaflet/leaflet.css"));
-  assert.ok(paths.includes("/js/status.js"));
-  assert.ok(paths.includes("/js/mentions.js"));
-  assert.ok(paths.includes("/js/calendar-month.js"));
-  assert.ok(paths.includes("/js/freebusy.js"));
-  const app = read("../public/js/app.js");
-  assert.equal(/const APP_VERSION = "([^"]+)"/.exec(app)?.[1], cache?.[1]);
+  assert.ok(paths.includes("/vendor/protomaps-leaflet/protomaps-leaflet.js"));
+  // The whats-new code is bundled into the app, and no cache name is kept by hand any more.
+  assert.ok(readBuilt("js/app.js").includes("fn_whats_new_seen"));
+  assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
+});
+
+test("the faster loading entry is the newest, in plain words without an em dash, and older entries are kept", () => {
+  const top = RAW[0];
+  assert.equal(top.id, "2026-11-15-faster-loading");
+  assert.equal(top.date, "2026-11-15");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(top.bullets.join(" "), /faster/i);
+  assert.match(top.bullets.join(" "), /update|version/i);
+  assert.ok(RAW.some((item) => item.id === "2026-11-14-meet-the-goblin"), "Meet the Goblin is kept");
+  assert.ok(RAW.some((item) => item.id === "2026-11-07-plan-another-day"), "older entries are kept");
 });
 
 test("/api/me carries whatsNewSeen and POST /api/me/whats-new stores it", async () => {
@@ -701,9 +712,7 @@ test("whats-new.json is served as JSON", async () => {
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /^application\/json/);
     assert.deepEqual(await response.json(), RAW);
-    const module = await fetch(`http://127.0.0.1:${port}/js/whats-new.js`);
-    assert.equal(module.status, 200);
-    assert.match(module.headers.get("content-type") ?? "", /^text\/javascript/);
+    assert.equal(response.headers.get("cache-control"), "no-cache");
   });
 });
 

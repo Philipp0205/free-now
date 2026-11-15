@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
 
@@ -22,7 +22,8 @@ async function open(reducedMotion?: "reduce") {
     (function () {
       var raf = window.requestAnimationFrame.bind(window);
       window.requestAnimationFrame = function (cb) {
-        if (String(cb).indexOf("BUZZ_SECONDS") >= 0) window.__buzzFrames += 1;
+        // The buzzer frame is the only rAF callback that clears a canvas. (A constant name would not survive minifying.)
+        if (String(cb).indexOf("clearRect") >= 0) window.__buzzFrames += 1;
         return raf(cb);
       };
     })();

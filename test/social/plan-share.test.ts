@@ -182,7 +182,9 @@ test("/p/ serves the app with escaped Open Graph tags: title, then day and time 
       assert.equal(tags["og:image"], `http://127.0.0.1:${port}/icons/icon-512.png`);
       assert.equal(tags["twitter:image"], tags["og:image"]);
       assert.ok(!shown.html.includes("<script>alert"));
-      assert.ok(shown.html.includes('<script type="module" src="/js/app.js"></script>'), "boots the app");
+      // The built shell adds `crossorigin`; the source page does not. Either way it is the same script as `/`.
+      assert.match(shown.html, /<script type="module"( crossorigin)? src="\/js\/app\.js"><\/script>/, "boots the app");
+      assert.match(shown.html, /<link rel="stylesheet"( crossorigin)? href="\/css\/styles\.css" ?\/?>/, "same styles as /");
       assert.ok(shown.html.includes('name="robots" content="noindex"'));
       for (const leak of [PLACE, "Hauptstr", "52.52", "13.405", "Kreuzberg crew", "Hana", made.id]) {
         assert.ok(!shown.html.includes(leak), `leaked ${leak}`);

@@ -253,12 +253,15 @@ src/            server.ts, app.ts (HTTP API), config.ts, db.ts (SQLite)
   map/          geocoding, PMTiles basemap
   admin/        admin queries, feedback, agent tokens, OpenAPI
   lib/          time, rate limit, client key, avatars
-public/         the PWA
-  js/           client modules (app.js and helpers)
-  css/          styles.css, welcome.css
+public/         the PWA sources
+  js/           client modules (app.js and helpers), bundled by Vite
+  css/          styles.css (bundled), welcome.css (copied)
   icons/ backgrounds/ vendor/
-                images and third-party files
-                HTML pages, sw.js, manifest and whats-new.json stay at the root
+                images and third-party files, copied as they are
+                HTML pages, manifest and whats-new.json stay at the root
+sw/             sw.js, the service worker source (push, fetch rules, ack retry)
+vite.config.ts  client build: bundles public/ into dist/client and generates the worker
+dist/           `npm run build` output: the server (dist/*.js) and the client (dist/client)
 test/           unit tests by area (calendar, chat, push, social, map, admin, lib),
                 shared helpers (http.ts, fake-google.ts, fixtures/) and ui/ specs
 Dockerfile      Railway and docker compose
@@ -324,7 +327,7 @@ The changelog lives in [`public/whats-new.json`](public/whats-new.json). The app
 - `id` is lowercase letters, digits, and dashes, at most 64 characters, and never reused. The popup compares against the newest id each person has seen, stored on the phone (`fn_whats_new_seen`) and on the account (`users.whats_new_seen`, sent as `user.whatsNewSeen` from `/api/me`, set with `POST /api/me/whats-new {"id"}`).
 - The popup shows only the entries above the one they last saw. New accounts start with the newest entry marked seen.
 - Do not reorder or delete old entries. A seen id that is no longer in the file shows nothing new.
-- Bump `CACHE` in `public/sw.js` in the same PR.
+- Bump `APP_VERSION` in `public/js/app.js` in the same PR. The service worker and its precache list come from the Vite build, so there is no cache name to bump.
 
 ## Limitations
 

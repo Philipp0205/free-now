@@ -55,6 +55,8 @@ const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 // still names the city and the streets at zooms 12–16. It has data through
 // zoom 19 here; 20+ is the "Map data not yet available" placeholder.
 const DEFAULT_MAP_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+/** Fine in dev and tests. Production (NODE_ENV=production) must set a real VAPID_SUBJECT. */
+const DEFAULT_VAPID_SUBJECT = "mailto:admin@localhost";
 const DEFAULT_MAP_TILE_ATTRIBUTION = "Powered by Esri | © Esri, HERE, Garmin, USGS, OpenStreetMap contributors";
 export const MAP_PMTILES_URL = "/tiles/basemap.pmtiles";
 export const MAP_PMTILES_ATTRIBUTION =
@@ -214,10 +216,15 @@ function readPmtiles(value: string | undefined): PmtilesInfo | null {
 function readVapid(env: NodeJS.ProcessEnv): VapidConfig | null {
   const publicKey = env.VAPID_PUBLIC_KEY?.trim() ?? "";
   const privateKey = env.VAPID_PRIVATE_KEY?.trim() ?? "";
-  const subject = env.VAPID_SUBJECT?.trim() || "mailto:admin@localhost";
+  const given = env.VAPID_SUBJECT?.trim() ?? "";
+  const subject = given || DEFAULT_VAPID_SUBJECT;
   if (!publicKey && !privateKey) return null;
   if (!publicKey || !privateKey) {
     throw new Error("Set both VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY, or neither");
+  }
+  const real = given.startsWith("mailto:") || given.startsWith("https:");
+  if (env.NODE_ENV === "production" && (!real || given === DEFAULT_VAPID_SUBJECT)) {
+    throw new Error("VAPID_SUBJECT must be set in production to a real mailto: or https: subject, not the localhost default");
   }
   if (!subject.startsWith("mailto:") && !subject.startsWith("https:")) {
     throw new Error("VAPID_SUBJECT must be a mailto: or https: URL");
