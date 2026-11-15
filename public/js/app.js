@@ -9,7 +9,7 @@ import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install
 import { scheduleErrorClear } from "./lib.js";
 
 /** The build label. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v104";
+export const APP_VERSION = "hangry-v105";
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});

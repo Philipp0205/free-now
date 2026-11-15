@@ -1,6 +1,5 @@
-import { mentionMatches, mentionAt, insertMention, findMentions, GOBLIN, REACTIONS, toggledReactions } from "./mentions.js";
+import { mentionAt, insertMention, toggledReactions } from "./mentions.js";
 import { APP_VERSION } from "./app.js";
-import { zonedParts, clockText } from "./when.js";
 import { state } from "./state.js";
 import { api, isNetworkFailure, noteConnectionProblem, scheduleOfflineRetry } from "./session.js";
 import { prefersTouchUi } from "./keyboard-ui.js";
@@ -8,6 +7,19 @@ import { render } from "./render.js";
 import { chatTargetUrl, eventUnread, forgetOpenUnread, syncChatAlerts } from "./alerts.js";
 import { tick } from "./replies.js";
 import { el, icon, run, scheduleErrorClear } from "./lib.js";
+import { batch } from "@preact/signals";
+import {
+  bumpThread,
+  chatFlash,
+  chatMeId,
+  chatMeName,
+  chatStatus,
+  mentionChoices,
+  resetChatSignals,
+  setChat,
+  swipeSignal,
+} from "./chat-store.js";
+import { mountChatView, paintChatView, unmountChatView } from "./chat-view.jsx";
 
 export async function openChat(target) {
   state.chatReturn = state.tab;
@@ -35,110 +47,122 @@ export function closeChat() {
   state.chatWho = null;
   state.chatReplyTo = null;
   state.tab = state.chatReturn || "home";
+  dropChatScreen();
   render();
 }
 
+/**
+ * The chat screen is one host element that lives for as long as the same chat is open. render() rebuilds #app
+ * every time, but it only ever receives this node again, so the Preact tree under it (and the composer's caret,
+ * the log's scroll, a swipe or a long-press in flight) is never remounted. It is dropped when the chat closes
+ * (closeChat, or render() finding state.chat empty) and when another chat is opened.
+ */
+let host = null;
+let hostKey = "";
+
+function chatKey() {
+  return `${state.chat?.kind || ""}:${state.chat?.id || ""}`;
+}
+
 export function chatScreen() {
+  if (host && hostKey !== chatKey()) dropChatScreen();
+  syncChatSignals();
+  if (!host) {
+    host = el("section", { class: "chat-screen" });
+    hostKey = chatKey();
+    mountChatView(host, ACTIONS);
+  } else {
+    paintChatView(host);
+  }
   const thread = state.chatThread;
-  const title = thread?.title || "Chat";
   const me = thread?.participants?.find((person) => person.id === state.me?.user?.id);
-  return     el("section", { class: "chat-screen", "aria-label": title, style: me ? `--me:${me.color}` : null }, [
-    state.statusMessage ? el("p", { class: "status-banner", role: "status", text: state.statusMessage }) : null,
-    el("header", { class: "chat-head" }, [
-      el("button", { class: "text-btn chat-back", type: "button", text: "Back", onclick: closeChat }),
-      el("h1", { text: title }),
-      thread
-        ? el("button", {
-            class: "text-btn",
-            type: "button",
-            text: thread.muted ? "Unmute" : "Mute",
-            onclick: () => { void toggleMute(); },
-          })
-        : null,
-    ]),
-    el("div", { class: "chat-log", id: "chat-log", onscroll: noteChatLogScroll }, thread
-      ? thread.messages.map((message) => message.system ? systemLine(message) : messageRow(message))
-      : [el("p", { class: "help", text: "Loading…" })]),
-    thread?.removed
-      ? el("p", { class: "chat-closed", text: "You were removed from this event." })
-      : thread?.closed
-      ? el("p", { class: "chat-closed", text: "This chat is closed." })
-      : el("form", { class: "chat-compose", onsubmit: sendChat }, [
-          replyPreview(),
-          withDraft(el("textarea", {
-            id: "chat-input",
-            class: "sheet-control",
-            rows: "1",
-            maxlength: "1000",
-            placeholder: "Message",
-            autocomplete: "off",
-            enterkeyhint: "send",
-            "aria-autocomplete": "list",
-            "aria-controls": "mention-list",
-            oninput: (event) => {
-              state.chatDraft = event.target.value;
-              growComposer(event.target);
-              noteMentionTyping(event.target);
-            },
-            onkeydown: onComposerKey,
-            onblur: (event) => {
-              if (!event.target.isConnected || !state.chatMention) return;
-              state.chatMention = null;
-              paintMentions();
-            },
-          })),
-          el("button", { class: "btn chat-send", type: "submit", text: "Send" }),
-          mentionPicker(),
-        ]),
-  ]);
+  host.setAttribute("aria-label", thread?.title || "Chat");
+  if (me) host.setAttribute("style", `--me:${me.color}`);
+  else host.removeAttribute("style");
+  // The draft is the textarea's value. Something other than typing changed it (a send kept only the unsent tail).
+  const input = host.querySelector("#chat-input");
+  if (input && input.value !== state.chatDraft) input.value = state.chatDraft;
+  return host;
 }
 
-/** Who can be tagged: the chat's people, never you, and the Goblin. */
-function mentionChoices() {
-  const pick = state.chatMention;
-  if (!pick) return [];
-  return mentionMatches([...(state.chatThread?.participants || []), GOBLIN], pick.query, state.me?.user?.id);
+/** render() calls this after it swaps the page in: a host that did not make it back into the page means chat was left. */
+export function releaseChatScreen() {
+  if (host && !host.isConnected) dropChatScreen();
 }
 
-function mentionPicker() {
-  const people = mentionChoices();
-  if (!people.length) return null;
-  const index = Math.min(state.chatMention.index, people.length - 1);
-  return el("ul", { class: "mention-list", id: "mention-list", role: "listbox", "aria-label": "Mention someone" }, people.map((person, i) =>
-    el("li", {
-      class: i === index ? "mention-option active" : "mention-option",
-      role: "option",
-      "aria-selected": i === index ? "true" : "false",
-      style: `--person:${person.color}`,
-      // Keeps focus (and the keyboard) on the composer.
-      onmousedown: (event) => event.preventDefault(),
-      onclick: () => chooseMention(person),
-    }, [person.id === GOBLIN.id ? el("span", { class: "goblin-face", "aria-hidden": "true", text: "👺" }) : el("span", { class: "mention-dot", "aria-hidden": "true" }), el("span", { text: person.name })])));
+/** Unmounts the chat view and drops the host. Called when leaving chat (closeChat, releaseChatScreen) and when another chat opens. */
+export function dropChatScreen() {
+  if (!host) return;
+  endPress();
+  swipe = null;
+  clearTimeout(flashTimer);
+  unmountChatView(host);
+  host = null;
+  hostKey = "";
+  resetChatSignals();
 }
 
-/** Swaps the list in place, so typing never rebuilds the composer under the keyboard. */
-function paintMentions() {
-  const form = document.querySelector(".chat-compose");
-  if (!form) return;
-  form.querySelector(".mention-list")?.remove();
-  const next = mentionPicker();
-  if (next) form.append(next);
+/** Copies the chat fields of the plain state into the signals the view reads. Existing writers keep writing `state`. */
+function syncChatSignals() {
+  batch(() => {
+    // The thread is edited in place (reactions, polls), so a fresh wrapper is what tells the view to repaint.
+    bumpThread(state.chatThread);
+    chatMeId.value = state.me?.user?.id ?? null;
+    chatMeName.value = state.me?.user?.name || "";
+    chatStatus.value = state.statusMessage || "";
+    setChat({
+      chatDraft: state.chatDraft,
+      chatMention: state.chatMention,
+      chatReactFor: state.chatReactFor,
+      chatWho: state.chatWho,
+      chatReplyTo: state.chatReplyTo,
+    });
+  });
+}
+
+/** A chat action's write: `state` for everyone else, then the signals, so only the views that read them repaint. */
+function put(patch) {
+  Object.assign(state, patch);
+  setChat(patch);
+}
+
+/**
+ * Repaints the chat from the signals without an app render(): the same scroll rules render() applies, the composer
+ * refit and the log kept clear of the bar. A no-op when the chat is not on screen.
+ */
+function repaint() {
+  if (!host) return;
+  const log = host.querySelector(".chat-log");
+  const y = log?.scrollTop ?? 0;
+  const nearEnd = log ? log.scrollHeight - log.scrollTop - log.clientHeight < 48 : true;
+  paintChatView(host);
+  if (log) {
+    log.scrollTop = nearEnd ? log.scrollHeight : y;
+    setChatLogPlace(nearEnd, log.scrollTop);
+  }
+  growComposer(document.getElementById("chat-input"));
+  stickChatLog();
+}
+
+function onInput(event) {
+  const input = event.target;
+  put({ chatDraft: input.value });
+  growComposer(input);
+  noteMentionTyping(input);
+}
+
+function onBlur(event) {
+  if (!event.target.isConnected || !state.chatMention) return;
+  put({ chatMention: null });
 }
 
 function noteMentionTyping(input) {
   const found = mentionAt(input.value, input.selectionStart ?? input.value.length);
   const before = state.chatMention;
-  state.chatMention = found ? { ...found, index: before && before.start === found.start ? before.index : 0 } : null;
-  paintMentions();
+  put({ chatMention: found ? { ...found, index: before && before.start === found.start ? before.index : 0 } : null });
 }
 
 const COMPOSER_MAX = 136;
-
-/** The draft is the textarea's value, not child text, so it never reads as page text. */
-function withDraft(input) {
-  input.value = state.chatDraft;
-  return input;
-}
 
 /** Fits the composer to its text: one line up to about five, then it scrolls. */
 export function growComposer(input) {
@@ -161,8 +185,7 @@ function onComposerKey(event) {
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
     const step = event.key === "ArrowDown" ? 1 : -1;
-    pick.index = (Math.min(pick.index, people.length - 1) + step + people.length) % people.length;
-    paintMentions();
+    put({ chatMention: { ...pick, index: (Math.min(pick.index, people.length - 1) + step + people.length) % people.length } });
   } else if (event.key === "Enter" || event.key === "Tab") {
     event.preventDefault();
     chooseMention(people[Math.min(pick.index, people.length - 1)]);
@@ -170,8 +193,7 @@ function onComposerKey(event) {
     // Only the list closes; the chat stays open.
     event.preventDefault();
     event.stopPropagation();
-    state.chatMention = null;
-    paintMentions();
+    put({ chatMention: null });
   }
 }
 
@@ -182,73 +204,9 @@ function chooseMention(person) {
   const next = insertMention(input.value, pick.start, input.selectionStart ?? input.value.length, person.name);
   input.value = next.text;
   growComposer(input);
-  state.chatDraft = next.text;
-  state.chatMention = null;
-  paintMentions();
+  put({ chatDraft: next.text, chatMention: null });
   input.focus({ preventScroll: true });
   input.setSelectionRange(next.caret, next.caret);
-}
-
-/** Message text with each @Name of someone in the chat in their colour. Yours is a little stronger. */
-function messageText(text) {
-  const thread = state.chatThread;
-  const colors = new Map();
-  for (const message of thread?.messages || []) if (message.color && message.name) colors.set(message.name.toLowerCase(), message.color);
-  for (const person of thread?.participants || []) colors.set(person.name.toLowerCase(), person.color);
-  colors.set(GOBLIN.name.toLowerCase(), GOBLIN.color);
-  const hits = findMentions(text, [...colors.keys()]);
-  if (!hits.length) return el("p", { text });
-  const me = (state.me?.user?.name || "").trim().toLowerCase();
-  const parts = [];
-  let at = 0;
-  for (const hit of hits) {
-    if (hit.start > at) parts.push(text.slice(at, hit.start));
-    const key = hit.name.toLowerCase();
-    parts.push(el("span", {
-      class: key === me ? "mention me" : "mention",
-      style: `--person:${colors.get(key)}`,
-      text: text.slice(hit.start, hit.end),
-    }));
-    at = hit.end;
-  }
-  if (at < text.length) parts.push(text.slice(at));
-  return el("p", {}, parts);
-}
-
-/** You can react once you are one of the chat's people and were not removed. */
-function canReact() {
-  const thread = state.chatThread;
-  if (!thread || thread.removed) return false;
-  return (thread.participants || []).some((person) => person.id === state.me?.user?.id);
-}
-
-/** Reply needs an open composer too, so a closed chat only takes reactions. */
-function canReply() {
-  return canReact() && !state.chatThread?.closed;
-}
-
-function reactionBar(message) {
-  return el("div", { class: "react-bar", role: "toolbar", "aria-label": "React" }, [
-    ...REACTIONS.map((emoji) => {
-      const mine = (message.reactions || []).some((item) => item.emoji === emoji && item.mine);
-      return el("button", {
-        class: mine ? "react-pick mine" : "react-pick",
-        type: "button",
-        "aria-label": `React ${emoji}`,
-        "aria-pressed": mine ? "true" : "false",
-        text: emoji,
-        onclick: () => { if (!pressConsumed()) void reactTo(message.id, emoji); },
-      });
-    }),
-    canReply() && el("button", {
-      class: "react-reply",
-      type: "button",
-      text: "Reply",
-      // Keeps focus (and the keyboard) on the composer.
-      onmousedown: (event) => event.preventDefault(),
-      onclick: () => { if (!pressConsumed()) startReply(message); },
-    }),
-  ]);
 }
 
 /** One line of a message, for a quote. */
@@ -258,10 +216,12 @@ function snippet(text) {
 
 /** Puts the composer in reply mode for this message, with the keyboard up. */
 function startReply(message) {
-  state.chatReplyTo = { id: message.id, name: message.name, text: snippet(message.text), mine: message.mine, color: message.color || null };
-  state.chatReactFor = null;
-  state.chatWho = null;
-  render();
+  put({
+    chatReplyTo: { id: message.id, name: message.name, text: snippet(message.text), mine: message.mine, color: message.color || null },
+    chatReactFor: null,
+    chatWho: null,
+  });
+  repaint();
   const input = document.getElementById("chat-input");
   if (!input) return;
   input.focus({ preventScroll: true });
@@ -272,46 +232,14 @@ function startReply(message) {
 /** Drops the reply target. The draft stays. */
 export function clearReply() {
   if (!state.chatReplyTo) return false;
-  state.chatReplyTo = null;
-  render();
+  put({ chatReplyTo: null });
+  repaint();
   return true;
 }
 
-function replyPreview() {
-  const reply = state.chatReplyTo;
-  if (!reply) return null;
-  return el("div", { class: "reply-preview", style: reply.color ? `--person:${reply.color}` : null }, [
-    el("div", { class: "reply-preview-copy" }, [
-      el("strong", { text: reply.mine ? "You" : reply.name }),
-      el("span", { text: reply.text }),
-    ]),
-    el("button", {
-      class: "reply-cancel",
-      type: "button",
-      "aria-label": "Cancel reply",
-      onmousedown: (event) => event.preventDefault(),
-      onclick: () => {
-        clearReply();
-        document.getElementById("chat-input")?.focus({ preventScroll: true });
-      },
-    }, [icon("close")]),
-  ]);
-}
-
-/** The message a reply answers, one line. A deleted one says so and goes nowhere. */
-function replyQuote(quote) {
-  if (!quote) return null;
-  if (quote.deleted) return el("p", { class: "chat-quote gone", text: "Original message deleted" });
-  return el("button", {
-    class: "chat-quote",
-    type: "button",
-    style: quote.color ? `--quote:${quote.color}` : null,
-    "aria-label": `Reply to ${quote.mine ? "you" : quote.name}: ${quote.text}. Show message`,
-    onclick: () => { if (!pressConsumed()) jumpToMessage(quote.id); },
-  }, [
-    el("strong", { text: quote.mine ? "You" : quote.name }),
-    el("span", { text: quote.text }),
-  ]);
+function cancelReply() {
+  clearReply();
+  document.getElementById("chat-input")?.focus({ preventScroll: true });
 }
 
 const FLASH_MS = 1600;
@@ -324,33 +252,16 @@ function jumpToMessage(id) {
   const still = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
   chatLogAtEnd = false;
   row.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
-  document.querySelectorAll(".chat-msg.flash").forEach((node) => node.classList.remove("flash"));
   // Restart the fade if it is already lit.
+  chatFlash.value = null;
+  paintChatView(host);
   void row.offsetWidth;
-  row.classList.add("flash");
+  chatFlash.value = id;
+  paintChatView(host);
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => row.classList.remove("flash"), FLASH_MS);
-}
-
-function reactionPills(message, live) {
-  const list = message.reactions || [];
-  if (!list.length) return null;
-  const who = state.chatWho && state.chatWho.id === message.id
-    ? list.find((item) => item.emoji === state.chatWho.emoji)
-    : null;
-  return el("div", { class: "chat-reacts" }, [
-    ...list.map((item) => el("button", {
-      class: item.mine ? "react-pill mine" : "react-pill",
-      type: "button",
-      "data-emoji": item.emoji,
-      title: item.names.join(", "),
-      "aria-label": `${item.emoji} ${item.count}: ${item.names.join(", ")}`,
-      "aria-pressed": item.mine ? "true" : "false",
-      disabled: !live,
-      onclick: () => { if (!pressConsumed()) void reactTo(message.id, item.emoji); },
-    }, [el("span", { class: "react-emoji", text: item.emoji }), el("span", { class: "react-count", text: String(item.count) })])),
-    who ? el("span", { class: "react-who", text: who.names.join(", ") }) : null,
-  ]);
+  flashTimer = setTimeout(() => {
+    if (chatFlash.peek() === id) chatFlash.value = null;
+  }, FLASH_MS);
 }
 
 const LONG_PRESS_MS = 400;
@@ -375,12 +286,9 @@ function startPress(event, message) {
     pressStart = null;
     pressUsedAt = Date.now();
     tick();
-    if (pill) state.chatWho = { id: message.id, emoji: pill.dataset.emoji };
-    else {
-      state.chatReactFor = message.id;
-      state.chatWho = null;
-    }
-    render();
+    if (pill) put({ chatWho: { id: message.id, emoji: pill.dataset.emoji } });
+    else put({ chatReactFor: message.id, chatWho: null });
+    repaint();
   }, LONG_PRESS_MS);
 }
 
@@ -401,9 +309,9 @@ let swipe = null;
 let swipeUsedAt = 0;
 
 /** Touch: a short swipe right on a message starts a reply. Up or down is a scroll and lets go. */
-function startSwipe(event, row, message) {
+function startSwipe(event, message) {
   if (event.pointerType === "mouse" || event.target.closest?.(".react-bar")) return;
-  swipe = { row, message, x: event.clientX, y: event.clientY, at: Date.now(), dx: 0, on: false };
+  swipe = { message, x: event.clientX, y: event.clientY, at: Date.now(), dx: 0, on: false };
 }
 
 function moveSwipe(event) {
@@ -418,9 +326,8 @@ function moveSwipe(event) {
   if (!swipe.on && dx > 10 && dx > Math.abs(dy) * 1.5) swipe.on = true;
   if (!swipe.on) return;
   swipe.dx = Math.max(0, Math.min(dx, SWIPE_MAX_PX));
-  swipe.row.classList.add("swiping");
-  swipe.row.style.setProperty("--swipe", `${swipe.dx}px`);
-  swipe.row.classList.toggle("swipe-ready", swipe.dx >= SWIPE_REPLY_PX);
+  // Only this row repaints: `swiping`, `--swipe` and `swipe-ready` come from its signal.
+  swipeSignal(swipe.message.id).value = { dx: swipe.dx, ready: swipe.dx >= SWIPE_REPLY_PX };
 }
 
 function endSwipe() {
@@ -434,25 +341,46 @@ function endSwipe() {
 
 function dropSwipe() {
   if (!swipe) return;
-  swipe.row.classList.remove("swiping", "swipe-ready");
-  swipe.row.style.removeProperty("--swipe");
+  swipeSignal(swipe.message.id).value = null;
   swipe = null;
 }
 
+function rowDown(event, message, replyable) {
+  startPress(event, message);
+  if (replyable) startSwipe(event, message);
+}
+
+function rowMove(event) {
+  movePress(event);
+  moveSwipe(event);
+}
+
+function rowUp() {
+  endPress();
+  endSwipe();
+}
+
+function rowCancel() {
+  endPress();
+  dropSwipe();
+}
+
+/** A held finger opens the reaction bar, not the browser's own menu. */
+function rowMenu(event) {
+  if (prefersTouchUi()) event.preventDefault();
+}
+
 function openReactionBar(message) {
-  state.chatReactFor = state.chatReactFor === message.id ? null : message.id;
-  state.chatWho = null;
-  render();
+  put({ chatReactFor: state.chatReactFor === message.id ? null : message.id, chatWho: null });
+  repaint();
   document.querySelector(".react-bar .react-pick")?.focus({ preventScroll: true });
 }
 
-/** Puts the bar or the names away without a re-render, so the tap that did it still lands. */
+/** Puts the bar or the names away without an app render, so the tap that did it still lands. */
 export function closeReactUi() {
   if (!state.chatReactFor && !state.chatWho) return false;
-  state.chatReactFor = null;
-  state.chatWho = null;
-  document.querySelectorAll(".react-bar, .react-who").forEach((node) => node.remove());
-  document.querySelectorAll('.chat-react-btn[aria-expanded="true"]').forEach((node) => node.setAttribute("aria-expanded", "false"));
+  put({ chatReactFor: null, chatWho: null });
+  if (host) paintChatView(host);
   return true;
 }
 
@@ -463,9 +391,8 @@ async function reactTo(messageId, emoji) {
   const on = !(message.reactions || []).some((item) => item.emoji === emoji && item.mine);
   tick();
   message.reactions = toggledReactions(message.reactions || [], emoji, state.me?.user?.name || "You");
-  state.chatReactFor = null;
-  state.chatWho = null;
-  render();
+  put({ chatReactFor: null, chatWho: null });
+  repaint();
   try {
     const result = await api(`/api/messages/${encodeURIComponent(messageId)}/reactions`, { method: "POST", body: { emoji, on } });
     const current = state.chatThread?.messages?.find((item) => item.id === messageId);
@@ -481,70 +408,6 @@ async function reactTo(messageId, emoji) {
     scheduleErrorClear();
   }
   render();
-}
-
-function systemLine(message) {
-  return el("p", { class: "chat-system" }, [
-    el("span", { text: message.text }),
-    el("time", { text: messageWhen(message.at) }),
-  ]);
-}
-
-function messageRow(message) {
-  const accent = message.system ? "" : message.color || "";
-  const live = canReact() && !message.goblin;
-  const replyable = canReply() && !message.goblin;
-  return el("article", {
-    class: message.mine ? "chat-msg mine" : message.goblin ? "chat-msg goblin" : "chat-msg",
-    "data-color": accent || null,
-    "data-id": message.id,
-    style: accent ? `--person:${accent}` : null,
-    onpointerdown: live ? (event) => { startPress(event, message); if (replyable) startSwipe(event, event.currentTarget, message); } : null,
-    onpointermove: live ? (event) => { movePress(event); moveSwipe(event); } : null,
-    onpointerup: live ? () => { endPress(); endSwipe(); } : null,
-    onpointercancel: live ? () => { endPress(); dropSwipe(); } : null,
-    // A held finger opens the reaction bar, not the browser's own menu.
-    oncontextmenu: live ? (event) => { if (prefersTouchUi()) event.preventDefault(); } : null,
-  }, [
-    el("header", {}, [
-      el("strong", { text: message.mine ? "You" : message.goblin ? `👺 ${message.name}` : message.name }),
-      live
-        ? el("button", {
-            class: "chat-react-btn",
-            type: "button",
-            "aria-label": "React",
-            "aria-expanded": state.chatReactFor === message.id ? "true" : "false",
-            text: "☺",
-            onclick: () => openReactionBar(message),
-          })
-        : null,
-      replyable
-        ? el("button", {
-            class: "chat-reply-btn",
-            type: "button",
-            "aria-label": "Reply",
-            onmousedown: (event) => event.preventDefault(),
-            onclick: () => startReply(message),
-          }, [icon("reply")])
-        : null,
-      el("time", { text: messageWhen(message.at) }),
-    ]),
-    replyQuote(message.replyTo),
-    messageText(message.text),
-    live && state.chatReactFor === message.id ? reactionBar(message) : null,
-    reactionPills(message, live),
-    message.canDelete
-      ? el("button", { class: "text-btn", type: "button", text: "Delete", onclick: () => { if (!pressConsumed()) confirmDeleteMessage(message); } })
-      : null,
-  ]);
-}
-
-function messageWhen(ms) {
-  const part = zonedParts(ms);
-  const today = zonedParts(Date.now());
-  const hm = clockText(part.hour, part.minute);
-  if (part.day === today.day) return hm;
-  return `${part.day.slice(5)} ${hm}`;
 }
 
 /** False once someone scrolls the log up (or jumps to a quoted message), so the keyboard does not pull it back down. */
@@ -669,6 +532,30 @@ function confirmDeleteMessage(message) {
   };
   render();
 }
+
+/** What the Preact view calls. Everything else in this file stays private to the chat. */
+const ACTIONS = {
+  closeChat,
+  toggleMute,
+  onLogScroll: noteChatLogScroll,
+  pressConsumed,
+  jumpToMessage,
+  reactTo,
+  startReply,
+  cancelReply,
+  rowDown,
+  rowMove,
+  rowUp,
+  rowCancel,
+  rowMenu,
+  openReactionBar,
+  confirmDelete: confirmDeleteMessage,
+  send: sendChat,
+  onInput,
+  onKey: onComposerKey,
+  onBlur,
+  chooseMention,
+};
 
 export function chatChip(kind, id) {
   return chatRow(kind, { id });
