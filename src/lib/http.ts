@@ -14,6 +14,32 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * Raster basemap tiles (Esri default) and the welcome page preview tiles (OSM) are the only
+ * cross-origin loads. Styles stay 'unsafe-inline' for element.style; scripts do not.
+ */
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' blob: data: https://server.arcgisonline.com https://tile.openstreetmap.org",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "object-src 'none'",
+].join("; ");
+
+/** Headers every response carries, so the value cannot drift between sendJson, sendPublic and static files. */
+export const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+  "content-security-policy": CONTENT_SECURITY_POLICY,
+} as const;
+
 export async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const text = await readBody(req);
   if (!text.trim()) return {};
@@ -57,9 +83,7 @@ export function sendJson(res: http.ServerResponse, status: number, body: unknown
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(json),
     "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
+    ...SECURITY_HEADERS,
     ...headers,
   });
   res.end(json);
@@ -71,9 +95,7 @@ export function sendPublic(req: http.IncomingMessage, res: http.ServerResponse, 
     "content-type": type,
     "content-length": Buffer.byteLength(text),
     "cache-control": "no-cache",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
+    ...SECURITY_HEADERS,
   });
   if (req.method === "HEAD") res.end();
   else res.end(text);
@@ -82,9 +104,7 @@ export function sendPublic(req: http.IncomingMessage, res: http.ServerResponse, 
 export function sendEmpty(res: http.ServerResponse, status: number): void {
   res.writeHead(status, {
     "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
+    ...SECURITY_HEADERS,
   });
   res.end();
 }

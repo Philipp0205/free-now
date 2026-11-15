@@ -281,6 +281,26 @@ test("config rejects a half-set VAPID pair and reads the public settings", () =>
   assert.equal(config.socialTtlMs, 2 * 60 * 60 * 1000);
 });
 
+test("VAPID_SUBJECT must be real in production and keeps its default elsewhere", () => {
+  const keys = { VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv" };
+  assert.equal(loadConfig({ ...keys }).vapid?.subject, "mailto:admin@localhost", "dev default");
+  assert.equal(loadConfig({ ...keys, NODE_ENV: "test" }).vapid?.subject, "mailto:admin@localhost");
+  assert.throws(() => loadConfig({ ...keys, VAPID_SUBJECT: "ftp://x" }), /VAPID_SUBJECT/);
+  const production = { ...keys, NODE_ENV: "production" };
+  for (const subject of [undefined, "", "   ", "mailto:admin@localhost", "localhost", "http://hangry.example"]) {
+    assert.throws(
+      () => loadConfig({ ...production, ...(subject === undefined ? {} : { VAPID_SUBJECT: subject }) }),
+      /VAPID_SUBJECT must be set in production .*mailto: or https:/,
+      `production rejects ${JSON.stringify(subject)}`,
+    );
+  }
+  assert.throws(() => loadConfig(production), /VAPID_SUBJECT must be set in production/);
+  assert.equal(loadConfig({ ...production, VAPID_SUBJECT: "mailto:ops@hangry.example" }).vapid?.subject, "mailto:ops@hangry.example");
+  assert.equal(loadConfig({ ...production, VAPID_SUBJECT: "https://hangry.example/contact" }).vapid?.subject, "https://hangry.example/contact");
+  assert.equal(loadConfig({ NODE_ENV: "production" }).vapid, null, "no keys, no vapid, even in production");
+  assert.throws(() => loadConfig({ NODE_ENV: "production", VAPID_PUBLIC_KEY: "abc" }), /both VAPID/);
+});
+
 test("serves the installable shell", async () => {
   await withApp(async (ctx) => {
     const origin = `http://127.0.0.1:${ctx.port}`;

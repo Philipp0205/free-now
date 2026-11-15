@@ -195,8 +195,23 @@ test("/welcome keeps its static, no-referrer headers while tiles opt in per imag
     const page = await get(port, "/welcome");
     assert.equal(page.headers.get("referrer-policy"), "no-referrer");
     assert.equal(page.headers.get("x-frame-options"), "DENY");
+    const csp = page.headers.get("content-security-policy") ?? "";
+    for (const part of ["frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'", "https://server.arcgisonline.com", "https://tile.openstreetmap.org"]) {
+      assert.ok(csp.includes(part), `CSP has ${part}`);
+    }
+    const scriptSrc = csp.split("; ").find((directive) => directive.startsWith("script-src ")) ?? "";
+    assert.equal(scriptSrc, "script-src 'self'");
+    assert.doesNotMatch(csp, /unsafe-eval|\*/);
     const css = await get(port, "/css/welcome.css");
     assert.equal(css.status, 200);
     assert.match(css.text, /\.wl-map-canvas/);
+    assert.equal(css.headers.get("content-security-policy"), csp, "static files carry the same policy");
+    const me = await api(port, "POST", "/api/auth/start", { body: { name: "Fake Tester" }, status: 201 });
+    const json = await get(port, "/api/me", { headers: { authorization: `Bearer ${me.token}` } });
+    assert.equal(json.status, 200);
+    assert.match(json.headers.get("content-type") ?? "", /^application\/json/);
+    assert.equal(json.headers.get("content-security-policy"), csp, "JSON responses carry the same policy");
+    const missing = await get(port, "/api/nope");
+    assert.equal(missing.headers.get("content-security-policy"), csp, "JSON errors carry the same policy");
   });
 });

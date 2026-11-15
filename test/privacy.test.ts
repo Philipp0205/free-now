@@ -55,6 +55,7 @@ test("/privacy serves the static policy at both paths, logged out or in", async 
       assert.equal(page.headers.get("cache-control"), "no-cache");
       assert.equal(page.headers.get("referrer-policy"), "no-referrer");
       assert.equal(page.headers.get("x-frame-options"), "DENY");
+      assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'; base-uri 'self'; object-src 'none'/);
     }
     const me = await api(port, "POST", "/api/auth/start", { body: { name: "Fake Tester" }, status: 201 });
     const signedIn = await get(port, "/privacy", { headers: { authorization: `Bearer ${me.token}` } });

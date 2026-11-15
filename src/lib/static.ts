@@ -2,7 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sendJson } from "./http.js";
+import { SECURITY_HEADERS, sendJson } from "./http.js";
 
 /** The repo root (or /app in the image). Same depth under tsx (src/lib) and node (dist/lib). */
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -97,8 +97,6 @@ export function staticHeaders(ext: string, length: number): http.OutgoingHttpHea
     "content-type": MIME[ext] ?? "application/octet-stream",
     "content-length": length,
     "cache-control": "no-cache",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "x-frame-options": "DENY",
+    ...SECURITY_HEADERS,
   };
 }

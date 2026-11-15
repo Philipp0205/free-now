@@ -14,7 +14,7 @@ const SCRIPT = SOURCE.replace(/^import [^;]+;\n/m, "");
 type Reply = number | Error;
 
 /** Runs sw/sw.js in a sandbox. fetch answers from `replies` in order; setTimeout fires at once and records the delay. */
-function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; cacheKeys?: string[] } = {}) {
+function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; cacheKeys?: string[]; page?: (request: Request) => Response } = {}) {
   const replies = [...(options.replies ?? [])];
   const fetches: Array<{ url: string; body: string }> = [];
   const delays: number[] = [];
@@ -22,6 +22,7 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; ca
   const order: string[] = [];
   const precached: unknown[] = [];
   const deleted: string[] = [];
+  const puts: Array<{ url: string; status: number }> = [];
   const sandbox: Record<string, unknown> = {
     URL,
     console,
@@ -33,14 +34,23 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; ca
       queueMicrotask(fn);
       return 0;
     },
-    fetch: async (url: string, init: { body: string }) => {
+    fetch: async (url: string | Request, init: { body: string }) => {
+      // The fetch handler passes a Request. The push ack passes a path string.
+      if (typeof url !== "string") return options.page!(url);
       fetches.push({ url, body: init.body });
       order.push("ack");
       const next = replies.shift() ?? 204;
       if (next instanceof Error) throw next;
       return { status: next };
     },
-    caches: { open: async () => ({}), keys: async () => options.cacheKeys ?? [], delete: async (key: string) => { deleted.push(key); return true; } },
+    caches: {
+      open: async (name: string) => ({
+        put: async (request: Request, response: Response) => { puts.push({ url: `${name} ${request.url}`, status: response.status }); },
+        match: async () => undefined,
+      }),
+      keys: async () => options.cacheKeys ?? [],
+      delete: async (key: string) => { deleted.push(key); return true; },
+    },
     self: {
       __WB_MANIFEST: [],
       location: { origin: "https://hangry.test" },
@@ -67,7 +77,16 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; ca
     handlers.push({ data: { json: () => data }, waitUntil: (promise: Promise<unknown>) => { settled = promise; } });
     return { settled };
   }
-  return { retryAck, push, fetches, delays, order, handlers, precached, deleted };
+  /** Sends a request through the worker's fetch handler. Resolves with what the page would get, after the cache write had a chance to run. */
+  async function get(path: string): Promise<Response> {
+    let answer: Promise<Response> | undefined;
+    handlers.fetch({ request: new Request(`https://hangry.test${path}`), respondWith: (promise: Promise<Response>) => { answer = promise; } });
+    assert.ok(answer, `${path} is answered by the worker`);
+    const response = await answer;
+    await new Promise((resolve) => setImmediate(resolve));
+    return response;
+  }
+  return { retryAck, push, get, puts, fetches, delays, order, handlers, precached, deleted };
 }
 
 function sender(replies: Reply[]) {
@@ -141,6 +160,23 @@ test("a push without a row id shows the notification and sends no ack", async ()
   const { settled } = await worker.push({ title: "Test" });
   await settled;
   assert.deepEqual(worker.order, ["shown"]);
+});
+
+test("the fetch handler caches a 200 in hangry-runtime and never a 4xx or 5xx", async () => {
+  const statuses: Record<string, number> = { "/ok.js": 200, "/gone.js": 404, "/boom.js": 500 };
+  const worker = loadWorker({
+    page: (request) => new Response(`body of ${new URL(request.url).pathname}`, { status: statuses[new URL(request.url).pathname] }),
+  });
+  const ok = await worker.get("/ok.js");
+  assert.equal(ok.status, 200);
+  assert.equal(await ok.text(), "body of /ok.js");
+  assert.deepEqual(worker.puts, [{ url: "hangry-runtime https://hangry.test/ok.js", status: 200 }]);
+  for (const path of ["/gone.js", "/boom.js"]) {
+    const bad = await worker.get(path);
+    assert.equal(bad.status, statuses[path], "the page still gets the error");
+    assert.equal(await bad.text(), `body of ${path}`);
+  }
+  assert.equal(worker.puts.length, 1, "no error response was stored");
 });
 
 test("the build label moved to v104 and the worker no longer keeps a cache name of its own", () => {

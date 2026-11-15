@@ -40,8 +40,11 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(RUNTIME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        // Only a good answer goes in the cache. A temporary 4xx or 5xx must not be replayed offline.
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(RUNTIME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        }
         return response;
       })
       .catch(() =>
