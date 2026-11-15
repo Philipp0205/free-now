@@ -1,9 +1,10 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
-import test from "node:test";
+import { test } from "@playwright/test";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
+import { flushChatNotices } from "../../src/chat/chat.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { CalendarNet } from "../../src/calendar/freebusy.js";
@@ -71,6 +72,10 @@ export async function startServer(opts: ServerOptions = {}): Promise<Server> {
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const close = async () => {
     await opts.beforeClose?.();
+    // chat.ts keeps pending notice slots at module level. A Playwright worker runs several spec
+    // files in one process, so drain this app's slots before its db closes, or the next file
+    // would flush slots that point at a closed db.
+    await flushChatNotices(true);
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
@@ -91,22 +96,22 @@ export async function call(baseUrl: string, method: string, pathname: string, to
 }
 
 /**
- * Registers test.before (server, then Chrome) and test.after (Chrome, then server).
- * Read baseUrl, browser and db inside tests; they exist once before() has run.
+ * Registers test.beforeAll (server, then Chrome) and test.afterAll (Chrome, then server).
+ * Read baseUrl, browser and db inside tests; they exist once beforeAll has run.
  */
 export function useHangry(opts: ServerOptions = {}) {
   let server: Server | undefined;
   let browser: Browser | undefined;
-  test.before(async () => {
+  test.beforeAll(async () => {
     server = await startServer(opts);
     browser = await launchChrome();
   });
-  test.after(async () => {
+  test.afterAll(async () => {
     await browser?.close();
     await server?.close();
   });
   const live = <T>(value: T | undefined): T => {
-    if (value === undefined) throw new Error("useHangry: test.before has not run yet");
+    if (value === undefined) throw new Error("useHangry: test.beforeAll has not run yet");
     return value;
   };
   return {

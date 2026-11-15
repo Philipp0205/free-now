@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
 
@@ -19,7 +19,7 @@ const WIDTHS = [320, 360, 412];
 const hangry = useHangry({ tz: "UTC" });
 let ip = 10;
 
-test.before(() => {
+test.beforeAll(() => {
   if (SHOT_DIR) fs.mkdirSync(SHOT_DIR, { recursive: true });
 });
 

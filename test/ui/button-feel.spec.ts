@@ -4,7 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "@playwright/test";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
@@ -26,7 +26,7 @@ let browser: Browser;
 let baseUrl = "";
 let closeServer: () => Promise<void> = async () => {};
 
-test.before(async () => {
+test.beforeAll(async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hangry-button-feel-"));
   const dbPath = path.join(dir, "test.sqlite");
   const db = openDb(dbPath);
@@ -44,7 +44,7 @@ test.before(async () => {
   catch { browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
 });
 
-test.after(async () => {
+test.afterAll(async () => {
   await browser?.close();
   await closeServer();
 });
