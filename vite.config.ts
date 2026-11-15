@@ -42,6 +42,8 @@ export default defineConfig({
   // The page sources live in public/. Its files are copied by copyThrough, not by Vite's publicDir.
   root: PUBLIC,
   publicDir: false,
+  // Vite 8 transforms JSX with Oxc. Preact components live in .jsx files; plain .js files are not transformed.
+  oxc: { jsx: { runtime: "automatic", importSource: "preact" } },
   build: {
     // dist/ is where tsc writes the server. The client goes in its own folder.
     outDir: path.join(ROOT, "dist", "client"),

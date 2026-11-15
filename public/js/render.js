@@ -6,7 +6,7 @@ import { anchorOpenSheet, revealWhereResults } from "./keyboard-ui.js";
 import { alertsScreen, banner, circleUnread, personalAlerts } from "./alerts.js";
 import { home, pastScreen } from "./home.js";
 import { circleScreen } from "./members.js";
-import { chatScreen, growComposer, setChatLogPlace, stickChatLog } from "./chat.js";
+import { chatScreen, growComposer, releaseChatScreen, setChatLogPlace, stickChatLog } from "./chat.js";
 import { forgetShownAgentToken, youScreen } from "./you.js";
 import { forgetShownFeedLink } from "./calendar-sync.js";
 import { whatsNewSheet } from "./whats-new-ui.js";
@@ -41,6 +41,8 @@ export function render() {
   if (shownTab && !wasCovered) tabY.set(shownTab, y);
   const freshTab = pageEntrance;
   document.getElementById("app").replaceChildren(view());
+  // The chat screen is one stable host that view() hands back each time; if it did not come back, chat was left.
+  releaseChatScreen();
   clearMenuJustOpened();
   pageEntrance = false;
   const sheetScroll = document.querySelector(".sheet-scroll");
