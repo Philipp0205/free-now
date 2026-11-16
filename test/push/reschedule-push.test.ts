@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { api, START, withApp, type SentPush } from "../http.js";
+import { api, START, withApp, type SentPush, testEmail } from "../http.js";
 
 const HOUR = 60 * 60 * 1000;
 
 async function circle(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
   const join = (name: string) =>
-    api(port, "POST", "/api/auth/start", { body: { name, code: created.circle.inviteCode }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code: created.circle.inviteCode }, status: 201 });
   const bea = await join("Bea");
   const sam = await join("Sam");
   const kim = await join("Kim");

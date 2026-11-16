@@ -4,7 +4,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const hangry = useHangry();
 const SHOTS = new URL("./screenshots/flic-circles/", import.meta.url);
 
@@ -47,7 +47,7 @@ async function choose(page: Page, press: string, label: string) {
 
 test("a user with two circles picks the circle for each Flic press", { timeout: 90_000 }, async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
-  const marius = await hangry.call("POST", "/api/auth/start", undefined, { name: "Marius" });
+  const marius = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Marius" });
   const home = (await hangry.call("POST", "/api/circles", marius.token, { name: "Home" })).circle;
   const uni = (await hangry.call("POST", "/api/circles", marius.token, { name: "Uni" })).circle;
   const { context, page } = await phone(marius.token);
@@ -117,7 +117,7 @@ test("a user with two circles picks the circle for each Flic press", { timeout: 
 
 test("a user with one circle still sees the single link and the steps, without pickers", { timeout: 90_000 }, async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
-  const solo = await hangry.call("POST", "/api/auth/start", undefined, { name: "Solo" });
+  const solo = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Solo" });
   await hangry.call("POST", "/api/circles", solo.token, { name: "friends" });
   const { context, page } = await phone(solo.token);
   try {

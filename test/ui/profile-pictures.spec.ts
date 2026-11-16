@@ -13,7 +13,7 @@ import { openDb } from "../../src/db.js";
 import { createNoopPushSender } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openYouSection } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/profile-pictures/";
 const CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 
@@ -93,9 +93,9 @@ async function call(method: string, urlPath: string, token?: string, body?: Reco
 }
 
 async function people() {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "Friends" });
-  const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+  const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
   return { host, friend, circle };
 }
 

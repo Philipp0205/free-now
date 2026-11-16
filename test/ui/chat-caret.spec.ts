@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-caret");
 const hangry = useHangry({ tz: "UTC" });
@@ -88,9 +88,9 @@ for (const [width, height] of SIZES) {
     }
 
     async function openChat() {
-      const alex = await post("/api/auth/start", { name: "Alex" });
+      const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
       const circle = await post("/api/circles", { name: "Testers" }, alex.token);
-      const ada = await post("/api/auth/start", { name: "Ada", code: circle.circle.inviteCode });
+      const ada = await post("/api/auth/start", { email: testEmail(), name: "Ada", code: circle.circle.inviteCode });
       await post("/api/circles/chat", { text: "Anyone up for ramen tonight at the usual place?" }, ada.token);
       const page = await openAs(alex.token, layout);
       await page.locator(".tabbar").getByRole("button", { name: /^Chat/ }).click();

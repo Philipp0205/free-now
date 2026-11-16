@@ -6,7 +6,7 @@ import { devices, type Page } from "playwright-core";
 import { FIELD_REVEAL_MS, keyboardOffset } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { useHangry } from "./harness.js";
+import { testEmail, useHangry } from "./harness.js";
 
 type Measure = {
   kb: number;
@@ -305,6 +305,7 @@ async function dismissReminders(page: Page) {
 async function signUp(page: Page, name: string) {
   await page.locator("#name").waitFor({ timeout: 15_000 });
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   await dismissReminders(page);
   await page.locator("#invite-code").waitFor();

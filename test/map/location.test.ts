@@ -6,15 +6,15 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { loadConfig } from "../../src/config.js";
 import { clearExpiredLocations, insertCircle, insertPlan, insertSocial, insertUser, listActiveSocials, openDb, sweep } from "../../src/db.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 // The old location harness pinned now() to the start instant.
 const locationOptions = { now: "fixed" as const };
 
 async function circle(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-  const veit = await api(port, "POST", "/api/auth/start", { body: { name: "Veit" }, status: 201 });
+  const veit = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Veit" }, status: 201 });
   await api(port, "POST", "/api/circles/join", { token: veit.token, body: { code: created.circle.inviteCode }, status: 200 });
   await api(port, "POST", "/api/push/subscribe", {
     token: veit.token,

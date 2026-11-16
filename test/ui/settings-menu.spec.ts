@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, openYou, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = path.resolve("test/ui/screenshots/settings-menu");
 const hangry = useHangry();
 const SIZE = { width: 360, height: 640 } as const;
@@ -84,7 +84,7 @@ test("the You tab is a short menu with sub-screens and Back", { timeout: 90_000 
 });
 
 test("returning from Google Calendar opens Availability & calendar", { timeout: 90_000 }, async () => {
-  const person = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const person = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   await hangry.call("POST", "/api/circles", person.token, { name: "Crew" });
   const context = await hangry.browser.newContext({
     viewport: SIZE,
@@ -114,7 +114,7 @@ test("returning from Google Calendar opens Availability & calendar", { timeout: 
 });
 
 async function phone(): Promise<{ context: Awaited<ReturnType<typeof hangry.browser.newContext>>; page: Page }> {
-  const person = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const person = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   await hangry.call("POST", "/api/circles", person.token, { name: "Crew" });
   const context = await hangry.browser.newContext({
     viewport: SIZE,

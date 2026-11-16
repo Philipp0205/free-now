@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots of the push sheet. Override with SCS_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.SCS_SHOT_DIR || "/workspace/hangry-shared-status-artifacts");
 
@@ -24,12 +24,12 @@ type Person = { token: string; user: { id: string; name: string } };
 for (const [width, height] of SIZES) {
   test(`Jonas from a shared circle shows in the host's push sheet at ${width}x${height}`, { timeout: 90_000 }, async () => {
     const tag = `w${width}`;
-    const philipp: Person = await call("POST", "/api/auth/start", undefined, { name: "Philipp" });
+    const philipp: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Philipp" });
     const family = (await call("POST", "/api/circles", philipp.token, { name: "Family" })).circle;
     const dinner = (await call("POST", "/api/circles", philipp.token, { name: "Jumping Dinner" })).circle;
-    const anna: Person = await call("POST", "/api/auth/start", undefined, { name: "Anna", code: family.inviteCode });
-    await call("POST", "/api/auth/start", undefined, { name: "Ben", code: family.inviteCode });
-    const jonas: Person = await call("POST", "/api/auth/start", undefined, { name: "Jonas", code: dinner.inviteCode });
+    const anna: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Anna", code: family.inviteCode });
+    await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ben", code: family.inviteCode });
+    const jonas: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Jonas", code: dinner.inviteCode });
     for (const person of [anna, jonas]) {
       await call("POST", "/api/push/subscribe", person.token, { endpoint: `https://push.example/${tag}-${person.user.id}`, keys: { p256dh: "p", auth: "a" } });
     }

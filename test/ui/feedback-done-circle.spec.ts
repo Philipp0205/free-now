@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, call, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots go here. Override with FDC_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.FDC_SHOT_DIR || ".oc/shots/feedback-done-circle");
 const ADMIN = "a".repeat(32);
@@ -53,9 +53,9 @@ async function openAlerts(page: Page, unread: boolean) {
 
 for (const [width, height] of SIZES) {
   test(`in a circle at ${width}px: only the submitter's Alerts show it, the other member's stay empty`, { timeout: 90_000 }, async () => {
-    const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+    const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
     const circle = (await hangry.call("POST", "/api/circles", alex.token, { name: `Friends ${width}` })).circle;
-    const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: circle.inviteCode });
+    const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: circle.inviteCode });
     const text = `Group polls ${width} <i>please</i>`;
     const sent = await hangry.call("POST", "/api/feedback", bea.token, { text, circleId: circle.id });
     // Alex got "Bea joined". Clear it so an empty Alerts list proves nothing else arrived.

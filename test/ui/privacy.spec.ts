@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { fakeGoogle, type Fake } from "../fake-google.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land here (gitignored). Override with PRIVACY_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.PRIVACY_SHOT_DIR || "test/ui/screenshots/privacy");
 
@@ -56,7 +56,7 @@ for (const [width, height] of [...SIZES, [1280, 800]] as const) {
       await page.getByRole("heading", { level: 1, name: "Privacy" }).waitFor();
       assert.equal(await page.getByRole("link", { name: "Hangry home" }).getAttribute("href"), "/welcome");
       assert.equal(await page.getByRole("link", { name: "Open Hangry" }).getAttribute("href"), "/");
-      await page.getByText("Last updated: 11 November 2026").waitFor();
+      await page.getByText("Last updated: 15 November 2026").waitFor();
       for (const heading of ["Your account", "Location", "Calendar", "Assistant tokens", "Where it is hosted", "Deleting your data", "Contact"]) {
         await page.getByRole("heading", { level: 2, name: heading }).waitFor();
       }
@@ -79,7 +79,7 @@ for (const [width, height] of [...SIZES, [1280, 800]] as const) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: the login screen links to Privacy, and the link opens the policy`, { timeout: 60_000 }, async () => {
-    const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Fake Host" });
+    const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Fake Host" });
     const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Fake circle" });
     const ctx = await context(width, height);
     const page = await ctx.newPage();
@@ -108,7 +108,7 @@ for (const [width, height] of SIZES) {
   });
 
   test(`at ${width}: the Google Calendar facts link to the privacy policy`, { timeout: 60_000 }, async () => {
-    const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+    const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
     const { circle } = await hangry.call("POST", "/api/circles", alex.token, { name: `Friends ${width}` });
     const ctx = await context(width, height, alex.token);
     await ctx.addInitScript((id) => localStorage.setItem("fn_circle", id), circle.id);

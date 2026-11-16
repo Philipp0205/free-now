@@ -3,7 +3,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const PLACE = "Secret Garden Bar";
 
 /** No navigator.share, and a clipboard that records what was copied. */
@@ -22,10 +22,10 @@ const { call } = hangry;
 
 /** A host with a circle, a friend in it, and an outsider in a circle of their own. */
 async function people(circleName = "Kreuzberg crew") {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: circleName });
-  const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
-  const outsider = await call("POST", "/api/auth/start", undefined, { name: "Sam" });
+  const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
+  const outsider = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Sam" });
   await call("POST", "/api/circles", outsider.token, { name: "Elsewhere" });
   return { host, friend, outsider, circle };
 }

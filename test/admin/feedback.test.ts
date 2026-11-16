@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { FEEDBACK_LIMIT, cleanFeedbackText, cleanPrUrl } from "../../src/admin/feedback.js";
-import { START, api, withApp } from "../http.js";
+import { START, api, withApp, testEmail } from "../http.js";
 
 const ADMIN = "a".repeat(32);
 const FIELDS = ["appVersion", "circleId", "circleName", "createdAt", "id", "note", "prUrl", "status", "text", "userId", "userName"];
@@ -43,9 +43,9 @@ async function captureLogs<T>(fn: (logs: string[]) => Promise<T>): Promise<T> {
 }
 
 async function people(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const friends = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea" }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea" }, status: 201 });
   const club = await api(port, "POST", "/api/circles", { token: bea.token, body: { name: "Club" }, status: 201 });
   return { alex, bea, friends: friends.circle, club: club.circle };
 }

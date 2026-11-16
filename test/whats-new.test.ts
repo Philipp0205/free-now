@@ -10,7 +10,7 @@ import {
   unseenEntries,
   validId,
 } from "../public/js/whats-new.js";
-import { api, withApp } from "./http.js";
+import { api, withApp, testEmail } from "./http.js";
 import { builtPrecache, readBuilt } from "./built.js";
 
 const read = (file: string) => fs.readFileSync(new URL(file, import.meta.url), "utf8");
@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v107 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v108 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v107");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v108");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -661,16 +661,17 @@ test("the build label is hangry-v107 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the pay link entry is the newest, in plain words without an em dash, and older entries are kept", () => {
+test("the email entry is the newest, in plain words without an em dash, and older entries are kept", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-16-payment-link");
+  assert.equal(top.id, "2026-11-15-email");
   assert.equal(top.date, "2026-11-16");
-  assert.equal(top.title, "Add a pay link to your profile");
-  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 3);
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
-  assert.match(top.bullets.join(" "), /paypal\.me/);
-  assert.match(top.bullets.join(" "), /share a circle/);
+  assert.match(top.bullets.join(" "), /email/i);
+  assert.match(top.bullets.join(" "), /Flic/);
+  assert.ok(RAW.some((item) => item.id === "2026-11-16-payment-link"), "the pay link entry is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-15-donate-accent"), "the tip entry is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-15-faster-loading"), "Faster loading is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-14-meet-the-goblin"), "Meet the Goblin is kept");
@@ -679,7 +680,7 @@ test("the pay link entry is the newest, in plain words without an em dash, and o
 
 test("/api/me carries whatsNewSeen and POST /api/me/whats-new stores it", async () => {
   await withApp(async ({ port, db }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     assert.equal(alex.user.whatsNewSeen, null);
     await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
 
@@ -698,7 +699,7 @@ test("/api/me carries whatsNewSeen and POST /api/me/whats-new stores it", async 
     assert.equal(row.seen, RAW[0].id);
 
     // A second device of the same person signs in and already has it.
-    const recovered = await api(port, "POST", "/api/auth/recover", { body: { token: alex.buzzToken }, status: 200 });
+    const recovered = await api(port, "POST", "/api/auth/recover", { body: { token: alex.recoveryCode }, status: 200 });
     const other = await api(port, "GET", "/api/me", { token: recovered.token });
     assert.equal(other.user.whatsNewSeen, RAW[0].id);
 

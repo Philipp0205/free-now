@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots go here. Override with CR_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.CR_SHOT_DIR || ".oc/shots/circle-read");
 
@@ -67,10 +67,10 @@ for (const [width, height] of SIZES) {
   test(`at ${width}: a circle dot means unread alerts there, and opening Alerts clears it`, { timeout: 120_000 }, async () => {
     const home = `Home ${width}`;
     const uni = `Uni ${width}`;
-    const finn = await call("POST", "/api/auth/start", undefined, { name: "Finn" });
+    const finn = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn" });
     const a = (await call("POST", "/api/circles", finn.token, { name: home })).circle;
     const b = (await call("POST", "/api/circles", finn.token, { name: uni })).circle;
-    const uma = await call("POST", "/api/auth/start", undefined, { name: "Uma", code: a.inviteCode });
+    const uma = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Uma", code: a.inviteCode });
     await call("POST", "/api/circles/join", uma.token, { code: b.inviteCode });
 
     const page = await phone(width, height, uma.token, b.id);
@@ -85,7 +85,7 @@ for (const [width, height] of SIZES) {
 
       // Activity in Home only: a plan, and a new member.
       const plan = (await call("POST", `/api/plans?circle=${a.id}`, finn.token, { note: "Pizza night", time: "19:30" })).plan;
-      await call("POST", "/api/auth/start", undefined, { name: "Cleo", code: a.inviteCode });
+      await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Cleo", code: a.inviteCode });
 
       // Still on Uni: Home has a dot, Uni does not, and Uni's bell has no badge.
       await page.locator(".circle-switch-btn .unread-dot").waitFor({ timeout: 10_000 });

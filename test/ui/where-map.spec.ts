@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, testEmail, useHangry } from "./harness.js";
 
 const PLACE = "Near Alexanderplatz, Berlin";
 const NOTE = "Coffee nearby";
@@ -54,6 +54,7 @@ async function phonePage() {
 async function signIn(page: Page, name: string) {
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();

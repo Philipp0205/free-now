@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { api as sharedApi, withApp as sharedApp } from "../http.js";
+import { api as sharedApi, withApp as sharedApp, testEmail } from "../http.js";
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
@@ -51,12 +51,12 @@ async function api(port: number, method: string, pathname: string, options: { to
 
 test("the creator is admin and a new member is not", async () => {
   await withApp(async ({ port }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     assert.equal(created.circle.youAreAdmin, true);
     assert.equal(created.circle.members[0].admin, true);
     const fritz = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Fritz", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode },
       status: 201,
     });
     assert.equal(fritz.circle.youAreAdmin, false);
@@ -66,11 +66,11 @@ test("the creator is admin and a new member is not", async () => {
 
 test("only an admin can remove a member, and that ends their posts", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     at(START + 1000);
     const fritz = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Fritz", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode },
       status: 201,
     });
     const social = await api(port, "POST", "/api/socials", { token: fritz.token, body: { note: "Coffee" }, status: 201 });
@@ -90,17 +90,17 @@ test("only an admin can remove a member, and that ends their posts", async () =>
 
 test("a circle keeps an admin, and leaving promotes the longest-standing member", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const alexId = (await api(port, "GET", "/api/me", { token: alex.token })).user.id as string;
     at(START + 1000);
     const fritz = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Fritz", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode },
       status: 201,
     });
     at(START + 2000);
     await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     const demote = await api(port, "POST", `/api/circles/members/${alexId}`, {
@@ -119,10 +119,10 @@ test("a circle keeps an admin, and leaving promotes the longest-standing member"
 
 test("an admin can edit or end someone else's free post and plan", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const fritz = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Fritz", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode },
       status: 201,
     });
     await api(port, "POST", "/api/push/subscribe", {
@@ -131,7 +131,7 @@ test("an admin can edit or end someone else's free post and plan", async () => {
       status: 204,
     });
     const sam = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     const social = await api(port, "POST", "/api/socials", { token: fritz.token, body: { note: "Coffee" }, status: 201 });
@@ -158,14 +158,14 @@ test("an admin can edit or end someone else's free post and plan", async () => {
 
 test("an admin ends someone else's plan and free post, and a plain member gets 403 on both", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const bea = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Bea", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Bea", code: created.circle.inviteCode },
       status: 201,
     });
     const sam = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     await api(port, "POST", "/api/push/subscribe", {
@@ -193,18 +193,18 @@ test("an admin ends someone else's plan and free post, and a plain member gets 4
 
 test("host and admin can change every event, and a member cannot", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const bea = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Bea", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Bea", code: created.circle.inviteCode },
       status: 201,
     });
     const sam = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     const nia = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Nia", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Nia", code: created.circle.inviteCode },
       status: 201,
     });
     await api(port, "POST", `/api/circles/members/${bea.user.id}`, {
@@ -377,11 +377,11 @@ test("host and admin can change every event, and a member cannot", async () => {
 
 test("removal blocks the old invite, ends posts, and names who removed you", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const code = created.circle.inviteCode;
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code }, status: 201 });
-    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code }, status: 201 });
     await api(port, "POST", `/api/circles/members/${bea.user.id}`, { token: alex.token, body: { admin: true }, status: 200 });
     await api(port, "POST", "/api/push/subscribe", {
       token: sam.token,
@@ -412,7 +412,7 @@ test("removal blocks the old invite, ends posts, and names who removed you", asy
 
     await api(port, "DELETE", `/api/socials/${coffee.social.id}`, { token: alex.token, status: 204 });
     const again = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Again" }, status: 201 });
-    await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: rotated.circle.inviteCode }, status: 201 }).then(async (nia) => {
+    await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Nia", code: rotated.circle.inviteCode }, status: 201 }).then(async (nia) => {
       await api(port, "POST", "/api/push/subscribe", {
         token: nia.token,
         body: { endpoint: "https://push.example/nia", keys: { p256dh: "p", auth: "a" } },
@@ -440,10 +440,10 @@ test("removal blocks the old invite, ends posts, and names who removed you", asy
 
 test("editing a plan tells people who are in, keeps an omitted place, and a past day is gone", async () => {
   await withApp(async ({ port, sent, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
     for (const person of [alex, fritz, sam]) {
       await api(port, "POST", "/api/push/subscribe", {
         token: person.token,
@@ -562,7 +562,7 @@ test("opening an older database makes the creator the admin", () => {
 
 test("editing an ended free post stays ended and does not push", async () => {
   await sharedApp(async ({ port, db, sent, at }) => {
-    const alex = await sharedApi(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await sharedApi(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await sharedApi(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const created = await sharedApi(port, "POST", "/api/socials", {
       token: alex.token,
@@ -597,10 +597,10 @@ test("editing an ended free post stays ended and does not push", async () => {
 
 test("an admin editing someone else's plan or free post tells the host, and the host's own edit does not", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
     await api(port, "POST", `/api/circles/members/${fritz.user.id}`, { token: alex.token, body: { admin: true }, status: 200 });
     for (const person of [alex, fritz, sam]) {
       await api(port, "POST", "/api/push/subscribe", {

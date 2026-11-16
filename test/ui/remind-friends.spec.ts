@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example RF_SHOT_DIR=/tmp/shots. */
 const SHOT_DIR = process.env.RF_SHOT_DIR ? path.resolve(process.env.RF_SHOT_DIR) : "";
@@ -54,9 +54,9 @@ async function toast(page: Page, text: string) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: the host reminds a friend from the plan menu, a second tap shows the cooldown, the friend sees it in Alerts`, { timeout: 120_000 }, async () => {
-    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
     const { circle } = await call("POST", "/api/circles", host.token, { name: `Remind ${width}` });
-    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
     await call("POST", "/api/push/subscribe", friend.token, { endpoint: `https://push.example/remind-${width}`, keys: { p256dh: "p", auth: "a" } });
     const note = `Board games ${width}`;
     await call("POST", "/api/plans", host.token, { note, time: "19:30" });
@@ -118,9 +118,9 @@ for (const [width, height] of SIZES) {
 }
 
 test("everyone answered: the toast says so and the item stays available", { timeout: 60_000 }, async () => {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "All answered" });
-  const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+  const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
   const made = (await call("POST", "/api/plans", host.token, { note: "Picnic" })).plan;
   await call("POST", `/api/plans/${made.id}/reply`, friend.token, { reply: "cant" });
   const page = await phone(360, 640, host.token);
@@ -140,10 +140,10 @@ test("everyone answered: the toast says so and the item stays available", { time
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: a friend who said Maybe still gets reminded, next to the Maybe item in the menu`, { timeout: 60_000 }, async () => {
-    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
     const { circle } = await call("POST", "/api/circles", host.token, { name: `Maybe ${width}` });
-    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
-    const sure = await call("POST", "/api/auth/start", undefined, { name: "Sami", code: circle.inviteCode });
+    const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
+    const sure = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Sami", code: circle.inviteCode });
     await call("POST", "/api/push/subscribe", friend.token, { endpoint: `https://push.example/remind-maybe-${width}`, keys: { p256dh: "p", auth: "a" } });
     const made = (await call("POST", "/api/plans", host.token, { note: `Karaoke ${width}` })).plan;
     await call("POST", `/api/plans/${made.id}/reply`, friend.token, { reply: "maybe" });
@@ -192,9 +192,9 @@ for (const [width, height] of SIZES) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: after a reminder a newcomer joins, and the sender can remind just them`, { timeout: 120_000 }, async () => {
-    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
     const { circle } = await call("POST", "/api/circles", host.token, { name: `Newcomer ${width}` });
-    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
     const finnEnd = `https://push.example/remind-old-${width}`;
     await call("POST", "/api/push/subscribe", friend.token, { endpoint: finnEnd, keys: { p256dh: "p", auth: "a" } });
     const note = `Pizza ${width}`;
@@ -218,7 +218,7 @@ for (const [width, height] of SIZES) {
       await page.keyboard.press("Escape");
 
       // Nina joins the circle inside the hour.
-      const nina = await call("POST", "/api/auth/start", undefined, { name: "Nina", code: circle.inviteCode });
+      const nina = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Nina", code: circle.inviteCode });
       const ninaEnd = `https://push.example/remind-new-${width}`;
       await call("POST", "/api/push/subscribe", nina.token, { endpoint: ninaEnd, keys: { p256dh: "p", auth: "a" } });
 

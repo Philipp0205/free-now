@@ -5,12 +5,12 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { openDb } from "../../src/db.js";
-import { api, withApp, type AppCtx } from "../http.js";
+import { api, withApp, type AppCtx, testEmail } from "../http.js";
 
 type Person = { token: string; buzzToken: string };
 
 async function signUp(ctx: AppCtx, name: string): Promise<Person> {
-  const { json } = await api(ctx, "POST", "/api/auth/start", { body: { name }, status: 201 });
+  const { json } = await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name }, status: 201 });
   return json;
 }
 

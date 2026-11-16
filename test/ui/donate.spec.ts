@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land in test/ui/screenshots/donate/ (git-ignored). */
 const SHOT_DIR = path.resolve("test/ui/screenshots/donate");
 const PAYPAL = "https://www.paypal.me/philippkurrle1";
@@ -17,7 +17,7 @@ let people = 0;
 /** A fake person with a circle, made through the real API. */
 async function person(): Promise<string> {
   people += 1;
-  const me = await call("POST", "/api/auth/start", undefined, { name: `Fake Cleo ${people}` });
+  const me = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Fake Cleo ${people}` });
   await call("POST", "/api/circles", me.token, { name: "Fake circle" });
   return me.token as string;
 }

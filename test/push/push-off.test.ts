@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { listPushSubs } from "../../src/db.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 test("after DELETE /api/push/subscribe the phone is gone and gets no more pushes", async () => {
   await withApp(async ({ port, db, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: created.circle.inviteCode }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: created.circle.inviteCode }, status: 201 });
     const endpoint = "https://push.example/bea";
     await api(port, "POST", "/api/push/subscribe", {
       token: bea.token,

@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = path.resolve(process.env.NOTIF_SHOT_DIR || ".oc/shots");
 const ENDPOINT = "https://push.example/fake";
 
@@ -88,9 +88,9 @@ async function shot(page: Page, name: string) {
 const fakeCount = (page: Page, key: string) => page.evaluate((k) => Number(localStorage.getItem(k) || 0), key);
 
 test("Settings → Notifications turns push off and back on at 393x852", { timeout: 120_000 }, async () => {
-  const alex = await post("/api/auth/start", { name: "Alex" });
+  const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const circle = await post("/api/circles", { name: "friends" }, alex.token);
-  const bea = await post("/api/auth/start", { name: "Bea", code: circle.circle.inviteCode });
+  const bea = await post("/api/auth/start", { email: testEmail(), name: "Bea", code: circle.circle.inviteCode });
 
   const context = await hangry.browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: UA });
   await skipWhatsNew(context);

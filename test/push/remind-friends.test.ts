@@ -7,7 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { openDb } from "../../src/db.js";
 import { planRemindTitle } from "../../src/push/notify.js";
 import { REMIND_COOLDOWN_MS } from "../../src/social/plans.js";
-import { api, START, withApp, type SentPush } from "../http.js";
+import { api, START, withApp, type SentPush, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 
@@ -19,7 +19,7 @@ const MINUTE = 60 * 1000;
  */
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   const alex = await start("Alex");
   const a = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", a.inviteCode);
@@ -150,10 +150,10 @@ test("cooldown: a second reminder within the hour is 429 with retryAt, for any s
 
 test("when everyone has answered: reminded 0, nothing sent, and the cooldown does not start", async () => {
   await withApp(async ({ port, sent, db }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const circle = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Duo" }, status: 201 })).circle;
-    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: circle.inviteCode }, status: 201 });
-    const cam = await api(port, "POST", "/api/auth/start", { body: { name: "Cam", code: circle.inviteCode }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: circle.inviteCode }, status: 201 });
+    const cam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cam", code: circle.inviteCode }, status: 201 });
     const plan = (await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Lunch" }, status: 201 })).plan;
     await api(port, "POST", `/api/plans/${plan.id}/reply`, { token: bea.token, body: { reply: "in" }, status: 200 });
     await api(port, "POST", `/api/plans/${plan.id}/reply`, { token: cam.token, body: { reply: "declined" }, status: 200 });
@@ -167,7 +167,7 @@ test("when everyone has answered: reminded 0, nothing sent, and the cooldown doe
     assert.equal(Number(rows.n), 0);
 
     // Cam changes nothing, but a newcomer arrives: a reminder still works right away.
-    const dee = await api(port, "POST", "/api/auth/start", { body: { name: "Dee", code: circle.inviteCode }, status: 201 });
+    const dee = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Dee", code: circle.inviteCode }, status: 201 });
     const next = await api(port, "POST", `/api/plans/${plan.id}/remind`, { token: bea.token, body: {}, status: 200 });
     assert.equal(next.reminded, 1);
     assert.equal(alerts(db, dee.user.id).length, 1);
@@ -202,11 +202,11 @@ test("Maybe is tentative: Maybe people get the reminder, In and Can't are skippe
 
 test("everyone In or Can't except one Maybe: that Maybe person is reminded", async () => {
   await withApp(async ({ port, sent, db }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const circle = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Trio" }, status: 201 })).circle;
-    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: circle.inviteCode }, status: 201 });
-    const cam = await api(port, "POST", "/api/auth/start", { body: { name: "Cam", code: circle.inviteCode }, status: 201 });
-    const dee = await api(port, "POST", "/api/auth/start", { body: { name: "Dee", code: circle.inviteCode }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: circle.inviteCode }, status: 201 });
+    const cam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cam", code: circle.inviteCode }, status: 201 });
+    const dee = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Dee", code: circle.inviteCode }, status: 201 });
     await api(port, "POST", "/api/push/subscribe", {
       token: dee.token,
       body: { endpoint: to(dee), keys: { p256dh: "p", auth: "a" } },

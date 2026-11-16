@@ -7,7 +7,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { PushSender } from "../../src/push/push.js";
-
+import { testEmail } from "../http.js";
 const START = Date.parse("2026-06-01T15:00:00.000Z");
 
 async function withApp(fn: (ctx: { port: number; db: DatabaseSync }) => Promise<void>) {
@@ -47,10 +47,10 @@ async function api(port: number, method: string, pathname: string, options: { to
 type Row = { id: string; note: string; circleId: string; circleName: string };
 
 async function setup(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni friends" }, status: 201 });
   const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea" }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea" }, status: 201 });
   const work = await api(port, "POST", "/api/circles", { token: bea.token, body: { name: "Work" }, status: 201 });
   await api(port, "POST", `/api/socials?circle=${uni.circle.id}`, { token: alex.token, body: { note: "Uni soup", lat: 48.77, lng: 9.18 }, status: 201 });
   await api(port, "POST", `/api/socials?circle=${home.circle.id}`, { token: alex.token, body: { note: "Home walk", lat: 48.78, lng: 9.19 }, status: 201 });
@@ -104,7 +104,7 @@ test("all=1 never shows a circle the caller is not in", async () => {
 test("leaving a circle drops its events from all=1", async () => {
   await withApp(async ({ port }) => {
     const { alex, uni, home } = await setup(port);
-    const ana = await api(port, "POST", "/api/auth/start", { body: { name: "Ana", code: uni.inviteCode }, status: 201 });
+    const ana = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Ana", code: uni.inviteCode }, status: 201 });
     await api(port, "POST", "/api/circles/join", { token: ana.token, body: { code: home.inviteCode }, status: 200 });
     const before = (await api(port, "GET", "/api/plans?all=1", { token: ana.token })).plans as Row[];
     assert.deepEqual(before.map((row) => row.note).sort(), ["Home brunch", "Uni dinner"]);

@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { fakeGoogle, type Fake } from "../fake-google.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 const MIN = 60_000;
 /** Screenshots land here (gitignored). Override with GF_SHOT_DIR. */
@@ -82,10 +82,10 @@ async function show(page: Page, locator: ReturnType<Page["locator"]>) {
 }
 
 async function seed(h: Hangry, tag: string) {
-  const alex = await h.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+  const alex = await h.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
   const friends = (await h.call("POST", "/api/circles", alex.token, { name: `Friends ${tag}` })).circle;
   const work = (await h.call("POST", "/api/circles", alex.token, { name: `Work ${tag}` })).circle;
-  const bea = await h.call("POST", "/api/auth/start", undefined, { name: "Bea", code: friends.inviteCode });
+  const bea = await h.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: friends.inviteCode });
   return { alex, bea, friends, work };
 }
 

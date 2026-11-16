@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { api, withApp } from "./http.js";
+import { api, withApp, testEmail } from "./http.js";
 import { builtPrecache } from "./built.js";
 
 const read = (file: string) => fs.readFileSync(new URL(file, import.meta.url), "utf8");
@@ -26,7 +26,7 @@ function visibleText(html: string): string {
 test("the Search Console verification file is served as is, not as the app shell", async () => {
   assert.equal(read("../public/googlee48df27048aaa965.html").trim(), VERIFY_BODY);
   await withApp(async ({ port }) => {
-    const me = await api(port, "POST", "/api/auth/start", { body: { name: "Fake Tester" }, status: 201 });
+    const me = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Tester" }, status: 201 });
     for (const headers of [{}, { authorization: `Bearer ${me.token}` }]) {
       const file = await get(port, VERIFY_PATH, { headers });
       assert.equal(file.status, 200);
@@ -56,7 +56,7 @@ test("/privacy serves the static policy at both paths, logged out or in", async 
       assert.equal(page.headers.get("referrer-policy"), "no-referrer");
       assert.equal(page.headers.get("x-frame-options"), "DENY");
     }
-    const me = await api(port, "POST", "/api/auth/start", { body: { name: "Fake Tester" }, status: 201 });
+    const me = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Tester" }, status: 201 });
     const signedIn = await get(port, "/privacy", { headers: { authorization: `Bearer ${me.token}` } });
     assert.equal(signedIn.text, PRIVACY);
     const head = await fetch(`http://127.0.0.1:${port}/privacy`, { method: "HEAD" });
@@ -79,7 +79,7 @@ test("the policy has no script, no dashes or parentheses, and no invented email"
 
 test("the policy states the facts", () => {
   const text = visibleText(PRIVACY);
-  assert.match(text, /Last updated: 11 November 2026/);
+  assert.match(text, /Last updated: 15 November 2026/);
   assert.match(text, /invite-only/);
   assert.match(text, /We do not show ads, and we do not sell your data\./);
   assert.match(text, /calendar\.freebusy permission, which is busy and free times/);

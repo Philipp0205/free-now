@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land here. Override with CAL_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.CAL_SHOT_DIR || "/workspace/hangry-calendar-android-artifacts");
 const PIXEL = "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
@@ -70,7 +70,7 @@ function check(ok: boolean, label: string): void {
 }
 
 async function host(label: string) {
-  const person = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   await call("POST", "/api/circles", person.token, { name: `Cal ${label}` });
   return person;
 }

@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Set to a folder to keep screenshots, for example MAP_ALL_SHOT_DIR=/workspace/hangry-railway. */
 const SHOT_DIR = process.env.MAP_ALL_SHOT_DIR ? path.resolve(process.env.MAP_ALL_SHOT_DIR) : "";
 const UNI_PLAN = "Uni rooftop";
@@ -56,7 +56,7 @@ async function shot(page: Page, name: string) {
 }
 
 test("map: This circle / All circles puts every circle on one map and names the circle on the card", { timeout: 180_000 }, async () => {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const uni = (await hangry.call("POST", "/api/circles", host.token, { name: "Uni friends" })).circle;
   const home = (await hangry.call("POST", "/api/circles", host.token, { name: "Home" })).circle;
   await hangry.call("POST", `/api/plans?circle=${uni.id}`, host.token, {
@@ -132,7 +132,7 @@ test("map: This circle / All circles puts every circle on one map and names the 
 });
 
 test("map: one circle shows no scope switch", { timeout: 60_000 }, async () => {
-  const solo = await hangry.call("POST", "/api/auth/start", undefined, { name: "Solo" });
+  const solo = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Solo" });
   const { circle } = await hangry.call("POST", "/api/circles", solo.token, { name: "Only" });
   await hangry.call("POST", "/api/plans", solo.token, { note: "Solo walk", lat: 48.77, lng: 9.18, precise: true });
   const page = await open(360, 740, solo.token, circle.id, true);

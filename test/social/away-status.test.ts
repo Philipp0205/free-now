@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { openDb } from "../../src/db.js";
 import { activeStatus, readStatusBody, StatusError, STATUS_TZ } from "../../src/social/status.js";
 import { endOfDay } from "../../src/lib/time.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 
@@ -16,7 +16,7 @@ const NOV_9_NOON_BERLIN = Date.parse("2026-11-09T11:00:00Z");
 /** Friends: Phil, Bea. Climbing: Bea, Cam. Sam is on his own. */
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   const phil = await start("Phil");
   const friends = (await api(port, "POST", "/api/circles", { token: phil.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", friends.inviteCode);
@@ -207,10 +207,10 @@ test("only people sharing a circle see a status, on members, events, rosters and
     // Unauthenticated routes never carry a status.
     const preview = await api(port, "GET", `/api/invites/${friends.inviteCode}`, { status: 200 });
     assert.deepEqual(preview, { name: "Friends" });
-    const loner = await api(port, "POST", "/api/auth/start", { body: { name: "Lou" }, status: 201 });
+    const loner = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Lou" }, status: 201 });
     assert.ok(!JSON.stringify(loner).includes("Tennis"), "a signup without a circle sees no one");
     // Joining a circle by invite makes Nia a member, so her signup answer and /api/me show it.
-    const fresh = await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: friends.inviteCode }, status: 201 });
+    const fresh = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Nia", code: friends.inviteCode }, status: 201 });
     assert.equal(statusOf(fresh.circle.members, phil.user.id) && "seen", "seen");
     const niaMe = await api(port, "GET", "/api/me", { token: fresh.token });
     assert.equal((statusOf(niaMe.circle.members, phil.user.id) as { type: string }).type, "away", "joining a circle shows it");

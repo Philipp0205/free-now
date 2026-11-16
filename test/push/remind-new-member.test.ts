@@ -6,7 +6,7 @@ import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { openDb, sweep } from "../../src/db.js";
 import { REMIND_COOLDOWN_MS } from "../../src/social/plans.js";
-import { api, START, withApp, type SentPush } from "../http.js";
+import { api, START, withApp, type SentPush, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 
@@ -35,9 +35,9 @@ async function subscribe(port: number, person: Person) {
 
 /** Alex hosts "Lunch" in Duo. Bea is an old member with push. */
 async function seed(port: number) {
-  const alex: Person = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const circle = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Duo" }, status: 201 })).circle;
-  const bea: Person = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: circle.inviteCode }, status: 201 });
+  const bea: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: circle.inviteCode }, status: 201 });
   await subscribe(port, alex);
   await subscribe(port, bea);
   const plan = (await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Lunch" }, status: 201 })).plan;
@@ -45,7 +45,7 @@ async function seed(port: number) {
 }
 
 const join = (port: number, name: string, code: string): Promise<Person> =>
-  api(port, "POST", "/api/auth/start", { body: { name, code }, status: 201 });
+  api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code }, status: 201 });
 
 const remind = (port: number, person: Person, planId: string, circleId?: string) =>
   api({ port }, "POST", `/api/plans/${planId}/remind${circleId ? `?circle=${circleId}` : ""}`, { token: person.token, body: {} });

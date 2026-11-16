@@ -50,6 +50,14 @@ if (sharePath) state.shareLink = sharePath[1];
 const joinPath = location.pathname.match(/^\/join\/([A-Za-z0-9]+)/);
 if (joinPath) state.pendingCode = joinPath[1].toUpperCase();
 state.codeDraft = state.pendingCode;
+// /verify and /recover open from an email. The token rides in the fragment so it never reaches a log, and it
+// leaves the address bar at once. Opening the page changes nothing: the button on it posts the token.
+const linkPath = location.pathname.match(/^\/(verify|recover)\/?$/);
+if (linkPath) {
+  const token = new URLSearchParams(location.hash.replace(/^#/, "")).get("t") || "";
+  state.linkFlow = { kind: linkPath[1], token, error: token ? "" : "This link is incomplete. Ask for a new one." };
+  history.replaceState(null, "", location.pathname);
+}
 
 export function persistCachedState() {
   if (!state.token || !state.me) return;
@@ -127,6 +135,10 @@ export function friendlyMessage(raw, status) {
   if (status === 429) return "That's a lot at once. Try again in a few minutes.";
   if (!text || lower.includes("failed to fetch") || status === 0) return "You're offline. Retrying…";
   if (lower.includes("unknown recovery")) return "That code didn't work. Check it and try again.";
+  if (lower.includes("valid email")) return "Enter a valid email address.";
+  if (lower.includes("add an email first")) return "Add your email to keep going.";
+  if (lower.includes("link is no longer valid")) return "This link doesn't work anymore. Ask for a new one.";
+  if (lower.includes("already confirmed on another")) return "That email is already confirmed on another account.";
   if (lower.includes("feedback")) return `Write 1–${FEEDBACK_MAX} characters.`;
   if (lower.includes("must be 1")) return "Use 1–24 characters for your name.";
   if (lower.includes("plan has ended")) return "That plan has ended.";
@@ -163,6 +175,8 @@ export function friendlyMessage(raw, status) {
 
 export async function refresh({ initial = false } = {}) {
   const seq = ++refreshSeq;
+  // An account with no email yet may only read /api/me, save an email or sign out. Everything else answers 403.
+  if (state.me?.user?.email === null) return;
   if (state.token && state.me && !state.me.circle) {
     await refreshPersonalAlerts(seq);
     return;
@@ -398,6 +412,8 @@ export function clearSession() {
   state.whatsNewChecked = false;
   rememberCircle("");
   state.token = null;
+  state.recoveryOnce = "";
+  state.emailDraft = "";
   state.joinInstall = false;
   state.installSteps = false;
   state.remindersChecked = false;
@@ -492,11 +508,13 @@ export async function onStart(event) {
   try {
     const data = await api("/api/auth/start", {
       method: "POST",
-      body: { name: state.nameDraft, code: state.pendingCode || undefined },
+      body: { name: state.nameDraft, email: state.emailDraft.trim(), code: state.pendingCode || undefined },
       token: null,
     });
     localStorage.setItem(TOKEN_KEY, data.token);
     state.token = data.token;
+    state.recoveryOnce = data.recoveryCode || "";
+    state.emailDraft = "";
     // Someone new has nothing to catch up on. Everything up to today counts as seen.
     await markNewAccountSeen();
     if (data.circle) rememberCircle(data.circle.id);

@@ -9,7 +9,7 @@ import { untilText } from "../../public/js/freebusy.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 const MIN = 60_000;
 /** Screenshots land here (gitignored). Override with FB_SHOT_DIR. */
@@ -108,11 +108,11 @@ function absent(text: string, label: string) {
 
 /** Alex shares with Friends (Bea), not with Work (Cleo). */
 async function seed(tag: string, connect: boolean) {
-  const alex = await call("POST", "/api/auth/start", undefined, { name: "Alex" });
+  const alex = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
   const friends = (await call("POST", "/api/circles", alex.token, { name: `Friends ${tag}` })).circle;
   const work = (await call("POST", "/api/circles", alex.token, { name: `Work ${tag}` })).circle;
-  const bea = await call("POST", "/api/auth/start", undefined, { name: "Bea", code: friends.inviteCode });
-  const cleo = await call("POST", "/api/auth/start", undefined, { name: "Cleo", code: work.inviteCode });
+  const bea = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: friends.inviteCode });
+  const cleo = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Cleo", code: work.inviteCode });
   if (connect) {
     await call("PUT", "/api/me/calendar-sync", alex.token, { url: link(tag) });
     await call("PATCH", "/api/me/calendar-sync", alex.token, { sharedCircleIds: [friends.id] });

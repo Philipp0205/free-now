@@ -8,7 +8,7 @@ import { loadConfig } from "../../src/config.js";
 import { HISTORY_DAYS, openDb, sweep } from "../../src/db.js";
 import type { PushPayload, PushSender } from "../../src/push/push.js";
 import { addDays } from "../../src/lib/time.js";
-
+import { testEmail } from "../http.js";
 const START = Date.parse("2026-06-01T15:00:00.000Z");
 
 async function withApp(fn: (ctx: {
@@ -54,11 +54,11 @@ async function api(port: number, method: string, pathname: string, options: { to
 
 test("ended hangouts stay in Past for 90 days, without a new push", async () => {
   await withApp(async ({ port, db, sent, at, now }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
-    const nia = await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: created.circle.inviteCode }, status: 201 });
-    const outsider = await api(port, "POST", "/api/auth/start", { body: { name: "Out" }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const nia = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Nia", code: created.circle.inviteCode }, status: 201 });
+    const outsider = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Out" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: outsider.token, body: { name: "other" }, status: 201 });
     const social = await api(port, "POST", "/api/socials", {
       token: alex.token,
@@ -127,10 +127,10 @@ test("ended hangouts stay in Past for 90 days, without a new push", async () => 
 
 test("an ended plan rejects reply, join, and a new arrival time", async () => {
   await withApp(async ({ port, db, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const fritz = await api(port, "POST", "/api/auth/start", { body: { name: "Fritz", code: created.circle.inviteCode }, status: 201 });
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const fritz = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
     await api(port, "POST", "/api/push/subscribe", {
       token: alex.token,
       body: { endpoint: `https://push.example/${alex.user.id}`, keys: { p256dh: "p", auth: "a" } },
@@ -166,7 +166,7 @@ test("an ended plan rejects reply, join, and a new arrival time", async () => {
 
 test("Past lists each day under one heading", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner" }, status: 201 });
     at(Date.parse("2026-06-01T20:00:00.000Z"));
@@ -186,7 +186,7 @@ test("Past lists each day under one heading", async () => {
 
 test("cleanup removes an event chat with its messages", async () => {
   await withApp(async ({ port, db, at, now }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const social = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Coffee" }, status: 201 });
     const plan = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner" }, status: 201 });

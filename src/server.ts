@@ -2,6 +2,7 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { clearExpiredLocations, HISTORY_DAYS, openDb, sweep } from "./db.js";
 import { createApp } from "./app.js";
+import { createMailer } from "./accounts/mail.js";
 import { installGracefulShutdown } from "./app-kit/shutdown.ts";
 import { syncCalendarFeeds } from "./calendar/freebusy.js";
 import { startPmtilesFetch } from "./map/pmtiles-fetch.js";
@@ -57,6 +58,7 @@ const server = http.createServer(
     push,
     config,
     now: () => Date.now(),
+    mailer: createMailer(config),
   }),
 );
 

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
 import test, { mock } from "node:test";
-import { api, withApp, type AppCtx, type WithAppOptions } from "../http.js";
+import { api, withApp, type AppCtx, type WithAppOptions, testEmail } from "../http.js";
 
 const AMANDA_ID = "00000000-0000-4000-8000-00000000a111";
 const CIRCLE = "Amanda & Philipp";
@@ -18,16 +19,19 @@ async function setup(ctx: AppCtx, circleName: string) {
     pin = null;
     return id;
   });
+  // The kit imports randomUUID by name, so the ESM binding has to follow the patched function.
+  syncBuiltinESMExports();
   let amanda;
   try {
-    amanda = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Amanda" }, status: 201 })).json;
+    amanda = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Amanda" }, status: 201 })).json;
   } finally {
     stub.mock.restore();
+    syncBuiltinESMExports();
   }
   assert.equal(amanda.user.id, AMANDA_ID);
   const pair = (await api(ctx, "POST", "/api/circles", { token: amanda.token, body: { name: circleName }, status: 201 })).json.circle;
   const other = (await api(ctx, "POST", "/api/circles", { token: amanda.token, body: { name: "Climbing" }, status: 201 })).json.circle;
-  const philipp = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Philipp", code: pair.inviteCode }, status: 201 })).json;
+  const philipp = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Philipp", code: pair.inviteCode }, status: 201 })).json;
   // A hold posts a normal social in the pair circle, so "stays normal" is visible there.
   await api(ctx, "PUT", "/api/me/buzz-circles", { token: amanda.token, body: { hold: pair.id }, status: 200 });
   return { amanda, philipp, pair, other };

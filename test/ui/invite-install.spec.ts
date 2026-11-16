@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land in test/ui/screenshots/invite-install/ (git-ignored); INVITE_INSTALL_SHOT_DIR overrides. */
 const SHOT_DIR = path.resolve(process.env.INVITE_INSTALL_SHOT_DIR || "test/ui/screenshots/invite-install");
 /** Copies for the issue thread, when that folder exists on this box. */
@@ -36,7 +36,7 @@ let hosts = 0;
 /** A fake host with a fresh circle, made through the real API. */
 async function hostCircle(name = "Fake circle") {
   hosts += 1;
-  const host: Person = await call("POST", "/api/auth/start", undefined, { name: `Host ${hosts}` });
+  const host: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Host ${hosts}` });
   const { circle } = await call("POST", "/api/circles", host.token, { name });
   return { host, circle: circle as { id: string; inviteCode: string } };
 }
@@ -90,6 +90,7 @@ async function overflow(page: Page) {
 async function joinAsNew(page: Page, code: string, name: string) {
   await page.goto(`${hangry.baseUrl}/join/${code}`);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: /^Join / }).click();
   await page.locator("nav.tabbar").waitFor();
 }
@@ -150,7 +151,7 @@ for (const [width, height] of SIZES) {
 
 test("a signed-in Android user opening an invite link is auto-joined and the Install button uses the browser prompt", { timeout: 60_000 }, async () => {
   const { circle } = await hostCircle("Fake dinner club");
-  const me: Person = await call("POST", "/api/auth/start", undefined, { name: "Fake Remi" });
+  const me: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Fake Remi" });
   await call("POST", "/api/circles", me.token, { name: "Fake home" });
   const context = await phone(360, 640, { token: me.token });
   await context.addInitScript(() => {
@@ -200,6 +201,7 @@ test("joining from the Circle tab shows the Android menu steps; the host who mad
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill("Fake Noor");
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   await page.locator("#circle-name").fill("Fake own circle");
   await page.getByRole("button", { name: "Create circle" }).click();

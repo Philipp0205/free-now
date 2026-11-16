@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getPlan, getSocial } from "../src/db.js";
 import { planPayload, socialPayload } from "../src/social/payload.js";
-import { api, START, withApp } from "./http.js";
+import { api, START, withApp, testEmail } from "./http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 type Entry = { id: string; paymentUrl?: string | null };
@@ -12,7 +12,7 @@ const LINK = "https://paypal.me/hangryfriend";
 /** Friends: Alex, Bea. Climbing: Cam. Sam is in no circle. */
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { email: testEmail(), name, code } : { email: testEmail(), name }, status: 201 });
   const alex = await start("Alex");
   const friends = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", friends.inviteCode);

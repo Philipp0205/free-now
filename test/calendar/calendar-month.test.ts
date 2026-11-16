@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { api, START, withApp } from "../http.js";
+import { api, START, withApp, testEmail } from "../http.js";
 
 // START is 2026-06-01 15:00 UTC, which is 17:00 in Berlin.
 const DAY = 86_400_000;
@@ -20,10 +20,10 @@ async function month(port: number, token: string, query: string, circle?: string
 }
 
 async function setup(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const uni = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni friends" }, status: 201 })).circle;
   const home = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 })).circle;
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea" }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea" }, status: 201 });
   const work = (await api(port, "POST", "/api/circles", { token: bea.token, body: { name: "Work" }, status: 201 })).circle;
   const early = (await api(port, "POST", `/api/plans?circle=${uni.id}`, { token: alex.token, body: { note: "Uni early", date: "2026-06-02" }, status: 201 })).plan;
   const late = (await api(port, "POST", `/api/plans?circle=${home.id}`, { token: alex.token, body: { note: "Home late", date: "2026-06-20" }, status: 201 })).plan;
@@ -82,7 +82,7 @@ test("all=1 never shows a circle the caller is not in, and a requested circle ca
 test("leaving a circle drops its events from the All month", async () => {
   await withApp(async ({ port }) => {
     const { uni, home } = await setup(port);
-    const ana = await api(port, "POST", "/api/auth/start", { body: { name: "Ana", code: uni.inviteCode }, status: 201 });
+    const ana = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Ana", code: uni.inviteCode }, status: 201 });
     await api(port, "POST", "/api/circles/join", { token: ana.token, body: { code: home.inviteCode }, status: 200 });
     const before = await month(port, ana.token, `${JUNE}&all=1`);
     assert.deepEqual(before.plans.map((row) => row.note), ["Uni early", "Home late"]);
@@ -122,7 +122,7 @@ test("the range is inclusive and leaves out plans outside it", async () => {
 
 test("socials land on the Berlin day they started, not the UTC day", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const circle = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Night" }, status: 201 })).circle;
     // 22:30 UTC on 9 Jun is 00:30 on 10 Jun in Berlin.
     at(Date.parse("2026-06-09T22:30:00.000Z"));
@@ -144,7 +144,7 @@ test("socials land on the Berlin day they started, not the UTC day", async () =>
 
 test("a later-today social lands on the day it starts", async () => {
   await withApp(async ({ port }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const circle = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Later" }, status: 201 })).circle;
     const made = (await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Late snack", startsAt: "23:30" }, status: 201 })).social;
     assert.ok(made.startsAt > START);

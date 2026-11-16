@@ -7,7 +7,7 @@ import type { PushPayload, PushSender, PushSubscription } from "../../src/push/p
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example MC_SHOT_DIR=/tmp/shots. */
 const SHOT_DIR = process.env.MC_SHOT_DIR ? path.resolve(process.env.MC_SHOT_DIR) : "";
@@ -25,11 +25,11 @@ type Person = { token: string; user: { id: string; name: string } };
 
 /** Ana hosts Friends and Climbing. Ben is only in Friends, Cleo only in Climbing. All three have push on. */
 async function seed(tag: string) {
-  const ana: Person = await call("POST", "/api/auth/start", undefined, { name: "Ana" });
+  const ana: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ana" });
   const friends = (await call("POST", "/api/circles", ana.token, { name: "Friends" })).circle;
   const climbing = (await call("POST", "/api/circles", ana.token, { name: "Climbing" })).circle;
-  const ben: Person = await call("POST", "/api/auth/start", undefined, { name: "Ben", code: friends.inviteCode });
-  const cleo: Person = await call("POST", "/api/auth/start", undefined, { name: "Cleo", code: climbing.inviteCode });
+  const ben: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ben", code: friends.inviteCode });
+  const cleo: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Cleo", code: climbing.inviteCode });
   const ends = { ana: `https://push.example/ana-${tag}`, ben: `https://push.example/ben-${tag}`, cleo: `https://push.example/cleo-${tag}` };
   for (const [person, endpoint] of [[ana, ends.ana], [ben, ends.ben], [cleo, ends.cleo]] as const) {
     await call("POST", "/api/push/subscribe", person.token, { endpoint, keys: { p256dh: "p", auth: "a" } });

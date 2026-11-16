@@ -4,7 +4,7 @@ import { api, clearSession } from "./session.js";
 import { render } from "./render.js";
 import { alertsBell } from "./alerts.js";
 import { onLeave, screenHeader } from "./circles.js";
-import { buzzNote, flicPanel, onRotateBuzz } from "./flic.js";
+import { buzzNote, flicPanel } from "./flic.js";
 import { busyHoursPanel, statusPanel } from "./status-ui.js";
 import { busyPreviewScreen, friendsViewPanel } from "./busy-preview.js";
 import { calendarFeedPanel, calendarSyncPanel, copyWithSelection, feedDate } from "./calendar-sync.js";
@@ -12,6 +12,7 @@ import { isInstalled, notificationStatusLabel, onInstall, onTestPush, openNotifi
 import { openFeedback, openWhatsNewList } from "./whats-new-ui.js";
 import { copyText, el, field, icon, paymentUrlError, run, scheduleErrorClear, viewerTz } from "./lib.js";
 import { avatar, onRemovePhoto, pickPhoto } from "./avatars.js";
+import { emailField, onResendEmail, saveEmail } from "./account.js";
 
 const YOU_SECTIONS = [
   { id: "profile", title: "Profile" },
@@ -161,7 +162,9 @@ function notificationsSection() {
 
 function accountSection() {
   const code = state.me.user.buzzToken;
+  const legacy = Boolean(state.me.user.recoveryIsFlic);
   return [
+    emailPanel(),
     el("div", { class: "panel" }, [
       el("button", {
         class: "text-btn",
@@ -173,25 +176,27 @@ function accountSection() {
         },
       }),
       state.showRecovery
-        ? el("div", {}, [
-            el("p", { class: "code-block", text: code }),
-            el("p", { class: "help", text: "Save this. It is how you sign back in on another phone." }),
-            buzzNote(code),
-            el("div", { class: "stack" }, [
-              el("button", {
-                class: "btn secondary",
-                type: "button",
-                text: "Copy",
-                onclick: () => copyText(code, "Recovery code copied"),
-              }),
-              el("button", {
-                class: "btn ghost",
-                type: "button",
-                text: "New code",
-                onclick: onRotateBuzz,
-              }),
-            ]),
-          ])
+        ? el("div", {}, legacy
+          ? [
+              el("p", { class: "code-block", text: code }),
+              el("p", { class: "help", text: "Save this. It is how you sign back in on another phone. It is also your Flic button secret, so make a new code to keep the two apart." }),
+              buzzNote(code),
+              el("div", { class: "stack" }, [
+                el("button", {
+                  class: "btn secondary",
+                  type: "button",
+                  text: "Copy",
+                  onclick: () => copyText(code, "Recovery code copied"),
+                }),
+                el("button", { class: "btn ghost", type: "button", text: "New recovery code", onclick: onNewRecoveryCode }),
+              ]),
+            ]
+          : [
+              el("p", { class: "help", text: "For your safety your recovery code is stored scrambled, so it can't be shown again. Make a new one if you need it. The old one stops working." }),
+              el("div", { class: "stack" }, [
+                el("button", { class: "btn secondary", type: "button", text: "New recovery code", onclick: onNewRecoveryCode }),
+              ]),
+            ])
         : null,
     ]),
     flicPanel(code),
@@ -202,6 +207,52 @@ function accountSection() {
       el("button", { class: "btn ghost", type: "button", text: "Sign out", onclick: onLogout }),
     ]),
   ];
+}
+
+function emailPanel() {
+  const user = state.me.user;
+  return el("form", { class: "panel stack", onsubmit: onChangeEmail }, [
+    el("h3", { text: "Email" }),
+    el("p", {
+      class: "help",
+      text: user.emailVerifiedAt ? `${user.email} is confirmed.` : `${user.email} is not confirmed yet. Tap the link we sent.`,
+    }),
+    emailField("Email address", "account-email", state.emailDraft || user.email || "", (value) => {
+      state.emailDraft = value;
+    }),
+    el("button", { class: "btn secondary", type: "submit", text: "Save email" }),
+    user.emailVerifiedAt ? null : el("button", { class: "btn ghost", type: "button", text: "Resend link", onclick: onResendEmail }),
+    el("p", { class: "help", text: "If you lose your recovery code, we email a sign-in link to a confirmed address." }),
+  ]);
+}
+
+async function onChangeEmail(event) {
+  event.preventDefault();
+  const input = document.getElementById("account-email");
+  await run(async () => {
+    await saveEmail(input.value.trim());
+    state.emailDraft = "";
+    state.error = "Confirmation link sent";
+  });
+}
+
+function onNewRecoveryCode() {
+  state.confirm = {
+    title: "New recovery code?",
+    body: "The old recovery code stops working. Your Flic button keeps working.",
+    confirmLabel: "Make new code",
+    action: async () => {
+      await run(async () => {
+        const data = await api("/api/me/recovery-code", { method: "POST", body: {} });
+        state.recoveryOnce = data.recoveryCode;
+        state.showRecovery = false;
+        // A legacy account's code was its Flic secret. Now they are apart.
+        state.me = { ...state.me, user: { ...state.me.user, recoveryIsFlic: false } };
+        window.scrollTo(0, 0);
+      });
+    },
+  };
+  render();
 }
 
 const DONATE_URL = "https://www.paypal.me/philippkurrle1";
@@ -384,11 +435,17 @@ async function onSavePayment(event) {
   });
 }
 
-function onLogout() {
-  const code = state.me?.user?.buzzToken || "";
+export function onLogout() {
+  const legacy = Boolean(state.me?.user?.recoveryIsFlic);
+  const code = legacy ? state.me?.user?.buzzToken || "" : "";
+  const email = state.me?.user?.email;
   state.confirm = {
     title: "Sign out?",
-    body: "You'll need this recovery code to get back in.",
+    body: legacy
+      ? "You'll need this recovery code to get back in."
+      : email
+        ? `You'll need your recovery code to get back in. If you lose it, we can email a sign-in link to ${email}.`
+        : "You'll need your recovery code to get back in.",
     confirmLabel: "Sign out",
     copy: code,
     action: async () => {

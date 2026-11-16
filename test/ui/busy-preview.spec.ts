@@ -9,7 +9,7 @@ import { untilText } from "../../public/js/freebusy.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 const MIN = 60_000;
 const SHOT_DIR = path.resolve("test/ui/screenshots/busy-preview");
@@ -68,6 +68,8 @@ function link(tag: string) {
 }
 
 async function phone(width: number, height: number, token: string, circleId: string) {
+  // Layout is measured without the "Confirm your email" banner that a fresh address shows.
+  hangry.confirmEmails();
   const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, timezoneId: TZ });
   await skipWhatsNew(context);
   await context.addInitScript(([value, circle]) => {
@@ -103,9 +105,9 @@ function absent(text: string, label: string) {
 }
 
 async function seed(tag: string, share: boolean) {
-  const alex = await call("POST", "/api/auth/start", undefined, { name: "Alex" });
+  const alex = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
   const friends = (await call("POST", "/api/circles", alex.token, { name: `Friends ${tag}` })).circle;
-  const bea = await call("POST", "/api/auth/start", undefined, { name: "Bea", code: friends.inviteCode });
+  const bea = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: friends.inviteCode });
   await call("PUT", "/api/me/calendar-sync", alex.token, { url: link(tag) });
   if (share) await call("PATCH", "/api/me/calendar-sync", alex.token, { sharedCircleIds: [friends.id] });
   return { alex, bea, friends };
@@ -232,7 +234,7 @@ test("at 360: not shared, then shared again, and history back leaves the view fi
 });
 
 test("at 360: a status and weekly hours show without a calendar, and an empty user sees the free state", { timeout: 120_000 }, async () => {
-  const alex = await call("POST", "/api/auth/start", undefined, { name: "Alex" });
+  const alex = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
   const friends = (await call("POST", "/api/circles", alex.token, { name: "Friends none" })).circle;
   const empty = await phone(360, 640, alex.token, friends.id);
   try {

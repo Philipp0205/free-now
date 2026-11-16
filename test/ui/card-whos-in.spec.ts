@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = path.resolve("test/ui/screenshots/card-whos-in");
 const ISSUES = "/workspace/hangry-issues";
 
@@ -21,9 +21,9 @@ function publish(name: string, target: string) {
 }
 
 async function circle() {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Test crew" });
-  const join = (name: string) => hangry.call("POST", "/api/auth/start", undefined, { name, code: circle.inviteCode });
+  const join = (name: string) => hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: circle.inviteCode });
   return { host, alex: await join("Alex"), bea: await join("Bea"), cy: await join("Cy") };
 }
 
@@ -197,11 +197,11 @@ test("saying Can't make it from the menu takes you off the card and into the det
 });
 
 test("a full plan keeps the stack readable at 320 with a +N", { timeout: 120_000 }, async () => {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Big crew" });
   const { plan } = await hangry.call("POST", "/api/plans", host.token, { note: "Picnic", time: "13:00" });
   for (const name of ["Alex", "Bea", "Cy", "Dee", "Eli", "Fay", "Gus", "Ivy"]) {
-    const friend = await hangry.call("POST", "/api/auth/start", undefined, { name, code: circle.inviteCode });
+    const friend = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: circle.inviteCode });
     await hangry.call("POST", `/api/plans/${plan.id}/reply`, friend.token, { reply: name === "Ivy" ? "can't" : "in" });
   }
   const page = await open(host.token, 320, 568);

@@ -45,6 +45,14 @@ export const state = {
   nameDraft: "",
   circleDraft: "friends",
   codeDraft: "",
+  emailDraft: "",
+  /** The lost code form on the welcome screen: open, and whether the link was asked for. */
+  lostOpen: false,
+  lostSent: false,
+  /** A fresh recovery code, shown once in a card until the person says they saved it. */
+  recoveryOnce: "",
+  /** The page behind an emailed link: { kind: "verify" | "recover", token, busy, done, error }. */
+  linkFlow: null,
   pendingCode: "",
   error: "",
   banner: null,

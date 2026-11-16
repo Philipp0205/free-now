@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const RAILWAY_DIR = "/workspace/hangry-railway";
 
 // Tue 10 Nov 2026, 12:00 in Berlin. Server and browser share this clock.
@@ -26,6 +26,8 @@ const HOME_DINNER = "Home dinner";
 const hangry = useHangry({ tz: "Europe/Berlin", now: () => NOW });
 
 async function open(width: number, height: number, token: string, circleId: string, mobile = true): Promise<Page> {
+  // Layout is measured without the "Confirm your email" banner that a fresh address shows.
+  hangry.confirmEmails();
   const context = await hangry.browser.newContext({
     viewport: { width, height },
     isMobile: mobile,
@@ -200,10 +202,10 @@ async function testPhoto(): Promise<Buffer> {
 }
 
 async function seed() {
-  const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+  const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
   const uni = (await hangry.call("POST", "/api/circles", alex.token, { name: "Uni friends" })).circle;
   const home = (await hangry.call("POST", "/api/circles", alex.token, { name: "Home" })).circle;
-  const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: uni.inviteCode });
+  const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: uni.inviteCode });
   await hangry.call("POST", "/api/circles/join", bea.token, { code: home.inviteCode });
   // A busy Saturday: four Uni plans and one Home plan, so This circle shows +1 and All shows +2.
   for (const [note, time] of [["Brunch", "10:30"], ["Library", "13:00"], ["Climbing", "16:00"], ["Late film", "21:00"]]) {
@@ -220,7 +222,7 @@ async function seed() {
   hangry.db.prepare("UPDATE plans SET for_date = ? WHERE id = ?").run(PAST, old.id);
   await hangry.call("POST", `/api/plans?circle=${uni.id}`, alex.token, { note: "Winter market", time: "19:00", date: "2026-12-05" });
   // Dana's party: Dana hosts (with a photo), five friends In, one maybe and one Can't.
-  const dana = await hangry.call("POST", "/api/auth/start", undefined, { name: "Dana", code: uni.inviteCode });
+  const dana = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Dana", code: uni.inviteCode });
   const photo = await fetch(`${hangry.baseUrl}/api/me/avatar`, {
     method: "PUT",
     headers: { authorization: `Bearer ${dana.token}`, "content-type": "image/webp" },
@@ -229,11 +231,11 @@ async function seed() {
   assert.equal(photo.status, 200, await photo.text());
   const party = (await hangry.call("POST", `/api/plans?circle=${uni.id}`, dana.token, { note: PARTY, time: "20:00", date: PARTY_DAY })).plan;
   for (const name of GUESTS) {
-    const guest = await hangry.call("POST", "/api/auth/start", undefined, { name, code: uni.inviteCode });
+    const guest = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: uni.inviteCode });
     await hangry.call("POST", `/api/plans/${party.id}/reply?circle=${uni.id}`, guest.token, { reply: "coming" });
   }
   for (const [name, reply] of [["Mo", "maybe"], ["Nia", "declined"]]) {
-    const guest = await hangry.call("POST", "/api/auth/start", undefined, { name, code: uni.inviteCode });
+    const guest = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: uni.inviteCode });
     await hangry.call("POST", `/api/plans/${party.id}/reply?circle=${uni.id}`, guest.token, { reply });
   }
   return { alex, bea, uni, home, homePlan };
@@ -417,7 +419,7 @@ test("calendar: the Events tab opens on a month of events, This circle and All c
 });
 
 test("calendar: one circle opens on Calendar without the scope switch", { timeout: 60_000 }, async () => {
-  const solo = await hangry.call("POST", "/api/auth/start", undefined, { name: "Solo" });
+  const solo = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Solo" });
   const { circle } = await hangry.call("POST", "/api/circles", solo.token, { name: "Only" });
   await hangry.call("POST", "/api/plans", solo.token, { note: "Solo walk", time: "15:00", date: "2026-11-12" });
   const page = await open(320, 568, solo.token, circle.id);
@@ -437,7 +439,7 @@ test("calendar: one circle opens on Calendar without the scope switch", { timeou
 });
 
 test("events view: a picked Map is kept on the v2 key, and the old key does not keep anyone on the map", { timeout: 60_000 }, async () => {
-  const user = await hangry.call("POST", "/api/auth/start", undefined, { name: "Vee" });
+  const user = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Vee" });
   const { circle } = await hangry.call("POST", "/api/circles", user.token, { name: "Pins" });
   await hangry.call("POST", "/api/plans", user.token, { note: "Pin walk", time: "15:00", date: "2026-11-12", place: "Park", lat: 48.77, lng: 9.18, precise: true });
   const page = await open(360, 640, user.token, circle.id);

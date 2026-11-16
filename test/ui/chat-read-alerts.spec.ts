@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const SHOT_DIR = path.resolve("test/ui/screenshots/chat-read-alerts");
 
@@ -64,10 +64,10 @@ async function reloadAndSync(page: Page) {
 }
 
 async function signUpPair(width: number) {
-  const finn = await call("POST", "/api/auth/start", undefined, { name: "Finn" });
+  const finn = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn" });
   const home = (await call("POST", "/api/circles", finn.token, { name: `Home ${width}` })).circle;
   const uni = (await call("POST", "/api/circles", finn.token, { name: `Uni ${width}` })).circle;
-  const uma = await call("POST", "/api/auth/start", undefined, { name: "Uma", code: home.inviteCode });
+  const uma = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Uma", code: home.inviteCode });
   await call("POST", "/api/circles/join", uma.token, { code: uni.inviteCode });
   // Joining told Finn and not Uma, but start both clean.
   for (const circle of [home, uni]) {

@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { getUserTimezone, openDb, setUserTimezone } from "../../src/db.js";
 import { endOfDay, isTimeZone } from "../../src/lib/time.js";
 import { readStatusBody, StatusError } from "../../src/social/status.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 type Member = { id: string; status: { type: string; until: number | null; source?: string } | null };
@@ -22,7 +22,7 @@ const weekdays = { timezone: BERLIN, blocks: [{ days: [1, 2, 3, 4, 5], start: "0
 
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   const phil = await start("Phil");
   const friends = (await api(port, "POST", "/api/circles", { token: phil.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", friends.inviteCode);

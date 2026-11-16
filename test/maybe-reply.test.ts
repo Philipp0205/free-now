@@ -3,12 +3,12 @@ import test from "node:test";
 import { replyLogText } from "../src/chat/chat.js";
 import { planReplyBody, replyPushBody } from "../src/push/notify.js";
 import { normalizeReply } from "../src/social/socials.js";
-import { api, withApp } from "./http.js";
+import { api, withApp, testEmail } from "./http.js";
 
 async function circleOfTwo(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-  const veit = await api(port, "POST", "/api/auth/start", { body: { name: "Veit", code: created.circle.inviteCode }, status: 201 });
+  const veit = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Veit", code: created.circle.inviteCode }, status: 201 });
   await api(port, "POST", "/api/push/subscribe", {
     token: alex.token,
     body: { endpoint: "https://push.example/alex", keys: { p256dh: "p", auth: "a" } },

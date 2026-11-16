@@ -7,8 +7,12 @@ import { createApp } from "../../src/app.js";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
+import { type MailMessage, stubMailer } from "../../src/app-kit/mailer.ts";
+import { testEmail } from "../http.js";
 import type { CalendarNet } from "../../src/calendar/freebusy.js";
 import { createNoopPushSender, type PushSender } from "../../src/push/push.js";
+
+export { testEmail };
 
 /** Android Chrome on a Pixel 8. */
 export const UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
@@ -49,7 +53,7 @@ export type ServerOptions = {
   calendarNet?: CalendarNet;
 };
 
-export type Server = { baseUrl: string; db: DatabaseSync; close: () => Promise<void> };
+export type Server = { baseUrl: string; db: DatabaseSync; mail: MailMessage[]; close: () => Promise<void> };
 
 /** Headless Chrome: the installed channel, else the system binary. */
 export async function launchChrome(): Promise<Browser> {
@@ -61,12 +65,14 @@ export async function launchChrome(): Promise<Browser> {
 export async function startServer(opts: ServerOptions = {}): Promise<Server> {
   const db = opts.db ?? openDb(":memory:");
   const config = loadConfig({ PORT: "3000", DB_PATH: ":memory:", APP_TZ: opts.tz ?? "Europe/Berlin", ...opts.env });
+  const mailer = stubMailer();
   const server = http.createServer(createApp({
     db,
     push: opts.push ?? createNoopPushSender(),
     config: { ...config, dbPath: ":memory:" },
     now: opts.now ?? (() => Date.now()),
     calendarNet: opts.calendarNet,
+    mailer,
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -80,7 +86,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<Server> {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
   };
-  return { baseUrl, db, close };
+  return { baseUrl, db, mail: mailer.sent, close };
 }
 
 /** JSON API call. Throws on a non-OK status; returns the parsed body, or null when empty. */
@@ -117,6 +123,11 @@ export function useHangry(opts: ServerOptions = {}) {
   return {
     get baseUrl() { return live(server).baseUrl; },
     get db() { return live(server).db; },
+    get mail() { return live(server).mail; },
+    /** Marks every address on file as confirmed, so layout specs are not measured under the "Confirm your email" banner. */
+    confirmEmails() {
+      live(server).db.prepare("UPDATE users SET email_verified_at = ? WHERE email IS NOT NULL AND email_verified_at IS NULL").run(Date.now());
+    },
     get browser() { return live(browser); },
     call: (method: string, pathname: string, token?: string, body?: unknown) => call(live(server).baseUrl, method, pathname, token, body),
   };

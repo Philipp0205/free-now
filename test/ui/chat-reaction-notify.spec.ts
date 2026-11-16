@@ -5,16 +5,16 @@ import { test } from "@playwright/test";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-reaction-notify");
 const hangry = useHangry({ tz: "UTC", beforeClose: () => flushChatNotices(true) });
 
 for (const [width, height] of SIZES) {
   test(`@ a friend's reaction shows up in Alerts at ${width}x${height}`, { timeout: 120_000 }, async () => {
-    const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+    const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
     const circle = await hangry.call("POST", "/api/circles", alex.token, { name: "Testers" });
-    const sam = await hangry.call("POST", "/api/auth/start", undefined, { name: "Sam", code: circle.circle.inviteCode });
+    const sam = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Sam", code: circle.circle.inviteCode });
     const posted = await hangry.call("POST", "/api/circles/chat", alex.token, { text: "Ramen at 7?\nBring cash" });
     const id = posted.chat.messages.at(-1).id;
     await flushChatNotices(true);

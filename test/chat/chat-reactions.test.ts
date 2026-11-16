@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { flushChatNotices } from "../../src/chat/chat.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 // Fake people only. The db is in memory.
 
@@ -9,11 +9,11 @@ type Person = { token: string; user: { id: string; name: string } };
 
 async function circleOf(port: number, names: string[]) {
   const [first, ...rest] = names;
-  const host: Person = await api(port, "POST", "/api/auth/start", { body: { name: first }, status: 201 });
+  const host: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: first }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: host.token, body: { name: "friends" }, status: 201 });
   const people: Person[] = [host];
   for (const name of rest) {
-    people.push(await api(port, "POST", "/api/auth/start", { body: { name, code: created.circle.inviteCode }, status: 201 }));
+    people.push(await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code: created.circle.inviteCode }, status: 201 }));
   }
   return people;
 }
@@ -71,7 +71,7 @@ test("a reaction toggles on and off, a second person adds to the count, and a re
 test("only the quick emoji, only text messages, and only the chat's people may react", async () => {
   await withChat(async ({ port }) => {
     const [alex, ada, sam] = await circleOf(port, ["Alex", "Ada", "Sam"]);
-    const outsider: Person = await api(port, "POST", "/api/auth/start", { body: { name: "Out" }, status: 201 });
+    const outsider: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Out" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: outsider.token, body: { name: "other" }, status: 201 });
     const posted = await api(port, "POST", "/api/circles/chat", { token: alex.token, body: { text: "hi" }, status: 201 });
     const id = posted.chat.messages.at(-1).id;

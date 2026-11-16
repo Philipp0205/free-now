@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { listPlanCircleIds } from "../src/db.js";
-import { api, withApp, type SentPush } from "./http.js";
+import { api, withApp, type SentPush, testEmail } from "./http.js";
 
 // The ⋯ menu's "Share with other circles" sheet sends PATCH /api/plans/:id with circleIds and nothing else.
 
@@ -11,7 +11,7 @@ type Person = { token: string; user: { id: string; name: string } };
 /** Friends: Alex, Bea, Dan. Climbing: Alex, Cam, Dan. Dan is in both. Everyone has push on. */
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   const alex = await start("Alex");
   const a = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", a.inviteCode);

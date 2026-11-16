@@ -3,7 +3,7 @@ import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { DURATION_NOTE, FEED_MAX_EVENTS } from "../../src/calendar/calendar.js";
 import { escapeText } from "../../src/calendar/ics.js";
-import { api, START, withApp } from "../http.js";
+import { api, START, withApp, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 const DAY = 24 * 60 * 60 * 1000;
@@ -11,7 +11,7 @@ const DAY = 24 * 60 * 60 * 1000;
 /** Friends: Alex (host), Bea, Dan, Kim. Climbing: Alex, Cam. Olli is elsewhere. */
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   const alex = await start("Alex");
   const a = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", a.inviteCode);

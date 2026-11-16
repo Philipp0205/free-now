@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-mentions-reactions");
 const hangry = useHangry({ tz: "UTC" });
@@ -19,11 +19,11 @@ const LAYOUTS: Layout[] = [
 
 for (const layout of LAYOUTS) {
   test(`@ tags a friend and a quick reaction toggles at ${layout.width}`, { timeout: 120_000 }, async () => {
-    const alex = await post("/api/auth/start", { name: "Alex" });
+    const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
     const circle = await post("/api/circles", { name: "Testers" }, alex.token);
-    const ada = await post("/api/auth/start", { name: "Ada", code: circle.circle.inviteCode });
-    await post("/api/auth/start", { name: "Alexandra", code: circle.circle.inviteCode });
-    await post("/api/auth/start", { name: "Bea", code: circle.circle.inviteCode });
+    const ada = await post("/api/auth/start", { email: testEmail(), name: "Ada", code: circle.circle.inviteCode });
+    await post("/api/auth/start", { email: testEmail(), name: "Alexandra", code: circle.circle.inviteCode });
+    await post("/api/auth/start", { email: testEmail(), name: "Bea", code: circle.circle.inviteCode });
     await post("/api/circles/chat", { text: "Anyone up for ramen?" }, ada.token);
     await post("/api/circles/chat", { text: "@Alex you in? Bring @Bea" }, ada.token);
 

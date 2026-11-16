@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CHAT_COLORS, chooseColor } from "./chat/chat-color.js";
+import { hashSecret } from "./app-kit/auth-code.ts";
 import { addDays, isTimeZone } from "./lib/time.js";
 
 export type UserRow = {
@@ -16,6 +17,12 @@ export type UserRow = {
   avatar_rev?: number | null;
   timezone?: string | null;
   payment_url?: string | null;
+  /** Normalized address, null for accounts made before email was required. */
+  email?: string | null;
+  /** epoch ms of the verify link, null until used. */
+  email_verified_at?: number | null;
+  /** sha256 of the recovery code. Independent of buzz_token once rotated. */
+  recovery_hash?: string | null;
 };
 
 export type CircleRow = {
@@ -143,7 +150,10 @@ CREATE TABLE IF NOT EXISTS users (
   standalone_at INTEGER,
   push_seen_at INTEGER,
   color INTEGER,
-  whats_new_seen TEXT
+  whats_new_seen TEXT,
+  email TEXT,
+  email_verified_at INTEGER,
+  recovery_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS circles (
@@ -428,6 +438,10 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "status_until", "status_until INTEGER");
   ensureColumn(db, "users", "timezone", "timezone TEXT");
   ensureColumn(db, "users", "payment_url", "payment_url TEXT");
+  ensureColumn(db, "users", "email", "email TEXT");
+  ensureColumn(db, "users", "email_verified_at", "email_verified_at INTEGER");
+  ensureColumn(db, "users", "recovery_hash", "recovery_hash TEXT");
+  migrateAccounts(db);
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -549,6 +563,43 @@ function ensurePlanReminders(db: DatabaseSync): void {
         GROUP BY n.ref_id, n.user_id;
     `);
   });
+}
+
+/**
+ * Accounts with an email and a recovery code of their own. Safe on every boot.
+ * Old users get recovery_hash = sha256(buzz_token), so the code they hold keeps working until they
+ * rotate it. Only a verified address is unique, so nobody can squat on someone else's address by
+ * typing it. auth_links holds the hashed verify and lost-code tokens.
+ */
+function migrateAccounts(db: DatabaseSync): void {
+  const rows = db.prepare("SELECT id, buzz_token FROM users WHERE recovery_hash IS NULL").all() as Array<{
+    id: string;
+    buzz_token: string;
+  }>;
+  if (rows.length > 0) {
+    const update = db.prepare("UPDATE users SET recovery_hash = ? WHERE id = ?");
+    db.exec("BEGIN");
+    try {
+      for (const row of rows) update.run(hashSecret(row.buzz_token), row.id);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_recovery_hash ON users(recovery_hash);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verified_email ON users(email)
+      WHERE email IS NOT NULL AND email_verified_at IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS auth_links (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      email TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_links_user ON auth_links(user_id, kind);
+  `);
 }
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
@@ -681,8 +732,8 @@ export function withTx(db: DatabaseSync, fn: () => void): void {
 
 export function insertUser(db: DatabaseSync, user: UserRow): void {
   db.prepare(
-    "INSERT INTO users (id, name, token_hash, buzz_token, created_at) VALUES (?, ?, ?, ?, ?)",
-  ).run(user.id, user.name, user.token_hash, user.buzz_token, user.created_at);
+    "INSERT INTO users (id, name, token_hash, buzz_token, recovery_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(user.id, user.name, user.token_hash, user.buzz_token, hashSecret(user.buzz_token), user.created_at);
   insertSession(db, crypto.randomUUID(), user.id, user.token_hash, user.created_at);
 }
 
@@ -2140,6 +2191,7 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   db.prepare(`DELETE FROM plans WHERE ${oldPlan}`).run(planDay, socialCutoff);
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
+  db.prepare("DELETE FROM auth_links WHERE expires_at < ?").run(now);
 }
 
 const SOCIAL_SELECT = `

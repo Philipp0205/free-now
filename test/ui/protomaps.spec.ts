@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Page, Response } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /**
  * The dark Protomaps basemap over a real regional archive, and the raster map outside it.
  * Default archive: the checked-in Schlossplatz fixture (see test/fixtures/README.md),
@@ -283,9 +283,9 @@ async function buzz(page: Page) {
 
 test("dark vector map over Stuttgart with every pin feature, raster in Berlin and zoomed out, archive read in small ranges and never cached", { timeout: 300_000 }, async () => {
   const size = fs.statSync(ARCHIVE).size;
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Friends" });
-  const join = (name: string) => hangry.call("POST", "/api/auth/start", undefined, { name, code: circle.inviteCode });
+  const join = (name: string) => hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: circle.inviteCode });
   const [ana, ben, cyd, dee] = [await join("Ana"), await join("Ben"), await join("Cyd"), await join("Dee")];
   await uploadPhotos([host.token, ana.token, cyd.token]);
   const { plan } = await hangry.call("POST", "/api/plans", host.token, {
@@ -414,7 +414,7 @@ function archiveBounds(): { west: number; south: number; east: number; north: nu
 
 test("edges, deep zoom, and an archive that fails mid-session: raster where vector cannot draw, no blank map, no swap loop", { timeout: 300_000 }, async () => {
   const cover = archiveBounds();
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Ida" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ida" });
   await hangry.call("POST", "/api/circles", host.token, { name: "Edge" });
   await hangry.call("POST", "/api/plans", host.token, {
     note: "Edge walk", date: daysAhead(1), time: "18:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,
@@ -520,7 +520,7 @@ const WAITING = `(() => {
 })()`;
 
 test("a slow archive: the map stays dark with no raster tiles, then the dark map draws", { timeout: 300_000 }, async () => {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Sol" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Sol" });
   await hangry.call("POST", "/api/circles", host.token, { name: "Slow" });
   await hangry.call("POST", "/api/plans", host.token, {
     note: "Slow dinner", date: daysAhead(1), time: "19:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,
@@ -574,7 +574,7 @@ test("on an idle app the map files and the archive head load ahead, so the Map t
   const meta = await hangry.call("GET", "/api/meta");
   const head = meta.mapPmtilesHead as number;
   assert.ok(Number.isSafeInteger(head) && head >= 16384, `head size in meta (${head})`);
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Wim" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Wim" });
   await hangry.call("POST", "/api/circles", host.token, { name: "Warm" });
   await hangry.call("POST", "/api/plans", host.token, {
     note: "Warm dinner", date: daysAhead(1), time: "19:00", place: "Schlossplatz", lat: SCHLOSSPLATZ[0], lng: SCHLOSSPLATZ[1], precise: true,

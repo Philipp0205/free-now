@@ -3,7 +3,7 @@ import test from "node:test";
 import { insertPlan, listPastPlans, listVisiblePlans, sweep } from "../../src/db.js";
 import { addDays, dayLabel, daysBetween, isCalendarDate, isoDate, noticeDay, shortDate } from "../../src/lib/time.js";
 import { dayLabel as clientDayLabel, planDayChoice, planDayDate, planDayRange } from "../../public/js/when.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 const BERLIN = "Europe/Berlin";
 // 2026-11-05 is a Thursday. 12:00 CET is 11:00Z.
@@ -101,7 +101,7 @@ test("calendar date check", () => {
 });
 
 async function host(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
   return { alex, created };
 }
@@ -144,7 +144,7 @@ test("create validates the date and the time against today in Berlin", async () 
 test("a far-future plan pushes its date and lists sorted by day then time", async () => {
   await withApp(async ({ port, sent }) => {
     const { alex, created } = await host(port);
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
     await api(port, "POST", "/api/push/subscribe", {
       token: sam.token,
       body: { endpoint: "https://push.example/sam", keys: { p256dh: "p", auth: "a" } },
@@ -200,7 +200,7 @@ test("a far-future plan pushes its date and lists sorted by day then time", asyn
 test("host moves a plan tomorrow to next week and back, with a push to guests", async () => {
   await withApp(async ({ port, sent }) => {
     const { alex, created } = await host(port);
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
     await api(port, "POST", "/api/push/subscribe", {
       token: sam.token,
       body: { endpoint: "https://push.example/sam", keys: { p256dh: "p", auth: "a" } },

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { circleAvailability, ownFriendView, STALE_AFTER_MS, type CalendarNet, type Transport } from "../../src/calendar/freebusy.js";
 import { expandBusyHours } from "../../src/social/status.js";
-import { api, START, withApp } from "../http.js";
+import { api, START, withApp, testEmail } from "../http.js";
 
 const H = 3_600_000;
 const LINK = "https://calendar.example.test/private-0123456789abcdef/basic.ics";
@@ -52,9 +52,9 @@ const FEED = ics(
 );
 
 async function setup(port: number, share = true) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const friends = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: friends.circle.inviteCode }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: friends.circle.inviteCode }, status: 201 });
   const work = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Work" }, status: 201 });
   await api(port, "PUT", "/api/me/calendar-sync", { token: alex.token, body: { url: LINK }, status: 200 });
   if (share) {

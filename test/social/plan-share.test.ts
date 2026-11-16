@@ -5,19 +5,19 @@ import path from "node:path";
 import test from "node:test";
 import { getPlan, openDb } from "../../src/db.js";
 import { ensureShareId, escapeHtml, newShareId } from "../../src/social/plan-share.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 const PLACE = "Secret Garden Bar, Hauptstr. 12";
 const LEAKS = [PLACE, "Hauptstr", "52.52", "13.405", "lat", "lng", "location", "joined", "members", "creator", "push", "chat", "place"];
 
 async function circleOf(port: number, name: string) {
-  const host = await api(port, "POST", "/api/auth/start", { body: { name }, status: 201 });
+  const host = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name }, status: 201 });
   const circle = await api(port, "POST", "/api/circles", { token: host.token, body: { name: "Kreuzberg crew" }, status: 201 });
   return { host, circle: circle.circle };
 }
 
 async function joinWith(port: number, name: string, code: string) {
-  return api(port, "POST", "/api/auth/start", { body: { name, code }, status: 201 });
+  return api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code }, status: 201 });
 }
 
 async function plan(port: number, token: string, body: Record<string, unknown> = {}) {
