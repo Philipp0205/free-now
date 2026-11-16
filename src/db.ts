@@ -15,6 +15,7 @@ export type UserRow = {
   whats_new_seen?: string | null;
   avatar_rev?: number | null;
   timezone?: string | null;
+  payment_url?: string | null;
 };
 
 export type CircleRow = {
@@ -426,6 +427,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "status_place", "status_place TEXT");
   ensureColumn(db, "users", "status_until", "status_until INTEGER");
   ensureColumn(db, "users", "timezone", "timezone TEXT");
+  ensureColumn(db, "users", "payment_url", "payment_url TEXT");
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
   backfillNotificationCircles(db);
@@ -715,6 +717,10 @@ export function getUserById(db: DatabaseSync, id: string): UserRow | undefined {
 
 export function updateUserName(db: DatabaseSync, id: string, name: string): void {
   db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, id);
+}
+
+export function setPaymentUrl(db: DatabaseSync, id: string, url: string | null): void {
+  db.prepare("UPDATE users SET payment_url = ? WHERE id = ?").run(url, id);
 }
 
 /** Bumps the photo revision and returns it. A new rev means a new URL, so caches never serve the old photo. */

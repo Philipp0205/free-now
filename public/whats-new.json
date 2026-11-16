@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-16-payment-link",
+    "date": "2026-11-16",
+    "title": "Add a pay link to your profile",
+    "bullets": [
+      "Under You, Profile, you can add your paypal.me link. It is optional.",
+      "Friends in your circle see a Pay link next to your name, so splitting a bill is one tap.",
+      "Only people who share a circle with you can see it. Clear the box and save to remove it."
+    ]
+  },
+  {
     "id": "2026-11-15-donate-accent",
     "date": "2026-11-15",
     "title": "A voluntary tip option",

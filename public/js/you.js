@@ -10,7 +10,7 @@ import { busyPreviewScreen, friendsViewPanel } from "./busy-preview.js";
 import { calendarFeedPanel, calendarSyncPanel, copyWithSelection, feedDate } from "./calendar-sync.js";
 import { isInstalled, notificationStatusLabel, onInstall, onTestPush, openNotifications } from "./push-install.js";
 import { openFeedback, openWhatsNewList } from "./whats-new-ui.js";
-import { copyText, el, field, icon, run, scheduleErrorClear, viewerTz } from "./lib.js";
+import { copyText, el, field, icon, paymentUrlError, run, scheduleErrorClear, viewerTz } from "./lib.js";
 import { avatar, onRemovePhoto, pickPhoto } from "./avatars.js";
 
 const YOU_SECTIONS = [
@@ -117,6 +117,16 @@ function profileSection() {
       field("Your name", "rename", state.me.user.name, () => {}, { maxlength: "24" }),
       el("button", { class: "btn secondary", type: "submit", text: "Save name" }),
       el("p", { class: "help", text: "Friends see this name on your cards." }),
+    ]),
+    el("form", { class: "panel stack", novalidate: "", onsubmit: onSavePayment }, [
+      field("Payment link", "payment-url", state.me.user.paymentUrl || "", () => {}, {
+        type: "url",
+        inputmode: "url",
+        maxlength: "200",
+        placeholder: "https://paypal.me/yourname",
+      }),
+      el("button", { class: "btn secondary", type: "submit", text: "Save payment link" }),
+      el("p", { class: "help", text: "Optional. Circle members see a Pay link next to your name. paypal.me only." }),
     ]),
   ];
 }
@@ -355,6 +365,22 @@ async function onRename(event) {
   await run(async () => {
     state.me = await api("/api/me", { method: "PATCH", body: { name: input.value } });
     state.error = "Name saved";
+  });
+}
+
+async function onSavePayment(event) {
+  event.preventDefault();
+  const value = document.getElementById("payment-url").value.trim();
+  const problem = paymentUrlError(value);
+  if (problem) {
+    state.error = problem;
+    render();
+    scheduleErrorClear();
+    return;
+  }
+  await run(async () => {
+    state.me = await api("/api/me", { method: "PATCH", body: { paymentUrl: value } });
+    state.error = value ? "Payment link saved" : "Payment link removed";
   });
 }
 

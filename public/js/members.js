@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import { api, refresh } from "./session.js";
 import { render } from "./render.js";
 import { onDeleteCircle, onRenameCircle, openCircleSheet, rotateInvite, screenHeader } from "./circles.js";
-import { el, field, run, viewerTz } from "./lib.js";
+import { el, field, payLink, run, viewerTz } from "./lib.js";
 import { shareInvite } from "./plan-share.js";
 import { avatar } from "./avatars.js";
 import { closeSheet } from "./sheets.js";
@@ -117,6 +117,7 @@ function memberRow(member) {
         self ? null : availabilityLine(member.availability),
       ]),
     ]),
+    payLink(member),
     youAreAdmin() && !self
       ? el("button", {
           class: "text-btn",
@@ -166,6 +167,7 @@ export function memberSheet() {
       statusCard(member),
       manage
         ? el("div", { class: "actions" }, [
+            payLink(member, "action"),
             member.admin
               ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
               : el("button", { class: "action", type: "button", text: "Make admin", onclick: () => setMemberAdmin(member, true) }),
@@ -176,7 +178,10 @@ export function memberSheet() {
               onclick: () => confirmRemoveMember(member),
             }),
           ])
-        : el("div", { class: "actions" }, [el("button", { class: "action", type: "button", text: "Close", onclick: closeSheet })]),
+        : el("div", { class: "actions" }, [
+            payLink(member, "action"),
+            el("button", { class: "action", type: "button", text: "Close", onclick: closeSheet }),
+          ]),
     ]),
   ]);
 }

@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v106 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v107 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v106");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v107");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -661,16 +661,17 @@ test("the build label is hangry-v106 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the tip entry is the newest, in plain words without an em dash, and older entries are kept", () => {
+test("the pay link entry is the newest, in plain words without an em dash, and older entries are kept", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-15-donate-accent");
-  assert.equal(top.date, "2026-11-15");
-  assert.ok(top.title.length <= 60);
-  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  assert.equal(top.id, "2026-11-16-payment-link");
+  assert.equal(top.date, "2026-11-16");
+  assert.equal(top.title, "Add a pay link to your profile");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 3);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
-  assert.match(top.bullets.join(" "), /optional/i);
-  assert.match(top.bullets.join(" "), /pink/i);
+  assert.match(top.bullets.join(" "), /paypal\.me/);
+  assert.match(top.bullets.join(" "), /share a circle/);
+  assert.ok(RAW.some((item) => item.id === "2026-11-15-donate-accent"), "the tip entry is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-15-faster-loading"), "Faster loading is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-14-meet-the-goblin"), "Meet the Goblin is kept");
   assert.ok(RAW.some((item) => item.id === "2026-11-07-plan-another-day"), "older entries are kept");
