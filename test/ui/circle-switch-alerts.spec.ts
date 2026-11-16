@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page, Request, Route, APIResponse } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots go here (gitignored). Override with CSA_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.CSA_SHOT_DIR || "test/ui/screenshots/circle-switch-alerts");
 /** Two phones and a desktop window. The banner and list are the same component at each. */
@@ -145,10 +145,10 @@ for (const [width, height] of VIEWS) {
   test(`at ${width}: switching circles never repeats an alert, and one new alert shows once`, { timeout: 150_000 }, async () => {
     const home = `Home ${width}`;
     const uni = `Uni ${width}`;
-    const bea = await call("POST", "/api/auth/start", undefined, { name: "Bea" });
+    const bea = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea" });
     const a = (await call("POST", "/api/circles", bea.token, { name: home })).circle;
     const b = (await call("POST", "/api/circles", bea.token, { name: uni })).circle;
-    const alex = await call("POST", "/api/auth/start", undefined, { name: "Alex", code: a.inviteCode });
+    const alex = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex", code: a.inviteCode });
     await call("POST", "/api/circles/join", alex.token, { code: b.inviteCode });
     // One alert Alex already has in each circle.
     await call("POST", `/api/plans?circle=${a.id}`, bea.token, { note: "Pizza night", time: "19:30" });

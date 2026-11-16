@@ -10,7 +10,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { PushPayload, PushSender } from "../../src/push/push.js";
-
+import { testEmail } from "../http.js";
 const START = Date.parse("2026-06-01T15:00:00.000Z");
 
 type Ctx = { port: number; db: DatabaseSync; sent: PushPayload[]; at: (ms: number) => void };
@@ -117,10 +117,10 @@ test("a main-era database and a stack-tip database both keep their memberships",
 
 test("one account can keep two circles apart", async () => {
   await withApp(async ({ port, db, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni friends" }, status: 201 });
-    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: uni.circle.inviteCode }, status: 201 });
-    const cam = await api(port, "POST", "/api/auth/start", { body: { name: "Cam", code: uni.circle.inviteCode }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: uni.circle.inviteCode }, status: 201 });
+    const cam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cam", code: uni.circle.inviteCode }, status: 201 });
     const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
     assert.equal(home.circle.name, "Home");
     assert.equal(home.circle.youAreAdmin, true);
@@ -221,9 +221,9 @@ test("one account can keep two circles apart", async () => {
 
 test("an admin edit and a test push show in that circle's alerts", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
-    const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: home.circle.inviteCode }, status: 201 });
+    const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: home.circle.inviteCode }, status: 201 });
     await api(port, "POST", `/api/circles/members/${bea.user.id}?circle=${home.circle.id}`, {
       token: alex.token,
       body: { admin: true },
@@ -282,7 +282,7 @@ test("an admin edit and a test push show in that circle's alerts", async () => {
 
 test("a buzz with no circle posts to the circle joined last", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
     at(START + 1000);
     const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
@@ -303,7 +303,7 @@ test("a buzz with no circle posts to the circle joined last", async () => {
 
 test("a DELETE on the buzz token ends the social in the circle a buzz would post to", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
     at(START + 1000);
     const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });

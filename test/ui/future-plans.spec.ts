@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { addDays, dayLabel, isoDate } from "../../src/lib/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { UA as CHROME_UA, useHangry } from "./harness.js";
+import { UA as CHROME_UA, testEmail, useHangry } from "./harness.js";
 
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example WN_SHOT_DIR=.oc/shots. */
@@ -241,6 +241,7 @@ async function dismiss(page: Page) {
 async function signIn(page: Page, name: string) {
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);
   await page.locator("#circle-name").fill("friends");

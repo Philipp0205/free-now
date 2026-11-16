@@ -6,7 +6,7 @@ import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { listPlanCircleIds, openDb } from "../../src/db.js";
-import { api, withApp, type SentPush } from "../http.js";
+import { api, withApp, type SentPush, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 
@@ -16,7 +16,7 @@ type Person = { token: string; user: { id: string; name: string } };
  */
 async function seed(port: number) {
   const start = (name: string, code?: string): Promise<Person> =>
-    api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+    api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   const alex = await start("Alex");
   const a = (await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 })).circle;
   const bea = await start("Bea", a.inviteCode);

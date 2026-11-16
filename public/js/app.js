@@ -9,7 +9,7 @@ import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install
 import { scheduleErrorClear } from "./lib.js";
 
 /** The build label. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v107";
+export const APP_VERSION = "hangry-v108";
 
 // The kit keeps the browser bar colour equal to the page background, and follows scheme and width changes.
 window.AppKit?.themeColor?.start({ media: ["(max-width: 719px)"] });
@@ -21,7 +21,7 @@ if ("serviceWorker" in navigator) {
 boot();
 setInterval(() => {
   // A later buzzer turns live, and a live one ends, without a new answer from the server.
-  if (!document.hidden && state.me?.user) refreshPins();
+  if (!document.hidden && state.me?.user && state.me.user.email !== null) refreshPins();
   if (!document.hidden && state.token) {
     pollRefresh().catch((error) => {
       if (error?.status === 401) return;
@@ -64,7 +64,7 @@ async function boot() {
     }
     if (state.me) adoptCircle(state.me);
     if (state.shareLink) await resolveShareLink();
-    if (state.token && state.me && state.pendingCode && !state.inviteError) {
+    if (state.token && state.me && state.me.user.email !== null && state.pendingCode && !state.inviteError) {
       try {
         const joined = await api("/api/circles/join", { method: "POST", body: { code: state.pendingCode } });
         rememberCircle(joined.circle.id);
@@ -92,7 +92,7 @@ async function boot() {
     landCalendar();
     render();
     scheduleErrorClear();
-    if (!state.offline) {
+    if (!state.offline && state.me?.user?.email !== null) {
       reportDisplay();
       refresh({ initial: true }).catch(() => {});
       rememberViewerLocation();

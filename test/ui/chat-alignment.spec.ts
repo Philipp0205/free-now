@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-alignment", process.env.CHAT_SHOTS_TAG || "after");
 const hangry = useHangry({ tz: "UTC" });
@@ -16,10 +16,10 @@ const UNBROKEN = "https://example.test/" + "a".repeat(90);
 const LAYOUTS = [...SIZES, [1280, 800]] as const;
 
 test("circle and plan chat rows share one left edge, one bar column and one timestamp edge", { timeout: 240_000 }, async () => {
-  const alex = await post("/api/auth/start", { name: "Alex" });
+  const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const circle = await post("/api/circles", { name: "Testers" }, alex.token);
-  const bea = await post("/api/auth/start", { name: "Bea", code: circle.circle.inviteCode });
-  const max = await post("/api/auth/start", { name: LONG_NAME, code: circle.circle.inviteCode });
+  const bea = await post("/api/auth/start", { email: testEmail(), name: "Bea", code: circle.circle.inviteCode });
+  const max = await post("/api/auth/start", { email: testEmail(), name: LONG_NAME, code: circle.circle.inviteCode });
   await post("/api/circles/chat", { text: "Hi" }, alex.token);
   await post("/api/circles/chat", { text: "Hallo" }, bea.token);
   await post("/api/circles/chat", { text: "nice 😄" }, alex.token);

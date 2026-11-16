@@ -6,7 +6,7 @@ import type { Locator, Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, openEventsMap, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 /** Screenshots of the menu and the sheet. Override with SCM_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.SCM_SHOT_DIR || "/workspace/hangry-share-circles-artifacts");
@@ -23,11 +23,11 @@ type Person = { token: string; user: { id: string; name: string } };
 
 /** Ana is in Friends and Climbing. Ben is only in Friends, Cleo only in Climbing. */
 async function seed(tag: string) {
-  const ana: Person = await call("POST", "/api/auth/start", undefined, { name: "Ana" });
+  const ana: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ana" });
   const friends = (await call("POST", "/api/circles", ana.token, { name: "Friends" })).circle;
   const climbing = (await call("POST", "/api/circles", ana.token, { name: "Climbing" })).circle;
-  const ben: Person = await call("POST", "/api/auth/start", undefined, { name: "Ben", code: friends.inviteCode });
-  const cleo: Person = await call("POST", "/api/auth/start", undefined, { name: "Cleo", code: climbing.inviteCode });
+  const ben: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ben", code: friends.inviteCode });
+  const cleo: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Cleo", code: climbing.inviteCode });
   const ends = { ben: `https://push.example/ben-${tag}`, cleo: `https://push.example/cleo-${tag}` };
   await call("POST", "/api/push/subscribe", ben.token, { endpoint: ends.ben, keys: { p256dh: "p", auth: "a" } });
   await call("POST", "/api/push/subscribe", cleo.token, { endpoint: ends.cleo, keys: { p256dh: "p", auth: "a" } });

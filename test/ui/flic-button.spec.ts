@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, testEmail, useHangry } from "./harness.js";
 
 const hangry = useHangry();
 
@@ -43,6 +43,7 @@ test("the You tab shows a Flic link that starts and ends a social", { timeout: 9
 async function signIn(page: Page, name: string) {
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();

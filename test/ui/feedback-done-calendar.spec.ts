@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, call, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots go here. Override with FDCAL_SHOT_DIR=/some/folder. The feed link is always masked. */
 const SHOT_DIR = path.resolve(process.env.FDCAL_SHOT_DIR || ".oc/shots/feedback-done-calendar");
 const ADMIN = "a".repeat(32);
@@ -45,9 +45,9 @@ async function dismiss(page: Page) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: a feedback-done banner on the You tab opens What's new and the calendar feed keeps working`, { timeout: 90_000 }, async () => {
-    const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+    const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
     const circle = (await hangry.call("POST", "/api/circles", alex.token, { name: `Cal fb ${width}` })).circle;
-    const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: circle.inviteCode });
+    const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: circle.inviteCode });
     const sent = await hangry.call("POST", "/api/feedback", bea.token, { text: `Plans in my calendar ${width}`, circleId: circle.id });
 
     const page = await phone(width, height, bea.token, circle.id);

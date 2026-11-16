@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
-import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
+import { SIZES, UA, openYouSection, useHangry, testEmail } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 
 const hangry = useHangry();
@@ -30,9 +30,9 @@ const shot = (page: Page, name: string, width: number, height: number) =>
   page.screenshot({ path: path.join(SHOT_DIR, `${name}-${width}x${height}.png`) });
 
 test("set a payment link, circle mates get a Pay link, bad links are refused, clearing removes it", async () => {
-  const phil = await hangry.call("POST", "/api/auth/start", undefined, { name: "Philipp" });
+  const phil = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Philipp" });
   const circle = (await hangry.call("POST", "/api/circles", phil.token, { name: "Tennis" })).circle;
-  const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: circle.inviteCode });
+  const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: circle.inviteCode });
 
   // Bea saves her link on the profile, with a refusal first.
   const own = await phone(bea.token, 360, 640);
@@ -92,7 +92,7 @@ test("set a payment link, circle mates get a Pay link, bad links are refused, cl
   }
 
   // Someone in another circle sees no Pay link anywhere.
-  const stranger = await hangry.call("POST", "/api/auth/start", undefined, { name: "Cam" });
+  const stranger = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Cam" });
   await hangry.call("POST", "/api/circles", stranger.token, { name: "Climbing" });
   const outsider = await phone(stranger.token, 360, 640);
   try {

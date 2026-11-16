@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { CHAT_COLORS, preferredColor } from "../../src/chat/chat-color.js";
 import { addMember, insertCircle, insertUser, openDb } from "../../src/db.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 function colorOf(db: DatabaseSync, id: string): number | null {
   return (db.prepare("SELECT color FROM users WHERE id = ?").get(id) as { color: number | null }).color;
@@ -76,12 +76,12 @@ test("joining a second circle keeps the color even when it clashes there", () =>
 
 test("the same person has the same color in two circles, in members, events, and chat", async () => {
   await withApp(async (ctx) => {
-    const alex = await api(ctx.port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(ctx.port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const one = await api(ctx.port, "POST", "/api/circles", { token: alex.token, body: { name: "One" }, status: 201 });
     const two = await api(ctx.port, "POST", "/api/circles", { token: alex.token, body: { name: "Two" }, status: 201 });
-    const bea = await api(ctx.port, "POST", "/api/auth/start", { body: { name: "Bea", code: one.circle.inviteCode }, status: 201 });
+    const bea = await api(ctx.port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: one.circle.inviteCode }, status: 201 });
     await api(ctx.port, "POST", "/api/circles/join", { token: bea.token, body: { code: two.circle.inviteCode }, status: 200 });
-    const cam = await api(ctx.port, "POST", "/api/auth/start", { body: { name: "Cam", code: two.circle.inviteCode }, status: 201 });
+    const cam = await api(ctx.port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cam", code: two.circle.inviteCode }, status: 201 });
     const me = await api(ctx.port, "GET", "/api/me", { token: bea.token, status: 200 });
     const color = me.user.color;
     assert.ok(CHAT_COLORS.includes(color));

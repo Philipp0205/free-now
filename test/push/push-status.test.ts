@@ -18,7 +18,7 @@ import {
 } from "../../src/db.js";
 import { reachOf, statusFor, summarizePush } from "../../src/push/push-status.js";
 import type { PushSender } from "../../src/push/push.js";
-import { api, withApp, type AppCtx, type SentPush } from "../http.js";
+import { api, withApp, type AppCtx, type SentPush, testEmail } from "../http.js";
 
 const NOW = 1_700_000_000_000;
 
@@ -269,7 +269,7 @@ test("a free post records one row per subscription and an ack marks it delivered
 });
 
 async function signUp(ctx: AppCtx<SentPush>, name: string) {
-  const { json } = await api(ctx, "POST", "/api/auth/start", { body: { name }, status: 201 });
+  const { json } = await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name }, status: 201 });
   return json as { token: string; user: { id: string }; buzzToken: string };
 }
 

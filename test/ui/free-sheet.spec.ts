@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, testEmail, useHangry } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
 
@@ -216,7 +216,7 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     const friend = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -292,7 +292,7 @@ test("later and tomorrow replies keep I'm in on the card and Can't in the menu",
     const friend = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const now = new Date();
     const ahead = new Date(now.getTime() + 90 * 60 * 1000);
@@ -420,7 +420,7 @@ test("each place tap recentres on that pin", { timeout: 90_000 }, async () => {
     const bea = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Bea", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -585,7 +585,7 @@ test("a 5xx while the app is open shows the retry banner and a toast", { timeout
     const friend = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -634,6 +634,7 @@ test("a fresh circle is named after you and drops a bad invite code", { timeout:
     await page.getByText("This invite isn't valid. Ask for a new link.").waitFor();
     await page.getByRole("button", { name: "Start my own circle" }).click();
     await page.locator("#name").fill("Philipp");
+    await page.locator("#email").fill(testEmail());
     await page.getByRole("button", { name: "Continue" }).click();
     assert.equal(await page.locator("#circle-name").inputValue(), "Philipp's circle");
     assert.equal(await page.locator("#invite-code").inputValue(), "");
@@ -819,7 +820,7 @@ test("alert times sit on the right of the card", { timeout: 90_000 }, async () =
     const fritz = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -1119,7 +1120,7 @@ test("an admin manages members from the circle list", { timeout: 90_000 }, async
     await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     });
     await page.reload();
     const later = page.locator(".sheet button", { hasText: "Not now" });
@@ -1154,7 +1155,7 @@ test("the host can remove someone who is in", { timeout: 90_000 }, async () => {
     const fritz = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -1194,7 +1195,7 @@ test("a removed guest sees a note instead of reply buttons", { timeout: 90_000 }
     const nia = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Nia", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Nia", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -1239,7 +1240,7 @@ test("an admin sees edit, end, and remove on someone else's cards", { timeout: 9
     const join = (name: string) => fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, code: me.circle.inviteCode }),
+      body: JSON.stringify({ name, email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const fritz = await join("Fritz");
     const sam = await join("Sam");
@@ -1475,7 +1476,7 @@ test("each person keeps a distinct chat color", { timeout: 90_000 }, async () =>
     const join = (name: string) => fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, code: me.circle.inviteCode }),
+      body: JSON.stringify({ name, email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const fritz = await join("Fritz");
     const nia = await join("Nia");
@@ -1614,7 +1615,7 @@ test("Past events lists an ended hangout without reply buttons", { timeout: 90_0
     const fritz = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fritz", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Fritz", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const social = await fetch(`${hangry.baseUrl}/api/socials`, {
       method: "POST",
@@ -1683,7 +1684,7 @@ test("two circles stay separate when you switch, post, join, and leave", { timeo
     const bea = await fetch(`${hangry.baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Bea", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Bea", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     const beaContext = await hangry.browser.newContext({ viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, userAgent: CHROME_UA });
     await skipWhatsNew(beaContext);
@@ -1731,6 +1732,7 @@ async function phonePage(userAgent: string, locate: boolean, extraScript = "") {
 async function signIn(page: Page, name: string) {
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { listOperations, openapi } from "../../src/admin/openapi.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
 
@@ -74,7 +74,7 @@ test("GET /llms.txt is public plain text that points at the real routes", async 
 
 test("every documented operation is routed", async () => {
   await withApp(async (ctx) => {
-    const { json: alex } = await api(ctx, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const { json: alex } = await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await api(ctx, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
 
     // Negative control: with a session, an unmatched path is the generic 404.

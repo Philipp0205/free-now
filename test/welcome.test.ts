@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { api, withApp } from "./http.js";
+import { api, withApp, testEmail } from "./http.js";
 import { builtPrecache, servedIndex } from "./built.js";
 
 const WELCOME = fs.readFileSync(new URL("../public/welcome.html", import.meta.url), "utf8");
@@ -45,7 +45,7 @@ test("/welcome does not mask API errors or unknown files", async () => {
     assert.equal(anonApi.status, 401, "anonymous unknown API stays an auth error");
     assert.match(anonApi.headers.get("content-type") ?? "", /application\/json/);
     assert.doesNotMatch(anonApi.text, /<html/i);
-    const me = await api(port, "POST", "/api/auth/start", { body: { name: "Fake Tester" }, status: 201 });
+    const me = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Tester" }, status: 201 });
     const unknownApi = await get(port, "/api/welcome", { headers: { authorization: `Bearer ${me.token}` } });
     assert.equal(unknownApi.status, 404);
     assert.deepEqual(JSON.parse(unknownApi.text), { error: "not found" });
@@ -78,7 +78,7 @@ test("/welcome is the same on every host and never redirects", async () => {
 
 test("a signed-in token does not change /welcome or /", async () => {
   await withApp(async ({ port }) => {
-    const me = await api(port, "POST", "/api/auth/start", { body: { name: "Fake Tester" }, status: 201 });
+    const me = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Tester" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: me.token, body: { name: "Fake circle" }, status: 201 });
     const auth = { authorization: `Bearer ${me.token}` };
     assert.equal((await get(port, "/welcome", { headers: auth })).text, WELCOME);

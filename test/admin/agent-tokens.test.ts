@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AGENT_TOKEN_LIMIT, MAX_AGENT_TOKENS } from "../../src/admin/agent-tokens.js";
 import { isAgentAllowed, listOperations } from "../../src/admin/openapi.js";
-import { api, withApp, type AppCtx } from "../http.js";
+import { api, withApp, type AppCtx, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 type Issued = { id: string; name: string; token: string; tokenPrefix: string; createdAt: number };
@@ -10,7 +10,7 @@ type Issued = { id: string; name: string; token: string; tokenPrefix: string; cr
 const FORBIDDEN = "agent tokens can only use routes in /api/openapi.json";
 
 async function signUp(ctx: AppCtx, name: string, code?: string): Promise<Person> {
-  const { json } = await api(ctx, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+  const { json } = await api(ctx, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   return json;
 }
 

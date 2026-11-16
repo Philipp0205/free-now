@@ -11,17 +11,17 @@ import { loadConfig } from "../../src/config.js";
 import { addMember, insertCircle, insertSocial, insertUser, openDb, setSocialReply } from "../../src/db.js";
 import type { PushSender } from "../../src/push/push.js";
 import { sendStartReminders } from "../../src/push/remind.js";
-import { START, api, withApp } from "../http.js";
+import { START, api, withApp, testEmail } from "../http.js";
 
 test("an invite link names the circle, joins in one step, and can be revoked", async () => {
   await withApp(async ({ port, db }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "the roof" }, status: 201 });
     const code = created.circle.inviteCode as string;
     const preview = await api(port, "GET", `/api/invites/${code}`);
     assert.equal(preview.name, "the roof");
 
-    const veit = await api(port, "POST", "/api/auth/start", { body: { name: "Veit", code }, status: 201 });
+    const veit = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Veit", code }, status: 201 });
     assert.equal(veit.circle.name, "the roof");
     const me = await api(port, "GET", "/api/me", { token: veit.token });
     assert.equal(me.circle.name, "the roof");
@@ -38,10 +38,10 @@ test("an invite link names the circle, joins in one step, and can be revoked", a
 
 test("on my way and can't make it notify the host and can be changed", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const veit = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Veit", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Veit", code: created.circle.inviteCode },
       status: 201,
     });
     await api(port, "POST", "/api/push/subscribe", {
@@ -82,14 +82,14 @@ test("on my way and can't make it notify the host and can be changed", async () 
 
 test("later today pushes once, then reminds only people who are coming", async () => {
   await withApp(async ({ port, db, sent, at }) => {
-    const philipp = await api(port, "POST", "/api/auth/start", { body: { name: "Philipp" }, status: 201 });
+    const philipp = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Philipp" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: philipp.token, body: { name: "friends" }, status: 201 });
     const alex = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Alex", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Alex", code: created.circle.inviteCode },
       status: 201,
     });
     const sam = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     for (const [token, endpoint] of [[alex.token, "alex"], [sam.token, "sam"], [philipp.token, "phil"]] as const) {
@@ -277,10 +277,10 @@ test("a start reminder is due once, and skips closed, later, and unscheduled soc
 
 test("a start-time change notifies immediately, and a quick ETA does not send a second push", async () => {
   await withApp(async ({ port, sent }) => {
-    const dana = await api(port, "POST", "/api/auth/start", { body: { name: "Dana" }, status: 201 });
+    const dana = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Dana" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: dana.token, body: { name: "friends" }, status: 201 });
     const philipp = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Philipp", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Philipp", code: created.circle.inviteCode },
       status: 201,
     });
     await api(port, "POST", "/api/push/subscribe", {
@@ -334,7 +334,7 @@ test("a start-time change notifies immediately, and a quick ETA does not send a 
 
 test("a circle with no invite expiry needs a new link", async () => {
   await withApp(async ({ port, db }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "old" }, status: 201 });
     db.prepare("UPDATE circles SET invite_expires_at = NULL").run();
     await api(port, "GET", `/api/invites/${created.circle.inviteCode}`, { status: 404 });
@@ -374,10 +374,10 @@ test("opening an older database backfills invite expiry from created_at", () => 
 
 test("a picked arrival time is stored and each change pushes once", async () => {
   await withApp(async ({ port, sent, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const veit = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Fritz", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Fritz", code: created.circle.inviteCode },
       status: 201,
     });
     await api(port, "POST", "/api/push/subscribe", {
@@ -482,10 +482,10 @@ test("a picked arrival time is stored and each change pushes once", async () => 
 
 test("any minute from the start through the window is a valid arrival, including 19:06", async () => {
   await withApp(async ({ port }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     const sam = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     const later = await api(port, "POST", "/api/socials", {
@@ -557,11 +557,11 @@ test("any minute from the start through the window is a valid arrival, including
 
 test("a member cannot rename the circle or the name others see", async () => {
   await withApp(async ({ port, db }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Amanda" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Amanda" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     assert.equal(created.circle.youAreAdmin, true);
     const sam = await api(port, "POST", "/api/auth/start", {
-      body: { name: "Sam", code: created.circle.inviteCode },
+      body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode },
       status: 201,
     });
     assert.equal(sam.circle.youAreAdmin, false);
@@ -656,7 +656,7 @@ test("the old Railway host redirects to the configured public origin", async () 
 
 test("Berlin midnight puts a plan on tomorrow and keeps a later-today start on today", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     // 23:50 Europe/Berlin (CEST, UTC+2). Local midnight is 22:00Z.
     const beforeMidnight = Date.parse("2026-06-01T21:50:00.000Z");
@@ -712,7 +712,7 @@ test("Berlin midnight puts a plan on tomorrow and keeps a later-today start on t
 
 test("Berlin late night still accepts only a later clock on the same day", async () => {
   await withApp(async ({ port, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
 
     // 23:15 CET. The half-hour default is still today.

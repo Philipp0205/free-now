@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { countUnreadNotifications, openDb, unreadNotificationsByCircle } from "../../src/db.js";
-import { api, withApp, type AppCtx } from "../http.js";
+import { api, withApp, type AppCtx, testEmail } from "../http.js";
 
 type Person = { token: string; user: { id: string; name: string } };
 
 async function signUp(ctx: AppCtx, name: string, code?: string): Promise<Person> {
-  const { json } = await api(ctx, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+  const { json } = await api(ctx, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
   return json;
 }
 

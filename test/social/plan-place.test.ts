@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 test("a plan keeps an optional time and a cleared pin drops the coordinates", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
     await api(port, "POST", "/api/push/subscribe", {
       token: sam.token,
       body: { endpoint: "https://push.example/sam", keys: { p256dh: "p", auth: "a" } },

@@ -4,7 +4,7 @@ import type { Page } from "playwright-core";
 import { gradientClass } from "../../public/js/card-grad.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const NOTES = ["Sushi night", "Board games", "Morning run", "Rooftop drinks", "Museum trip"];
 
 const hangry = useHangry({ tz: "UTC" });
@@ -64,9 +64,9 @@ async function backgrounds(page: Page): Promise<Record<string, { cls: string; im
 }
 
 test("each plan card has its own gradient, kept after reload, on the map and in details", { timeout: 120_000 }, async () => {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "Friends" });
-  const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+  const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
   const ids: string[] = [];
   for (const [n, note] of NOTES.entries()) {
     const body: Record<string, unknown> = { note, date: tomorrow(), time: `1${n}:30` };

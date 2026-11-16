@@ -125,7 +125,9 @@ export function flicPanel(code) {
           el("p", {
             class: "help",
             style: "margin-top: 12px",
-            text: "Keep this link private. It contains your recovery code, and anyone with it can post as you.",
+            text: state.me?.user?.recoveryIsFlic
+              ? "Keep this link private. It contains your recovery code, and anyone with it can post as you or sign in as you. Make a new recovery code to separate the two."
+              : "Keep this link private. Anyone with it can post as you. It does not sign anyone in.",
           }),
           el("div", { class: "stack" }, [
             several
@@ -136,6 +138,7 @@ export function flicPanel(code) {
                   text: "Copy link",
                   onclick: () => copyText(link, "Button link copied"),
                 }),
+            el("button", { class: "btn ghost", type: "button", text: "New button link", onclick: onRotateBuzz }),
             el("button", {
               class: "btn secondary",
               type: "button",
@@ -150,15 +153,18 @@ export function flicPanel(code) {
 }
 
 export async function onRotateBuzz() {
+  const together = Boolean(state.me?.user?.recoveryIsFlic);
   state.confirm = {
-    title: "New secret?",
-    body: "The old buzzer and recovery code will stop working.",
-    confirmLabel: "Regenerate",
+    title: "New button link?",
+    body: together
+      ? "The old button link and the old recovery code stop working. You get a new recovery code to save."
+      : "The old button link stops working. Paste the new one into the Flic app. Your recovery code stays the same.",
+    confirmLabel: "Make new link",
     action: async () => {
       await run(async () => {
         const data = await api("/api/me/buzz-token", { method: "POST", body: {} });
-        state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken } };
-        state.error = "New secret ready";
+        state.me = { ...state.me, user: { ...state.me.user, buzzToken: data.buzzToken, recoveryIsFlic: Boolean(data.recoveryIsFlic) } };
+        state.error = "New button link ready";
       });
     },
   };

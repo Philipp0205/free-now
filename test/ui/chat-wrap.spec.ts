@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-wrap");
 const hangry = useHangry({ tz: "UTC" });
@@ -16,9 +16,9 @@ const LONG_URL = `https://example.com/${"very-long-path-segment-".repeat(8)}end`
 for (const [width, height] of SIZES) {
   test(`composer wraps, grows and sends at ${width}x${height}`, { timeout: 120_000 }, async () => {
     assert.ok(LONG_TEXT.length > 200 && LONG_URL.length > 150);
-    const alex = await post("/api/auth/start", { name: "Alex" });
+    const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
     const circle = await post("/api/circles", { name: "Testers" }, alex.token);
-    const ada = await post("/api/auth/start", { name: "Ada", code: circle.circle.inviteCode });
+    const ada = await post("/api/auth/start", { email: testEmail(), name: "Ada", code: circle.circle.inviteCode });
     await post("/api/circles/chat", { text: "Anyone around tonight?" }, ada.token);
     const page = await openAs(alex.token, width, height);
     try {

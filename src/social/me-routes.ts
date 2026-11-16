@@ -8,6 +8,8 @@ import {
 } from "../admin/agent-tokens.js";
 import { cleanAppVersion, cleanFeedbackText, insertFeedback } from "../admin/feedback.js";
 import type { AppDeps } from "../app.js";
+import { hashSecret } from "../app-kit/auth-code.ts";
+import { accountsFor } from "../accounts/accounts.js";
 import {
   type UserRow,
   bumpAvatarRev,
@@ -52,6 +54,24 @@ export async function handleMeRoutes(ctx: AuthedRouteContext): Promise<boolean> 
     const match = /^Bearer\s+(\S+)$/i.exec(Array.isArray(header) ? header[0] : header ?? "");
     if (match) deleteSessionByHash(deps.db, sha256(match[1]));
     sendEmpty(res, 204);
+    return true;
+  }
+
+  // Adds or changes the address. It stays unconfirmed until the mailed link is used.
+  if (method === "POST" && pathname === "/api/auth/email") {
+    const result = await accountsFor(deps, req, limits.accounts).setEmail(me.id, typeof body.email === "string" ? body.email : "");
+    if (!result.ok) {
+      if (result.reason === "rate_limited") throw new HttpError(429, "too many attempts, try again later");
+      throw new HttpError(400, "enter a valid email");
+    }
+    sendJson(res, 200, { email: result.user.email, emailVerifiedAt: result.user.emailVerifiedAt });
+    return true;
+  }
+
+  // A new recovery code, shown once. The old one stops working. The Flic link and other sessions are untouched.
+  if (method === "POST" && pathname === "/api/me/recovery-code") {
+    const { code } = await accountsFor(deps, req, limits.accounts).rotateCode(me.id);
+    sendJson(res, 200, { recoveryCode: code });
     return true;
   }
 
@@ -149,8 +169,13 @@ export async function handleMeRoutes(ctx: AuthedRouteContext): Promise<boolean> 
 
   if (method === "POST" && pathname === "/api/me/buzz-token") {
     const buzzToken = humanCode();
+    // An account whose recovery code is still its Flic secret keeps them together, so the old secret
+    // stops working as a way in too. Once the two are separate, the recovery code is not touched.
+    const row = getUserById(deps.db, me.id);
+    const together = row?.recovery_hash === hashSecret(me.buzz_token);
     rotateBuzzToken(deps.db, me.id, buzzToken);
-    sendJson(res, 200, { buzzToken });
+    if (together) deps.db.prepare("UPDATE users SET recovery_hash = ? WHERE id = ?").run(hashSecret(buzzToken), me.id);
+    sendJson(res, 200, { buzzToken, recoveryIsFlic: together });
     return true;
   }
 

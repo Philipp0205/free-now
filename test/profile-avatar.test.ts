@@ -11,7 +11,7 @@ import { avatarDirFor, loadConfig } from "../src/config.js";
 import { getPlan, openDb } from "../src/db.js";
 import { shareMeta, sharePreview } from "../src/social/plan-share.js";
 import { createNoopPushSender } from "../src/push/push.js";
-import { api } from "./http.js";
+import { api, testEmail } from "./http.js";
 
 /** Modernizr's 1×1 lossless WebP: a real, decodable image in 38 bytes. */
 const WEBP = Buffer.from("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==", "base64");
@@ -56,10 +56,10 @@ function get(port: number, token: string | null, userId: string, rev: unknown = 
 }
 
 async function people(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const { circle } = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: circle.inviteCode }, status: 201 });
-  const stranger = await api(port, "POST", "/api/auth/start", { body: { name: "Sam" }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: circle.inviteCode }, status: 201 });
+  const stranger = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam" }, status: 201 });
   await api(port, "POST", "/api/circles", { token: stranger.token, body: { name: "Elsewhere" }, status: 201 });
   return { alex, bea, stranger };
 }

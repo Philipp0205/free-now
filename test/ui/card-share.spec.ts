@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, openEventsMap, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 /** Screenshots of the card Share button. Inside the worktree and gitignored. */
 const SHOT_DIR = path.resolve(process.env.CARD_SHARE_SHOT_DIR || "test/ui/screenshots/card-share");
@@ -73,9 +73,9 @@ type Person = { token: string; user: { id: string; name: string } };
 
 /** Hana hosts in Kreuzberg crew, Finn is a member there. */
 async function people(circleName = "Kreuzberg crew") {
-  const host: Person = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: circleName });
-  const friend: Person = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+  const friend: Person = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
   return { host, friend, circle };
 }
 

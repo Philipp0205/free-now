@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { api, withApp, type AppCtx } from "../http.js";
+import { api, withApp, type AppCtx, testEmail } from "../http.js";
 
 async function setup(ctx: AppCtx) {
-  const alex = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 })).json;
+  const alex = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 })).json;
   const home = (await api(ctx, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 })).json.circle;
   const uni = (await api(ctx, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 })).json.circle;
   const work = (await api(ctx, "POST", "/api/circles", { token: alex.token, body: { name: "Work" }, status: 201 })).json.circle;
@@ -77,7 +77,7 @@ test("a hold with DELETE ends the social in the hold circle", async () => {
 test("saving a circle the user is not in is 404 and changes nothing", async () => {
   await withApp(async (ctx) => {
     const { alex, home } = await setup(ctx);
-    const bea = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Bea" }, status: 201 })).json;
+    const bea = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea" }, status: 201 })).json;
     const other = (await api(ctx, "POST", "/api/circles", { token: bea.token, body: { name: "Bea only" }, status: 201 })).json.circle;
     await api(ctx, "PUT", "/api/me/buzz-circles", { token: alex.token, body: { hold: home.id }, status: 200 });
 
@@ -91,7 +91,7 @@ test("a press mapped to a circle the user left is 404 and posts nowhere", async 
   await withApp(async (ctx) => {
     const { alex, home, uni, work } = await setup(ctx);
     // Someone else stays in Home, so the circle (and the mapping) outlives Alex leaving it.
-    await api(ctx, "POST", "/api/auth/start", { body: { name: "Bea", code: home.inviteCode }, status: 201 });
+    await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: home.inviteCode }, status: 201 });
     await api(ctx, "PUT", "/api/me/buzz-circles", { token: alex.token, body: { single: home.id, hold: home.id }, status: 200 });
     await api(ctx, "POST", `/api/circles/leave?circle=${home.id}`, { token: alex.token, status: 200 });
     await api(ctx, "POST", `/api/buzz/${alex.buzzToken}`, { status: 404 });
@@ -104,7 +104,7 @@ test("a press mapped to a circle the user left is 404 and posts nowhere", async 
 test("an explicit circle beats the mapping and a non-member circle is 404", async () => {
   await withApp(async (ctx) => {
     const { alex, home, uni } = await setup(ctx);
-    const bea = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Bea" }, status: 201 })).json;
+    const bea = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea" }, status: 201 })).json;
     const other = (await api(ctx, "POST", "/api/circles", { token: bea.token, body: { name: "Bea only" }, status: 201 })).json.circle;
     await api(ctx, "PUT", "/api/me/buzz-circles", { token: alex.token, body: { single: home.id }, status: 200 });
     await api(ctx, "POST", `/api/buzz/${alex.buzzToken}?press=single&circle=${uni.id}`, { status: 201 });

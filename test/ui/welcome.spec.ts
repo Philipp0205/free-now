@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land in .oc/shots/ (git-ignored); WELCOME_SHOT_DIR overrides. */
 const SHOT_DIR = path.resolve(process.env.WELCOME_SHOT_DIR || ".oc/shots");
 /** WELCOME_REAL_TILES=1 lets the example map fetch real OpenStreetMap tiles (for screenshots). Otherwise tiles are stubbed. */
@@ -141,7 +141,7 @@ for (const [width, height] of VIEWS) {
 }
 
 test("signed out: the login view links to /welcome quietly, an invite link does not", { timeout: 60_000 }, async () => {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Fake Host" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Fake Host" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "Fake circle" });
   const context = await phone(360, 640);
   const page = await context.newPage();
@@ -173,7 +173,7 @@ test("signed out: the login view links to /welcome quietly, an invite link does 
 });
 
 test("signed in: / opens the app, deep links work, /welcome does not redirect", { timeout: 60_000 }, async () => {
-  const me = await call("POST", "/api/auth/start", undefined, { name: "Fake Rosa" });
+  const me = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Fake Rosa" });
   const { circle } = await call("POST", "/api/circles", me.token, { name: "Fake Rosa circle" });
   const { plan } = await call("POST", "/api/plans", me.token, { note: "Example picnic", time: "19:00" });
   const context = await phone(412, 915, me.token);

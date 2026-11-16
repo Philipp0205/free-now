@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land in test/ui/screenshots/invite-existing-account/ (git-ignored). */
 const SHOT_DIR = path.resolve(process.env.INVITE_EXISTING_SHOT_DIR || "test/ui/screenshots/invite-existing-account");
 
@@ -20,9 +20,9 @@ let seq = 0;
 /** Fake host with a circle, plus a fake guest who already has an account. Made through the real API. */
 async function scene() {
   seq += 1;
-  const host = await call("POST", "/api/auth/start", undefined, { name: `Host ${seq}` });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Host ${seq}` });
   const { circle } = await call("POST", "/api/circles", host.token, { name: `Fake circle ${seq}` });
-  const guest = await call("POST", "/api/auth/start", undefined, { name: `Guest ${seq}` });
+  const guest = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Guest ${seq}` });
   return { host, circle: circle as { id: string; name: string; inviteCode: string }, guest };
 }
 
@@ -91,7 +91,7 @@ for (const [width, height] of SIZES) {
     await page.getByRole("button", { name: `Sign in and join ${circle.name}` }).waitFor();
     await page.getByRole("button", { name: "Back" }).waitFor();
     await noOverflow(page, "recover sheet");
-    await page.locator("#recover-code").fill(guest.buzzToken);
+    await page.locator("#recover-code").fill(guest.recoveryCode);
     await shot(page, "invite-recover", width, height);
 
     await page.getByRole("button", { name: `Sign in and join ${circle.name}` }).click();
@@ -144,6 +144,7 @@ test("a brand-new name on the same invite still creates a fresh account and join
   const page = await context.newPage();
   await page.goto(`${hangry.baseUrl}/join/${circle.inviteCode}`);
   await page.locator("#name").fill("Fake Newcomer");
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: `Join ${circle.name}` }).click();
   await page.locator("nav.tabbar").waitFor();
   const me = await meOf(page);

@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.resolve(".oc/shots/maybe");
 
 const hangry = useHangry({ tz: "UTC" });
@@ -16,9 +16,9 @@ function shot(name: string) {
 }
 
 async function people() {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Amanda" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Amanda" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Amanda & Philipp" });
-  const friend = await hangry.call("POST", "/api/auth/start", undefined, { name: "Philipp", code: circle.inviteCode });
+  const friend = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Philipp", code: circle.inviteCode });
   return { host, friend };
 }
 

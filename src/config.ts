@@ -45,6 +45,11 @@ export type Config = {
   /** Google endpoints. Defaults are the real ones; the GOOGLE_OAUTH_* overrides exist for tests. */
   googleUrls: GoogleUrls;
   footMassageUserId: string | null;
+  /** RESEND_API_KEY and MAIL_FROM, both or neither. Without them no mail is sent. A secret: never logged. */
+  resendApiKey: string | null;
+  mailFrom: string | null;
+  /** Dev only: append each mail as a JSON line to this file instead of sending it. */
+  mailLogPath: string | null;
 };
 
 export type GoogleUrls = { auth: string; token: string; freebusy: string; revoke: string };
@@ -86,6 +91,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     calendarSyncKey: readCalendarSyncKey(env.CALENDAR_SYNC_KEY),
     ...readGoogle(env),
     footMassageUserId: env.EASTER_EGG_FOOT_MASSAGE_USER_ID?.trim() || null,
+    ...readMail(env),
+  };
+}
+
+function readMail(env: NodeJS.ProcessEnv): Pick<Config, "resendApiKey" | "mailFrom" | "mailLogPath"> {
+  const key = env.RESEND_API_KEY?.trim() ?? "";
+  const from = env.MAIL_FROM?.trim() ?? "";
+  if ((key || from) && !(key && from)) console.warn("Email is off: set both RESEND_API_KEY and MAIL_FROM");
+  const logPath = env.MAIL_LOG_PATH?.trim() ?? "";
+  return {
+    resendApiKey: key && from ? key : null,
+    mailFrom: key && from ? from : null,
+    mailLogPath: logPath ? path.resolve(logPath) : null,
   };
 }
 

@@ -17,7 +17,7 @@ import {
   type CalendarNet,
   type Transport,
 } from "../../src/calendar/freebusy.js";
-import { api, START, withApp } from "../http.js";
+import { api, START, withApp, testEmail } from "../http.js";
 
 const H = 3_600_000;
 const SECRET_PATH = "/private-0123456789abcdef/basic.ics";
@@ -216,12 +216,12 @@ test("links are sealed with AES-GCM bound to the owner; a missing key is made on
 });
 
 async function circleOf(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const friends = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: friends.circle.inviteCode }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: friends.circle.inviteCode }, status: 201 });
   const work = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Work" }, status: 201 });
-  const cleo = await api(port, "POST", "/api/auth/start", { body: { name: "Cleo", code: work.circle.inviteCode }, status: 201 });
-  const dan = await api(port, "POST", "/api/auth/start", { body: { name: "Dan" }, status: 201 });
+  const cleo = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cleo", code: work.circle.inviteCode }, status: 201 });
+  const dan = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Dan" }, status: 201 });
   await api(port, "POST", "/api/circles", { token: dan.token, body: { name: "Elsewhere" }, status: 201 });
   return { alex, bea, cleo, dan, friends: friends.circle, work: work.circle };
 }
@@ -486,7 +486,7 @@ test("replace keeps shares, leave and kick drop them, delete removes everything,
 });
 
 async function circleOfCleo(port: number, code: string) {
-  const cleo = await api(port, "POST", "/api/auth/start", { body: { name: "Cleo two", code }, status: 201 });
+  const cleo = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cleo two", code }, status: 201 });
   await api(port, "PUT", "/api/me/calendar-sync", { token: cleo.token, body: { url: LINK }, status: 200 });
   const me = await api(port, "GET", "/api/me", { token: cleo.token });
   await api(port, "PATCH", "/api/me/calendar-sync", { token: cleo.token, body: { sharedCircleIds: [me.circle.id] }, status: 200 });

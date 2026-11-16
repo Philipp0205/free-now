@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land in test/ui/screenshots/pwa-install/ (git-ignored). */
 const SHOT_DIR = path.resolve("test/ui/screenshots/pwa-install");
 const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
@@ -27,7 +27,7 @@ let people = 0;
 /** A fake person with a circle, made through the real API. */
 async function person(): Promise<string> {
   people += 1;
-  const me = await call("POST", "/api/auth/start", undefined, { name: `Fake Ada ${people}` });
+  const me = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Fake Ada ${people}` });
   await call("POST", "/api/circles", me.token, { name: "Fake circle" });
   return me.token as string;
 }
@@ -161,7 +161,7 @@ for (const [width, height] of SIZES) {
 }
 
 test("the setup screen and the notification sheet do not stack with the install banner", { timeout: 60_000 }, async () => {
-  const fresh = await call("POST", "/api/auth/start", undefined, { name: "Fake Bea" });
+  const fresh = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Fake Bea" });
   const setupContext = await phone(360, 640, { token: fresh.token });
   const setup = await setupContext.newPage();
   await setup.goto(hangry.baseUrl);

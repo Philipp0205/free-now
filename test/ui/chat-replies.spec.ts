@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-replies");
 const hangry = useHangry({ tz: "UTC" });
@@ -19,9 +19,9 @@ const LAYOUTS: Layout[] = [
 
 for (const layout of LAYOUTS) {
   test(`reply to a message, see the quote, and jump back to the original at ${layout.width}`, { timeout: 120_000 }, async () => {
-    const alex = await post("/api/auth/start", { name: "Alex" });
+    const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
     const circle = await post("/api/circles", { name: "Testers" }, alex.token);
-    const ada = await post("/api/auth/start", { name: "Ada", code: circle.circle.inviteCode });
+    const ada = await post("/api/auth/start", { email: testEmail(), name: "Ada", code: circle.circle.inviteCode });
     const original = (await post("/api/circles/chat", { text: "Who wants to try the new ramen place on Friday?" }, ada.token)).chat.messages.at(-1);
     for (let i = 1; i <= 14; i += 1) await post("/api/circles/chat", { text: `Filler message ${i}` }, i % 2 ? alex.token : ada.token);
     const doomed = (await post("/api/circles/chat", { text: "Old idea, ignore this" }, ada.token)).chat.messages.at(-1);
@@ -159,9 +159,9 @@ for (const layout of LAYOUTS) {
 }
 
 test("a reduced-motion flash has no animation and still marks the original", { timeout: 60_000 }, async () => {
-  const alex = await post("/api/auth/start", { name: "Alex" });
+  const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const circle = await post("/api/circles", { name: "Calm" }, alex.token);
-  const ada = await post("/api/auth/start", { name: "Ada", code: circle.circle.inviteCode });
+  const ada = await post("/api/auth/start", { email: testEmail(), name: "Ada", code: circle.circle.inviteCode });
   const first = (await post("/api/circles/chat", { text: "Picnic Sunday?" }, ada.token)).chat.messages.at(-1);
   await post("/api/circles/chat", { text: "Yes please", replyTo: first.id }, alex.token);
   const page = await openAs(alex.token, LAYOUTS[0], true);

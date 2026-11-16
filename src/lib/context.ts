@@ -11,6 +11,8 @@ export type Limits = {
   feed: RateLimiter;
   calendarSync: RateLimiter;
   agent: RateLimiter;
+  /** Email, recovery-code and lost-code attempts (see ACCOUNT_LIMIT). */
+  accounts: RateLimiter;
 };
 
 /** The per-request values every route handler reads. Built once in handle(). */

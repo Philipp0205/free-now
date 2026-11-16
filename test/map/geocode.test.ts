@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CACHE_MAX, isMapsLinkInput, looksLikeUrl, parseMapsLink, parseNominatim, parsePhoton, rankPlaces, resolveMapsLink, reversePlace, searchPlaces, type PlaceCandidate } from "../../src/map/geocode.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 const STUTTGART = { lat: 48.7784, lng: 9.18 };
 
@@ -433,7 +433,7 @@ test("geocode never sends a pasted non-Maps URL upstream as search text", async 
   const original = globalThis.fetch;
   const upstream: string[] = [];
   await withApp(async ({ port }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       const href = String(url instanceof Request ? url.url : url);

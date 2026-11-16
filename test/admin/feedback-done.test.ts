@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { openDb } from "../../src/db.js";
 import { FEEDBACK_DONE_TITLE, feedbackDoneBody, feedbackExcerpt } from "../../src/admin/feedback.js";
-import { api, withApp } from "../http.js";
+import { api, withApp, testEmail } from "../http.js";
 
 const ADMIN = "a".repeat(32);
 const ENV = { env: { ADMIN_TOKEN: ADMIN } };
@@ -36,10 +36,10 @@ const markDone = (port: number, id: string, status = "done") =>
   hit(port, "POST", `/api/admin/feedback/${id}`, { token: ADMIN, body: { status } });
 
 async function circleOfTwo(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
   const circle = created.circle as { id: string; inviteCode: string };
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: circle.inviteCode }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: circle.inviteCode }, status: 201 });
   return { alex, bea, circle };
 }
 
@@ -301,8 +301,8 @@ test("only the operator token can mark done; app users and bad tokens send nothi
 test("zero-circle submitter reads their alert with no circle named; unrelated people get nothing", async () => {
   await withApp(async ({ port, db }) => {
     const { alex, bea, circle } = await circleOfTwo(port);
-    const stranger = await api(port, "POST", "/api/auth/start", { body: { name: "Cam" }, status: 201 });
-    const elsewhere = await api(port, "POST", "/api/auth/start", { body: { name: "Dee" }, status: 201 });
+    const stranger = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Cam" }, status: 201 });
+    const elsewhere = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Dee" }, status: 201 });
     const club = await api(port, "POST", "/api/circles", { token: elsewhere.token, body: { name: "Club" }, status: 201 });
     const strangerOwn = await send(port, stranger.token, "Cam's own idea");
     const id = await send(port, bea.token, "Shared calendar view", circle.id);
@@ -348,8 +348,8 @@ test("client: zero-circle refresh loads personal alerts, setup lists them, and t
   const session = client("session");
   const render = client("render");
   const alerts = client("alerts");
-  // refresh() no longer bails out without a circle.
-  assert.match(session, /export async function refresh\(\{ initial = false \} = \{\}\) \{\n  const seq = \+\+refreshSeq;\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(seq\);/);
+  // refresh() no longer bails out without a circle. An account with no email yet returns first, see session.js.
+  assert.match(session, /export async function refresh\(\{ initial = false \} = \{\}\) \{\n  const seq = \+\+refreshSeq;\n(?:  \/\/ [^\n]*\n)*  if \(state\.me\?\.user\?\.email === null\) return;\n  if \(state\.token && state\.me && !state\.me\.circle\) \{\n    await refreshPersonalAlerts\(seq\);/);
   assert.match(session, /api\("\/api\/notifications", \{ circle: null \}\)/);
   assert.match(render, /root\.append\(setup\(\)\);\n    if \(state\.sheet === "whats-new"\) root\.append\(whatsNewSheet\(\)\);/);
   assert.match(render, /personalAlerts\(\),\n  \]\);/);

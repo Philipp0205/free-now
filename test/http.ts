@@ -4,12 +4,20 @@ import type { DatabaseSync } from "node:sqlite";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
+import { type MailMessage, stubMailer } from "../src/app-kit/mailer.ts";
 import type { CalendarNet } from "../src/calendar/freebusy.js";
 import type { PushPayload, PushSender } from "../src/push/push.js";
 
 // Shared by the route tests. Not a test file: `npm test` only runs `test/*.test.ts`.
 
 export const START = Date.parse("2026-06-01T15:00:00.000Z");
+
+let emailCounter = 0;
+/** A fresh fake address for /api/auth/start. Signup needs one and it must be unique per test run. */
+export function testEmail(): string {
+  emailCounter += 1;
+  return `person-${emailCounter}@example.test`;
+}
 
 /** What flow.test.ts records. Hangout and location record the payload alone. */
 export type SentPush = { endpoint: string; payload: PushPayload };
@@ -19,6 +27,8 @@ export type AppCtx<TSent = PushPayload> = {
   server: http.Server;
   db: DatabaseSync;
   sent: TSent[];
+  /** Mail the app tried to send: confirm and lost-code links. */
+  mail: MailMessage[];
   advance: (ms: number) => void;
   at: (ms: number) => void;
 };
@@ -67,12 +77,14 @@ export async function withApp(fn: (ctx: any) => Promise<void>, options: WithAppO
   if (options.tz !== undefined) env.APP_TZ = options.tz;
   const config = loadConfig(env);
   const readNow = options.now === "fixed" ? () => START : () => now;
+  const mailer = stubMailer();
   const server = http.createServer(createApp({
     db,
     push,
     config: { ...config, dbPath: ":memory:" },
     now: readNow,
     calendarNet: options.calendarNet,
+    mailer,
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const port = (server.address() as AddressInfo).port;
@@ -82,6 +94,7 @@ export async function withApp(fn: (ctx: any) => Promise<void>, options: WithAppO
       server,
       db,
       sent,
+      mail: mailer.sent,
       advance(ms: number) {
         now += ms;
       },

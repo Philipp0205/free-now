@@ -9,7 +9,7 @@ import { openDb } from "../../src/db.js";
 import { GOOGLE_FREEBUSY_SCOPE, onlyFreebusyScope } from "../../src/calendar/google-calendar.js";
 import { syncCalendarFeeds, type CalendarNet } from "../../src/calendar/freebusy.js";
 import { fakeGoogle, REFRESH, type Fake } from "../fake-google.js";
-import { api, START, withApp } from "../http.js";
+import { api, START, withApp, testEmail } from "../http.js";
 
 const H = 3_600_000;
 const SCOPE = "https://www.googleapis.com/auth/calendar.freebusy";
@@ -47,9 +47,9 @@ function icsFile(title: string, start: number, end: number): string {
 }
 
 async function setup(port: number) {
-  const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+  const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
   const friends = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Friends" }, status: 201 });
-  const bea = await api(port, "POST", "/api/auth/start", { body: { name: "Bea", code: friends.circle.inviteCode }, status: 201 });
+  const bea = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Bea", code: friends.circle.inviteCode }, status: 201 });
   return { alex, bea, friends: friends.circle };
 }
 

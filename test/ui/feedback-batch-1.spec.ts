@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Tue 10 Nov 2026, 12:00 in Berlin. Server and browser share this clock.
 const NOW = Date.parse("2026-11-10T11:00:00Z");
 const SHOT_DIR = path.resolve("test/ui/screenshots/feedback-batch-1");
@@ -15,6 +15,8 @@ const hangry = useHangry({ tz: "Europe/Berlin", now: () => NOW });
 const { call } = hangry;
 
 async function phone(width: number, height: number, token: string, circleId: string): Promise<Page> {
+  // Layout is measured without the "Confirm your email" banner that a fresh address shows.
+  hangry.confirmEmails();
   const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA });
   await skipWhatsNew(context);
   await context.addInitScript(([value, circle]) => {
@@ -38,7 +40,7 @@ async function shot(page: Page, name: string) {
 }
 
 async function signUp(name: string) {
-  const host = await call("POST", "/api/auth/start", undefined, { name });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name });
   const { circle } = await call("POST", "/api/circles", host.token, { name: `Batch ${name}` });
   return { host, circle };
 }

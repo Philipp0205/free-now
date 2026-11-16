@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Set to a folder to keep screenshots, for example MAP_CLOSE_SHOT_DIR=.oc/shots/map-card-close. */
 const SHOT_DIR = process.env.MAP_CLOSE_SHOT_DIR ? path.resolve(process.env.MAP_CLOSE_SHOT_DIR) : "";
 const PLAN_NOTE = "Rooftop dinner";
@@ -55,9 +55,9 @@ async function shot(page: Page, name: string) {
 }
 
 test("map card: a quiet Close in the corner, Escape and a tap on the map put it away, and the map still moves", { timeout: 180_000 }, async () => {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Friends" });
-  const friend = await hangry.call("POST", "/api/auth/start", undefined, { name: "Ana", code: circle.inviteCode });
+  const friend = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ana", code: circle.inviteCode });
   await hangry.call("POST", "/api/plans", host.token, {
     note: PLAN_NOTE, time: "23:30", place: "Schlossplatz", lat: 48.7784, lng: 9.18, precise: true,
   });

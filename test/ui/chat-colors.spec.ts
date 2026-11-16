@@ -5,16 +5,16 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const shotsDir = path.resolve("test/ui/screenshots");
 
 const hangry = useHangry({ tz: "UTC" });
 
 test("own messages carry the avatar color and a friend keeps one color in every chat", { timeout: 120_000 }, async () => {
-  const alex = await post("/api/auth/start", { name: "Alex" });
+  const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const circle = await post("/api/circles", { name: "friends" }, alex.token);
-  const bea = await post("/api/auth/start", { name: "Bea", code: circle.circle.inviteCode });
-  const cam = await post("/api/auth/start", { name: "Cam", code: circle.circle.inviteCode });
+  const bea = await post("/api/auth/start", { email: testEmail(), name: "Bea", code: circle.circle.inviteCode });
+  const cam = await post("/api/auth/start", { email: testEmail(), name: "Cam", code: circle.circle.inviteCode });
   await post("/api/circles/chat", { text: "Anyone hungry?" }, bea.token);
   await post("/api/circles/chat", { text: "Always. Ramen at 7?" }, alex.token);
   await post("/api/circles/chat", { text: "I'm in, see you there" }, cam.token);

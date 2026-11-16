@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 /** Screenshots of the open ⋯ menu. Override with POLISH_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.POLISH_SHOT_DIR || "/workspace/hangry-polish-logs/shots");
@@ -59,9 +59,9 @@ async function openMenu(page: Page) {
 
 /** Ana's circle with one free post from Ben, so Now has a card with a ⋯ menu. */
 async function seed(note: string) {
-  const ana = await call("POST", "/api/auth/start", undefined, { name: "Ana" });
+  const ana = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ana" });
   const circle = (await call("POST", "/api/circles", ana.token, { name: "Friends" })).circle;
-  const ben = await call("POST", "/api/auth/start", undefined, { name: "Ben", code: circle.inviteCode });
+  const ben = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ben", code: circle.inviteCode });
   await call("POST", "/api/socials", ben.token, { note });
   return ana;
 }

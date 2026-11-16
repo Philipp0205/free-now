@@ -3,7 +3,7 @@ import { test } from "@playwright/test";
 import type { Browser, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { UA as CHROME_UA, launchChrome, startServer } from "./harness.js";
+import { UA as CHROME_UA, launchChrome, startServer, testEmail } from "./harness.js";
 
 const HIT = { name: "RATTO Bistrobar", address: "Cottastraße 4", lat: 48.7674, lng: 9.1708, distanceM: 400 };
 
@@ -62,7 +62,7 @@ test("plan and edit sheets send a picked place and free text clears the pin", { 
     await page.locator("#where-query").fill("Schloss");
     await page.locator(".where-hit").click();
     const edited = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/api/plans/"));
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     const patched = (await edited).request().postDataJSON();
     assert.equal(patched.lat, HIT.lat);
     assert.equal(patched.lng, HIT.lng);
@@ -75,7 +75,7 @@ test("plan and edit sheets send a picked place and free text clears the pin", { 
     await page.locator("#where-query").fill("Kitchen");
     await searched;
     const cleared = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/api/plans/"));
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     const textOnly = (await cleared).request().postDataJSON();
     assert.equal(textOnly.place, "Kitchen");
     assert.equal(textOnly.lat, null);
@@ -142,7 +142,7 @@ test("chat badge and banner follow unread; circle chat leaves circle dots alone"
     const sam = await fetch(`${baseUrl}/api/auth/start`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Sam", code: me.circle.inviteCode }),
+      body: JSON.stringify({ name: "Sam", email: testEmail(), code: me.circle.inviteCode }),
     }).then((response) => response.json());
     await fetch(`${baseUrl}/api/circles/chat?circle=${me.circle.id}`, {
       method: "POST",
@@ -238,6 +238,7 @@ async function dismiss(page: Page) {
 async function signIn(page: Page, name: string) {
   await page.goto(baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);
   await page.locator("#circle-name").fill("friends");

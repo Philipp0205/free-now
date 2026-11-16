@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots always land in .oc/shots/ (git-ignored); BACK_SHOT_DIR overrides. */
 const SHOT_DIR = path.resolve(process.env.BACK_SHOT_DIR || ".oc/shots");
 /** Set to a folder to record a webm per width, for example BACK_VIDEO_DIR=/tmp/back-video. */
@@ -67,10 +67,10 @@ async function atRest(page: Page) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: Back closes sheets, panels and tabs one at a time instead of leaving the app`, { timeout: 180_000 }, async () => {
-    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
     const { circle } = await call("POST", "/api/circles", host.token, { name: `Back ${width}` });
     await call("POST", "/api/circles", host.token, { name: `Other ${width}` });
-    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
     await call("POST", "/api/socials", friend.token, { note: `Coffee ${width}`, place: "Schlossplatz", lat: 48.7784, lng: 9.18 });
     await call("POST", `/api/socials?circle=${circle.id}`, host.token, { note: "Around" });
 

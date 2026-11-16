@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { GOBLIN_LINES } from "../../src/chat/goblin.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and gripes only. Screenshots go to test/ui/screenshots (gitignored).
 // The Goblin picks its lines at random, so a reply is checked against the whole list for its situation.
 const shotsDir = path.resolve("test/ui/screenshots/chat-goblin");
@@ -53,7 +53,7 @@ async function feedbackList() {
 
 for (const [width, height] of SIZES) {
   test(`@gob picks the Goblin, a gripe is filed and the Goblin answers at ${width}px`, { timeout: 120_000 }, async () => {
-    const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: `Alex${width}` });
+    const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Alex${width}` });
     const circle = await hangry.call("POST", "/api/circles", alex.token, { name: `Testers ${width}` });
     const page = await openChatAs(alex.token, width, height);
     const errors: string[] = [];

@@ -19,6 +19,7 @@ import { sharePreviewScreen } from "./plan-share.js";
 import { el, field, icon } from "./lib.js";
 import { bindSheetSwipe, onTab, syncOverlayHistory } from "./nav.js";
 import { onCreateCircle, onJoinCircle } from "./circles.js";
+import { accountNotices, emailField, emailGate, linkScreen, lostCodeForm, needsEmail } from "./account.js";
 
 /** Set by a tab bar tap that changes the page; the next render fades that page in once, then clears it. */
 let pageEntrance = false;
@@ -133,6 +134,17 @@ function view() {
     if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
     return root;
   }
+  if (state.linkFlow) {
+    root.append(linkScreen());
+    if (state.error) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+    return root;
+  }
+  if (needsEmail()) {
+    // Nothing else works for this account yet, so nothing else is offered: no sheets, prompts or what's new.
+    root.append(emailGate());
+    if (state.error && !RETRY_NOTE.has(state.error)) root.append(el("div", { class: "toast", role: "status", text: state.error }));
+    return root;
+  }
   if (state.sharePreview) {
     root.append(sharePreviewScreen());
     if (state.installOpen) root.append(installGuideView());
@@ -198,7 +210,9 @@ function welcome() {
       }),
     ]),
     recovering
-      ? el("form", { class: "stack", onsubmit: onRecover }, [
+      ? state.lostOpen
+        ? lostCodeForm()
+        : el("form", { class: "stack", onsubmit: onRecover }, [
           field("Recovery code", "recover-code", state.codeDraft, (value) => {
             state.codeDraft = value;
           }),
@@ -209,6 +223,17 @@ function welcome() {
             class: "btn",
             type: "submit",
             text: inviting ? `Sign in and join${state.invitePreview?.name ? ` ${state.invitePreview.name}` : ""}` : "Sign back in",
+          }),
+          el("button", {
+            class: "text-btn",
+            type: "button",
+            text: "I lost my code",
+            onclick: () => {
+              state.lostOpen = true;
+              state.lostSent = false;
+              state.error = "";
+              render();
+            },
           }),
           el("button", {
             class: "btn ghost",
@@ -226,6 +251,10 @@ function welcome() {
           field("Your name", "name", state.nameDraft, (value) => {
             state.nameDraft = value;
           }, { placeholder: "Alex", maxlength: "24", autocomplete: "nickname" }),
+          emailField("Email", "email", state.emailDraft, (value) => {
+            state.emailDraft = value;
+          }),
+          el("p", { class: "hint", text: "We email you a link to confirm it. It is how you get back in if you lose your code." }),
           el("button", {
             class: "btn",
             type: "submit",
@@ -277,6 +306,7 @@ export function useNamedCircleDefault() {
 
 function setup() {
   return el("section", { class: "gate" }, [
+    ...accountNotices(),
     el("div", { class: "hero" }, [
       el("h1", { class: "wordmark", text: `Hi ${state.me.user.name}` }),
       el("p", { class: "lede", text: "Start a circle, or join one with an invite code." }),
@@ -311,6 +341,7 @@ function shell() {
     return phone;
   }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
+  phone.append(...accountNotices());
   // Only an explicit tab bar switch fades in; sheet closes, Back and the 3s refresh renders never do.
   const freshTab = pageEntrance;
   const screens = { home, map: mapScreen, circle: circleScreen, alerts: alertsScreen, you: youScreen };

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import type { AppDeps } from "../app.js";
+import { hashSecret } from "../app-kit/auth-code.ts";
 import { circleAvailability, isConnected } from "../calendar/freebusy.js";
 import { colorHex } from "../chat/chat-color.js";
 import {
@@ -130,7 +131,16 @@ export function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRo
       timezone: row?.timezone ?? null,
       busyHours: getBusyHours(deps.db, user.id),
       // The recovery code would let an agent token take over the account.
-      ...(agent ? {} : { buzzToken: user.buzz_token, buzzCircles: buzzCirclesFor(deps.db, user.id) }),
+      // recoveryIsFlic: the recovery code is still the buzz token, so showing one shows the other.
+      ...(agent
+        ? {}
+        : {
+            buzzToken: user.buzz_token,
+            buzzCircles: buzzCirclesFor(deps.db, user.id),
+            email: row?.email ?? null,
+            emailVerifiedAt: row?.email_verified_at ?? null,
+            recoveryIsFlic: row?.recovery_hash === hashSecret(user.buzz_token),
+          }),
       whatsNewSeen: user.whats_new_seen ?? null,
       calendarConnected: isConnected(deps.db, user.id),
     },

@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots always land in .oc/shots/ (git-ignored); BELL_SHOT_DIR overrides. */
 const SHOT_DIR = path.resolve(process.env.BELL_SHOT_DIR || ".oc/shots");
 /** Set to a folder to record a webm per width, for example BELL_VIDEO_DIR=/tmp/bell-video. */
@@ -55,9 +55,9 @@ async function expectBell(button: Locator, open: boolean) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: the bell opens Alerts, a second tap closes it back to the previous tab, the tabbar still leaves Alerts`, { timeout: 120_000 }, async () => {
-    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
     const { circle } = await call("POST", "/api/circles", host.token, { name: `Bell ${width}` });
-    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
     await call("POST", "/api/socials", friend.token, { note: `Coffee ${width}` });
 
     const page = await phone(width, height, host.token);

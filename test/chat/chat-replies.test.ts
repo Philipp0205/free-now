@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { flushChatNotices } from "../../src/chat/chat.js";
-import { api, withApp, type AppCtx, type SentPush } from "../http.js";
+import { api, withApp, type AppCtx, type SentPush, testEmail } from "../http.js";
 
 // Fake people only. Push goes to a recorder, the db is in memory.
 
@@ -20,11 +20,11 @@ type Person = { token: string; user: { id: string; name: string } };
 
 async function circleOf(port: number, names: string[]) {
   const [first, ...rest] = names;
-  const host: Person = await api(port, "POST", "/api/auth/start", { body: { name: first }, status: 201 });
+  const host: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: first }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: host.token, body: { name: "friends" }, status: 201 });
   const people: Person[] = [host];
   for (const name of rest) {
-    people.push(await api(port, "POST", "/api/auth/start", { body: { name, code: created.circle.inviteCode }, status: 201 }));
+    people.push(await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code: created.circle.inviteCode }, status: 201 }));
   }
   for (const person of people) {
     await api(port, "POST", "/api/push/subscribe", {
@@ -77,7 +77,7 @@ test("a reply carries a short quote of the message it answers", async () => {
 test("a reply to another chat, a missing message or a system line is refused and not saved", async () => {
   await withChat(async ({ port, db }) => {
     const [alex, ada] = await circleOf(port, ["Alex", "Ada"]);
-    const other = await api(port, "POST", "/api/auth/start", { body: { name: "Out" }, status: 201 });
+    const other = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Out" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: other.token, body: { name: "other" }, status: 201 });
     const elsewhere = (await api(port, "POST", "/api/circles/chat", { token: other.token, body: { text: "not yours" }, status: 201 })).chat.messages.at(-1);
 

@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** The build label app.js sends with feedback, so a version bump does not break this test. */
 const APP_VERSION = /const APP_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.resolve("public/js/app.js"), "utf8"))?.[1] ?? "";
 
@@ -94,6 +94,7 @@ test("someone who signs up in the app starts with everything seen", { timeout: 9
   try {
     await page.goto(hangry.baseUrl);
     await page.locator("input").first().fill("Nia");
+    await page.locator("#email").fill(testEmail());
     await page.locator("form button[type=submit]").first().click();
     await page.waitForFunction(() => Boolean(localStorage.getItem("fn_token")));
     await page.waitForFunction((id) => localStorage.getItem("fn_whats_new_seen") === id, LATEST, { timeout: 10_000 });
@@ -252,7 +253,7 @@ test("popup, list, and feedback sheets fit 320, 360, and 412 wide phones", { tim
 });
 
 async function person(name: string) {
-  const host = await post("/api/auth/start", { name });
+  const host = await post("/api/auth/start", { email: testEmail(), name });
   const circle = await post("/api/circles", { name: `${name}'s circle` }, host.token);
   return { token: host.token as string, user: host.user as { id: string }, circleId: circle.circle.id as string };
 }

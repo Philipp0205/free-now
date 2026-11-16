@@ -3,7 +3,7 @@ import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { findMentions as serverFind, flushChatNotices } from "../../src/chat/chat.js";
 import { findMentions as clientFind, insertMention, mentionAt, mentionMatches } from "../../public/js/mentions.js";
-import { api, withApp, type AppCtx, type SentPush } from "../http.js";
+import { api, withApp, type AppCtx, type SentPush, testEmail } from "../http.js";
 
 // Fake people only. Push goes to a recorder, the db is in memory.
 
@@ -22,11 +22,11 @@ type Person = { token: string; user: { id: string; name: string } };
 
 async function circleOf(port: number, names: string[]) {
   const [first, ...rest] = names;
-  const host: Person = await api(port, "POST", "/api/auth/start", { body: { name: first }, status: 201 });
+  const host: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: first }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: host.token, body: { name: "friends" }, status: 201 });
   const people: Person[] = [host];
   for (const name of rest) {
-    people.push(await api(port, "POST", "/api/auth/start", { body: { name, code: created.circle.inviteCode }, status: 201 }));
+    people.push(await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code: created.circle.inviteCode }, status: 201 }));
   }
   for (const person of people) {
     await api(port, "POST", "/api/push/subscribe", {

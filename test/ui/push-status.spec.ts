@@ -4,7 +4,7 @@ import type { Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const sent: Array<{ endpoint: string; payload: PushPayload }> = [];
 const push: PushSender = {
   async send(subscription: PushSubscription, payload: PushPayload) {
@@ -14,12 +14,12 @@ const push: PushSender = {
 const hangry = useHangry({ tz: "UTC", push });
 
 test("the host opens a delivery sheet and a friend does not see it", { timeout: 90_000 }, async () => {
-  const alex = await post("/api/auth/start", { name: "Alex" });
+  const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const circle = await post("/api/circles", { name: "friends" }, alex.token);
   const code = circle.circle.inviteCode as string;
-  const bea = await post("/api/auth/start", { name: "Bea", code });
-  const cam = await post("/api/auth/start", { name: "Cam", code });
-  const dana = await post("/api/auth/start", { name: "Dana", code });
+  const bea = await post("/api/auth/start", { email: testEmail(), name: "Bea", code });
+  const cam = await post("/api/auth/start", { email: testEmail(), name: "Cam", code });
+  const dana = await post("/api/auth/start", { email: testEmail(), name: "Dana", code });
   await post("/api/push/subscribe", {
     endpoint: "https://push.example/bea",
     keys: { p256dh: "p", auth: "a" },
@@ -85,13 +85,13 @@ test("the host opens a delivery sheet and a friend does not see it", { timeout: 
 
 /** A host and `count` friends, each with notifications on, plus one social. Returns the delivery row id per friend name. */
 async function crowd(count: number, note: string) {
-  const host = await post("/api/auth/start", { name: "Host" });
+  const host = await post("/api/auth/start", { email: testEmail(), name: "Host" });
   const circle = await post("/api/circles", { name: "big" }, host.token);
   const code = circle.circle.inviteCode as string;
   const names: string[] = [];
   for (let i = 1; i <= count; i += 1) {
     const name = `Friend ${String(i).padStart(2, "0")}`;
-    const friend = await post("/api/auth/start", { name, code });
+    const friend = await post("/api/auth/start", { email: testEmail(), name, code });
     await post("/api/push/subscribe", {
       endpoint: `https://push.example/${note}-${i}`,
       keys: { p256dh: "p", auth: "a" },
@@ -208,7 +208,7 @@ test("an open push sheet updates when a friend acks, without reopening", { timeo
 test("a friend with notifications on but no push for this event says so", { timeout: 90_000 }, async () => {
   const { host } = await crowd(1, "Early");
   const circle = (await get("/api/me", host.token)).circle;
-  const late = await post("/api/auth/start", { name: "Late", code: circle.inviteCode });
+  const late = await post("/api/auth/start", { email: testEmail(), name: "Late", code: circle.inviteCode });
   await post("/api/push/subscribe", { endpoint: "https://push.example/late", keys: { p256dh: "p", auth: "a" } }, late.token);
   const page = await openAs(host.token);
   try {
@@ -223,12 +223,12 @@ test("a friend with notifications on but no push for this event says so", { time
 });
 
 test("a sheet opened from a plan card refreshes live and survives the plan ending", { timeout: 90_000 }, async () => {
-  const host = await post("/api/auth/start", { name: "Planner" });
+  const host = await post("/api/auth/start", { email: testEmail(), name: "Planner" });
   const circle = await post("/api/circles", { name: "plans" }, host.token);
   const code = circle.circle.inviteCode as string;
   const ids: string[] = [];
   for (const name of ["Pia", "Quinn"]) {
-    const friend = await post("/api/auth/start", { name, code });
+    const friend = await post("/api/auth/start", { email: testEmail(), name, code });
     await post("/api/push/subscribe", { endpoint: `https://push.example/plan-${name}`, keys: { p256dh: "p", auth: "a" } }, friend.token);
   }
   sent.length = 0;

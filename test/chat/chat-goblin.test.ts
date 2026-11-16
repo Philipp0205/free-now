@@ -3,7 +3,7 @@ import test from "node:test";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { FEEDBACK_LIMIT } from "../../src/admin/feedback.js";
 import { GOBLIN_LINES, gripeText } from "../../src/chat/goblin.js";
-import { api, withApp, type AppCtx, type SentPush } from "../http.js";
+import { api, withApp, type AppCtx, type SentPush, testEmail } from "../http.js";
 
 // Fake people only. Push goes to a recorder, the db is in memory.
 // The Goblin's lines are random, so these tests check a reply against its list, never one line.
@@ -25,11 +25,11 @@ type Message = { id: string; name: string; text: string; goblin: boolean; mine: 
 
 async function circleOf(port: number, names: string[]) {
   const [first, ...rest] = names;
-  const host: Person = await api(port, "POST", "/api/auth/start", { body: { name: first }, status: 201 });
+  const host: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: first }, status: 201 });
   const created = await api(port, "POST", "/api/circles", { token: host.token, body: { name: "friends" }, status: 201 });
   const people: Person[] = [host];
   for (const name of rest) {
-    people.push(await api(port, "POST", "/api/auth/start", { body: { name, code: created.circle.inviteCode }, status: 201 }));
+    people.push(await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name, code: created.circle.inviteCode }, status: 201 }));
   }
   for (const person of people) {
     await api(port, "POST", "/api/push/subscribe", {

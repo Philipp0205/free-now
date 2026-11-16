@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { addDays, dayLabel, isoDate } from "../../src/lib/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 const SHOT_DIR = path.resolve(process.env.WH_SHOT_DIR || "test/ui/screenshots/when-hierarchy");
 const ORB = "Let friends know you're free now";
@@ -25,7 +25,7 @@ let seq = 0;
 /** Fake user over the API, in a fresh circle, so counts start at zero. */
 async function user() {
   seq += 1;
-  const me = await call("POST", "/api/auth/start", undefined, { name: `Wen${seq}` });
+  const me = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Wen${seq}` });
   const { circle } = await call("POST", "/api/circles", me.token, { name: `When ${seq}` });
   return { token: me.token as string, circleId: circle.id as string };
 }

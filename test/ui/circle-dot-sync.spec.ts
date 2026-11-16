@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots go here. Override with CDS_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.CDS_SHOT_DIR || ".oc/shots/circle-dot-sync");
 /** 360 writes before.png / after.png; the other sizes add their size to the name. */
@@ -67,10 +67,10 @@ for (const [width, height] of SIZES) {
   test(`at ${width}: reading Alerts clears the circle dot even with unread plan chat`, { timeout: 120_000 }, async () => {
     const home = `Home ${width}`;
     const uni = `Uni ${width}`;
-    const finn = await call("POST", "/api/auth/start", undefined, { name: "Finn" });
+    const finn = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn" });
     const a = (await call("POST", "/api/circles", finn.token, { name: home })).circle;
     const b = (await call("POST", "/api/circles", finn.token, { name: uni })).circle;
-    const uma = await call("POST", "/api/auth/start", undefined, { name: "Uma", code: a.inviteCode });
+    const uma = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Uma", code: a.inviteCode });
     await call("POST", "/api/circles/join", uma.token, { code: b.inviteCode });
     await call("POST", `/api/notifications/read?circle=${a.id}`, uma.token);
     await call("POST", `/api/notifications/read?circle=${b.id}`, uma.token);

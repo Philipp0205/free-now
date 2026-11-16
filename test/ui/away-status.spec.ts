@@ -5,7 +5,7 @@ import { addDays } from "../../src/lib/time.js";
 import { statusToday } from "../../public/js/status.js";
 import { SIZES, UA, openEventsMap, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-
+import { testEmail } from "../http.js";
 const hangry = useHangry();
 
 async function phone(token: string, width = 412, height = 915) {
@@ -30,9 +30,9 @@ async function phone(token: string, width = 412, height = 915) {
 const tab = (page: Page, name: string) => page.locator("nav.tabbar").getByRole("button", { name, exact: true }).click();
 
 async function seed() {
-  const phil = await hangry.call("POST", "/api/auth/start", undefined, { name: "Philipp" });
+  const phil = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Philipp" });
   const circle = (await hangry.call("POST", "/api/circles", phil.token, { name: "Tennis" })).circle;
-  const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: circle.inviteCode });
+  const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: circle.inviteCode });
   return { phil, bea, circle };
 }
 

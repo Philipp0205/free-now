@@ -18,7 +18,10 @@ import {
 import { ChatError } from "./chat/chat.js";
 import { handleChatRoutes } from "./chat/routes.js";
 import { type Config, MAP_PMTILES_ATTRIBUTION, MAP_PMTILES_URL } from "./config.js";
+import { ACCOUNT_LIMIT } from "./accounts/accounts.js";
+import type { Mailer } from "./app-kit/mailer.ts";
 import { healthHandler } from "./app-kit/health.ts";
+import type { UserRow } from "./db.js";
 import { authFromRequest, requireUser } from "./lib/auth.js";
 import { clientKey } from "./lib/client-key.js";
 import type { AuthedRouteContext, Limits, RouteContext } from "./lib/context.js";
@@ -43,6 +46,8 @@ export type AppDeps = {
   now: () => number;
   /** Tests swap DNS and the HTTP client for the calendar availability import. */
   calendarNet?: CalendarNet;
+  /** Sends the confirm and lost-code links. Undefined: no mail goes out (see createMailer). */
+  mailer?: Mailer;
 };
 
 export { HttpError } from "./lib/http.js";
@@ -69,6 +74,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
     feed: createRateLimiter(FEED_LIMIT),
     calendarSync: createRateLimiter(CALENDAR_SYNC_LIMIT),
     agent: createRateLimiter(AGENT_TOKEN_LIMIT),
+    accounts: createRateLimiter(ACCOUNT_LIMIT),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
@@ -85,6 +91,17 @@ export function createApp(deps: AppDeps): http.RequestListener {
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
     });
   };
+}
+
+/**
+ * Accounts from before email was required can only read themselves, sign out and add an address.
+ * Everything else answers 403 until they do. The public routes (sign up, recover, buzz) never get here.
+ */
+function requireEmail(me: UserRow, method: string, pathname: string): void {
+  if (me.email) return;
+  if (method === "GET" && pathname === "/api/me") return;
+  if (method === "POST" && (pathname === "/api/auth/logout" || pathname === "/api/auth/email")) return;
+  throw new HttpError(403, "add an email first");
 }
 
 function errorText(error: unknown): string {
@@ -169,7 +186,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     if (!isAgentAllowed(method, pathname)) throw new HttpError(403, AGENT_ROUTES_ERROR);
   }
   if (pathname === "/api/me/avatar" || /^\/api\/users\/[^/]+\/avatar$/.test(pathname)) {
-    await handleAvatar(req, res, deps, method, pathname, requireUser(user));
+    const caller = requireUser(user);
+    requireEmail(caller, method, pathname);
+    await handleAvatar(req, res, deps, method, pathname, caller);
     return;
   }
   const body =
@@ -211,6 +230,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   if (await handleGoogleCallbackRoute(ctx)) return;
 
   const me = requireUser(user);
+  requireEmail(me, method, pathname);
   const agent = auth?.kind === "agent";
   const authed: AuthedRouteContext = { ...ctx, me, agent };
 

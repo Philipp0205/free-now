@@ -5,15 +5,15 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const shotsDir = path.resolve("test/ui/screenshots/chat-host");
 const hangry = useHangry({ tz: "UTC" });
 
 test("the chat screen host and the composer survive render() while the same chat is open", { timeout: 120_000 }, async () => {
-  const alex = await post("/api/auth/start", { name: "Alex" });
+  const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const circle = await post("/api/circles", { name: "Testers" }, alex.token);
-  const ada = await post("/api/auth/start", { name: "Ada", code: circle.circle.inviteCode });
+  const ada = await post("/api/auth/start", { email: testEmail(), name: "Ada", code: circle.circle.inviteCode });
   await post("/api/circles/chat", { text: "Anyone up for ramen tonight?" }, ada.token);
   fs.mkdirSync(shotsDir, { recursive: true });
 

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-15-email",
+    "date": "2026-11-15",
+    "title": "Add an email so you never get locked out",
+    "bullets": [
+      "Every account now has an email. New accounts add one when they join, and existing accounts are asked once.",
+      "Lost your recovery code? We email you a sign-in link and make you a new code.",
+      "Your Flic button link and your recovery code are now separate. A new button link no longer changes your code."
+    ]
+  },
+  {
     "id": "2026-11-16-payment-link",
     "date": "2026-11-16",
     "title": "Add a pay link to your profile",

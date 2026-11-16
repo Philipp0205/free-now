@@ -7,7 +7,7 @@ import type { PushPayload, PushSender, PushSubscription } from "../../src/push/p
 import { addDays, isoDate, shortDate } from "../../src/lib/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 /** Set to a folder to keep screenshots, for example RS_SHOT_DIR=/tmp/shots. */
 const SHOT_DIR = process.env.RS_SHOT_DIR ? path.resolve(process.env.RS_SHOT_DIR) : "";
@@ -45,15 +45,15 @@ async function shot(page: Page, name: string) {
 
 for (const [width, height] of SIZES) {
   test(`at ${width}: the host moves a plan, friends get one push with the new day and time, the host gets none, the alert opens the plan`, { timeout: 120_000 }, async () => {
-    const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+    const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
     const { circle } = await call("POST", "/api/circles", host.token, { name: `Crew ${width}` });
-    const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+    const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
     // A second circle, so pushes carry the circle name like every other multi-circle push.
     await call("POST", "/api/circles", friend.token, { name: "Other" });
     for (const [user, tag] of [[host, "host"], [friend, "friend"]] as const) {
       await call("POST", "/api/push/subscribe", user.token, { endpoint: `https://push.example/${tag}-${width}`, keys: { p256dh: "p", auth: "a" } });
     }
-    const ola = await call("POST", "/api/auth/start", undefined, { name: "Ola", code: circle.inviteCode });
+    const ola = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ola", code: circle.inviteCode });
     await call("POST", "/api/push/subscribe", ola.token, { endpoint: `https://push.example/ola-${width}`, keys: { p256dh: "p", auth: "a" } });
     const note = `Board games ${width}`;
     const made = (await call("POST", "/api/plans", host.token, { note, time: "19:30" })).plan;
@@ -110,9 +110,9 @@ for (const [width, height] of SIZES) {
 }
 
 test("a title-only edit sends no push", { timeout: 60_000 }, async () => {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "Quiet crew" });
-  const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+  const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
   await call("POST", "/api/push/subscribe", friend.token, { endpoint: "https://push.example/quiet", keys: { p256dh: "p", auth: "a" } });
   await call("POST", "/api/plans", host.token, { note: "Walk", time: "19:30" });
   const before = sent.length;

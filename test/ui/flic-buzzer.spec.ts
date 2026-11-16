@@ -4,16 +4,16 @@ import { test } from "@playwright/test";
 import type { BrowserContext, Page } from "playwright-core";
 import { UA, openYouSection, useHangry } from "./harness.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-
+import { testEmail } from "../http.js";
 const hangry = useHangry();
 const SHOTS = new URL("./screenshots/flic-buzzer/", import.meta.url);
 const ORDER = ["shockwave", "slam", "flood", "bell"];
 
 /** Alex (who owns the Flic link) and Bea share one circle. Fake names only. */
 async function seed() {
-  const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+  const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
   const circle = (await hangry.call("POST", "/api/circles", alex.token, { name: "Lunch" })).circle;
-  const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: circle.inviteCode });
+  const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: circle.inviteCode });
   return { alex, bea, link: `${hangry.baseUrl}/api/buzz/${alex.buzzToken}` };
 }
 

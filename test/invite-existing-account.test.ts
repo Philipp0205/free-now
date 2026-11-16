@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import type { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { api, withApp } from "./http.js";
+import { api, withApp, testEmail } from "./http.js";
 
 function userCount(db: DatabaseSync): number {
   return Number((db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number | bigint }).n);
 }
 
 async function setup(ctx: { port: number }) {
-  const host = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Fake Host" }, status: 201 })).json;
+  const host = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Host" }, status: 201 })).json;
   const created = (await api(ctx, "POST", "/api/circles", { token: host.token, body: { name: "Fake circle" }, status: 201 })).json;
-  const guest = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Fake Guest" }, status: 201 })).json;
+  const guest = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Guest" }, status: 201 })).json;
   return { host, guest, circle: created.circle };
 }
 
@@ -35,7 +35,7 @@ test("recovering on a fresh device then joining keeps the same account", async (
   await withApp(async (ctx) => {
     const { guest, circle } = await setup(ctx);
     const before = userCount(ctx.db);
-    const recovered = (await api(ctx, "POST", "/api/auth/recover", { body: { token: guest.buzzToken }, status: 200 })).json;
+    const recovered = (await api(ctx, "POST", "/api/auth/recover", { body: { token: guest.recoveryCode }, status: 200 })).json;
     assert.notEqual(recovered.token, guest.token, "the new device gets its own token");
     assert.equal(recovered.user.id, guest.user.id);
     const joined = await api(ctx, "POST", "/api/circles/join", { token: recovered.token, body: { code: circle.inviteCode }, status: 200 });
@@ -50,7 +50,7 @@ test("a brand-new person starting with an invite still gets a new account and jo
   await withApp(async (ctx) => {
     const { circle } = await setup(ctx);
     const before = userCount(ctx.db);
-    const fresh = (await api(ctx, "POST", "/api/auth/start", { body: { name: "Fake Newcomer", code: circle.inviteCode }, status: 201 })).json;
+    const fresh = (await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Fake Newcomer", code: circle.inviteCode }, status: 201 })).json;
     assert.equal(userCount(ctx.db), before + 1);
     assert.equal(fresh.circle.id, circle.id);
     assert.ok(memberIds(fresh.circle).includes(fresh.user.id));

@@ -7,7 +7,7 @@ import { test } from "@playwright/test";
 import type { Page, Route } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 // Fake people and messages only. Screenshots go to test/ui/screenshots (gitignored).
 const SHOT_DIR = path.resolve("test/ui/screenshots/chat-stall");
 
@@ -18,9 +18,9 @@ const PLANS_LIST = /\/api\/plans(\?|$)/;
 const EVENT_CHAT = /\/api\/(plans|socials)\/[^/]+\/chat(\?|$)/;
 
 async function seed() {
-  const finn = await call("POST", "/api/auth/start", undefined, { name: "Finn" });
+  const finn = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn" });
   const circle = (await call("POST", "/api/circles", finn.token, { name: "Stall test" })).circle;
-  const uma = await call("POST", "/api/auth/start", undefined, { name: "Uma", code: circle.inviteCode });
+  const uma = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Uma", code: circle.inviteCode });
   const plan = (await call("POST", "/api/plans", finn.token, { note: "Pizza night", time: "23:59" })).plan;
   const social = (await call("POST", "/api/socials", finn.token, { note: "Coffee now" })).social;
   await call("POST", `/api/plans/${plan.id}/chat`, finn.token, { text: "Bring plates" });

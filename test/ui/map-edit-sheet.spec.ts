@@ -4,7 +4,7 @@ import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, testEmail, useHangry } from "./harness.js";
 
 const HITS = [
   { name: "jomi Bagel Deli", address: "Hasenbergsteige 5, Stuttgart", lat: 48.7705, lng: 9.1655, distanceM: 1100 },
@@ -212,6 +212,7 @@ async function dismiss(page: Page) {
 async function signIn(page: Page, name: string) {
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);
   await page.locator("#circle-name").fill("friends");

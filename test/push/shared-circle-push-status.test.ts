@@ -14,7 +14,7 @@ import {
   upsertPushSub,
 } from "../../src/db.js";
 import { pushSummaryForPlan } from "../../src/push/push-status.js";
-import { api, withApp, type AppCtx, type SentPush } from "../http.js";
+import { api, withApp, type AppCtx, type SentPush, testEmail } from "../http.js";
 
 // The host's push roster for a plan shared to more circles. Family is home, Jumping Dinner is shared to later.
 
@@ -22,7 +22,7 @@ type Person = { token: string; user: { id: string; name: string } };
 type Roster = { delivered: number; total: number; people: Array<{ id: string; name: string; status: string; circleIds: string[] }> };
 
 const start = (port: number, name: string, code?: string): Promise<Person> =>
-  api(port, "POST", "/api/auth/start", { body: code ? { name, code } : { name }, status: 201 });
+  api(port, "POST", "/api/auth/start", { body: code ? { name, email: testEmail(), code } : { name, email: testEmail() }, status: 201 });
 
 const subscribe = (port: number, person: Person) =>
   api(port, "POST", "/api/push/subscribe", {

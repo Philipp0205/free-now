@@ -8,7 +8,7 @@ import { insertSocial } from "../../src/db.js";
 import { addDays, dayLabel, isoDate } from "../../src/lib/time.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const TZ = "Europe/Berlin";
 const SHOT_DIR = path.resolve(process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/unify-create/");
 const ORB = "Let friends know you're free now";
@@ -34,7 +34,7 @@ async function call(method: string, pathname: string, token?: string, body?: unk
 /** Fake auth: a user made over the API, in a fresh circle. */
 async function user(name = "Hana") {
   seq += 1;
-  const me = await call("POST", "/api/auth/start", undefined, { name: `${name}${seq}` });
+  const me = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `${name}${seq}` });
   const { circle } = await call("POST", "/api/circles", me.token, { name: `Unify ${seq}` });
   return { token: me.token as string, id: me.user?.id as string, circleId: circle.id as string, code: circle.inviteCode as string };
 }
@@ -176,8 +176,8 @@ test("red orb, Now, I'm free: posts a social", { timeout: 60_000 }, async () => 
 
 test("live social, later social, today plan and a far plan share one feed in order", { timeout: 90_000 }, async () => {
   const host = await user();
-  const ben = await call("POST", "/api/auth/start", undefined, { name: "Ben", code: host.code });
-  const cleo = await call("POST", "/api/auth/start", undefined, { name: "Cleo", code: host.code });
+  const ben = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Ben", code: host.code });
+  const cleo = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Cleo", code: host.code });
   const now = Date.now();
   const today = isoDate(now, TZ);
   // Inserted straight in the DB, so the later one works at any hour.

@@ -8,7 +8,7 @@ import type { Page } from "playwright-core";
 import { shortDate } from "../../public/js/when.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openEventsMap, openYouSection, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots land here. Override with MAP_PINS_SHOT_DIR. */
 const SHOT_DIR = path.resolve(process.env.MAP_PINS_SHOT_DIR || "/workspace/hangry-mapbuzz-logs/shots");
 const SIZES: Array<[number, number]> = [[320, 568], [360, 640], [412, 915]];
@@ -95,9 +95,9 @@ async function photoLoaded(page: Page, selector: string): Promise<number> {
 }
 
 async function people() {
-  const host = await hangry.call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await hangry.call("POST", "/api/circles", host.token, { name: "Friends" });
-  const join = (name: string) => hangry.call("POST", "/api/auth/start", undefined, { name, code: circle.inviteCode });
+  const join = (name: string) => hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: circle.inviteCode });
   const going = [await join("Ana"), await join("Ben"), await join("Cyd"), await join("Dee")];
   const maybe = await join("Max");
   return { host, going, maybe };

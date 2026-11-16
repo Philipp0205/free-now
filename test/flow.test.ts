@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadConfig } from "../src/config.js";
-import { api, withApp, type AppCtx, type SentPush } from "./http.js";
+import { api, withApp, type AppCtx, type SentPush, testEmail } from "./http.js";
 
 const TTL = 2 * 60 * 60 * 1000;
 
@@ -14,8 +14,8 @@ const flowOptions = {
 type Ctx = AppCtx<SentPush>;
 
 async function signUp(ctx: Ctx, name: string) {
-  const { json } = await api(ctx, "POST", "/api/auth/start", { body: { name }, status: 201 });
-  return json as { token: string; buzzToken: string; user: { id: string; name: string } };
+  const { json } = await api(ctx, "POST", "/api/auth/start", { body: { email: testEmail(), name }, status: 201 });
+  return json as { token: string; buzzToken: string; recoveryCode: string; user: { id: string; name: string } };
 }
 
 async function subscribe(ctx: Ctx, token: string, endpoint: string) {
@@ -258,13 +258,15 @@ test("logout ends that device and recovery starts another", async () => {
     await api(ctx, "POST", "/api/auth/logout", { token: alex.token, body: {}, status: 204 });
     await api(ctx, "GET", "/api/me", { token: alex.token, status: 401 });
     const recovered = await api(ctx, "POST", "/api/auth/recover", {
-      body: { token: alex.buzzToken },
+      body: { token: alex.recoveryCode },
       status: 200,
     });
     assert.notEqual(recovered.json.token, alex.token);
     const me = await api(ctx, "GET", "/api/me", { token: recovered.json.token, status: 200 });
     assert.equal(me.json.user.name, "Alex");
     assert.equal(me.json.user.buzzToken, alex.buzzToken);
+    assert.notEqual(alex.recoveryCode, alex.buzzToken, "the Flic secret and the recovery code are separate");
+    await api(ctx, "POST", "/api/auth/recover", { body: { token: alex.buzzToken }, status: 401 });
     await api(ctx, "GET", "/api/me", { token: alex.token, status: 401 });
   }, flowOptions);
 });
@@ -392,7 +394,7 @@ test("a second sign-in keeps the first device signed in", async () => {
   await withApp(async (ctx) => {
     const alex = await signUp(ctx, "Alex");
     const again = await api(ctx, "POST", "/api/auth/recover", {
-      body: { token: `curl -X POST http://localhost/api/buzz/${alex.buzzToken} -d '{}'` },
+      body: { token: `curl -X POST http://localhost/api/buzz/${alex.recoveryCode} -d '{}'` },
       status: 200,
     });
     assert.notEqual(again.json.token, alex.token);

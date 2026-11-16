@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/waiting-tap/after";
 const SIZES: Array<[number, number]> = [[360, 740], [390, 844]];
 
@@ -32,9 +32,9 @@ async function call(method: string, urlPath: string, token?: string, body?: Reco
 }
 
 async function people() {
-  const host = await call("POST", "/api/auth/start", undefined, { name: "Hana" });
+  const host = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
   const { circle } = await call("POST", "/api/circles", host.token, { name: "Friends" });
-  const friend = await call("POST", "/api/auth/start", undefined, { name: "Finn", code: circle.inviteCode });
+  const friend = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Finn", code: circle.inviteCode });
   return { host, friend, circle };
 }
 
@@ -52,6 +52,8 @@ async function phone(width: number, height: number, colorScheme: "light" | "dark
 }
 
 async function asUser(page: Page, token: string) {
+  // Taps are aimed at fixed positions, so run without the "Confirm your email" banner that a fresh address shows.
+  hangry.confirmEmails();
   await page.goto(`${hangry.baseUrl}/robots.txt`);
   await page.evaluate((value) => {
     localStorage.clear();

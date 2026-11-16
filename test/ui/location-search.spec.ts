@@ -6,7 +6,7 @@ import type { Page, Route } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { UA as CHROME_UA, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 const SHOT_DIR = path.resolve(process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/location-search/");
 const WIDTHS = [[360, 740], [390, 844]] as const;
 const HITS = [
@@ -32,7 +32,7 @@ function deferred() {
 /** A fresh user in a fresh circle, so plan/social counts start at zero. */
 async function user() {
   seq += 1;
-  const me = await call("POST", "/api/auth/start", undefined, { name: `Lena${seq}` });
+  const me = await call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Lena${seq}` });
   const { circle } = await call("POST", "/api/circles", me.token, { name: `Search ${seq}` });
   return { token: me.token as string, circleId: circle.id as string };
 }

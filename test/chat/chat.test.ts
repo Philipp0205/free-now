@@ -8,7 +8,7 @@ import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import { openDb } from "../../src/db.js";
 import type { PushPayload, PushSender } from "../../src/push/push.js";
-
+import { testEmail } from "../http.js";
 const START = Date.parse("2026-06-01T15:00:00.000Z");
 
 async function withApp(fn: (ctx: { port: number; db: DatabaseSync; sent: Array<{ endpoint: string; payload: PushPayload }>; at: (ms: number) => void }) => Promise<void>) {
@@ -49,10 +49,10 @@ async function api(port: number, method: string, pathname: string, options: { to
 
 test("each recipient hears messages they did not write, and a removed writer is left out", async () => {
   await withApp(async ({ port, sent }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const ada = await api(port, "POST", "/api/auth/start", { body: { name: "Ada", code: created.circle.inviteCode }, status: 201 });
-    const nia = await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: created.circle.inviteCode }, status: 201 });
+    const ada = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Ada", code: created.circle.inviteCode }, status: 201 });
+    const nia = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Nia", code: created.circle.inviteCode }, status: 201 });
     for (const person of [alex, ada, nia]) {
       await api(port, "POST", "/api/push/subscribe", {
         token: person.token,
@@ -98,11 +98,11 @@ test("a chat batch window stays fixed from the first message", () => {
 
 test("circle members can chat on an event, and a removed person cannot post", async () => {
   await withApp(async ({ port, db, sent, at }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const created = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: created.circle.inviteCode }, status: 201 });
-    const nia = await api(port, "POST", "/api/auth/start", { body: { name: "Nia", code: created.circle.inviteCode }, status: 201 });
-    const outsider = await api(port, "POST", "/api/auth/start", { body: { name: "Out" }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: created.circle.inviteCode }, status: 201 });
+    const nia = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Nia", code: created.circle.inviteCode }, status: 201 });
+    const outsider = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Out" }, status: 201 });
     await api(port, "POST", "/api/circles", { token: outsider.token, body: { name: "other" }, status: 201 });
     for (const person of [alex, sam, nia]) {
       await api(port, "POST", "/api/push/subscribe", {
@@ -192,10 +192,10 @@ test("circle members can chat on an event, and a removed person cannot post", as
 
 test("unread totals follow each circle, and an open chat marks a new message read", async () => {
   await withApp(async ({ port }) => {
-    const alex = await api(port, "POST", "/api/auth/start", { body: { name: "Alex" }, status: 201 });
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
     const home = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Home" }, status: 201 });
     const uni = await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "Uni" }, status: 201 });
-    const sam = await api(port, "POST", "/api/auth/start", { body: { name: "Sam", code: home.circle.inviteCode }, status: 201 });
+    const sam = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Sam", code: home.circle.inviteCode }, status: 201 });
     await api(port, "POST", `/api/circles/chat?circle=${home.circle.id}`, { token: sam.token, body: { text: "Dinner?" }, status: 201 });
     const social = await api(port, "POST", `/api/socials?circle=${home.circle.id}`, { token: alex.token, body: { note: "Coffee" }, status: 201 });
     await api(port, "POST", `/api/socials/${social.social.id}/reply?circle=${home.circle.id}`, { token: sam.token, body: { reply: "in" }, status: 200 });

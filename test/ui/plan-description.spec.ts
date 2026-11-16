@@ -3,7 +3,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { openPlanSheet } from "./plan-sheet.js";
-import { UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openEventsMap, testEmail, useHangry } from "./harness.js";
 
 const LONG = "Meet at the side door, not the front. Bring a jacket because we sit outside until late. "
   + "Menu is at https://example.com/menu and we split the bill. Text me if you run late, I will save you a seat.";
@@ -169,6 +169,7 @@ async function dismiss(page: Page) {
 async function signIn(page: Page, name: string) {
   await page.goto(hangry.baseUrl);
   await page.locator("#name").fill(name);
+  await page.locator("#email").fill(testEmail());
   await page.getByRole("button", { name: "Continue" }).click();
   await dismiss(page);
   await page.locator("#circle-name").fill("friends");

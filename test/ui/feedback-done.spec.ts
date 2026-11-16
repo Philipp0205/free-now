@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, call, useHangry } from "./harness.js";
-
+import { testEmail } from "../http.js";
 /** Screenshots go here. Override with FD_SHOT_DIR=/some/folder. */
 const SHOT_DIR = path.resolve(process.env.FD_SHOT_DIR || ".oc/shots/feedback-done");
 const ADMIN = "a".repeat(32);
@@ -37,9 +37,9 @@ function markDone(id: string) {
 
 for (const [width, height] of SIZES) {
   test(`left-circle submitter sees and taps "Your suggestion is live" at ${width}px`, { timeout: 60_000 }, async () => {
-    const alex = await hangry.call("POST", "/api/auth/start", undefined, { name: "Alex" });
+    const alex = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Alex" });
     const created = await hangry.call("POST", "/api/circles", alex.token, { name: "Friends" });
-    const bea = await hangry.call("POST", "/api/auth/start", undefined, { name: "Bea", code: created.circle.inviteCode });
+    const bea = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Bea", code: created.circle.inviteCode });
     const evil = `<b>bold</b> ${"long words ".repeat(20)}🍕`;
     const sent = await hangry.call("POST", "/api/feedback", bea.token, { text: evil, circleId: created.circle.id });
     await hangry.call("POST", `/api/circles/leave?circle=${created.circle.id}`, bea.token, {});
