@@ -127,6 +127,29 @@ export function payLink(person, cls = "text-btn pay-link") {
   return el("a", { class: cls, href: url, target: "_blank", rel: "noopener noreferrer", text: "Pay", "aria-label": `Pay ${person.name}` });
 }
 
+/** Same rules as the server's cleanWeroEmail. Returns the error text, or "" when the address is fine or empty. */
+export function weroEmailError(value) {
+  const text = String(value).trim();
+  return !text || (text.length <= 254 && /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(text)) ? "" : "Enter a valid email";
+}
+
+/** Another member's Wero email with a copy button. Nothing for yourself or without an address. */
+export function weroEntry(person, cls = "wero-entry") {
+  const email = person?.weroEmail;
+  if (!person || person.id === state.me?.user?.id || typeof email !== "string" || !email) return null;
+  return el("div", { class: cls }, [
+    el("span", { class: "wero-tag", text: "Wero" }),
+    el("span", { class: "wero-email", text: email }),
+    el("button", {
+      class: "text-btn",
+      type: "button",
+      text: "Copy",
+      "aria-label": `Copy Wero email for ${person.name}`,
+      onclick: () => { void copyText(email, "Copied"); },
+    }),
+  ]);
+}
+
 export async function run(fn, keepError = "") {
   state.error = keepError;
   try {

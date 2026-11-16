@@ -1,7 +1,7 @@
 import type { AppDeps } from "../app.js";
 import { colorHex } from "../chat/chat-color.js";
 import { getPlanReply, getSocialReply, listPastPlans, listPastSocials, listPlanJoins, listSocialJoins } from "../db.js";
-import { visiblePaymentUrls } from "../lib/payment-url.js";
+import { visiblePaymentUrls, visibleWeroEmails } from "../lib/payment-url.js";
 import { addDays, clockLabel, isoDate } from "../lib/time.js";
 import { isInReply } from "./events.js";
 import { type PersonStatus, visibleStatuses } from "./status.js";
@@ -14,8 +14,8 @@ type PastEvent = {
   at: number;
   time: string;
   place: string;
-  host: { id: string; name: string; color: string; avatarRev: number | null; status: PersonStatus | null; paymentUrl: string | null };
-  people: Array<{ id: string; name: string; color: string; avatarRev: number | null; status: PersonStatus | null; paymentUrl: string | null; arriveAt: number | null }>;
+  host: { id: string; name: string; color: string; avatarRev: number | null; status: PersonStatus | null; paymentUrl: string | null; weroEmail: string | null };
+  people: Array<{ id: string; name: string; color: string; avatarRev: number | null; status: PersonStatus | null; paymentUrl: string | null; weroEmail: string | null; arriveAt: number | null }>;
 };
 
 export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
@@ -23,6 +23,7 @@ export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
   const today = isoDate(now, deps.config.tz);
   const statuses = visibleStatuses(deps.db, viewerId, now);
   const payments = visiblePaymentUrls(deps.db, viewerId);
+  const weroEmails = visibleWeroEmails(deps.db, viewerId);
   const events: PastEvent[] = [];
   for (const social of listPastSocials(deps.db, circleId, now)) {
     if (getSocialReply(deps.db, social.id, viewerId)?.blocked) continue;
@@ -35,10 +36,10 @@ export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: clockLabel(at, deps.config.tz),
       place: social.place ?? "",
-      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null },
+      host: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null, weroEmail: weroEmails.get(social.creator_id) ?? null },
       people: listSocialJoins(deps.db, social.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, paymentUrl: payments.get(join.id) ?? null, arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, paymentUrl: payments.get(join.id) ?? null, weroEmail: weroEmails.get(join.id) ?? null, arriveAt: join.arrive_at })),
     });
   }
   for (const plan of listPastPlans(deps.db, circleId, today)) {
@@ -53,10 +54,10 @@ export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
       at,
       time: plan.at_time ?? "",
       place: plan.place ?? "",
-      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null, status: statuses.get(plan.creator_id) ?? null, paymentUrl: payments.get(plan.creator_id) ?? null },
+      host: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null, status: statuses.get(plan.creator_id) ?? null, paymentUrl: payments.get(plan.creator_id) ?? null, weroEmail: weroEmails.get(plan.creator_id) ?? null },
       people: listPlanJoins(deps.db, plan.id)
         .filter((join) => isInReply(join.reply))
-        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, paymentUrl: payments.get(join.id) ?? null, arriveAt: join.arrive_at })),
+        .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, paymentUrl: payments.get(join.id) ?? null, weroEmail: weroEmails.get(join.id) ?? null, arriveAt: join.arrive_at })),
     });
   }
   events.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at || b.id.localeCompare(a.id));

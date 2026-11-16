@@ -10,7 +10,7 @@ import { busyPreviewScreen, friendsViewPanel } from "./busy-preview.js";
 import { calendarFeedPanel, calendarSyncPanel, copyWithSelection, feedDate } from "./calendar-sync.js";
 import { isInstalled, notificationStatusLabel, onInstall, onTestPush, openNotifications } from "./push-install.js";
 import { openFeedback, openWhatsNewList } from "./whats-new-ui.js";
-import { copyText, el, field, icon, paymentUrlError, run, scheduleErrorClear, viewerTz } from "./lib.js";
+import { copyText, el, field, icon, paymentUrlError, run, scheduleErrorClear, viewerTz, weroEmailError } from "./lib.js";
 import { avatar, onRemovePhoto, pickPhoto } from "./avatars.js";
 import { emailField, onResendEmail, saveEmail } from "./account.js";
 
@@ -128,6 +128,16 @@ function profileSection() {
       }),
       el("button", { class: "btn secondary", type: "submit", text: "Save payment link" }),
       el("p", { class: "help", text: "Optional. Circle members see a Pay link next to your name. paypal.me only." }),
+    ]),
+    el("form", { class: "panel stack", novalidate: "", onsubmit: onSaveWero }, [
+      field("Wero email", "wero-email", state.me.user.weroEmail || "", () => {}, {
+        type: "email",
+        inputmode: "email",
+        maxlength: "254",
+        placeholder: "you@example.com",
+      }),
+      el("button", { class: "btn secondary", type: "submit", text: "Save Wero email" }),
+      el("p", { class: "help", text: "Optional. Separate from your sign-in email. Circle members see it with a copy button." }),
     ]),
   ];
 }
@@ -432,6 +442,22 @@ async function onSavePayment(event) {
   await run(async () => {
     state.me = await api("/api/me", { method: "PATCH", body: { paymentUrl: value } });
     state.error = value ? "Payment link saved" : "Payment link removed";
+  });
+}
+
+async function onSaveWero(event) {
+  event.preventDefault();
+  const value = document.getElementById("wero-email").value.trim();
+  const problem = weroEmailError(value);
+  if (problem) {
+    state.error = problem;
+    render();
+    scheduleErrorClear();
+    return;
+  }
+  await run(async () => {
+    state.me = await api("/api/me", { method: "PATCH", body: { weroEmail: value } });
+    state.error = value ? "Wero email saved" : "Wero email removed";
   });
 }
 

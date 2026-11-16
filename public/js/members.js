@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import { api, refresh } from "./session.js";
 import { render } from "./render.js";
 import { onDeleteCircle, onRenameCircle, openCircleSheet, rotateInvite, screenHeader } from "./circles.js";
-import { el, field, payLink, run, viewerTz } from "./lib.js";
+import { el, field, payLink, run, viewerTz, weroEntry } from "./lib.js";
 import { shareInvite } from "./plan-share.js";
 import { avatar } from "./avatars.js";
 import { closeSheet } from "./sheets.js";
@@ -127,6 +127,7 @@ function memberRow(member) {
           onclick: () => openMemberMenu(member),
         })
       : null,
+    weroEntry(member),
   ]);
 }
 
@@ -168,6 +169,7 @@ export function memberSheet() {
       manage
         ? el("div", { class: "actions" }, [
             payLink(member, "action"),
+            weroEntry(member, "wero-entry full"),
             member.admin
               ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
               : el("button", { class: "action", type: "button", text: "Make admin", onclick: () => setMemberAdmin(member, true) }),
@@ -180,6 +182,7 @@ export function memberSheet() {
           ])
         : el("div", { class: "actions" }, [
             payLink(member, "action"),
+            weroEntry(member, "wero-entry full"),
             el("button", { class: "action", type: "button", text: "Close", onclick: closeSheet }),
           ]),
     ]),

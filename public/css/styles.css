@@ -643,6 +643,15 @@ button:disabled { cursor: default; opacity: 0.55; }
 .text-btn.danger { color: var(--danger); }
 a.text-btn, a.action { display: inline-flex; align-items: center; text-decoration: none; }
 a.pay-link { flex: none; padding-left: 12px; padding-right: 12px; color: var(--text); font-weight: 600; }
+.wero-entry { display: flex; align-items: center; gap: 6px; flex: 1 0 100%; min-width: 0; font-size: 13px; }
+.member-row:has(.wero-entry), .guest-row:has(.wero-entry) { flex-wrap: wrap; }
+.member-row .wero-entry { padding-left: 52px; }
+.guest-row .wero-entry { padding-left: 36px; }
+.wero-tag { flex: none; color: var(--text); font-weight: 600; }
+.wero-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.wero-entry .text-btn { flex: none; margin-left: auto; padding-left: 8px; padding-right: 8px; color: var(--text); font-weight: 600; }
+.wero-entry.full { flex: none; gap: 12px; min-height: 52px; padding: 0 8px 0 16px; background: #2c2c2e; border-radius: 14px; font-size: 16px; }
+.wero-entry.full .wero-email { white-space: normal; overflow-wrap: anywhere; color: #fff; }
 .card-tools .event-tool {
   min-width: 44px;
   min-height: 44px;
