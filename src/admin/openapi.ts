@@ -83,6 +83,7 @@ const person = {
     color: { type: "string", description: "Hex color." },
     avatarRev: nullable({ type: "integer" }),
     status: { oneOf: [ref("Status"), { type: "null" }] },
+    paymentUrl: nullable({ type: "string" }),
   },
 };
 const availability = {

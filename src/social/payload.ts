@@ -10,6 +10,7 @@ import {
   listPlanJoins,
   listSocialJoins,
 } from "../db.js";
+import { visiblePaymentUrls } from "../lib/payment-url.js";
 import { dayLabel } from "../lib/time.js";
 import { type PushSummary, pushSummaryForPlan, pushSummaryForViewer } from "../push/push-status.js";
 import { remindAgainAt } from "./plans.js";
@@ -27,6 +28,7 @@ function removedByName(reply: { blocked: number; removed_by: string | null } | u
 
 export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: string | null = null, now: number = Date.now()) {
   const statuses = visibleStatuses(db, viewerId, now);
+  const payments = visiblePaymentUrls(db, viewerId);
   return {
     id: social.id,
     note: social.note,
@@ -38,7 +40,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     location: pointPayload(social.lat, social.lng),
     circleId: social.circle_id,
     circleName: getCircleById(db, social.circle_id)?.name ?? "",
-    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null },
+    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: listSocialJoins(db, social.id).map((join) => ({
       id: join.id,
@@ -46,6 +48,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
       color: colorHex(join.id, join.color),
       avatarRev: join.avatar_rev || null,
       status: statuses.get(join.id) ?? null,
+      paymentUrl: payments.get(join.id) ?? null,
       joinedAt: join.joined_at,
       reply: join.reply ?? "join",
       etaMin: join.eta_min ?? null,
@@ -57,6 +60,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
 
 export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, viewerId: string | null = null, now: number = Date.now()) {
   const statuses = visibleStatuses(db, viewerId, now);
+  const payments = visiblePaymentUrls(db, viewerId);
   return {
     id: plan.id,
     note: plan.note,
@@ -74,7 +78,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     // Last "Remind friends" and when the next one is allowed, so the menu can grey out.
     remindedAt: plan.reminded_at ?? null,
     remindAgainAt: remindAgainAt(db, plan, viewerId),
-    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null, status: statuses.get(plan.creator_id) ?? null },
+    creator: { id: plan.creator_id, name: plan.creator_name, color: colorHex(plan.creator_id, plan.creator_color), avatarRev: plan.creator_avatar_rev || null, status: statuses.get(plan.creator_id) ?? null, paymentUrl: payments.get(plan.creator_id) ?? null },
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
@@ -84,6 +88,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
       color: colorHex(join.id, join.color),
       avatarRev: join.avatar_rev || null,
       status: statuses.get(join.id) ?? null,
+      paymentUrl: payments.get(join.id) ?? null,
       joinedAt: join.joined_at,
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,

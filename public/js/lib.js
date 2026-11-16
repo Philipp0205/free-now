@@ -101,6 +101,32 @@ export function el(tag, attrs = {}, children = []) {
   return node;
 }
 
+/** Same rules as the server's cleanPaymentUrl. Returns the error text, or "" when the link is fine or empty. */
+export function paymentUrlError(value) {
+  const text = String(value).trim();
+  if (!text) return "";
+  if (text.length > 200) return "Link is too long";
+  if (!/^https:\/\//i.test(text)) return "Links must start with https://";
+  const bad = "Use a paypal.me link, for example https://paypal.me/yourname";
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    return bad;
+  }
+  const hasPort = /^https:\/\/[^/\\?#]*:\d*(?:[/\\?#]|$)/i.test(text);
+  const path = url.hostname === "www.paypal.com" ? /^\/paypalme\/[^/]/ : /^\/[^/]/;
+  const host = ["paypal.me", "www.paypal.me", "www.paypal.com"].includes(url.hostname);
+  return url.username || url.password || url.port || hasPort || !host || !path.test(url.pathname) ? bad : "";
+}
+
+/** A "Pay" link to another member's payment link. Nothing for yourself or without an https link. */
+export function payLink(person, cls = "text-btn pay-link") {
+  const url = person?.paymentUrl;
+  if (!person || person.id === state.me?.user?.id || typeof url !== "string" || !url.startsWith("https://")) return null;
+  return el("a", { class: cls, href: url, target: "_blank", rel: "noopener noreferrer", text: "Pay", "aria-label": `Pay ${person.name}` });
+}
+
 export async function run(fn, keepError = "") {
   state.error = keepError;
   try {

@@ -18,6 +18,7 @@ import {
   unreadNotificationsByCircle,
 } from "../db.js";
 import { HttpError, requestOrigin } from "../lib/http.js";
+import { visiblePaymentUrls } from "../lib/payment-url.js";
 import { cleanCode } from "../lib/validate.js";
 import { notifyUsers } from "../push/notify.js";
 import { reachForCircle } from "../push/push-status.js";
@@ -83,6 +84,7 @@ export function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: 
   const members = listMembers(deps.db, circle.id);
   const reach = reachForCircle(deps.db, circle.id);
   const statuses = visibleStatuses(deps.db, viewerId, deps.now());
+  const payments = visiblePaymentUrls(deps.db, viewerId);
   const now = deps.now();
   // Busy or free only, never a title. Only people who shared their calendar with this circle.
   const availability = viewerId ? circleAvailability(deps.db, circle.id, viewerId, now, now) : new Map();
@@ -98,6 +100,7 @@ export function circlePayload(deps: AppDeps, req: http.IncomingMessage, circle: 
       color: colorHex(member.id, member.color),
       avatarRev: member.avatar_rev || null,
       status: statuses.get(member.id) ?? null,
+      paymentUrl: payments.get(member.id) ?? null,
       admin: Boolean(member.is_admin),
       reach: reach.get(member.id) ?? "off",
       availability: member.id === viewerId ? null : availability.get(member.id) ?? null,
@@ -123,6 +126,7 @@ export function mePayload(deps: AppDeps, req: http.IncomingMessage, user: UserRo
       color: colorHex(user.id, row?.color),
       avatarRev: row?.avatar_rev || null,
       status: ownStatus(deps.db, user.id, deps.now()),
+      paymentUrl: row?.payment_url ?? null,
       timezone: row?.timezone ?? null,
       busyHours: getBusyHours(deps.db, user.id),
       // The recovery code would let an agent token take over the account.
