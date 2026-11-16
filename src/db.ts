@@ -17,6 +17,8 @@ export type UserRow = {
   avatar_rev?: number | null;
   timezone?: string | null;
   payment_url?: string | null;
+  /** Optional Wero email, separate from the login email. */
+  wero_email?: string | null;
   /** Normalized address, null for accounts made before email was required. */
   email?: string | null;
   /** epoch ms of the verify link, null until used. */
@@ -438,6 +440,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "status_until", "status_until INTEGER");
   ensureColumn(db, "users", "timezone", "timezone TEXT");
   ensureColumn(db, "users", "payment_url", "payment_url TEXT");
+  ensureColumn(db, "users", "wero_email", "wero_email TEXT");
   ensureColumn(db, "users", "email", "email TEXT");
   ensureColumn(db, "users", "email_verified_at", "email_verified_at INTEGER");
   ensureColumn(db, "users", "recovery_hash", "recovery_hash TEXT");
@@ -772,6 +775,10 @@ export function updateUserName(db: DatabaseSync, id: string, name: string): void
 
 export function setPaymentUrl(db: DatabaseSync, id: string, url: string | null): void {
   db.prepare("UPDATE users SET payment_url = ? WHERE id = ?").run(url, id);
+}
+
+export function setWeroEmail(db: DatabaseSync, id: string, email: string | null): void {
+  db.prepare("UPDATE users SET wero_email = ? WHERE id = ?").run(email, id);
 }
 
 /** Bumps the photo revision and returns it. A new rev means a new URL, so caches never serve the old photo. */

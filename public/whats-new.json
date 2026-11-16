@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-16-wero-email",
+    "date": "2026-11-16",
+    "title": "Add your Wero email to your profile",
+    "bullets": [
+      "Under You, Profile, you can add the email you use for Wero. It is optional.",
+      "Friends in your circle see it next to your name with a Copy button, so paying you back is quick.",
+      "It is separate from your sign-in email. Clear the box and save to remove it."
+    ]
+  },
+  {
     "id": "2026-11-15-email",
     "date": "2026-11-16",
     "title": "Add an email so you never get locked out",

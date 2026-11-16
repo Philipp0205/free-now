@@ -25,6 +25,7 @@ import {
   rotateBuzzToken,
   setBuzzCircle,
   setPaymentUrl,
+  setWeroEmail,
   setWhatsNewSeen,
   sharesCircle,
   updateUserName,
@@ -41,7 +42,7 @@ import {
 import { clientKey } from "../lib/client-key.js";
 import type { AuthedRouteContext } from "../lib/context.js";
 import { HttpError, firstHeader, matchPath, safeDecode, sendEmpty, sendJson } from "../lib/http.js";
-import { cleanPaymentUrl } from "../lib/payment-url.js";
+import { cleanPaymentUrl, cleanWeroEmail } from "../lib/payment-url.js";
 import { cleanLabel, parseId } from "../lib/validate.js";
 import { BUZZ_PRESSES, buzzCirclesFor, mePayload, requireCircle } from "./circles.js";
 import { humanCode } from "./code.js";
@@ -82,11 +83,14 @@ export async function handleMeRoutes(ctx: AuthedRouteContext): Promise<boolean> 
 
   if (method === "PATCH" && pathname === "/api/me") {
     const hasPayment = body.paymentUrl !== undefined;
-    // Validate everything before writing, so a bad value changes nothing. Name stays required unless only paymentUrl is sent.
-    const name = hasPayment && body.name === undefined ? me.name : cleanLabel(body.name, "name", 24);
+    const hasWero = body.weroEmail !== undefined;
+    // Validate everything before writing, so a bad value changes nothing. Name stays required unless only payment fields are sent.
+    const name = (hasPayment || hasWero) && body.name === undefined ? me.name : cleanLabel(body.name, "name", 24);
     const paymentUrl = hasPayment ? cleanPaymentUrl(body.paymentUrl) : undefined;
+    const weroEmail = hasWero ? cleanWeroEmail(body.weroEmail) : undefined;
     updateUserName(deps.db, me.id, name);
     if (paymentUrl !== undefined) setPaymentUrl(deps.db, me.id, paymentUrl);
+    if (weroEmail !== undefined) setWeroEmail(deps.db, me.id, weroEmail);
     const updated = { ...me, name };
     sendJson(res, 200, mePayload(deps, req, updated, requested, agent));
     return true;

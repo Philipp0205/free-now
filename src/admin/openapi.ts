@@ -84,6 +84,7 @@ const person = {
     avatarRev: nullable({ type: "integer" }),
     status: { oneOf: [ref("Status"), { type: "null" }] },
     paymentUrl: nullable({ type: "string" }),
+    weroEmail: nullable({ type: "string", format: "email" }),
   },
 };
 const availability = {
