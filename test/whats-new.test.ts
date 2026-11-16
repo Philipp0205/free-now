@@ -664,7 +664,7 @@ test("the build label is hangry-v108 and the built worker precaches the changelo
 test("the email entry is the newest, in plain words without an em dash, and older entries are kept", () => {
   const top = RAW[0];
   assert.equal(top.id, "2026-11-15-email");
-  assert.equal(top.date, "2026-11-15");
+  assert.equal(top.date, "2026-11-16");
   assert.ok(top.title.length <= 60);
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
