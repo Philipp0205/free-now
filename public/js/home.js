@@ -6,7 +6,7 @@ import { planCard, socialCard } from "./cards.js";
 import { awayLine } from "./members.js";
 import { homeChatBanner } from "./alerts.js";
 import { chatChip } from "./chat.js";
-import { clock, el, isLiveSocial, mySocial, run } from "./lib.js";
+import { clock, el, isLiveSocial, mySocial, run, skeletonList } from "./lib.js";
 import { shareInvite } from "./plan-share.js";
 import { openSheet } from "./sheets.js";
 
@@ -87,7 +87,7 @@ export function pastScreen() {
       el("h1", { text: "Past events" }),
     ]),
     days == null
-      ? el("p", { class: "help past-empty", text: "Loading…" })
+      ? skeletonList(4, "past-skel")
       : days.length
         ? el("div", { class: "past-list" }, days.map(pastDay))
         : el("p", { class: "help past-empty", text: "Nothing here yet. Ended hangouts stay for 90 days." }),

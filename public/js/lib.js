@@ -82,6 +82,21 @@ export function icon(name) {
   return node;
 }
 
+/** Placeholder rows (avatar circle and two lines) for a list that waits on a fetch. The container announces "Loading". */
+export function skeletonList(count = 3, cls = "") {
+  const rows = Array.from({ length: count }, () => el("div", { class: "skel-row", "aria-hidden": "true" }, [
+    el("span", { class: "ak-skeleton ak-skeleton-circle", "aria-hidden": "true" }),
+    el("div", { class: "skel-lines", "aria-hidden": "true" }, [
+      el("span", { class: "ak-skeleton ak-skeleton-line", "aria-hidden": "true" }),
+      el("span", { class: "ak-skeleton ak-skeleton-line ak-skeleton-short", "aria-hidden": "true" }),
+    ]),
+  ]));
+  return el("div", { class: `skel-list ${cls}`.trim(), "aria-busy": "true" }, [
+    el("span", { class: "visually-hidden", text: "Loading" }),
+    ...rows,
+  ]);
+}
+
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {

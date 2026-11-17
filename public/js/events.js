@@ -10,7 +10,7 @@ import { render } from "./render.js";
 import { screenHeader } from "./circles.js";
 import { openEventDetail } from "./event-sheets.js";
 import { openSheet } from "./sheets.js";
-import { appTz, clock, colorFor, el, icon, initial, remaining } from "./lib.js";
+import { appTz, clock, colorFor, el, icon, initial, remaining, skeletonList } from "./lib.js";
 import { planOpen } from "./plan-share.js";
 import { avatar, avatarKey, avatarUrls, loadAvatar } from "./avatars.js";
 
@@ -289,7 +289,7 @@ function calendarScreen() {
   });
   const dayEvents = byDay.get(state.calDay) || [];
   let below;
-  if (!ready) below = el("p", { class: "cal-quiet", text: "Loading…" });
+  if (!ready) below = skeletonList(3, "cal-skel");
   else if (!monthCount && monthStart(state.calDay) === state.calMonth) {
     below = el("div", { class: "cal-empty" }, [
       el("h2", { text: "Nothing planned this month." }),

@@ -1002,11 +1002,15 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  background: rgba(0, 0, 0, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 0.5px solid rgba(255, 255, 255, 0.08);
+  background: var(--ak-glass);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 0.5px solid var(--ak-hairline);
   z-index: 20;
+}
+/* No backdrop-filter: an opaque bar, so content under it does not show through. */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .tabbar { background: var(--ak-bg); }
 }
 .chat-screen {
   position: fixed;
@@ -1328,6 +1332,12 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
 .past-entry { padding: 8px 20px 28px; }
 .past-entry .text-btn { min-height: 44px; }
 .past-empty { padding: 8px 20px; }
+/* Loading placeholders (kit .ak-skeleton*): an avatar circle and two lines per row. */
+.skel-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; }
+.skel-lines { flex: 1; min-width: 0; }
+.skel-lines .ak-skeleton-line { margin: 6px 0; }
+.past-skel { padding: 8px 20px; }
+.cal-skel { padding: 0 4px; }
 .past-day { padding: 0 20px; }
 .past-day h2 { margin: 18px 0 0; color: var(--muted); font-size: 13px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
 .past-card { padding: 14px 0; border-bottom: 1px solid var(--hairline); }
@@ -1358,7 +1368,7 @@ html.kb-open .tabbar {
   padding: 0;
 }
 .tab-label { font-size: 12px; font-weight: 650; letter-spacing: -0.01em; }
-.tab[aria-current="page"] { color: #fff; }
+.tab[aria-current="page"] { color: var(--text); }
 .tab .badge {
   position: absolute;
   top: 4px;
@@ -2331,7 +2341,7 @@ html.kb-open .sheet .help { margin-top: 0; }
 }
 @keyframes tab-in {
   from { color: var(--muted); }
-  to { color: #fff; }
+  to { color: var(--text); }
 }
 @keyframes tab-icon-in {
   0% { transform: scale(0.86); }
@@ -2358,6 +2368,33 @@ html.kb-open .sheet .help { margin-top: 0; }
     transform: none;
   }
   .in-toggle.pop-on, .in-toggle.pop-off { animation: none; }
+}
+
+/* app-kit native feel (html.ak-native) turns a press into an instant opacity dim with no transform.
+ * Hangry keeps its own dip and spring above. The kit selectors are more specific than the :where
+ * rules above, so these sit after the kit sheet and match or beat it: a press is dipped once and
+ * never dimmed twice. The kit still adds the iOS :active touch listener, no tap highlight, and no
+ * text selection on buttons and bars (inputs and text stay selectable). The kit sets no transition
+ * while pressed, so the press gets the same 80ms ease-out as before. An instant scale would shrink a
+ * nested button and its role="button" parent between press and release and move the tap off its target. */
+html.ak-native :is(button, [role="button"], [role="menuitem"]):where(:not(.scrim, .leaflet-container *)) {
+  transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out;
+}
+html.ak-native .card-more { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 120ms ease-out; }
+html.ak-native .card-menu button { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 80ms ease-out; }
+html.ak-native .map-card-close { transition: background-color 100ms ease-out, color 100ms ease-out; }
+html.ak-native :is(button, [role="button"], a.map-link, label.chip):not(.scrim, .card-body, :disabled, .leaflet-container *):active {
+  opacity: 1;
+  transform: scale(0.96);
+  filter: brightness(0.88);
+  transition: transform 80ms ease-out, filter 80ms ease-out;
+}
+/* A card dips as a whole, so its body does not dim on top of that. */
+html.ak-native .card-body[role="button"]:active { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  html.ak-native :is(button, [role="button"], [role="menuitem"]):where(:not(.scrim, .leaflet-container *)) { transition: filter 100ms ease-out; }
+  html.ak-native .card-more, html.ak-native .card-menu button { transition: filter 100ms ease-out, background-color 100ms ease-out; }
+  html.ak-native :is(button, [role="button"], a.map-link, label.chip):not(.scrim, .card-body, :disabled, .leaflet-container *):active { transform: none; }
 }
 
 .calendar-feed .feed-url {
