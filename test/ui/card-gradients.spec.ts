@@ -99,12 +99,12 @@ test("each plan card has its own gradient, kept after reload, on the map and in 
     await page.locator(".card-plan").nth(NOTES.length - 1).waitFor();
     assert.deepEqual(await backgrounds(page), first, "same plan, same gradient after reload");
 
-    // Light mode swaps to the lighter stops but keeps the same slot.
+    // A light OS setting renders the same dark stops: Hangry is always dark.
     await page.emulateMedia({ colorScheme: "light" });
     const light = await backgrounds(page);
     for (const id of ids) {
       assert.equal(light[id].cls, first[id].cls);
-      assert.notEqual(light[id].image, first[id].image, `light stops differ for ${id}`);
+      assert.equal(light[id].image, first[id].image, `light OS keeps the dark stops for ${id}`);
     }
     await page.emulateMedia({ colorScheme: "dark" });
 

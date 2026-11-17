@@ -135,6 +135,8 @@ test("tapping Waiting for friends on an empty plan opens details, never the map"
         await dismiss(page);
         const card = page.locator(".card-plan", { hasText: "Rooftop drinks" });
         await card.locator(".who-row", { hasText: "Waiting for friends" }).waitFor();
+        // A light OS setting renders the same dark look as a dark one.
+        assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(0, 0, 0)", `${scheme} OS: body is dark`);
         await page.screenshot({ path: shot(`card-${scheme}-w${width}.png`) });
         await separated(card, width);
         if (scheme === "light") {

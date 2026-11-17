@@ -1060,6 +1060,12 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
 .chat-msg header time { flex: none; font-variant-numeric: tabular-nums; }
 .chat-msg p { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
 .chat-msg .text-btn { min-height: 44px; }
+/* Desktop mouse: Delete shows on hover or keyboard focus, and a drag selects message text, not buttons or times. */
+@media (hover: hover) and (pointer: fine) {
+  .chat-msg .chat-delete { opacity: 0; }
+  .chat-msg:hover .chat-delete, .chat-msg:focus-within .chat-delete { opacity: 1; }
+  .chat-msg button, .chat-msg header time { -webkit-user-select: none; user-select: none; }
+}
 /* @Name in the sender's chat colour; a mention of you gets a soft fill so it stands out. */
 .chat-msg p .mention { color: var(--person); font-weight: 600; }
 .chat-msg p .mention.me { background: color-mix(in srgb, var(--person) 24%, transparent); border-radius: 4px; padding: 0 3px; margin: 0 -1px; }
@@ -2258,22 +2264,6 @@ html.kb-open .sheet .help { margin-top: 0; }
 .grad-11 { --g1: #45325d; --g2: #371a33; }
 .grad-12 { --g1: #522e51; --g2: #3d1826; }
 .grad-13 { --g1: #5b2b40; --g2: #3f1917; }
-@media (prefers-color-scheme: light) {
-  .grad-0 { --g1: #763638; --g2: #53280c; }
-  .grad-1 { --g1: #743b1f; --g2: #4b2f00; }
-  .grad-2 { --g1: #6b4300; --g2: #3e3600; }
-  .grad-3 { --g1: #5b4c00; --g2: #2b3c0b; }
-  .grad-4 { --g1: #445514; --g2: #0d4022; }
-  .grad-5 { --g1: #245a30; --g2: #004136; }
-  .grad-6 { --g1: #005c4a; --g2: #004047; }
-  .grad-7 { --g1: #005b60; --g2: #003b54; }
-  .grad-8 { --g1: #005672; --g2: #19365b; }
-  .grad-9 { --g1: #234f7c; --g2: #2f2f5b; }
-  .grad-10 { --g1: #41477d; --g2: #402a53; }
-  .grad-11 { --g1: #574075; --g2: #4b2546; }
-  .grad-12 { --g1: #673a65; --g2: #532335; }
-  .grad-13 { --g1: #723650; --g2: #562422; }
-}
 
 .card-plan.card-grad .card-bg,
 .map-card.card-grad,

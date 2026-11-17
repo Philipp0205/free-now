@@ -213,9 +213,14 @@ function fullHeight(panel) {
   return height;
 }
 
-/** Snap heights low to high. One entry when the sheet is too short to have a half stop. */
+/** A mouse with hover (a desktop browser) has room and no thumb: sheets open full, with no half stop. */
+function finePointer() {
+  return Boolean(window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches);
+}
+
+/** Snap heights low to high. One entry when the sheet is too short to have a half stop, or on a desktop pointer. */
 function snapHeights(panel, full) {
-  if (!panel.dataset.snap) return [full];
+  if (!panel.dataset.snap || finePointer()) return [full];
   const half = Math.round(viewportHeight() * HALF_FRACTION);
   return full - half >= SNAP_MIN_GAP ? [half, full] : [full];
 }
