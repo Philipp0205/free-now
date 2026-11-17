@@ -127,29 +127,27 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
       const tag = `${width}x${height} ${reducedMotion}`;
       const page = await phone(host.token, { width, height, reducedMotion });
       try {
-        await openMember(page);
         await padSheet(page);
-        const full = (await sheetBox(page)).height;
+        await openMember(page);
         const half = Math.round(height * 0.5);
-        assert.ok(full > half + 60, `${tag}: the sheet is taller than the half stop (${full})`);
 
-        // A slow pull to about the middle rests on the half stop.
-        await drag(page, full - half + 10, "slow");
+        // It opens resting on the half stop, with no settle animation on the way in.
+        const opened = await sheetBox(page);
+        assert.ok(Math.abs(opened.height - half) <= 2, `${tag}: opens at half ${opened.height} vs ${half}`);
+        assert.ok(Math.abs(opened.bottom - height) <= 1, `${tag}: opens on the bottom edge`);
+        assert.equal(await page.locator(".sheet.snap-settle").count(), 0, `${tag}: no settle animation on open`);
+        assert.equal(await page.locator(".sheet .actions").getByRole("button", { name: "Make admin" }).count(), 1);
+        if (width === 360 || width === 390) await shot(page, `sheet-half-${reducedMotion}`);
+
+        // A slow pull up goes to full.
+        await drag(page, -(height - half), "slow");
         if (reducedMotion === "reduce") {
           assert.equal(await page.locator(".sheet.snap-settle").count(), 0, `${tag}: no settle animation`);
         }
         await page.waitForTimeout(SETTLE);
-        const atHalf = await sheetBox(page);
-        assert.ok(Math.abs(atHalf.height - half) <= 2, `${tag}: half stop ${atHalf.height} vs ${half}`);
-        assert.ok(Math.abs(atHalf.bottom - height) <= 1, `${tag}: still on the bottom edge`);
-        assert.equal(await page.locator(".sheet .actions").getByRole("button", { name: "Make admin" }).count(), 1);
-        if (width === 360 || width === 390) await shot(page, `sheet-half-${reducedMotion}`);
-
-        // A slow pull up goes back to full.
-        await drag(page, -300, "slow");
-        await page.waitForTimeout(SETTLE);
-        const backFull = await sheetBox(page);
-        assert.ok(Math.abs(backFull.height - full) <= 2, `${tag}: full again ${backFull.height} vs ${full}`);
+        const full = (await sheetBox(page)).height;
+        assert.ok(full > half + 60, `${tag}: the sheet is taller than the half stop (${full})`);
+        assert.equal(await page.getByRole("dialog").evaluate((node) => (node as HTMLElement).style.maxHeight), "", `${tag}: full has no inline cap`);
         if (width === 360 || width === 390) await shot(page, `sheet-full-${reducedMotion}`);
 
         // A short slow pull from full is nearer full than half, so it springs back.
@@ -157,22 +155,31 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
         await page.waitForTimeout(SETTLE);
         assert.ok(Math.abs((await sheetBox(page)).height - full) <= 2, `${tag}: small pull springs back`);
 
-        // A quick flick down from full steps to half. It does not close.
-        await drag(page, 70, "flick");
+        // A slow pull down to about the middle rests on the half stop.
+        await drag(page, full - half + 10, "slow");
         await page.waitForTimeout(SETTLE);
-        const flicked = await sheetBox(page);
-        assert.ok(Math.abs(flicked.height - half) <= 2, `${tag}: flick from full lands on half (${flicked.height})`);
+        const atHalf = await sheetBox(page);
+        assert.ok(Math.abs(atHalf.height - half) <= 2, `${tag}: slow pull rests on half ${atHalf.height} vs ${half}`);
+        assert.ok(Math.abs(atHalf.bottom - height) <= 1, `${tag}: still on the bottom edge`);
 
         // A quick flick up from half goes to full.
         await drag(page, -70, "flick");
         await page.waitForTimeout(SETTLE);
         assert.ok(Math.abs((await sheetBox(page)).height - full) <= 2, `${tag}: flick up lands on full`);
 
-        // Two flicks down: half, then closed.
+        // A quick flick down from full steps to half. It does not close.
         await drag(page, 70, "flick");
         await page.waitForTimeout(SETTLE);
-        await drag(page, 40, "flick");
+        const flicked = await sheetBox(page);
+        assert.ok(Math.abs(flicked.height - half) <= 2, `${tag}: flick from full lands on half (${flicked.height})`);
+
+        // A second flick down from half closes it.
+        await drag(page, 60, "flick");
         await page.getByRole("dialog").waitFor({ state: "detached" });
+
+        // Reopening starts on the half stop again.
+        await openMember(page);
+        assert.ok(Math.abs((await sheetBox(page)).height - half) <= 2, `${tag}: reopens at half`);
       } finally {
         await page.context().close();
       }
@@ -184,11 +191,9 @@ test("a long slow pull below the half stop closes the sheet, and a short one doe
   const host = await seed();
   const page = await phone(host.token, { width: 360, height: 640 });
   try {
-    await openMember(page);
     await padSheet(page);
-    await drag(page, 300, "slow");
-    await page.waitForTimeout(SETTLE);
-    assert.ok(Math.abs((await sheetBox(page)).height - 320) <= 2, "rests on half");
+    await openMember(page);
+    assert.ok(Math.abs((await sheetBox(page)).height - 320) <= 2, "opens on half");
     // 30px below the half stop: not far enough to close.
     await drag(page, 30, "slow");
     await page.waitForTimeout(SETTLE);
@@ -210,6 +215,7 @@ test("a short sheet has no half stop: a slow pull springs back, a long one or a 
     await openMember(page);
     const before = await sheetBox(page);
     assert.ok(before.height < 915 / 2, `short sheet (${before.height})`);
+    assert.equal(await page.getByRole("dialog").evaluate((node) => (node as HTMLElement).style.maxHeight), "", "opens at its natural height, no cap");
     await shot(page, "sheet-short");
     await drag(page, 40, "slow");
     await page.waitForTimeout(SETTLE);
@@ -225,6 +231,109 @@ test("a short sheet has no half stop: a slow pull springs back, a long one or a 
     await page.context().close();
   }
 });
+
+// ---- Event details ----
+
+/** A plan with eight people in, so its details sheet is tall. */
+async function seedCrowd() {
+  const host = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: "Hana" });
+  const circle = (await hangry.call("POST", "/api/circles", host.token, { name: "Crowd crew" })).circle;
+  const { plan } = await hangry.call("POST", "/api/plans", host.token, { note: "Big picnic", date: tomorrow(), time: "13:00" });
+  for (const name of ["Alex", "Bea", "Cy", "Dee", "Eli", "Fay", "Gus", "Ivy"]) {
+    const friend = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name, code: circle.inviteCode });
+    await hangry.call("POST", `/api/plans/${plan.id}/reply`, friend.token, { reply: "in" });
+  }
+  hangry.confirmEmails();
+  return { host, circle, plan };
+}
+
+const dockBox = (page: Page) => page.locator(".sheet .sheet-dock").evaluate((node) => {
+  const rect = node.getBoundingClientRect();
+  return { top: rect.top, bottom: rect.bottom, height: rect.height };
+});
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`event details open at half, go full, keep their stop through a refresh, and flick closed (${reducedMotion})`, { timeout: 300_000 }, async () => {
+    const { host, circle, plan } = await seedCrowd();
+    for (const [width, height] of SIZES) {
+      const tag = `details ${width}x${height} ${reducedMotion}`;
+      const page = await phone(host.token, { width, height, reducedMotion });
+      try {
+        await page.locator(`.card-plan[data-plan="${plan.id}"] .card-body`).click();
+        await page.getByRole("dialog", { name: "Details" }).waitFor();
+        const half = Math.round(height * 0.5);
+        const opened = await sheetBox(page);
+        const natural = await page.getByRole("dialog").evaluate((node) => {
+          const panel = node as HTMLElement;
+          const held = panel.style.maxHeight;
+          panel.style.maxHeight = "";
+          const value = panel.getBoundingClientRect().height;
+          panel.style.maxHeight = held;
+          return value;
+        });
+        assert.equal(await page.locator(".sheet.snap-settle").count(), 0, `${tag}: no settle animation on open`);
+        if (natural - half < 48) {
+          // Genuinely too short for two stops: it opens at its natural height.
+          console.log(`${tag}: details are only ${natural}px tall, too short for a half stop; asserting natural height only`);
+          assert.ok(Math.abs(opened.height - natural) <= 1, `${tag}: opens at its natural height ${opened.height} vs ${natural}`);
+          assert.equal(await page.getByRole("dialog").evaluate((node) => (node as HTMLElement).style.maxHeight), "", `${tag}: no cap`);
+          continue;
+        }
+
+        assert.ok(Math.abs(opened.height - half) <= 2, `${tag}: opens at half ${opened.height} vs ${half}`);
+        assert.ok(Math.abs(opened.bottom - height) <= 1, `${tag}: bottom edge`);
+        const dockHalf = await dockBox(page);
+        assert.ok(dockHalf.height > 20 && dockHalf.bottom <= height + 1 && dockHalf.top >= opened.top, `${tag}: the dock stays visible at half`);
+        await page.locator(".sheet .sheet-dock").getByRole("button", { name: "End plan" }).waitFor();
+        if (width === 360 || width === 390) await shot(page, `details-half-${reducedMotion}`);
+
+        // A slow drag up goes to full.
+        await drag(page, -(height - half), "slow");
+        await page.waitForTimeout(SETTLE);
+        const full = await sheetBox(page);
+        assert.ok(Math.abs(full.height - natural) <= 2, `${tag}: full ${full.height} vs ${natural}`);
+        assert.ok(Math.abs(full.bottom - height) <= 1, `${tag}: full on the bottom edge`);
+        assert.ok((await dockBox(page)).bottom <= height + 1, `${tag}: the dock stays visible at full`);
+        if (width === 360 || width === 390) await shot(page, `details-full-${reducedMotion}`);
+
+        // A re-render (someone else posts, the 3s refresh redraws) keeps the full stop.
+        await page.evaluate(() => {
+          (window as any).__draws = 0;
+          new MutationObserver(() => { (window as any).__draws += 1; }).observe(document.getElementById("app")!, { childList: true, subtree: true });
+        });
+        const poster = await hangry.call("POST", "/api/auth/start", undefined, { email: testEmail(), name: `Zed${width}${reducedMotion === "reduce" ? "r" : "m"}`, code: circle.inviteCode });
+        await hangry.call("POST", "/api/socials", poster.token, { note: `Coffee ${width}` });
+        await page.waitForFunction(() => (window as any).__draws > 0, undefined, { timeout: 10_000 });
+        await page.waitForTimeout(3500);
+        const kept = await sheetBox(page);
+        assert.ok(Math.abs(kept.height - full.height) <= 2, `${tag}: still full after a refresh (${kept.height} vs ${full.height})`);
+
+        // A flick down from full goes to half.
+        await drag(page, 70, "flick");
+        await page.waitForTimeout(SETTLE);
+        const flicked = await sheetBox(page);
+        assert.ok(Math.abs(flicked.height - half) <= 2, `${tag}: flick from full lands on half (${flicked.height})`);
+        assert.ok((await dockBox(page)).bottom <= height + 1, `${tag}: the dock is visible again at half`);
+
+        // A refresh while at half keeps half.
+        await hangry.call("POST", "/api/socials", poster.token, { note: `Tea ${width}` });
+        await page.waitForTimeout(3500);
+        assert.ok(Math.abs((await sheetBox(page)).height - half) <= 2, `${tag}: still half after a refresh`);
+
+        // A flick down from half closes it.
+        await drag(page, 60, "flick");
+        await page.getByRole("dialog").waitFor({ state: "detached" });
+
+        // Reopening starts on half again.
+        await page.locator(`.card-plan[data-plan="${plan.id}"] .card-body`).click();
+        await page.getByRole("dialog", { name: "Details" }).waitFor();
+        assert.ok(Math.abs((await sheetBox(page)).height - half) <= 2, `${tag}: reopens at half`);
+      } finally {
+        await page.context().close();
+      }
+    }
+  });
+}
 
 // ---- Large titles ----
 

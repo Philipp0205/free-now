@@ -193,7 +193,7 @@ const HALF_FRACTION = 0.5;
 const SNAP_MIN_GAP = 48;
 const SETTLE_MS = 260;
 
-/** Which snap the open sheet rests on. Survives the re-render a refresh or an edit causes. */
+/** Which snap the open sheet rests on (half: true until the user takes it to full). Survives the re-render a refresh or an edit causes. */
 let snapMemo = null;
 
 function reducedMotion() {
@@ -223,7 +223,7 @@ function snapHeights(panel, full) {
 export function bindSheetSwipe() {
   const snapKey = document.querySelector(".sheet[data-snap]")?.dataset.snap || "";
   if (!snapKey) snapMemo = null;
-  else if (snapMemo?.key !== snapKey) snapMemo = { key: snapKey, half: false };
+  else if (snapMemo?.key !== snapKey) snapMemo = { key: snapKey, half: true }; // a sheet opens on its half stop
   document.querySelectorAll(".sheet, .guide").forEach((panel) => {
     let tracking = false;
     let dragging = false;
@@ -237,7 +237,8 @@ export function bindSheetSwipe() {
     let samples = [];
     const headerHit = (event) => Boolean(event.target.closest(".sheet-head, .grabber"));
     if (snapMemo?.half && panel.dataset.snap === snapMemo.key) {
-      // Re-rendered while resting on the half stop: put the new panel back there, without animating.
+      // Opening, or re-rendered while resting on the half stop: size the new panel before it first paints.
+      // A sheet too short for two stops keeps its natural height.
       const stops = snapHeights(panel, fullHeight(panel));
       if (stops.length > 1) panel.style.maxHeight = `${stops[0]}px`;
     }
