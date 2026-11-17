@@ -159,7 +159,7 @@ export function memberSheet() {
   const manage = youAreAdmin() && member.id !== state.me.user.id;
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
-    el("div", { class: "sheet", role: "dialog", "aria-label": member.name }, [
+    el("div", { class: "sheet", role: "dialog", "aria-label": member.name, "data-snap": `member:${member.id}` }, [
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: member.name }),

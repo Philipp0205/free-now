@@ -88,8 +88,8 @@ test("html wears ak-native and ak-no-bounce, the kit files load, and inputs stay
       const sheetOrder = root.sheets.map((href) => href.split("/").pop());
       assert.ok(sheetOrder.indexOf("ak-native.css") > sheetOrder.indexOf("ak-components.css"), "ak-native.css comes after ak-components.css");
       assert.ok(root.scripts.some((src) => src.endsWith("/app-kit/ak-native.js")), "ak-native.js is loaded");
-      // The kit does not load what is out of scope.
-      assert.ok(!root.scripts.some((src) => /ak-(transition|swr|sw)/.test(src)));
+      // The kit does not load what is out of scope. ak-transition.js came with part B.
+      assert.ok(!root.scripts.some((src) => /ak-(swr|sw)/.test(src)));
 
       // Chrome is not selectable, inputs and text are.
       await tab(page, "Circle").click();
@@ -266,7 +266,7 @@ test("the Events calendar shows skeletons while the month loads, then the day li
       if (width === 360 || width === 390) {
         await loading.scrollIntoViewIfNeeded();
         await page.waitForTimeout(500);
-        await page.evaluate(() => document.querySelector(".cal")?.scrollTo(0, 400));
+        await page.evaluate(() => window.scrollTo(0, 400));
         await shot(page, "events-skeleton");
       }
 

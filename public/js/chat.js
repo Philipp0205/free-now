@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import { api, isNetworkFailure, noteConnectionProblem, scheduleOfflineRetry } from "./session.js";
 import { prefersTouchUi } from "./keyboard-ui.js";
 import { render } from "./render.js";
+import { navigate } from "./native.js";
 import { chatTargetUrl, eventUnread, forgetOpenUnread, syncChatAlerts } from "./alerts.js";
 import { tick } from "./replies.js";
 import { el, icon, run, scheduleErrorClear } from "./lib.js";
@@ -29,7 +30,7 @@ export async function openChat(target) {
   forgetOpenUnread(target);
   // Event chats show their screen (Loading…) at once. The thread fills in when the GET lands, or on the next poll.
   // The circle Chat tab keeps the tab bar while it loads, so a later tab tap wins.
-  if (target.kind !== "circle") render();
+  if (target.kind !== "circle") void navigate(render, "push");
   await run(async () => {
     const chat = (await api(chatTargetUrl(target))).chat;
     // Another tab was tapped while this loaded; that tap wins.
@@ -47,8 +48,11 @@ export function closeChat() {
   state.chatWho = null;
   state.chatReplyTo = null;
   state.tab = state.chatReturn || "home";
-  dropChatScreen();
-  render();
+  void navigate(() => {
+    // The Preact host is dropped with the screen, so the old chat stays on screen until the slide has captured it.
+    dropChatScreen();
+    render();
+  }, "pop");
 }
 
 /**

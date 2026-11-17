@@ -9,6 +9,7 @@ import { chatChip } from "./chat.js";
 import { clock, el, isLiveSocial, mySocial, run, skeletonList } from "./lib.js";
 import { shareInvite } from "./plan-share.js";
 import { openSheet } from "./sheets.js";
+import { navigate } from "./native.js";
 
 export function home() {
   const mine = mySocial();
@@ -67,7 +68,7 @@ async function openPast() {
   state.past = true;
   state.sheet = null;
   state.pastDays = null;
-  render();
+  void navigate(render, "push");
   await run(async () => {
     state.pastDays = (await api("/api/past")).days;
   });
@@ -76,7 +77,7 @@ async function openPast() {
 export function closePast() {
   state.past = false;
   state.pastDays = null;
-  render();
+  void navigate(render, "pop");
 }
 
 export function pastScreen() {

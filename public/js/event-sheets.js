@@ -75,7 +75,7 @@ export function eventDetailSheet() {
     : guestDetailRow(text, person, kind, item);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
-    el("div", { class: "sheet", role: "dialog", "aria-label": "Details" }, [
+    el("div", { class: "sheet", role: "dialog", "aria-label": "Details", "data-snap": `event-detail:${kind}:${item.id}` }, [
       el("div", { class: kind === "plan" ? `sheet-head card-grad ${gradientClass(item.id)}` : "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: title }),

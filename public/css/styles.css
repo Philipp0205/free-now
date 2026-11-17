@@ -82,6 +82,18 @@ button:disabled { cursor: default; opacity: 0.55; }
   padding: 14px 20px 6px;
   gap: 12px;
 }
+/* Large titles (Now, Events, Circle, You). A sticky glass bar sits above the head; its small title fades in
+   once the big one has scrolled under it (AppKit.largeTitle, bound in render). The phone's own top padding is
+   taken back when the bar is the first thing on screen, so the bar reaches the top edge and the notch. */
+.phone .ak-navbar { min-height: calc(32px + var(--ak-safe-top)); }
+/* The tab bar is its own layer in a screen slide, so it stays put while the page moves (the kit's rule stops its fade). */
+html.ak-native .tabbar { view-transition-name: ak-tabbar; }
+.phone > .page:first-child > .ak-navbar:first-child { margin-top: calc(-8px - env(safe-area-inset-top)); }
+.phone .ak-navbar + .screen-head { padding-top: 4px; }
+.screen-head .ak-large-title { padding: 0; font-size: clamp(32px, 9vw, 40px); }
+@media (prefers-reduced-motion: reduce) {
+  .ak-navbar-title { transition: none; }
+}
 .head-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
 .circle-switch { position: relative; margin-bottom: 2px; }
 .circle-switch-btn, .circle-switch-name {
@@ -1715,6 +1727,10 @@ html.kb-open .sheet .help { margin-top: 0; }
 /* Chromium retargets a touch in a 12px gap onto the nearest button. */
 .sheet-gap { height: 32px; flex: none; }
 .sheet.dragging, .guide.dragging { transition: none; }
+/* A released sheet eases to its snap. Set by bindSheetSwipe, and never under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .sheet.snap-settle { transition: max-height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
 .time-error { margin: 0; color: var(--danger); font-size: 13px; }
 .grabber { touch-action: none; }
 .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
@@ -1837,7 +1853,8 @@ html.kb-open .sheet .help { margin-top: 0; }
 .events-controls .icon, .events-controls .icon svg { width: 18px; height: 18px; }
 .events-controls.scoped .events-view { flex: none; grid-template-columns: 40px 40px; }
 .events-controls.scoped .events-view button { padding: 0; }
-.map-screen.calendar-view { height: calc(100dvh - var(--tab) - 8px - env(safe-area-inset-top)); min-height: 0; overflow: hidden; }
+/* The whole Events page scrolls under the large title, so the calendar grows with its month instead of scrolling inside. */
+.map-screen.calendar-view { min-height: calc(100dvh - var(--tab) - 8px - env(safe-area-inset-top)); }
 .map-empty { margin: 28px 22px; }
 .map-empty h2 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.04em; }
 .map-empty p { margin: 0; color: var(--muted); line-height: 1.4; }
@@ -2439,7 +2456,7 @@ html.ak-native .card-body[role="button"]:active { opacity: 1; }
 
 /* Calendar view on the Events tab: a month grid, then the picked day's events. */
 /* The month and the day list scroll above the tab bar, so the last row is never under it. */
-.cal { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 12px 24px; }
+.cal { flex: 1; min-height: 0; padding: 4px 12px 24px; }
 .cal-head { display: flex; align-items: center; gap: 4px; margin: 4px 0 6px; }
 .cal-title { flex: 1; min-width: 0; margin: 0 0 0 4px; font-size: 22px; letter-spacing: -0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 340px) { .cal-title { font-size: 19px; } .cal-today { padding: 8px 6px; } }
@@ -2512,6 +2529,8 @@ html.ak-native .card-body[role="button"]:active { opacity: 1; }
   color: #fff;
   text-align: left;
   font: inherit;
+  /* scrollIntoView and focus keep the row clear of the fixed tab bar now that the calendar scrolls with the page. */
+  scroll-margin-bottom: calc(var(--tab) + 12px);
 }
 .cal-event .cal-dot { width: 10px; height: 10px; }
 .cal-event-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
