@@ -207,7 +207,7 @@ export function alertsScreen() {
       })
     : null;
   return el("div", {}, [
-    screenHeader("Alerts"),
+    screenHeader("Alerts", { large: false }),
     dev,
     el("div", { class: "list" }, items),
   ]);

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-17-native-feel-2",
+    "date": "2026-11-17",
+    "title": "Sheets, titles and screens move like an app",
+    "bullets": [
+      "Sheets stop halfway or open full. Flick one down to close it.",
+      "Now, Events, Circle and You have a big title that shrinks as you scroll.",
+      "Chat and Past events slide in, and slide back out when you go back."
+    ]
+  },
+  {
     "id": "2026-11-17-native-feel",
     "date": "2026-11-17",
     "title": "Hangry feels more like an app",

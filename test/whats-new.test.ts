@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v110 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v111 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v110");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v111");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -653,6 +653,7 @@ test("the build label is hangry-v110 and the built worker precaches the changelo
   assert.ok(paths.includes("/app-kit/ak-donate.js"));
   assert.ok(paths.includes("/app-kit/ak-native.js"));
   assert.ok(paths.includes("/app-kit/ak-native.css"));
+  assert.ok(paths.includes("/app-kit/ak-transition.js"));
   assert.ok(paths.includes("/app-kit/install-prompt.js"));
   assert.ok(paths.includes("/app-kit/ak-tokens.css"));
   assert.ok(paths.includes("/vendor/leaflet/leaflet.js"));
@@ -663,17 +664,22 @@ test("the build label is hangry-v110 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the native feel entry is the newest, in plain words without an em dash, and older entries are kept", () => {
+test("the native feel part B entry is the newest, in plain words without an em dash, and older entries are kept", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-17-native-feel");
+  assert.equal(top.id, "2026-11-17-native-feel-2");
   assert.equal(top.date, "2026-11-17");
   assert.ok(top.title.length <= 60);
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
-  assert.match(top.bullets.join(" "), /tab bar/i);
-  assert.match(top.bullets.join(" "), /top/i);
-  assert.match(top.bullets.join(" "), /placeholder/i);
+  assert.match(top.bullets.join(" "), /sheets/i);
+  assert.match(top.bullets.join(" "), /big title/i);
+  assert.match(top.bullets.join(" "), /slide/i);
+  const partA = RAW.find((item) => item.id === "2026-11-17-native-feel");
+  assert.ok(partA, "the native feel part A entry is kept");
+  assert.match(partA.bullets.join(" "), /tab bar/i);
+  assert.match(partA.bullets.join(" "), /top/i);
+  assert.match(partA.bullets.join(" "), /placeholder/i);
   const wero = RAW.find((item) => item.id === "2026-11-16-wero-email");
   assert.ok(wero, "the Wero email entry is kept");
   assert.match(wero.bullets.join(" "), /Wero/);

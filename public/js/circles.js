@@ -8,15 +8,25 @@ import { el, field, icon, run } from "./lib.js";
 import { closeSheet } from "./sheets.js";
 import { considerReminders, noteInviteJoin } from "./push-install.js";
 
-export function screenHeader(title) {
-  const titleEl = el("h1", { class: "screen-title", text: title });
+/**
+ * The page header: the bell, the circle switcher and the title.
+ * Large by default: a sticky glass bar (its small title fades in once the big one scrolls under it) comes first,
+ * then the head with the big title. `large: false` keeps the plain head, for screens that are not a main tab.
+ */
+export function screenHeader(title, { large = true } = {}) {
+  const titleEl = el("h1", { class: large ? "screen-title ak-large-title" : "screen-title", text: title });
   const bell = alertsBell();
   const switcher = circleSwitcher();
-  if (!switcher) return el("header", { class: "screen-head" }, [titleEl, bell]);
-  return el("header", { class: "screen-head" }, [
-    el("div", { class: "head-copy" }, [switcher, titleEl]),
-    bell,
+  const head = switcher
+    ? el("header", { class: "screen-head" }, [el("div", { class: "head-copy" }, [switcher, titleEl]), bell])
+    : el("header", { class: "screen-head" }, [titleEl, bell]);
+  if (!large) return head;
+  const bar = el("header", { class: "ak-navbar", "aria-hidden": "true" }, [
+    el("span", { class: "ak-navbar-title", text: title }),
   ]);
+  const both = document.createDocumentFragment();
+  both.append(bar, head);
+  return both;
 }
 
 function circleSwitcher() {
