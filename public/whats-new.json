@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-17-native-feel",
+    "date": "2026-11-17",
+    "title": "Hangry feels more like an app",
+    "bullets": [
+      "Buttons react the moment you touch them.",
+      "The tab bar is see-through, so the page shows softly behind it.",
+      "Tap the tab you are already on to jump back to the top.",
+      "Lists show a placeholder while they load instead of plain text."
+    ]
+  },
+  {
     "id": "2026-11-16-wero-email",
     "date": "2026-11-16",
     "title": "Add your Wero email to your profile",

@@ -357,6 +357,16 @@ function shell() {
   return phone;
 }
 
+/** The page, and the Events month list that scrolls inside the page, back to the top. Smooth unless reduced motion. */
+function scrollPageTop() {
+  const scroll = window.AppKit?.scroll;
+  const scrollers = [window, document.querySelector(".cal")].filter(Boolean);
+  for (const node of scrollers) {
+    if (scroll) scroll.toTop(node);
+    else node.scrollTo(0, 0);
+  }
+}
+
 function tabbar(fresh = false) {
   const tabs = [
     ["home", "Now", "home"],
@@ -378,7 +388,14 @@ function tabbar(fresh = false) {
       onclick: () => {
         // Chat is its own screen, not a page. A tap on the page already showing is not a switch.
         if (id !== "chat" && (id !== state.tab || state.chat)) pageEntrance = true;
-        void onTab(id);
+        // A tap on the tab already showing also jumps that page to the top. onTab has redrawn by its first await.
+        const again = id !== "chat" && id === state.tab && !state.chat;
+        const pending = onTab(id);
+        if (again) {
+          scrollPageTop();
+          // The Events refetch redraws the month and would cut the scroll short, so finish it once that is done.
+          void pending.finally(scrollPageTop);
+        }
       },
     }, [
       icon(glyph),
