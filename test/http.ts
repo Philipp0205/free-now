@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config.js";
 import { openDb } from "../src/db.js";
 import { type MailMessage, stubMailer } from "../src/app-kit/mailer.ts";
 import type { CalendarNet } from "../src/calendar/freebusy.js";
+import type { GiphyFetch } from "../src/chat/giphy.js";
 import type { PushPayload, PushSender } from "../src/push/push.js";
 
 // Shared by the route tests. Not a test file: `npm test` only runs `test/*.test.ts`.
@@ -49,6 +50,8 @@ export type WithAppOptions = {
   now?: "controllable" | "fixed";
   /** Fake DNS and HTTP for the calendar availability import. */
   calendarNet?: CalendarNet;
+  /** Fake Giphy. With GIPHY_API_KEY in env, no run ever reaches api.giphy.com. */
+  giphyFetch?: GiphyFetch;
 };
 
 type ApiOptions = { token?: string; body?: unknown; status?: number };
@@ -84,6 +87,7 @@ export async function withApp(fn: (ctx: any) => Promise<void>, options: WithAppO
     config: { ...config, dbPath: ":memory:" },
     now: readNow,
     calendarNet: options.calendarNet,
+    giphyFetch: options.giphyFetch,
     mailer,
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));

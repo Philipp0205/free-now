@@ -116,6 +116,8 @@ export const state = {
   chatWho: null,
   /** Message the composer is replying to: { id, name, text, mine, color }. */
   chatReplyTo: null,
+  /** The open GIF sheet: { reply, from, status, gifs, message }. Null when closed. It counts as an overlay for Back. */
+  chatGif: null,
   chatSummary: { circle: { unread: 0, muted: false }, events: [], unreadByCircle: {} },
   past: false,
   pastDays: null,

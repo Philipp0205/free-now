@@ -50,7 +50,14 @@ export type Config = {
   mailFrom: string | null;
   /** Dev only: append each mail as a JSON line to this file instead of sending it. */
   mailLogPath: string | null;
+  /** GIPHY_API_KEY turns on the GIF picker. A secret: never logged or sent to the client. Null hides the feature. */
+  giphyApiKey: string | null;
+  /** GIPHY_RATING (g, pg, pg-13 or r). Defaults to pg-13. Only the operator can change it. */
+  giphyRating: GiphyRating;
 };
+
+export const GIPHY_RATINGS = ["g", "pg", "pg-13", "r"] as const;
+export type GiphyRating = (typeof GIPHY_RATINGS)[number];
 
 export type GoogleUrls = { auth: string; token: string; freebusy: string; revoke: string };
 
@@ -92,7 +99,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     ...readGoogle(env),
     footMassageUserId: env.EASTER_EGG_FOOT_MASSAGE_USER_ID?.trim() || null,
     ...readMail(env),
+    ...readGiphy(env),
   };
+}
+
+function readGiphy(env: NodeJS.ProcessEnv): Pick<Config, "giphyApiKey" | "giphyRating"> {
+  const key = env.GIPHY_API_KEY?.trim() ?? "";
+  const asked = env.GIPHY_RATING?.trim().toLowerCase() ?? "";
+  const known = (GIPHY_RATINGS as readonly string[]).includes(asked);
+  if (asked && !known) console.warn("GIPHY_RATING ignored: use g, pg, pg-13 or r. Using pg-13");
+  return { giphyApiKey: key || null, giphyRating: known ? (asked as GiphyRating) : "pg-13" };
 }
 
 function readMail(env: NodeJS.ProcessEnv): Pick<Config, "resendApiKey" | "mailFrom" | "mailLogPath"> {

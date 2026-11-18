@@ -8,6 +8,8 @@ import {
   canReply,
   chatDraft,
   chatFlash,
+  chatGif,
+  chatGifOn,
   chatMeId,
   chatMeName,
   chatMention,
@@ -76,6 +78,7 @@ function ChatScreen() {
       ) : (
         <Composer />
       )}
+      <GifSheet />
     </>
   );
 }
@@ -170,8 +173,9 @@ function Quote({ quote }) {
 
 function ReactionBar({ message, replyable }) {
   const picking = chatPicker.value === message.id;
+  const gifOn = replyable && chatGifOn.value;
   return (
-    <div class={picking ? "react-bar picking" : "react-bar"} role="toolbar" aria-label="React">
+    <div class={`react-bar${picking ? " picking" : ""}${gifOn ? " has-gif" : ""}`} role="toolbar" aria-label="React">
       <div class="react-row">
         {REACTIONS.map((emoji) => {
           const mine = (message.reactions || []).some((item) => item.emoji === emoji && item.mine);
@@ -193,6 +197,14 @@ function ReactionBar({ message, replyable }) {
           aria-expanded={picking ? "true" : "false"}
           onClick={() => { if (!A.pressConsumed()) A.togglePicker(message); }}
         >+</button>
+        {gifOn ? (
+          <button
+            class="react-gif"
+            type="button"
+            aria-label="React with a GIF"
+            onClick={() => { if (!A.pressConsumed()) A.openGif(message); }}
+          >GIF</button>
+        ) : null}
       </div>
       {picking ? <div class="react-picker" data-id={message.id} ref={mountPicker} /> : null}
       <div class="react-actions">
@@ -295,7 +307,7 @@ function MessageRow({ message }) {
         <time>{messageWhen(message.at)}</time>
       </header>
       <Quote quote={message.replyTo} />
-      <MessageText text={message.text} />
+      {message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
       {live && barOpen ? <ReactionBar message={message} replyable={replyable} /> : null}
       <ReactionPills message={message} live={live} />
       {message.canDelete ? (
@@ -314,6 +326,9 @@ function Composer() {
   return (
     <form class="chat-compose" onSubmit={(event) => A.send(event)}>
       <ReplyPreview />
+      {chatGifOn.value ? (
+        <button class="chat-gif-btn" type="button" aria-label="Choose a GIF" onMouseDown={keepFocus} onClick={() => A.openGif(null)}>GIF</button>
+      ) : null}
       <textarea
         id="chat-input"
         class="sheet-control"
@@ -332,6 +347,88 @@ function Composer() {
       <button class="btn chat-send" type="submit">Send</button>
       <MentionList />
     </form>
+  );
+}
+
+/** A sent GIF: the animated image from Giphy, sized by its stored width and height so the log does not jump as it loads. */
+function GifBody({ gif }) {
+  const label = gif.title ? `GIF: ${gif.title}` : "GIF";
+  return (
+    <div class="chat-gif">
+      <img
+        src={gif.url}
+        width={gif.width}
+        height={gif.height}
+        alt={label}
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+      />
+    </div>
+  );
+}
+
+/** The GIF sheet: trending, or a search. Picking one sends it, as a reply when it was opened from a message's reaction bar. */
+function GifSheet() {
+  const gif = chatGif.value;
+  if (!gif) return null;
+  const reply = gif.reply;
+  return (
+    <>
+      <button class="scrim gif-scrim" type="button" aria-label="Close GIFs" onClick={() => A.closeGif()} />
+      <div class="sheet gif-sheet" role="dialog" aria-modal="true" aria-label="GIFs">
+        <div class="sheet-head">
+          <div class="grabber" />
+          <div class="sheet-intro gif-intro">
+            <h2>GIFs</h2>
+            <button class="text-btn gif-close" type="button" onClick={() => A.closeGif()}>Close</button>
+            {reply ? <p class="help">Replying to {reply.mine ? "yourself" : reply.name}</p> : null}
+          </div>
+          <input
+            id="gif-query"
+            class="sheet-control gif-query"
+            type="search"
+            enterkeyhint="search"
+            autocomplete="off"
+            placeholder="Search GIFs"
+            aria-label="Search GIFs"
+            maxlength="50"
+            value={gif.query}
+            onInput={(event) => A.searchGifs(event.target.value)}
+          />
+        </div>
+        <div class="sheet-scroll gif-scroll">
+          <GifResults gif={gif} />
+        </div>
+        <div class="sheet-dock gif-credit">
+          <a href="https://giphy.com" target="_blank" rel="noopener noreferrer">Powered by GIPHY</a>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function GifResults({ gif }) {
+  if (gif.status === "loading" && !gif.gifs.length) return <p class="help gif-note" role="status">Loading GIFs…</p>;
+  if (gif.status === "error") {
+    return (
+      <p class="help gif-note" role="status">
+        {gif.message || "GIFs are unavailable right now."}{" "}
+        <button class="text-btn" type="button" onClick={() => A.retryGifs()}>Try again</button>
+      </p>
+    );
+  }
+  if (!gif.gifs.length) return <p class="help gif-note" role="status">No GIFs found. Try another search.</p>;
+  return (
+    <ul class="gif-grid" aria-label={gif.query ? `Results for ${gif.query}` : "Trending GIFs"}>
+      {gif.gifs.map((item) => (
+        <li key={item.id}>
+          <button class="gif-pick" type="button" aria-label={item.title ? `Send GIF: ${item.title}` : "Send GIF"} onClick={() => { void A.pickGif(item); }}>
+            <img src={item.preview} alt="" width={item.width} height={item.height} loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

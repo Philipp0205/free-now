@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-18-gif-reactions",
+    "date": "2026-11-18",
+    "title": "Send GIFs in chat",
+    "bullets": [
+      "Tap GIF next to the message box to browse trending GIFs or search, then tap one to send it.",
+      "Tap GIF in a message's reaction bar to answer that message with a GIF.",
+      "GIFs come from Giphy and are kept to PG-13."
+    ]
+  },
+  {
     "id": "2026-11-18-event-payments",
     "date": "2026-11-18",
     "title": "Set a price and see who has paid",

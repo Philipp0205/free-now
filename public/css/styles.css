@@ -1309,6 +1309,79 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
 }
 .reply-cancel .icon, .reply-cancel .icon svg { display: block; width: 18px; height: 18px; margin: auto; }
 @media (hover: hover) { .reply-cancel:hover { color: var(--text); } }
+/* GIF: a composer button, a control in the reaction bar, the picker sheet and a sent GIF. */
+.chat-gif-btn {
+  align-self: flex-end;
+  flex: none;
+  min-width: 48px;
+  height: 48px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 24px;
+  background: #1c1c1e;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+@media (hover: hover) { .chat-gif-btn:hover, .react-gif:hover { background: #2c2c2e; } }
+.react-gif {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+/* Eight round buttons in one row: shrink them so the bar fits the chat column from 320px up. */
+@media (max-width: 400px) {
+  .react-bar.has-gif .react-pick, .react-bar.has-gif .react-more, .react-bar.has-gif .react-gif { width: 36px; }
+}
+@media (max-width: 340px) {
+  .react-bar.has-gif .react-pick, .react-bar.has-gif .react-more, .react-bar.has-gif .react-gif { width: 32px; }
+  .react-bar.has-gif .react-pick { font-size: 20px; }
+}
+.chat-gif { margin: 4px 0 0; }
+.chat-gif img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 260px);
+  max-height: 260px;
+  border-radius: 12px;
+  background: #1c1c1e;
+  -webkit-user-drag: none;
+}
+/* The sheet is inside the transformed chat screen, which is already as tall as the visible viewport. */
+.chat-screen .gif-scrim { top: 0; height: 100%; }
+.chat-screen .gif-sheet { bottom: 0; height: min(78%, 620px); max-height: calc(100% - var(--sheet-margin)); }
+.gif-query { margin: 12px 0 4px; }
+.gif-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; }
+.gif-intro .help { flex-basis: 100%; }
+.gif-close { min-height: 44px; }
+.gif-scroll { padding-top: 8px; }
+.gif-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.gif-grid li { margin: 0; padding: 0; min-width: 0; }
+.gif-pick {
+  display: block;
+  width: 100%;
+  height: 120px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #2c2c2e;
+}
+.gif-pick img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.gif-pick:focus-visible { outline-offset: 2px; }
+.gif-note { margin: 24px 0; text-align: center; }
+.gif-credit { padding-top: 8px; text-align: center; font-size: 12px; }
+.gif-credit a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
 /* @ autocomplete sits right above the composer, same width as the input. */
 .chat-compose { position: relative; }
 .mention-list {

@@ -80,7 +80,7 @@ function syncKeyboardInset() {
 
 /** Pull a sheet down when bottom offset and a resized visual viewport both lift it. */
 export function anchorOpenSheet() {
-  const sheet = document.querySelector(".sheet");
+  const sheet = document.querySelector(".sheet:not(.gif-sheet)");
   const vv = window.visualViewport;
   if (!sheet || !vv) return;
   const gap = vv.height - sheet.getBoundingClientRect().bottom;

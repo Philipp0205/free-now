@@ -17,6 +17,8 @@ import {
 } from "./calendar/routes.js";
 import { ChatError } from "./chat/chat.js";
 import { handleChatRoutes } from "./chat/routes.js";
+import type { GiphyFetch } from "./chat/giphy.js";
+import { GIPHY_LIMIT_PER_MIN, handleGiphyRoutes } from "./chat/giphy-routes.js";
 import { type Config, MAP_PMTILES_ATTRIBUTION, MAP_PMTILES_URL } from "./config.js";
 import { ACCOUNT_LIMIT } from "./accounts/accounts.js";
 import type { Mailer } from "./app-kit/mailer.ts";
@@ -48,6 +50,8 @@ export type AppDeps = {
   calendarNet?: CalendarNet;
   /** Sends the confirm and lost-code links. Undefined: no mail goes out (see createMailer). */
   mailer?: Mailer;
+  /** Tests swap the Giphy HTTP client, so no run ever reaches api.giphy.com. Undefined: the real fetch. */
+  giphyFetch?: GiphyFetch;
 };
 
 export { HttpError } from "./lib/http.js";
@@ -75,6 +79,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
     calendarSync: createRateLimiter(CALENDAR_SYNC_LIMIT),
     agent: createRateLimiter(AGENT_TOKEN_LIMIT),
     accounts: createRateLimiter(ACCOUNT_LIMIT),
+    giphy: createRateLimiter(GIPHY_LIMIT_PER_MIN),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {
@@ -208,6 +213,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
       devMode: !deps.config.vapid,
       mapTileUrl: deps.config.mapTileUrl,
       mapTileAttribution: deps.config.mapTileAttribution,
+      // Only whether GIFs are on. The key and rating stay on the server.
+      giphy: Boolean(deps.config.giphyApiKey),
       ...(deps.config.mapPmtiles
         ? {
             mapPmtilesUrl: MAP_PMTILES_URL,
@@ -235,6 +242,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
   const authed: AuthedRouteContext = { ...ctx, me, agent };
 
   if (await handleChatRoutes(authed)) return;
+  if (await handleGiphyRoutes(authed)) return;
   if (await handleMapRoutes(authed)) return;
   if (await handleMeRoutes(authed)) return;
   if (await handleCircleRoutes(authed)) return;
