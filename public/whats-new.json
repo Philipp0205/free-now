@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-17-always-dark",
+    "date": "2026-11-17",
+    "title": "Hangry now always uses the dark look",
+    "bullets": [
+      "The app is dark on every device, so it is easy to read on desktop browsers in light mode.",
+      "Cards, chats and buttons that were hard to see in light mode look right again."
+    ]
+  },
+  {
     "id": "2026-11-17-native-feel-2",
     "date": "2026-11-17",
     "title": "Sheets, titles and screens move like an app",

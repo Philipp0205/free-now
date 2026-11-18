@@ -31,20 +31,16 @@ function over(fg: Rgb, alpha: number, bg: Rgb): Rgb {
   return fg.map((v, i) => v * alpha + bg[i] * (1 - alpha)) as Rgb;
 }
 
-/** Palette stops per scheme, read straight from styles.css. */
-function stops(): Record<"dark" | "light", Rgb[][]> {
-  const lightAt = CSS.indexOf("@media (prefers-color-scheme: light)");
-  assert.ok(lightAt > 0, "light palette block");
-  const read = (chunk: string) => {
-    const out: Rgb[][] = [];
-    for (const match of chunk.matchAll(/\.grad-(\d+) \{ --g1: (#[0-9a-f]{6}); --g2: (#[0-9a-f]{6}); \}/g)) {
-      out[Number(match[1])] = [hex(match[2]), hex(match[3])];
-    }
-    return out;
-  };
-  const darkChunk = CSS.slice(CSS.lastIndexOf("/* Plan colours", lightAt), lightAt);
-  const lightChunk = CSS.slice(lightAt, CSS.indexOf("\n}\n", lightAt));
-  return { dark: read(darkChunk), light: read(lightChunk) };
+/** Palette stops, read straight from styles.css. Hangry is always dark, so there is only one set. */
+function stops(): Rgb[][] {
+  assert.ok(!CSS.includes("prefers-color-scheme: light"), "styles.css has no light-scheme rules");
+  const start = CSS.indexOf("/* Plan colours");
+  assert.ok(start > 0, "plan colours block");
+  const out: Rgb[][] = [];
+  for (const match of CSS.slice(start, start + 2000).matchAll(/\.grad-(\d+) \{ --g1: (#[0-9a-f]{6}); --g2: (#[0-9a-f]{6}); \}/g)) {
+    out[Number(match[1])] = [hex(match[2]), hex(match[3])];
+  }
+  return out;
 }
 
 const WHITE: Rgb = [255, 255, 255];
@@ -80,10 +76,10 @@ test("the gradient pick is stable and spreads across the palette", () => {
   assert.ok(seq.size >= 10, `only ${seq.size} slots for plan-0..27`);
 });
 
-test("card text, chat row, badge, In toggle and ⋯ stay AA on every stop, light and dark", () => {
-  const palette = stops();
-  for (const scheme of ["dark", "light"] as const) {
-    const rows = palette[scheme];
+test("card text, chat row, badge, In toggle and ⋯ stay AA on every stop", () => {
+  const rows = stops();
+  const scheme = "dark";
+  {
     assert.equal(rows.filter(Boolean).length, GRADIENT_COUNT, `${scheme} has ${GRADIENT_COUNT} gradients`);
     for (const [slot, pair] of rows.entries()) {
       for (const stop of pair) {
@@ -119,8 +115,9 @@ test("the palette has a good hue spread, not one colour family", () => {
     const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
     return (h * 60 + 360) % 360;
   };
-  for (const scheme of ["dark", "light"] as const) {
-    const sectors = new Set(stops()[scheme].map(([first]) => Math.floor(hue(first) / 30)));
+  const scheme = "dark";
+  {
+    const sectors = new Set(stops().map(([first]) => Math.floor(hue(first) / 30)));
     assert.ok(sectors.size >= 8, `${scheme} covers ${sectors.size} of 12 hue sectors`);
   }
 });

@@ -116,6 +116,8 @@ async function shoot(page: Page, name: string) {
       await page.setViewportSize({ width, height: 640 });
       await page.emulateMedia({ colorScheme: scheme });
       await page.waitForTimeout(100);
+      // A light OS setting renders the same dark look.
+      assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(0, 0, 0)", `${scheme} body stays dark`);
       await page.screenshot({ path: path.join(shotsDir, `chat-colors-${name}-${width}-${scheme}.png`) });
     }
   }

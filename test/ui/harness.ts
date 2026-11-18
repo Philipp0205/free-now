@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 import { test } from "@playwright/test";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, firefox, webkit, type Browser, type Page } from "playwright-core";
 import { createApp } from "../../src/app.js";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { loadConfig } from "../../src/config.js";
@@ -61,6 +61,13 @@ export async function launchChrome(): Promise<Browser> {
   catch { return await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
 }
 
+/** The browser for a Playwright project: desktop-firefox and desktop-webkit use those engines, anything else Chrome. */
+export async function launchBrowser(project: string): Promise<Browser> {
+  if (project === "desktop-firefox") return firefox.launch({ headless: true });
+  if (project === "desktop-webkit") return webkit.launch({ headless: true });
+  return launchChrome();
+}
+
 /** The app on 127.0.0.1 with a random port and an in-memory db. */
 export async function startServer(opts: ServerOptions = {}): Promise<Server> {
   const db = opts.db ?? openDb(":memory:");
@@ -110,7 +117,7 @@ export function useHangry(opts: ServerOptions = {}) {
   let browser: Browser | undefined;
   test.beforeAll(async () => {
     server = await startServer(opts);
-    browser = await launchChrome();
+    browser = await launchBrowser(test.info().project.name);
   });
   test.afterAll(async () => {
     await browser?.close();

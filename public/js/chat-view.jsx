@@ -250,7 +250,7 @@ function MessageRow({ message }) {
       {live && barOpen ? <ReactionBar message={message} replyable={replyable} /> : null}
       <ReactionPills message={message} live={live} />
       {message.canDelete ? (
-        <button class="text-btn" type="button" onClick={() => { if (!A.pressConsumed()) A.confirmDelete(message); }}>Delete</button>
+        <button class="text-btn chat-delete" type="button" onClick={() => { if (!A.pressConsumed()) A.confirmDelete(message); }}>Delete</button>
       ) : null}
     </article>
   );
