@@ -330,6 +330,50 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     assert.equal(await page.evaluate(() => window.getSelection()?.toString() ?? ""), "", "a click on a row selects nothing");
     await shot(page, "chat");
 
+    // The URL is a real link, and a mouse click on it is a link click, not a row action.
+    const MENU_TEXT = "Menu is at https://example.com/menu and it looks great";
+    const menuRow = page.locator(".chat-msg", { hasText: "Menu is at" });
+    const link = menuRow.locator("p a");
+    assert.equal(await link.count(), 1);
+    assert.equal(await link.getAttribute("href"), "https://example.com/menu");
+    assert.equal(await link.getAttribute("target"), "_blank");
+    assert.equal(await link.getAttribute("rel"), "noopener noreferrer");
+    assert.equal(await link.textContent(), "https://example.com/menu");
+    assert.equal(await menuRow.locator("p").textContent(), MENU_TEXT);
+    await assertContrast(page, ".chat-msg p a", "Chat link");
+    // Stop the navigation itself (no network from a test) and record what the click hit.
+    await page.evaluate(() => {
+      const hits: string[] = [];
+      (window as unknown as { __linkClicks: string[] }).__linkClicks = hits;
+      window.addEventListener("click", (event) => {
+        const anchor = (event.target as Element).closest?.("a");
+        if (anchor) { hits.push(anchor.href); event.preventDefault(); }
+      }, true);
+    });
+    await link.click();
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { __linkClicks: string[] }).__linkClicks), ["https://example.com/menu"]);
+    assert.equal(await menuRow.locator(".react-bar").count(), 0, "a link click does not open the action menu");
+    assert.equal(await page.evaluate(() => window.getSelection()?.toString() ?? ""), "", "a link click selects nothing");
+
+    // Open the action menu with the React button (mouse), click Copy, and the full text is copied.
+    await page.evaluate(() => {
+      const copied: string[] = [];
+      (window as unknown as { __copied: string[] }).__copied = copied;
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { copied.push(text); } } });
+    });
+    await menuRow.hover();
+    await menuRow.getByRole("button", { name: "React" }).click();
+    const bar = menuRow.locator(".react-bar");
+    await bar.waitFor();
+    await settle(page);
+    await shot(page, "chat-menu");
+    await bar.getByRole("button", { name: "Copy" }).click();
+    await page.locator(".toast", { hasText: "Copied" }).waitFor();
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { __copied: string[] }).__copied), [MENU_TEXT]);
+    await bar.waitFor({ state: "detached" });
+    await shot(page, "chat-copied");
+    assert.equal(await page.evaluate(() => window.getSelection()?.toString() ?? ""), "", "Copy leaves no selection");
+
     assert.deepEqual(errors, [], "no page errors");
   } finally {
     await context.close();

@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-18-chat-links-copy",
+    "date": "2026-11-18",
+    "title": "Tap links in chat and copy messages",
+    "bullets": [
+      "Web links in a chat message are now tappable and open in a new tab.",
+      "Hold a message (or tap the smile on desktop) and choose Copy to copy its text."
+    ]
+  },
+  {
     "id": "2026-11-17-always-dark",
     "date": "2026-11-17",
     "title": "Hangry now always uses the dark look",

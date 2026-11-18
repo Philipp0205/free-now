@@ -1069,6 +1069,8 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
 /* @Name in the sender's chat colour; a mention of you gets a soft fill so it stands out. */
 .chat-msg p .mention { color: var(--person); font-weight: 600; }
 .chat-msg p .mention.me { background: color-mix(in srgb, var(--person) 24%, transparent); border-radius: 4px; padding: 0 3px; margin: 0 -1px; }
+/* Links: light enough on the dark rows, underlined so they read as links. */
+.chat-msg p a { color: #64b5ff; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; word-break: break-all; }
 /* React control: a quiet hint next to the time on desktop hover. Touch uses a long-press. */
 .chat-react-btn {
   flex: none;
@@ -1096,9 +1098,9 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
 }
 .react-bar {
   display: flex;
+  flex-direction: column;
   width: max-content;
   max-width: 100%;
-  gap: 2px;
   margin: 6px 0 0;
   padding: 4px;
   border-radius: 22px;
@@ -1106,6 +1108,7 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
   border: 0.5px solid var(--hairline);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 }
+.react-row { display: flex; gap: 2px; }
 .react-pick {
   width: 40px;
   height: 40px;
@@ -1165,22 +1168,25 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
   /* Sideways moves reach the swipe-to-reply; up and down still scroll the log. */
   .chat-msg { touch-action: pan-y pinch-zoom; }
 }
-.react-reply {
-  flex: none;
+/* Reply and Copy: a row of text actions under the emoji, split by hairlines. */
+.react-actions { display: flex; margin-top: 2px; border-top: 0.5px solid var(--hairline); }
+.react-reply, .react-copy {
+  flex: 1;
   height: 40px;
-  margin-left: 2px;
   padding: 0 12px;
   border: 0;
-  border-left: 0.5px solid var(--hairline);
-  border-radius: 0 20px 20px 0;
+  border-radius: 0;
   background: transparent;
   color: var(--text);
   font-size: 15px;
 }
-@media (hover: hover) { .react-reply:hover { background: #2c2c2e; } }
+.react-reply + .react-copy { border-left: 0.5px solid var(--hairline); }
+.react-reply:first-child { border-bottom-left-radius: 18px; }
+.react-copy:last-child { border-bottom-right-radius: 18px; }
+.react-copy:first-child { border-bottom-left-radius: 18px; }
+@media (hover: hover) { .react-reply:hover, .react-copy:hover { background: #2c2c2e; } }
 @media (max-width: 340px) {
   .react-pick { width: 34px; }
-  .react-reply { padding: 0 9px; }
 }
 /* The message a reply answers: one quiet line of who and what, not a second bubble. */
 .chat-quote {
