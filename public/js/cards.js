@@ -11,11 +11,50 @@ import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends 
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
 import { priceLine } from "./event-pay.js";
 
-/** Card menu opened by the latest ⋯ tap; its next render plays the open animation once. */
+/** Card menu opened by the latest ⋯ tap; the render that draws it pops it in once. */
 let menuJustOpened = null;
-/** render() calls this once the open animation has had its render. */
-export function clearMenuJustOpened() {
+
+/** The kit's pop for a menu that was just opened by a ⋯ tap. render() calls it once the menu is placed. */
+export function playMenuPop() {
+  const key = menuJustOpened;
   menuJustOpened = null;
+  if (!key || state.cardMenu !== key) return;
+  const menu = document.querySelector(`.card-more[data-menu="${CSS.escape(key)}"]`)?.parentElement?.querySelector(".card-menu");
+  if (menu) window.AppKit?.pop?.in?.(menu);
+}
+
+/** The open menu before a render, with where it sat, so the render can pop it out instead of dropping it. */
+export function captureOpenMenu() {
+  const menu = document.querySelector(".card-menu:not(.ak-pop-out)");
+  const key = menu?.parentElement?.querySelector(".card-more")?.dataset.menu;
+  return menu && key ? { menu, key } : null;
+}
+
+/**
+ * After a render that closed a card menu, puts the old menu back for the kit's pop-out, then removes it.
+ * The state is already closed: the ghost is inert and hidden from assistive tech, and its card keeps
+ * .menu-open (overflow visible) until the pop ends. A card that is gone, or a menu that is open again, is skipped.
+ * render() rebuilds the page, so a ghost never outlives the next render.
+ */
+export function ghostClosedMenu(captured) {
+  const pop = window.AppKit?.pop;
+  if (!captured || !pop?.out) return;
+  const { menu, key } = captured;
+  if (state.cardMenu === key || document.querySelector(".card-menu")) return;
+  const host = document.querySelector(`.card-more[data-menu="${CSS.escape(key)}"]`)?.parentElement;
+  if (!host) return;
+  const card = host.closest(".card, .map-card");
+  menu.setAttribute("aria-hidden", "true");
+  menu.setAttribute("inert", "");
+  card?.classList.add("menu-open");
+  host.append(menu);
+  const done = () => {
+    menu.remove();
+    card?.classList.remove("menu-open");
+  };
+  const out = pop.out(menu);
+  if (out?.then) out.then(done, done);
+  else setTimeout(done, 160);
 }
 
 export function socialCard(social) {
@@ -265,7 +304,7 @@ export function cardOverflow(kind, item, { onMap = false } = {}) {
       },
     }, [icon("more")]),
     open ? el("div", {
-      class: menuJustOpened === key ? "card-menu menu-in" : "card-menu",
+      class: "card-menu",
       role: "menu",
       onclick: (event) => event.stopPropagation(),
     }, items.map((row) => el("button", {

@@ -8,6 +8,7 @@ import { closeYouSection } from "./you.js";
 import { closeBusyPreview } from "./busy-preview.js";
 import { loadCalendar, refreshMapAll } from "./events.js";
 import { closeSheet } from "./sheets.js";
+import { sheetLeaving } from "./sheet-out.js";
 import { closeInstallSteps, dismissJoinInstall } from "./push-install.js";
 
 /** How many history entries the app pushed for open overlays (sheets, panels, non-home tabs). */
@@ -368,9 +369,9 @@ export function bindSheetSwipe() {
         close = true;
       }
       if (close) {
-        panel.style.transform = "";
-        panel.style.maxHeight = "";
+        // Keep the offset the drag left: the sheet slides on from there instead of jumping back to rest first.
         drag = 0;
+        sheetLeaving(panel);
         dismissTopOverlay();
         return;
       }

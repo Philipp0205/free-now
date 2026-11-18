@@ -1,4 +1,4 @@
-import { clearMenuJustOpened, placeOpenCardMenus } from "./cards.js";
+import { captureOpenMenu, ghostClosedMenu, placeOpenCardMenus, playMenuPop } from "./cards.js";
 import { state } from "./state.js";
 import { RETRY_NOTE, calendarLanding, onRecover, onStart } from "./session.js";
 import { mountMap, mountWhereMap } from "./map-card.js";
@@ -21,6 +21,7 @@ import { bindSheetSwipe, onTab, syncOverlayHistory } from "./nav.js";
 import { bindLargeTitle, bindPullToRefresh } from "./native.js";
 import { onCreateCircle, onJoinCircle } from "./circles.js";
 import { accountNotices, emailField, emailGate, linkScreen, lostCodeForm, needsEmail } from "./account.js";
+import { slideOutSheet, takeLeavingSheet } from "./sheet-out.js";
 
 /** Set by a tab bar tap that changes the page; the next render fades that page in once, then clears it. */
 let pageEntrance = false;
@@ -42,11 +43,18 @@ export function render() {
   const wasCovered = !shownTab || document.documentElement.classList.contains("sheet-open");
   if (shownTab && !wasCovered) tabY.set(shownTab, y);
   const freshTab = pageEntrance;
+  const openMenu = captureOpenMenu();
+  const leavingSheet = takeLeavingSheet();
   document.getElementById("app").replaceChildren(view());
   // The chat screen is one stable host that view() hands back each time; if it did not come back, chat was left.
   releaseChatScreen();
-  clearMenuJustOpened();
   pageEntrance = false;
+  if (freshTab) {
+    // The kit plays the landing once per real switch: the page fades in, the tab you landed on springs.
+    const tabs = window.AppKit?.tabbar;
+    tabs?.animatePage?.(document.querySelector("[data-page]"));
+    tabs?.animateIn?.(document.querySelector(".tabbar .tab[aria-current]"));
+  }
   const sheetScroll = document.querySelector(".sheet-scroll");
   if (sheetScroll) sheetScroll.scrollTop = sheetY;
   // The month scrolls inside the Events tab, so a refresh render keeps its place.
@@ -107,6 +115,11 @@ export function render() {
     placeOpenCardMenus();
     requestAnimationFrame(() => { if (state.cardMenu) placeOpenCardMenus(); });
   }
+  // A menu opened by this render pops in once; one closed by it pops out from where it sat.
+  playMenuPop();
+  if (!state.cardMenu) ghostClosedMenu(openMenu);
+  // A sheet closed by the user slides on down from where it was, after everything above has found the live page.
+  slideOutSheet(leavingSheet);
   syncInstallPrompt();
   if (state.focusPlanScroll) {
     state.focusPlanScroll = false;
@@ -347,17 +360,15 @@ function shell() {
   }
   if (state.statusMessage) phone.append(el("p", { class: "status-banner", role: "status", text: state.statusMessage }));
   phone.append(...accountNotices());
-  // Only an explicit tab bar switch fades in; sheet closes, Back and the 3s refresh renders never do.
-  const freshTab = pageEntrance;
+  // Only an explicit tab bar switch fades in (render() plays it); sheet closes, Back and the 3s refresh renders never do.
   const screens = { home, map: mapScreen, circle: circleScreen, alerts: alertsScreen, you: youScreen };
   const page = screens[state.tab]?.();
   if (page) {
     page.classList.add("page");
-    if (freshTab) page.classList.add("page-in");
     page.dataset.page = state.tab;
     phone.append(page);
   }
-  phone.append(tabbar(freshTab));
+  phone.append(tabbar());
   if (state.sheet) phone.append(sheet());
   return phone;
 }
@@ -372,7 +383,7 @@ function scrollPageTop() {
   }
 }
 
-function tabbar(fresh = false) {
+function tabbar() {
   const tabs = [
     ["home", "Now", "home"],
     // The Events tab (formerly Map): the id stays "map" so routing and hashes do not move.
@@ -382,11 +393,14 @@ function tabbar(fresh = false) {
     ["you", "You", "person"],
   ];
   const unread = circleUnread();
-  return el("nav", { class: "tabbar" }, tabs.map(([id, label, glyph]) => {
+  // ak-tabbar, ak-tab and ak-tab-icon bring the kit's icon dip and landing motion; .tabbar and .tab keep Hangry's look.
+  return el("nav", { class: "tabbar ak-tabbar" }, tabs.map(([id, label, glyph]) => {
     const current = state.tab === id;
     const name = id === "chat" && unread ? `Chat, ${unread} unread` : label;
+    const glyphNode = icon(glyph);
+    glyphNode.classList.add("ak-tab-icon");
     return el("button", {
-      class: current && fresh ? "tab tab-in" : "tab",
+      class: "tab ak-tab",
       type: "button",
       "aria-label": name,
       "aria-current": current ? "page" : null,
@@ -403,7 +417,7 @@ function tabbar(fresh = false) {
         }
       },
     }, [
-      icon(glyph),
+      glyphNode,
       el("span", { class: "tab-label", text: label }),
       id === "chat" && unread
         ? el("span", { class: "badge", role: "img", "aria-label": `${unread > 9 ? "9+" : unread} new`, text: unread > 9 ? "9+" : String(unread) })

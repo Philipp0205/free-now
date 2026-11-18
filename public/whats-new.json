@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-18-app-kit-070",
+    "date": "2026-11-18",
+    "title": "Smoother tabs, sheets and menus",
+    "bullets": [
+      "Switching tabs now slides the new page in and gives the tab icon a small dip.",
+      "Sheets keep sliding down from where you let go when you drag them closed.",
+      "Card menus pop open and pop shut instead of blinking in and out."
+    ]
+  },
+  {
     "id": "2026-11-18-more-goblin-lines",
     "date": "2026-11-18",
     "title": "The Goblin has more to say",
