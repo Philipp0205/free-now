@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, openYouSection, testEmail, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, testEmail, useHangry, waitForEventChat } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
 
@@ -1578,7 +1578,7 @@ test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => 
       const height = await chat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
       assert.ok(height >= 44, `chat is ${height}px`);
       await chat.click();
-      await page.getByRole("heading", { name: "Coffee" }).waitFor();
+      await waitForEventChat(page, "Coffee");
       await page.locator("#chat-input").fill("See you there");
       await page.getByRole("button", { name: "Send" }).click();
       await page.getByText("See you there").waitFor();
