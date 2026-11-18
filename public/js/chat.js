@@ -13,6 +13,7 @@ import { batch } from "@preact/signals";
 import {
   bumpThread,
   chatFlash,
+  chatGifOn,
   chatMeId,
   chatMeName,
   chatPicker,
@@ -49,6 +50,7 @@ export function closeChat() {
   state.chatReactFor = null;
   state.chatWho = null;
   state.chatReplyTo = null;
+  state.chatGif = null;
   state.tab = state.chatReturn || "home";
   void navigate(() => {
     // The Preact host is dropped with the screen, so the old chat stays on screen until the slide has captured it.
@@ -102,6 +104,9 @@ export function dropChatScreen() {
   endPress();
   swipe = null;
   clearTimeout(flashTimer);
+  clearTimeout(gifTimer);
+  gifSeq += 1;
+  state.chatGif = null;
   unmountChatView(host);
   host = null;
   hostKey = "";
@@ -116,12 +121,14 @@ function syncChatSignals() {
     chatMeId.value = state.me?.user?.id ?? null;
     chatMeName.value = state.me?.user?.name || "";
     chatStatus.value = state.statusMessage || "";
+    chatGifOn.value = Boolean(state.meta?.giphy);
     setChat({
       chatDraft: state.chatDraft,
       chatMention: state.chatMention,
       chatReactFor: state.chatReactFor,
       chatWho: state.chatWho,
       chatReplyTo: state.chatReplyTo,
+      chatGif: state.chatGif,
     });
   });
 }
@@ -415,12 +422,121 @@ async function buildPicker(messageId) {
   }
 }
 
-/** Copy from the bar: the plain message text goes to the clipboard and a short toast says so. */
+/** Copy from the bar: the plain message text goes to the clipboard (a GIF copies its link) and a short toast says so. */
 function copyMessage(message) {
   tick();
   put({ chatReactFor: null, chatWho: null });
   repaint();
-  void copyText(message.text, "Copied");
+  void copyText(message.gif?.url || message.text, "Copied");
+}
+
+const GIF_SEARCH_MS = 300;
+let gifTimer = 0;
+/** Bumped on every lookup, open and close, so a slow answer for an old search never lands on a newer one. */
+let gifSeq = 0;
+let gifSending = false;
+
+/** Edits the open GIF sheet and paints it. Nothing else on the chat screen is rebuilt. */
+function setGif(patch) {
+  if (!state.chatGif) return;
+  put({ chatGif: { ...state.chatGif, ...patch } });
+  if (host) paintChatView(host);
+}
+
+/**
+ * Opens the GIF sheet. From a message's reaction bar it answers that message; from the composer it answers
+ * whatever the composer is already replying to, or nothing. Does nothing while GIFs are off.
+ */
+function openGif(message) {
+  if (!state.meta?.giphy || !state.chat) return;
+  const target = message || state.chatReplyTo;
+  tick();
+  state.chatGif = {
+    reply: target ? { id: target.id, name: target.name, mine: Boolean(target.mine) } : null,
+    from: message ? "bar" : "composer",
+    query: "",
+    status: "loading",
+    gifs: [],
+    message: "",
+  };
+  put({ chatGif: state.chatGif, chatReactFor: null, chatWho: null });
+  // render() so the scroll lock, the Back entry and the focus rules apply like any other sheet.
+  render();
+  void loadGifs("");
+  // A phone keeps its keyboard down until the search box is tapped. A mouse or keyboard can type at once.
+  if (!prefersTouchUi()) document.getElementById("gif-query")?.focus({ preventScroll: true });
+}
+
+export function closeGif() {
+  if (!state.chatGif) return false;
+  const from = state.chatGif.from;
+  clearTimeout(gifTimer);
+  gifSeq += 1;
+  state.chatGif = null;
+  put({ chatGif: null });
+  render();
+  if (from === "composer") document.querySelector(".chat-gif-btn")?.focus({ preventScroll: true });
+  return true;
+}
+
+async function loadGifs(query) {
+  gifSeq += 1;
+  const mine = gifSeq;
+  const text = query.trim();
+  setGif({ status: "loading", message: "" });
+  try {
+    const path = text ? `/api/giphy/search?q=${encodeURIComponent(text)}` : "/api/giphy/trending";
+    const result = await api(path);
+    if (mine !== gifSeq || !state.chatGif) return;
+    setGif({ status: "ready", gifs: Array.isArray(result?.gifs) ? result.gifs : [] });
+  } catch (error) {
+    if (mine !== gifSeq || !state.chatGif || error.status === 401) return;
+    setGif({
+      status: "error",
+      gifs: [],
+      message: error.status === 429 ? "Slow down a moment, then try again." : "GIFs are unavailable right now.",
+    });
+  }
+}
+
+/** Typing in the sheet: the box follows every key, the lookup waits for a pause. An empty box is trending again. */
+function searchGifs(value) {
+  if (!state.chatGif) return;
+  setGif({ query: value });
+  clearTimeout(gifTimer);
+  gifTimer = setTimeout(() => { void loadGifs(value); }, GIF_SEARCH_MS);
+}
+
+function retryGifs() {
+  if (state.chatGif) void loadGifs(state.chatGif.query);
+}
+
+/** Sends the picked GIF, as a reply when the sheet has a target. A failure keeps the sheet open so another pick is one tap. */
+async function pickGif(item) {
+  const open = state.chatGif;
+  if (!open || !state.chat || gifSending || state.chatQueue) return;
+  gifSending = true;
+  tick();
+  const target = { kind: state.chat.kind, id: state.chat.id };
+  const replyTo = open.reply?.id || null;
+  const gif = { id: item.id, title: item.title || "", width: item.width, height: item.height, url: item.url };
+  try {
+    const body = replyTo ? { gif, replyTo, appVersion: APP_VERSION } : { gif, appVersion: APP_VERSION };
+    const chat = (await api(chatTargetUrl(target), { method: "POST", body })).chat;
+    gifSending = false;
+    void syncChatAlerts(target);
+    if (state.chat && state.chat.kind === target.kind && state.chat.id === target.id) state.chatThread = chat;
+    state.statusMessage = "";
+    state.chatStick = true;
+    sentReply(replyTo);
+    closeGif();
+  } catch (error) {
+    gifSending = false;
+    if (error.status === 401) return;
+    state.error = error.status === 0 ? "You're offline. Try again in a moment." : "Couldn't send that GIF. Try again.";
+    scheduleErrorClear();
+    render();
+  }
 }
 
 async function reactTo(messageId, emoji) {
@@ -599,6 +715,11 @@ const ACTIONS = {
   togglePicker,
   buildPicker,
   copyMessage,
+  openGif,
+  closeGif,
+  searchGifs,
+  retryGifs,
+  pickGif,
   confirmDelete: confirmDeleteMessage,
   send: sendChat,
   onInput,

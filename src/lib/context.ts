@@ -13,6 +13,8 @@ export type Limits = {
   agent: RateLimiter;
   /** Email, recovery-code and lost-code attempts (see ACCOUNT_LIMIT). */
   accounts: RateLimiter;
+  /** GIF picker lookups per person (see GIPHY_LIMIT_PER_MIN). */
+  giphy: RateLimiter;
 };
 
 /** The per-request values every route handler reads. Built once in handle(). */

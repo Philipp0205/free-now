@@ -3,7 +3,7 @@ import { closeMapCard, mapCardOpen, refreshPins } from "./map-card.js";
 import { render } from "./render.js";
 import { closePast } from "./home.js";
 import { markAlertsRead } from "./alerts.js";
-import { clearReply, closeChat, closeReactUi, openChat } from "./chat.js";
+import { clearReply, closeChat, closeGif, closeReactUi, openChat } from "./chat.js";
 import { closeYouSection } from "./you.js";
 import { closeBusyPreview } from "./busy-preview.js";
 import { loadCalendar, refreshMapAll } from "./events.js";
@@ -32,6 +32,7 @@ function currentOverlayDepth() {
   if (state.installSteps) depth += 1;
   if (state.sheet) depth += 1;
   if (!shellShown()) return depth;
+  if (state.chatGif) depth += 1;
   if (state.circleMenu) depth += 1;
   if (state.chat) depth += 1;
   if (state.past) depth += 1;
@@ -101,6 +102,10 @@ function dismissTopOverlay() {
     return;
   }
   if (!shellShown()) return;
+  if (state.chatGif) {
+    closeGif();
+    return;
+  }
   if (state.circleMenu) {
     state.circleMenu = false;
     render();
@@ -230,6 +235,8 @@ export function bindSheetSwipe() {
   if (!snapKey) snapMemo = null;
   else if (snapMemo?.key !== snapKey) snapMemo = { key: snapKey, half: true }; // a sheet opens on its half stop
   document.querySelectorAll(".sheet, .guide").forEach((panel) => {
+    // The GIF sheet lives in the chat host and closes by button, scrim, Escape or Back, not by swipe.
+    if (panel.classList.contains("gif-sheet")) return;
     let tracking = false;
     let dragging = false;
     let startY = 0;
@@ -432,7 +439,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // An open @ list already took this Escape in the composer. Next comes the reply preview, then the chat.
-  if (state.chat && state.chatReplyTo && !state.confirm && !state.sheet) {
+  if (state.chat && state.chatReplyTo && !state.confirm && !state.sheet && !state.chatGif) {
     event.preventDefault();
     clearReply();
     return;

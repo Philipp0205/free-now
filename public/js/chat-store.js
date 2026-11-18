@@ -39,9 +39,13 @@ export const chatPicker = signal(null);
 export const chatReplyTo = signal(null);
 /** Message id lit up for a moment after a jump to its quote. */
 export const chatFlash = signal(null);
+/** The open GIF sheet: { reply: { id, name, mine } | null, from, status, gifs, message }. Null when closed. */
+export const chatGif = signal(null);
+/** GIFs are on (the server has a Giphy key). Off hides the composer button and the reaction-bar control. */
+export const chatGifOn = signal(false);
 
 /** The signal behind each chat field of `state`, by the same name. */
-export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chatReplyTo };
+export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chatReplyTo, chatGif };
 
 /** Writes chat fields to the signals only. Callers write `state` first. Only the views that read a changed field repaint. */
 export function setChat(patch) {

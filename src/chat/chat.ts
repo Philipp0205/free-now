@@ -14,6 +14,7 @@ import {
 } from "../db.js";
 import { colorHex } from "./chat-color.js";
 import { isSingleEmoji } from "./emoji.js";
+import { cleanGif, gifBody, readGifBody } from "./giphy.js";
 import { fileGripe, gripeText, GOBLIN_COLOR, GOBLIN_NAME, type GoblinAsk } from "./goblin.js";
 import { notifyUsers } from "../push/notify.js";
 import type { PushSender } from "../push/push.js";
@@ -31,7 +32,8 @@ export class ChatError extends Error {
 export type ChatDeps = {
   db: DatabaseSync;
   push: PushSender;
-  config: { tz: string };
+  /** `giphyApiKey` only says whether GIFs are on. It is never read for its value here. */
+  config: { tz: string; giphyApiKey?: string | null };
   now: () => number;
 };
 
@@ -59,6 +61,16 @@ type MessageRow = {
 };
 
 const TEXT_MAX = 1000;
+/** What a GIF is called wherever only words fit: previews, quotes, notices. Never its stored JSON. */
+export const GIF_LABEL = "GIF";
+/** A message a person wrote: words or a GIF. The others are the Goblin and system lines. */
+function isPersonKind(kind: string): boolean {
+  return kind === "text" || kind === "gif";
+}
+/** The words for a message in a preview, quote or notice. A GIF is its label, not its JSON. */
+function plainText(kind: string, body: string): string {
+  return kind === "gif" ? GIF_LABEL : body;
+}
 /** Quick reactions, in the order the bar and the pills show them. */
 export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"] as const;
 const REACTION_NAMES_MAX = 10;
@@ -107,7 +119,7 @@ export async function routeChat(
   }
   if (pathname === "/api/circles/chat") {
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "", requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo, ask) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo, ask, body.gif) } };
   }
   const mute = /^\/api\/chats\/([^/]+)\/mute$/.exec(pathname);
   if (mute && method === "POST") {
@@ -131,13 +143,13 @@ export async function routeChat(
   if (social) {
     const id = decodeURIComponent(social[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo, ask) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo, ask, body.gif) } };
   }
   const plan = /^\/api\/plans\/([^/]+)\/chat$/.exec(pathname);
   if (plan) {
     const id = decodeURIComponent(plan[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id, requestedCircle) } };
-    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo, ask) } };
+    if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo, ask, body.gif) } };
   }
   return null;
 }
@@ -162,13 +174,13 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
          ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1`,
         row.id,
       );
-      const preview = last && last.kind === "text" ? last.body : last?.body || "";
+      const preview = last ? plainText(last.kind, last.body) : "";
       return {
         kind: row.kind,
         id: row.ref_id,
         unread: unreadCount(deps.db, row.id, userId),
         preview: preview.slice(0, 80),
-        previewBy: last && last.kind === "text" ? (last.name || "") : last?.kind === "goblin" ? GOBLIN_NAME : "",
+        previewBy: last && isPersonKind(last.kind) ? (last.name || "") : last?.kind === "goblin" ? GOBLIN_NAME : "",
       };
     }),
     unreadByCircle: unreadTotals(deps, userId),
@@ -216,17 +228,26 @@ export async function postThread(
   requestedCircle: string | null = null,
   replyRaw: unknown = null,
   ask: GoblinAsk = { appVersion: null, allow: () => true },
+  gifRaw: unknown = null,
 ): Promise<ReturnType<typeof threadPayload>> {
-  const text = cleanText(raw);
+  const gif = gifRaw == null ? null : pickGif(deps, gifRaw);
+  const text = gif ? GIF_LABEL : cleanText(raw);
   const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
   const parent = replyTarget(deps.db, access.chat.id, replyRaw);
   const now = deps.now();
   const id = crypto.randomUUID();
   deps.db.prepare(
-    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, reply_to) VALUES (?, ?, ?, ?, 'text', ?, ?)",
-  ).run(id, access.chat.id, userId, text, now, parent?.id ?? null);
+    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, access.chat.id, userId, gif ? gifBody(gif) : text, gif ? "gif" : "text", now, parent?.id ?? null);
   markRead(deps.db, access.chat.id, userId, now);
   markChatAlertsRead(deps.db, access.chat, userId, now);
+  if (gif) {
+    // A GIF names nobody and talks to nobody but the thread: no mentions, no Goblin. A reply still pings its author.
+    const pinged = new Set<string>();
+    if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, `sent a ${GIF_LABEL}`, parent.user_id, pinged)) pinged.add(author);
+    scheduleChatNotice(deps, access.chat.id, userId, userName, `sent a ${GIF_LABEL}`, pinged);
+    return threadPayload(deps, access, userId);
+  }
   const pinged = await notifyMentions(deps, access.chat, id, userId, userName, text);
   if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, text, parent.user_id, pinged)) pinged.add(author);
   const goblin = findMentions(text, [GOBLIN_NAME]);
@@ -243,7 +264,15 @@ export async function postThread(
   return threadPayload(deps, access, userId);
 }
 
-/** The message a new one replies to: a live text message in the same chat. Nothing set is no reply. */
+/** A GIF to send: only when GIFs are on, and only a well-formed Giphy one. Nothing else reaches the table. */
+function pickGif(deps: ChatDeps, raw: unknown) {
+  if (!deps.config.giphyApiKey) throw new ChatError(404, "not found");
+  const gif = cleanGif(raw);
+  if (!gif) throw new ChatError(400, "Pick a GIF from the list.");
+  return gif;
+}
+
+/** The message a new one replies to: a live text or GIF message in the same chat. Nothing set is no reply. */
 function replyTarget(db: DatabaseSync, chatId: string, raw: unknown): { id: string; user_id: string } | null {
   if (raw == null || raw === "") return null;
   if (typeof raw !== "string") throw new ChatError(400, "You can't reply to that.");
@@ -253,7 +282,7 @@ function replyTarget(db: DatabaseSync, chatId: string, raw: unknown): { id: stri
     raw,
   );
   if (!row || row.chat_id !== chatId || row.deleted_at != null) throw new ChatError(404, "message not found");
-  if (row.kind !== "text") throw new ChatError(400, "You can't reply to that.");
+  if (!isPersonKind(row.kind)) throw new ChatError(400, "You can't reply to that.");
   return { id: row.id, user_id: row.user_id };
 }
 
@@ -387,7 +416,7 @@ export function toggleReaction(deps: ChatDeps, userId: string, messageId: string
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
   if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
-  if (row.kind !== "text") throw new ChatError(400, "You can't react to that.");
+  if (!isPersonKind(row.kind)) throw new ChatError(400, "You can't react to that.");
   if (!chatAudience(deps.db, chat).some((member) => member.id === userId)) throw new ChatError(403, "You can't react in this chat.");
   const gone = on === true
     ? 0
@@ -401,7 +430,7 @@ export function toggleReaction(deps: ChatDeps, userId: string, messageId: string
   return {
     reactions: reactionsFor(deps.db, [row.id], userId).get(row.id) ?? [],
     // Set only when a reaction row was really inserted, so removals and repeats stay silent.
-    added: added ? { chat, emoji, authorId: row.user_id, text: row.body } : null,
+    added: added ? { chat, emoji, authorId: row.user_id, text: plainText(row.kind, row.body) } : null,
   };
 }
 
@@ -444,12 +473,12 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
     messageId,
   );
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
-  if (row.kind !== "text") throw new ChatError(403, "You can't delete that.");
+  if (!isPersonKind(row.kind)) throw new ChatError(403, "You can't delete that.");
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
   if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
   const host = chat.kind !== "circle" && chat.host_id === userId;
   const admin = isCircleAdmin(deps.db, chat.circle_id, userId);
-  const ownText = row.kind === "text" && row.user_id === userId;
+  const ownText = row.user_id === userId;
   if (!ownText && !host && !admin) throw new ChatError(403, "You can't delete that.");
   deps.db.prepare("UPDATE messages SET deleted_at = ? WHERE id = ?").run(deps.now(), row.id);
 }
@@ -667,7 +696,7 @@ export function chatAudience(db: DatabaseSync, chat: ChatRow): MemberRow[] {
   }
   const writers = all<{ user_id: string }>(
     db,
-    "SELECT DISTINCT user_id FROM messages WHERE chat_id = ? AND kind = 'text' AND deleted_at IS NULL",
+    "SELECT DISTINCT user_id FROM messages WHERE chat_id = ? AND kind IN ('text', 'gif') AND deleted_at IS NULL",
     chat.id,
   );
   for (const row of writers) {
@@ -689,7 +718,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   );
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
-  const reactions = reactionsFor(deps.db, messages.filter((message) => message.kind === "text").map((message) => message.id), userId);
+  const reactions = reactionsFor(deps.db, messages.filter((message) => isPersonKind(message.kind)).map((message) => message.id), userId);
   const quotes = quotesFor(deps.db, access.chat.id, messages, userId);
   return {
     id: access.chat.id,
@@ -702,13 +731,15 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     messages: messages.map((message) => ({
       id: message.id,
       name: message.kind === "goblin" ? GOBLIN_NAME : message.name,
-      text: message.body,
+      // A GIF's words are just "GIF", so a client that does not know GIFs never shows raw JSON.
+      text: plainText(message.kind, message.body),
+      gif: message.kind === "gif" ? readGifBody(message.body) : null,
       at: message.created_at,
       system: message.kind === "system",
       goblin: message.kind === "goblin",
       mine: message.kind !== "goblin" && message.user_id === userId,
-      color: message.kind === "text" ? colorHex(message.user_id, message.color) : message.kind === "goblin" ? GOBLIN_COLOR : null,
-      canDelete: message.kind === "text" && (message.user_id === userId || admin || host),
+      color: isPersonKind(message.kind) ? colorHex(message.user_id, message.color) : message.kind === "goblin" ? GOBLIN_COLOR : null,
+      canDelete: isPersonKind(message.kind) && (message.user_id === userId || admin || host),
       reactions: reactions.get(message.id) ?? [],
       replyTo: message.reply_to ? quotes.get(message.reply_to) ?? goneQuote(message.reply_to) : null,
     })),
@@ -733,9 +764,9 @@ function quotesFor(db: DatabaseSync, chatId: string, messages: MessageRow[], use
   const out = new Map<string, Quote>();
   const ids = [...new Set(messages.map((message) => message.reply_to).filter((id): id is string => Boolean(id)))];
   if (ids.length === 0) return out;
-  const rows = all<{ id: string; user_id: string; body: string; deleted_at: number | null; name: string | null; color: number | null }>(
+  const rows = all<{ id: string; user_id: string; body: string; kind: string; deleted_at: number | null; name: string | null; color: number | null }>(
     db,
-    `SELECT m.id, m.user_id, m.body, m.deleted_at, u.name, u.color FROM messages m LEFT JOIN users u ON u.id = m.user_id
+    `SELECT m.id, m.user_id, m.body, m.kind, m.deleted_at, u.name, u.color FROM messages m LEFT JOIN users u ON u.id = m.user_id
      WHERE m.chat_id = ? AND m.id IN (${ids.map(() => "?").join(", ")})`,
     chatId,
     ...ids,
@@ -745,7 +776,7 @@ function quotesFor(db: DatabaseSync, chatId: string, messages: MessageRow[], use
     out.set(row.id, {
       id: row.id,
       name: row.name || "",
-      text: deleted ? "" : row.body.replace(/\s+/g, " ").trim().slice(0, QUOTE_MAX),
+      text: deleted ? "" : plainText(row.kind, row.body).replace(/\s+/g, " ").trim().slice(0, QUOTE_MAX),
       mine: row.user_id === userId,
       deleted,
       color: deleted ? null : colorHex(row.user_id, row.color),

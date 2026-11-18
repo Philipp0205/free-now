@@ -6,6 +6,19 @@ import type { BrowserContext, Locator, Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openYou, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
+import type { GiphyFetch } from "../../src/chat/giphy.js";
+
+// A fake Giphy: the server never reaches api.giphy.com, and the browser gets mocked images (see desktop()).
+const fakeGiphy: GiphyFetch = async (url) => {
+  const q = new URL(url).searchParams.get("q");
+  const names = q ? [`${q} one`, `${q} two`] : ["Trending one", "Trending two", "Trending three"];
+  const data = names.map((title, index) => {
+    const id = `${q ? "s" : "t"}${index}`;
+    const image = (file: string, width: number, height: number) => ({ url: `https://media${index}.giphy.com/media/${id}/${file}`, width: String(width), height: String(height) });
+    return { id, title, images: { fixed_width: image("200w.gif", 200, 150), fixed_width_small: image("100w.gif", 100, 75) } };
+  });
+  return { ok: true, status: 200, json: async () => ({ data }) };
+};
 
 // Desktop smoke test, run by the desktop-chrome, desktop-firefox and desktop-webkit projects
 // (playwright.config.ts): 1440x900, mouse and keyboard only, prefers-color-scheme: light.
@@ -13,7 +26,21 @@ import { testEmail } from "../http.js";
 // Fake people and messages only. useHangry launches the browser that matches the project.
 const browserName = () => test.info().project.name.replace(/^desktop-/, "");
 const shotsDir = () => path.resolve("test/ui/screenshots/desktop-smoke", browserName());
-const hangry = useHangry({ tz: "UTC" });
+const hangry = useHangry({ tz: "UTC", env: { GIPHY_API_KEY: "test-giphy-key" }, giphyFetch: fakeGiphy });
+
+const GIF_IMAGE = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150"><rect width="200" height="150" fill="#ff4d8d"/><circle cx="100" cy="75" r="40" fill="#fff"/></svg>';
+
+/** Runs in the page: resolves once the image has pixels. WebKit reports a lazy image as complete before it starts loading, so poll. */
+const imageLoaded = (node: Element) => new Promise<void>((resolve, reject) => {
+  const image = node as HTMLImageElement;
+  const started = Date.now();
+  const check = () => {
+    if (image.naturalWidth > 0) resolve();
+    else if (Date.now() - started > 10_000) reject(new Error(`the GIF image did not load: ${image.currentSrc}`));
+    else setTimeout(check, 50);
+  };
+  check();
+});
 
 type Rgba = [number, number, number, number];
 type Pair = { fg: string; bg: string; bgImage: boolean; opacity: number };
@@ -29,12 +56,15 @@ async function desktop(token?: string): Promise<{ context: BrowserContext; page:
     isMobile: false,
     hasTouch: false,
     colorScheme: "light",
+    // Page routes do not see requests the app's service worker makes (WebKit), and the GIF images must never reach the network.
+    serviceWorkers: "block",
   });
   await skipWhatsNew(context);
   await context.addInitScript((value) => {
     if (value) localStorage.setItem("fn_token", value);
     localStorage.setItem("fn_install_later", String(Date.now()));
   }, token ?? "");
+  await context.route("https://*.giphy.com/**", (route) => route.fulfill({ status: 200, contentType: "image/svg+xml", body: GIF_IMAGE }));
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -473,7 +503,7 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await reactBar.waitFor();
     assert.deepEqual(
       await reactBar.locator(".react-row > button").evaluateAll((nodes) => nodes.map((node) => node.textContent)),
-      ["👍", "❤️", "😂", "😮", "😢", "🔥", "+"],
+      ["👍", "❤️", "😂", "😮", "😢", "🔥", "+", "GIF"],
     );
     await reactBar.getByRole("button", { name: "More emoji" }).click();
     const emojiPicker = partyRow.locator("emoji-picker");
@@ -506,6 +536,56 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await popperPill.click();
     assert.equal((await takenBack).status(), 200);
     await popperPill.waitFor({ state: "detached" });
+
+    // GIFs with a mouse: the composer button opens trending, a click sends one, Escape closes the sheet.
+    const gifSheet = page.getByRole("dialog", { name: "GIFs" });
+    await page.locator(".toast").waitFor({ state: "detached" });
+    const chatPost = () => page.waitForResponse((response) => /\/chat$/.test(response.url()) && response.request().method() === "POST");
+    await page.locator(".chat-compose").getByRole("button", { name: "Choose a GIF" }).click();
+    await gifSheet.waitFor();
+    const gifSearch = gifSheet.getByRole("searchbox", { name: "Search GIFs" });
+    assert.ok(await gifSearch.evaluate((node) => node === document.activeElement), "a mouse user can type at once");
+    await gifSheet.getByRole("button", { name: "Send GIF: Trending one" }).waitFor();
+    await gifSheet.getByText("Powered by GIPHY").waitFor();
+    const sheetBox = (await gifSheet.boundingBox())!;
+    assert.ok(sheetBox.x >= 0 && sheetBox.y >= 0 && sheetBox.y + sheetBox.height <= viewportHeight + 1, `the GIF sheet is inside the window: ${JSON.stringify(sheetBox)}`);
+    await gifSheet.locator(".gif-pick img").first().evaluate(imageLoaded);
+    await shot(page, "chat-gif-sheet");
+    await page.keyboard.press("Escape");
+    await gifSheet.waitFor({ state: "detached" });
+    assert.equal(await page.locator(".chat-screen").count(), 1, "Escape closes the sheet, not the chat");
+
+    await page.locator(".chat-compose").getByRole("button", { name: "Choose a GIF" }).click();
+    await gifSheet.waitFor();
+    await gifSearch.fill("cat");
+    const catGif = gifSheet.getByRole("button", { name: "Send GIF: cat one" });
+    await catGif.waitFor();
+    const gifSent = chatPost();
+    await catGif.click();
+    assert.equal((await gifSent).status(), 201);
+    await gifSheet.waitFor({ state: "detached" });
+    const sentGif = page.locator('.chat-msg.mine img[alt="GIF: cat one"]');
+    await sentGif.waitFor();
+    await sentGif.evaluate(imageLoaded);
+    await shot(page, "chat-gif-sent");
+
+    // From the bar of a message, a GIF answers that message.
+    const gifRow = page.locator(".chat-msg", { hasText: "Running 5 min late" });
+    await gifRow.hover();
+    await gifRow.getByRole("button", { name: "React" }).click();
+    await gifRow.locator(".react-bar").getByRole("button", { name: "React with a GIF" }).click();
+    await gifSheet.waitFor();
+    await gifSheet.getByText("Replying to Bea").waitFor();
+    const answered = chatPost();
+    await gifSheet.getByRole("button", { name: "Send GIF: Trending two" }).click();
+    const answer = await answered;
+    assert.equal(answer.status(), 201);
+    assert.ok(answer.request().postDataJSON().replyTo, "sent as a reply");
+    await gifSheet.waitFor({ state: "detached" });
+    const reply = page.locator(".chat-msg", { has: page.locator('img[alt="GIF: Trending two"]') });
+    await reply.locator(".chat-quote").getByText("Running 5 min late").waitFor();
+    await reply.locator(".chat-gif img").evaluate(imageLoaded);
+    await shot(page, "chat-gif-reply");
 
     assert.deepEqual(errors, [], "no page errors");
   } finally {
