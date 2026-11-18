@@ -337,6 +337,8 @@ function shell() {
   const phone = el("div", { class: "phone" });
   if (state.chat) {
     phone.append(chatScreen());
+    // The event details sheet opened from the chat title stacks on top of the chat.
+    if (state.sheet === "event-detail") phone.append(sheet());
     return phone;
   }
   if (state.past) {

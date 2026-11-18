@@ -57,7 +57,13 @@ function ChatScreen() {
       {status ? <p class="status-banner" role="status">{status}</p> : null}
       <header class="chat-head">
         <button class="text-btn chat-back" type="button" onClick={() => A.closeChat()}>Back</button>
-        <h1>{thread?.title || "Chat"}</h1>
+        {thread && thread.kind !== "circle" ? (
+          <h1>
+            <button class="chat-title" type="button" aria-label="Event details" onClick={() => A.openDetails()}>{thread.title || "Chat"}</button>
+          </h1>
+        ) : (
+          <h1>{thread?.title || "Chat"}</h1>
+        )}
         {thread ? (
           <button class="text-btn" type="button" onClick={() => { void A.toggleMute(); }}>{thread.muted ? "Unmute" : "Mute"}</button>
         ) : null}

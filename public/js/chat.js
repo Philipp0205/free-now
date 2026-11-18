@@ -7,6 +7,7 @@ import { render } from "./render.js";
 import { navigate } from "./native.js";
 import { chatTargetUrl, eventUnread, forgetOpenUnread, syncChatAlerts } from "./alerts.js";
 import { tick } from "./replies.js";
+import { openEventDetail } from "./event-sheets.js";
 import { copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { batch } from "@preact/signals";
 import {
@@ -571,9 +572,17 @@ function confirmDeleteMessage(message) {
   render();
 }
 
+/** The chat title opens the event's details sheet on top of the chat. A circle chat has none. */
+function openDetails() {
+  const target = state.chat;
+  if (!target || target.kind === "circle" || !target.id) return;
+  openEventDetail(target.kind, { id: target.id });
+}
+
 /** What the Preact view calls. Everything else in this file stays private to the chat. */
 const ACTIONS = {
   closeChat,
+  openDetails,
   toggleMute,
   onLogScroll: noteChatLogScroll,
   pressConsumed,
