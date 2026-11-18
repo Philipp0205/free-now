@@ -1109,7 +1109,7 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 }
 .react-row { display: flex; gap: 2px; }
-.react-pick {
+.react-pick, .react-more {
   width: 40px;
   height: 40px;
   border: 0;
@@ -1120,7 +1120,32 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
   padding: 0;
 }
 .react-pick.mine { background: color-mix(in srgb, var(--me, #8e8e93) 30%, transparent); }
-@media (hover: hover) { .react-pick:hover { background: #2c2c2e; } }
+@media (hover: hover) { .react-pick:hover, .react-more:hover { background: #2c2c2e; } }
+/* + opens the full emoji picker under the six quick ones. */
+.react-more { color: var(--muted); font-size: 24px; font-weight: 300; }
+.react-more[aria-expanded="true"] { background: #2c2c2e; color: var(--text); }
+.react-bar.picking { width: min(100%, 340px); }
+.react-picker { margin-top: 4px; border-top: 0.5px solid var(--hairline); }
+.react-picker emoji-picker {
+  width: 100%;
+  height: 300px;
+  --background: #1c1c1e;
+  --border-size: 0;
+  --border-color: #38383a;
+  --input-border-color: #48484a;
+  --input-font-color: var(--text);
+  --input-placeholder-color: #8e8e93;
+  /* 16px keeps iOS from zooming the page when the search box is focused. */
+  --input-font-size: 16px;
+  --button-hover-background: #2c2c2e;
+  --button-active-background: #3a3a3c;
+  --category-font-color: #8e8e93;
+  --indicator-color: #0a84ff;
+  --outline-color: #0a84ff;
+  --emoji-size: 1.375rem;
+  --emoji-padding: 0.4rem;
+  --num-columns: 7;
+}
 .chat-reacts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0; }
 .react-pill {
   display: inline-flex;

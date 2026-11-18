@@ -374,6 +374,48 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await shot(page, "chat-copied");
     assert.equal(await page.evaluate(() => window.getSelection()?.toString() ?? ""), "", "Copy leaves no selection");
 
+    // Any emoji with a mouse: React button, +, search in the picker, click a non-quick emoji, and a pill appears.
+    const partyRow = page.locator(".chat-msg", { hasText: "Running 5 min late" });
+    await partyRow.hover();
+    await partyRow.getByRole("button", { name: "React" }).click();
+    const reactBar = partyRow.locator(".react-bar");
+    await reactBar.waitFor();
+    assert.deepEqual(
+      await reactBar.locator(".react-row > button").evaluateAll((nodes) => nodes.map((node) => node.textContent)),
+      ["👍", "❤️", "😂", "😮", "😢", "🔥", "+"],
+    );
+    await reactBar.getByRole("button", { name: "More emoji" }).click();
+    const emojiPicker = partyRow.locator("emoji-picker");
+    const emojiSearch = emojiPicker.locator("input.search");
+    await emojiSearch.waitFor();
+    await emojiPicker.locator('button.emoji[role="menuitem"]').first().waitFor({ timeout: 30_000 });
+    assert.ok((await emojiPicker.locator('button[role="tab"]').count()) >= 8, "the picker has category tabs");
+    assert.equal(
+      await emojiPicker.evaluate((node) => getComputedStyle(node.shadowRoot!.querySelector(".picker")!).backgroundColor),
+      "rgb(28, 28, 30)",
+      "the picker is dark on a light OS",
+    );
+    await shot(page, "chat-picker");
+    await emojiSearch.fill("party popper");
+    const partyPopper = emojiPicker.locator('button.emoji[aria-label*="party popper"]').first();
+    await partyPopper.waitFor({ timeout: 15_000 });
+    await shot(page, "chat-picker-search");
+    const reacted = page.waitForResponse((response) => response.url().includes("/reactions") && response.request().method() === "POST");
+    await partyPopper.click();
+    assert.equal((await reacted).status(), 200);
+    await reactBar.waitFor({ state: "detached" });
+    const popperPill = partyRow.locator('.react-pill[data-emoji="🎉"]');
+    await popperPill.waitFor();
+    assert.equal(await popperPill.locator(".react-count").textContent(), "1");
+    assert.equal(await popperPill.getAttribute("aria-pressed"), "true", "the pill is mine");
+    assert.equal(await page.evaluate(() => window.getSelection()?.toString() ?? ""), "", "the picker leaves no selection");
+    await shot(page, "chat-picker-pill");
+    // Taking it back with a click on the pill.
+    const takenBack = page.waitForResponse((response) => response.url().includes("/reactions") && response.request().method() === "POST");
+    await popperPill.click();
+    assert.equal((await takenBack).status(), 200);
+    await popperPill.waitFor({ state: "detached" });
+
     assert.deepEqual(errors, [], "no page errors");
   } finally {
     await context.close();
