@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA as CHROME_UA, openEventsMap, useHangry } from "./harness.js";
+import { SIZES, UA as CHROME_UA, openEventsMap, useHangry, waitForEventChat } from "./harness.js";
 import { testEmail } from "../http.js";
 const SHOT_DIR = process.env.HANG_SHOT_DIR || "/workspace/hangry-shots/card-a";
 
@@ -210,7 +210,7 @@ test("chat row opens chat with badge; card body opens details with Remove and De
       await card.locator(".chat-row .badge").waitFor({ timeout: 10_000 });
       await page.screenshot({ path: shot(`chat-row-w${width}.png`) });
       await card.locator(".chat-row").click();
-      await page.getByRole("heading", { name: "Board games" }).waitFor();
+      await waitForEventChat(page, "Board games");
       await page.getByText("Bring speakers?").first().waitFor();
       await page.getByRole("button", { name: "Back" }).click();
 

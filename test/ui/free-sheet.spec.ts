@@ -5,7 +5,7 @@ import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { UA as CHROME_UA, openYouSection, testEmail, useHangry } from "./harness.js";
+import { UA as CHROME_UA, openYouSection, testEmail, useHangry, waitForEventChat } from "./harness.js";
 
 const SHOT_DIR = process.env.HANG_SHOT_DIR || path.join(process.cwd(), "test-results");
 
@@ -247,10 +247,11 @@ test("pick time keeps a one-tap I'm in and can set an arrival clock", { timeout:
     await viewer.screenshot({ path: shot("free-arrive-before.png") });
     const field = viewer.locator("#arrival-time");
     await field.waitFor();
+    // Five minutes ahead, wrapping past 23:59, so the arrival is never in the past.
     const placed = await field.evaluate((input) => {
       const [hour, minute] = (input as HTMLInputElement).value.split(":").map(Number);
-      const nextMinute = minute === 59 ? 58 : minute + 1;
-      const value = `${String(hour).padStart(2, "0")}:${String(nextMinute).padStart(2, "0")}`;
+      const total = (hour * 60 + minute + 5) % (24 * 60);
+      const value = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
       (input as HTMLInputElement).value = value;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       return {
@@ -1578,7 +1579,7 @@ test("a chat thread stays above the keyboard", { timeout: 90_000 }, async () => 
       const height = await chat.evaluate((node) => Math.round(node.getBoundingClientRect().height));
       assert.ok(height >= 44, `chat is ${height}px`);
       await chat.click();
-      await page.getByRole("heading", { name: "Coffee" }).waitFor();
+      await waitForEventChat(page, "Coffee");
       await page.locator("#chat-input").fill("See you there");
       await page.getByRole("button", { name: "Send" }).click();
       await page.getByText("See you there").waitFor();

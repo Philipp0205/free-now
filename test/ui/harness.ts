@@ -36,6 +36,15 @@ export async function openYouSection(page: Page, title: string): Promise<void> {
   await page.getByRole("heading", { name: title, exact: true, level: 1 }).waitFor();
 }
 
+/**
+ * Waits for an open plan or social chat to show the event title. That title is a button (aria-label "Event details")
+ * inside the h1, so the heading's accessible name is not the title and getByRole("heading", { name: title }) never matches.
+ */
+export async function waitForEventChat(page: Page, title: string): Promise<void> {
+  await page.locator(".chat-screen .chat-title", { hasText: title }).waitFor();
+  await page.locator("#chat-input").waitFor();
+}
+
 /** The three phone sizes we check UI at. */
 export const SIZES = [[320, 568], [360, 640], [412, 915]] as const;
 
