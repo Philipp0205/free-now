@@ -1,4 +1,8 @@
-/** Native-feel glue over the app kit: large titles and screen transitions. Both do nothing when the kit is missing. */
+/** Native-feel glue over the app kit: large titles, pull to refresh and screen transitions. All do nothing when the kit is missing. */
+
+import { state } from "./state.js";
+import { sheetIsOpen } from "./sheets.js";
+import { refresh } from "./session.js";
 
 let titleBinding = null;
 
@@ -30,4 +34,29 @@ export function bindLargeTitle() {
   if (!title || !navbar) return;
   navbar.classList.toggle("ak-collapsed", title.getBoundingClientRect().bottom <= navbar.offsetHeight + 1);
   titleBinding = window.AppKit?.largeTitle?.(title, { navbar }) ?? null;
+}
+
+let pullBinding = null;
+
+/** A main tab page (Now, Events calendar, Circle, You) is showing with nothing over it. */
+function pullIsEligible() {
+  if (state.chat || state.past || sheetIsOpen()) return false;
+  const page = document.querySelector("[data-page]")?.dataset.page;
+  if (!page || page !== state.tab) return false;
+  if (page === "map") return state.eventsView !== "map";
+  return page === "home" || page === "circle" || page === "you";
+}
+
+/**
+ * Pull down at the top of a main tab page to run the app's refresh. One binding is kept across redraws (render()
+ * runs often, even mid-pull) and dropped only when the page stops being eligible: chat, the map, a sheet, signed out.
+ */
+export function bindPullToRefresh() {
+  if (!pullIsEligible()) {
+    pullBinding?.destroy();
+    pullBinding = null;
+    return;
+  }
+  if (pullBinding || typeof window.AppKit?.pullToRefresh !== "function") return;
+  pullBinding = window.AppKit.pullToRefresh({ onRefresh: () => refresh() });
 }

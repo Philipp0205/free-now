@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Locator, Page } from "playwright-core";
 import type { PushPayload, PushSender, PushSubscription } from "../../src/push/push.js";
+import { flushChatNotices } from "../../src/chat/chat.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { openPlanSheet } from "./plan-sheet.js";
 import { UA, useHangry } from "./harness.js";
@@ -215,6 +216,8 @@ for (const [width, height] of SIZES) {
     assert.equal(newPlanPushes(start, ends.ben, planId).length, 1);
 
     // Ana unchecks Climbing. Quietly: no push to anyone.
+    // Chat notices are batched; flush them so that timer cannot fire in the quiet window.
+    await flushChatNotices(true);
     const anaAgain = await phone(width, height, ana.token, friends.id);
     try {
       const page = anaAgain.page;

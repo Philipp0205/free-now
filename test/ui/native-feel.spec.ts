@@ -81,8 +81,24 @@ test("html wears ak-native and ak-no-bounce, the kit files load, and inputs stay
       }));
       assert.ok(root.classes.includes("ak-native"), `${width}: ak-native`);
       assert.ok(root.classes.includes("ak-no-bounce"), `${width}: ak-no-bounce`);
-      assert.equal(root.overscroll, "none");
+      // Pull to refresh is bound on Now: the kit sets overscroll-behavior-y: contain on the page scroller.
+      assert.equal(root.overscroll, "contain", `${width}: scroller while pull to refresh is bound`);
       assert.equal(root.bodyOverscroll, "none");
+      const overscroll = () => page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY);
+      // A sheet open: the binding is destroyed, ak-no-bounce is back in charge. Closing it binds again.
+      await page.getByRole("button", { name: "Let friends know you're free now" }).tap();
+      await page.locator(".sheet").waitFor();
+      assert.equal(await overscroll(), "none", `${width}: none while a sheet is open`);
+      await page.locator(".scrim").tap({ position: { x: 5, y: 5 } });
+      await page.locator(".sheet").waitFor({ state: "detached" });
+      assert.equal(await overscroll(), "contain", `${width}: contain again once the sheet closes`);
+      // Chat is a pushed screen: no binding.
+      await tab(page, "Chat").tap();
+      await page.locator(".chat-screen").waitFor();
+      assert.equal(await overscroll(), "none", `${width}: none in chat`);
+      await page.locator(".chat-back").tap();
+      await page.locator(".chat-screen").waitFor({ state: "detached" });
+      assert.equal(await overscroll(), "contain", `${width}: contain back on Now`);
       assert.equal(root.scroll, "function", "AppKit.scroll.toTop comes from ak-native.js");
       assert.ok(root.sheets.some((href) => href.endsWith("/app-kit/ak-native.css")), "ak-native.css is linked");
       const sheetOrder = root.sheets.map((href) => href.split("/").pop());
