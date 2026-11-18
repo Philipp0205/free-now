@@ -18,7 +18,7 @@ import { TIME_LATER_ERROR } from "./composer.js";
 import { sharePreviewScreen } from "./plan-share.js";
 import { el, field, icon } from "./lib.js";
 import { bindSheetSwipe, onTab, syncOverlayHistory } from "./nav.js";
-import { bindLargeTitle } from "./native.js";
+import { bindLargeTitle, bindPullToRefresh } from "./native.js";
 import { onCreateCircle, onJoinCircle } from "./circles.js";
 import { accountNotices, emailField, emailGate, linkScreen, lostCodeForm, needsEmail } from "./account.js";
 
@@ -98,6 +98,7 @@ export function render() {
     document.scrollingElement.scrollTop = switched ? tabY.get(state.tab) ?? 0 : y;
   }
   bindLargeTitle();
+  bindPullToRefresh();
   anchorOpenSheet();
   bindSheetSwipe();
   liftSheetToast();

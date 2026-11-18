@@ -222,6 +222,20 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     assert.ok(luminance(over(navbar, [255, 255, 255, 1])) < 0.2, `the tab bar is dark even over a light page, got ${navbar}`);
     await shot(page, "now");
 
+    // The kit's pull to refresh is touch only: a mouse drag down from the top of Now starts nothing and leaves no spinner.
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains("ak-no-bounce")), true, "html keeps ak-no-bounce");
+    assert.equal(await page.evaluate(() => document.scrollingElement!.scrollTop), 0);
+    await page.mouse.move(720, 120);
+    await page.mouse.down();
+    await page.mouse.move(720, 200, { steps: 4 });
+    await page.mouse.move(720, 340, { steps: 6 });
+    assert.equal(await page.locator(".ak-ptr.ak-ptr-pulling, .ak-ptr.ak-ptr-loading").count(), 0, "a mouse drag does not pull");
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator(".ak-ptr-loading").count(), 0, "no stuck refresh spinner after a mouse drag");
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains("ak-no-bounce")), true);
+    await page.mouse.move(5, 5);
+
     // Event details open at full height with a mouse: not stuck at the half stop.
     await page.locator("article h3", { hasText: "Climbing" }).click();
     const details = page.getByRole("dialog", { name: "Details" });

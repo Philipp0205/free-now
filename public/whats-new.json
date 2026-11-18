@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-18-pull-to-refresh",
+    "date": "2026-11-18",
+    "title": "Pull down to refresh",
+    "bullets": [
+      "Pull the Now, Events, Circle and You tabs down from the top to refresh them.",
+      "It works only at the top of the page, so scrolling a long list stays as it was."
+    ]
+  },
+  {
     "id": "2026-11-18-any-emoji",
     "date": "2026-11-18",
     "title": "React with any emoji in chat",

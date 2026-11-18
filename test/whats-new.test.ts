@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v114 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v115 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v114");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v115");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -664,9 +664,22 @@ test("the build label is hangry-v114 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the any emoji entry is the newest, in plain words without an em dash, and the links and copy entry is kept", () => {
+test("the pull to refresh entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-18-any-emoji");
+  assert.equal(top.id, "2026-11-18-pull-to-refresh");
+  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
+  assert.equal(top.date, "2026-11-18");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(top.bullets.join(" "), /pull/i);
+  for (const tab of ["Now", "Events", "Circle", "You"]) assert.match(top.bullets.join(" "), new RegExp(`\\b${tab}\\b`));
+});
+
+test("the any emoji entry is kept, in plain words without an em dash", () => {
+  const top = RAW.find((item) => item.id === "2026-11-18-any-emoji");
+  assert.ok(top, "the any emoji entry is kept");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-18");
   assert.ok(top.title.length <= 60);
@@ -675,12 +688,11 @@ test("the any emoji entry is the newest, in plain words without an em dash, and 
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
   assert.match(top.bullets.join(" "), /any emoji/i);
   assert.match(top.bullets.join(" "), /search/i);
-  assert.ok(RAW.some((item) => item.id === "2026-11-18-chat-links-copy"), "older entry is kept");
 });
 
 test("the chat links and copy entry is kept, in plain words without an em dash", () => {
-  const top = RAW.find((item) => item.id === "2026-11-18-chat-links-copy")!;
-  assert.ok(top, "links and copy entry");
+  const top = RAW.find((item) => item.id === "2026-11-18-chat-links-copy");
+  assert.ok(top, "the chat links and copy entry is kept");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-18");
   assert.ok(top.title.length <= 60);
