@@ -31,9 +31,8 @@ function over(fg: Rgb, alpha: number, bg: Rgb): Rgb {
   return fg.map((v, i) => v * alpha + bg[i] * (1 - alpha)) as Rgb;
 }
 
-/** Palette stops, read straight from styles.css. Hangry is always dark, so there is only one set. */
+/** Palette stops, read straight from styles.css. Plan cards are dark art in both schemes, so there is only one set. */
 function stops(): Rgb[][] {
-  assert.ok(!CSS.includes("prefers-color-scheme: light"), "styles.css has no light-scheme rules");
   const start = CSS.indexOf("/* Plan colours");
   assert.ok(start > 0, "plan colours block");
   const out: Rgb[][] = [];

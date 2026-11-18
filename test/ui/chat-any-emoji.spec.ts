@@ -82,7 +82,7 @@ for (const [width, height] of SIZES) {
       assert.ok(barBox.x >= 0 && barBox.x + barBox.width <= width, `the bar fits the screen: ${JSON.stringify(barBox)}`);
       await shot("bar");
 
-      // Open the picker with +. It has a search box and category tabs, and it is dark.
+      // Open the picker with +. It has a search box and category tabs, and it follows the OS scheme.
       await bar.getByRole("button", { name: "More emoji" }).tap();
       const picker = row.locator("emoji-picker");
       await picker.waitFor();
@@ -94,7 +94,8 @@ for (const [width, height] of SIZES) {
       const pickerBox = (await picker.boundingBox())!;
       assert.ok(pickerBox.x >= 0 && pickerBox.x + pickerBox.width <= width + 0.5, `the picker fits the screen: ${JSON.stringify(pickerBox)}`);
       const background = await picker.evaluate((node) => getComputedStyle(node.shadowRoot!.querySelector(".picker")!).backgroundColor);
-      assert.equal(background, "rgb(28, 28, 30)", "dark picker");
+      // The context has no colour scheme set, so Playwright gives it a light OS: the picker takes our light surface.
+      assert.equal(background, "rgb(242, 242, 247)", "light picker on a light OS");
       assert.equal(await page.evaluate(() => document.querySelector(".chat-log")!.scrollWidth <= document.querySelector(".chat-log")!.clientWidth), true, "no sideways scroll");
       await shot("picker");
 

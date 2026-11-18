@@ -22,7 +22,8 @@ const fakeGiphy: GiphyFetch = async (url) => {
 
 // Desktop smoke test, run by the desktop-chrome, desktop-firefox and desktop-webkit projects
 // (playwright.config.ts): 1440x900, mouse and keyboard only, prefers-color-scheme: light.
-// Hangry must still render its dark look and every screen must be usable with a mouse.
+// Hangry follows the OS, so a light desktop gets the light look, and every screen must be readable
+// and usable with a mouse. Plan cards and the map card stay dark art in both schemes.
 // Fake people and messages only. useHangry launches the browser that matches the project.
 const browserName = () => test.info().project.name.replace(/^desktop-/, "");
 const shotsDir = () => path.resolve("test/ui/screenshots/desktop-smoke", browserName());
@@ -124,8 +125,8 @@ async function colours(page: Page, selector: string): Promise<{ fg: Rgba; bg: Rg
     return { fg: getComputedStyle(node).color, bg: JSON.stringify(layers), bgImage, opacity };
   });
   assert.equal(found.opacity, 1, `${selector} is fully opaque once settled, got ${found.opacity}`);
-  // Paint from the page colour (opaque black canvas is what a dark scheme gets) up to the node.
-  let bg: Rgba = [0, 0, 0, 1];
+  // Paint from the page colour (opaque white canvas is what a light scheme gets) up to the node.
+  let bg: Rgba = [255, 255, 255, 1];
   for (const layer of (JSON.parse(found.bg) as string[]).reverse()) bg = over(parse(layer), bg);
   return { fg: over(parse(found.fg), bg), bg, bgImage: found.bgImage };
 }
@@ -190,7 +191,7 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(shotsDir(), `${name}.png`) });
 }
 
-test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop", { timeout: 150_000 }, async () => {
+test("a light OS gets the readable, mouse-friendly light Hangry on desktop", { timeout: 150_000 }, async () => {
   const viewportHeight = 900;
   const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const { circle } = await post("/api/circles", { name: "Friends" }, alex.token);
@@ -217,7 +218,7 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await out.page.goto(hangry.baseUrl);
     const button = out.page.getByRole("button", { name: "Continue" });
     await button.waitFor();
-    assert.equal(await out.page.locator("html").getAttribute("data-ak-scheme"), "dark");
+    assert.equal(await out.page.locator("html").getAttribute("data-ak-scheme"), null, "the page does not force a scheme");
     const body = parse(await out.page.evaluate(() => getComputedStyle(document.body).backgroundColor));
     const fill = parse(await button.evaluate((node) => getComputedStyle(node).backgroundColor));
     assert.ok(fill[3] > 0.9, `Continue has a solid fill, got alpha ${fill[3]}`);
@@ -233,17 +234,17 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
   try {
     await page.goto(hangry.baseUrl);
     await page.locator(".tabbar").waitFor();
-    assert.equal(await page.locator("html").getAttribute("data-ak-scheme"), "dark");
+    assert.equal(await page.locator("html").getAttribute("data-ak-scheme"), null, "the page does not force a scheme");
     const body = parse(await page.evaluate(() => getComputedStyle(document.body).backgroundColor));
-    assert.ok(luminance(body) < 0.05, `body is dark, got ${body}`);
+    assert.ok(luminance(body) > 0.9, `body is light, got ${body}`);
     assert.equal(await page.evaluate(() => matchMedia("(prefers-color-scheme: light)").matches), true, "the OS really is light");
     const themeColors = await page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map((meta) => meta.getAttribute("content")));
-    assert.ok(themeColors.length > 0 && themeColors.every((value) => value === "#000000"), `dark theme colour, got ${themeColors}`);
+    assert.ok(themeColors.length > 0 && themeColors.every((value) => value === "#ffffff"), `light theme colour, got ${themeColors}`);
     assert.equal(await page.evaluate(() => matchMedia("(hover: hover) and (pointer: fine)").matches), true, "a mouse, so the desktop rules apply");
 
     const tabs = page.locator(".tabbar");
 
-    // Now: every card title is readable on its card, and the tab bar is dark.
+    // Now: every card title is readable on its card (cards stay dark art), and the tab bar is light.
     await page.locator("article h3", { hasText: "Ramen" }).waitFor();
     await page.locator("article h3", { hasText: "Climbing" }).waitFor();
     const titles = page.locator("article.card h3");
@@ -253,7 +254,7 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
       await assertContrastOverPaint(page, titles.nth(n), `Now card title ${n}`);
     }
     const navbar = parse(await page.locator(".tabbar").evaluate((node) => getComputedStyle(node).backgroundColor));
-    assert.ok(luminance(over(navbar, [255, 255, 255, 1])) < 0.2, `the tab bar is dark even over a light page, got ${navbar}`);
+    assert.ok(luminance(over(navbar, [255, 255, 255, 1])) > 0.8, `the tab bar is light on a light page, got ${navbar}`);
     await shot(page, "now");
 
     // The kit's pull to refresh is touch only: a mouse drag down from the top of Now starts nothing and leaves no spinner.
@@ -422,7 +423,7 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await assertContrast(page, ".chat-msg.goblin p", "Goblin message body");
     await assertContrast(page, ".chat-msg.mine header strong", "Own message name");
     const chatBg = parse(await screen.evaluate((node) => getComputedStyle(node).backgroundColor));
-    assert.ok(luminance(chatBg) < 0.05, `the chat screen is dark, got ${chatBg}`);
+    assert.ok(luminance(chatBg) > 0.9, `the chat screen is light, got ${chatBg}`);
 
     // Delete shows only while the mouse is over the row, or the button has keyboard focus.
     const mine = page.locator(".chat-msg.mine", { hasText: "On my way, save me a seat" });
@@ -513,8 +514,8 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     assert.ok((await emojiPicker.locator('button[role="tab"]').count()) >= 8, "the picker has category tabs");
     assert.equal(
       await emojiPicker.evaluate((node) => getComputedStyle(node.shadowRoot!.querySelector(".picker")!).backgroundColor),
-      "rgb(28, 28, 30)",
-      "the picker is dark on a light OS",
+      "rgb(242, 242, 247)",
+      "the picker is light on a light OS",
     );
     await shot(page, "chat-picker");
     await emojiSearch.fill("party popper");
