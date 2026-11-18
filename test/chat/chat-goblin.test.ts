@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { FEEDBACK_LIMIT } from "../../src/admin/feedback.js";
-import { GOBLIN_LINES, gripeText } from "../../src/chat/goblin.js";
+import { GOBLIN_LINES, goblinLine, gripeText } from "../../src/chat/goblin.js";
 import { api, withApp, type AppCtx, type SentPush, testEmail } from "../http.js";
 
 // Fake people only. Push goes to a recorder, the db is in memory.
@@ -256,8 +256,21 @@ test("the Goblin's lists are non-empty, short and free of em dashes", () => {
       assert.ok(!/gripe\s+goblin/i.test(line), line);
     }
   }
-  assert.ok(GOBLIN_LINES.received.length >= 8);
+  assert.ok(GOBLIN_LINES.received.length >= 16);
   assert.ok(GOBLIN_LINES.received.includes("*clanking away* 🔨 got it, the goblin is on it"));
   assert.ok(GOBLIN_LINES.received.includes("Gripe swallowed. Digesting into a fix..."));
   assert.ok(GOBLIN_LINES.received.some((line) => line.includes("clanking away")));
 });
+
+test("goblinLine never hands out the same line twice in a row", () => {
+  for (const kind of ["received", "empty", "full"] as const) {
+    let previous = goblinLine(kind);
+    for (let i = 0; i < 200; i += 1) {
+      const next = goblinLine(kind);
+      assert.notEqual(next, previous, kind);
+      assert.ok((GOBLIN_LINES[kind] as readonly string[]).includes(next), next);
+      previous = next;
+    }
+  }
+});
+

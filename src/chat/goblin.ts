@@ -24,22 +24,44 @@ export const GOBLIN_LINES = {
     "The goblin stuffed your gripe in its hat. Safe and grumbling.",
     "*sharpening tiny wrench* consider it handled.",
     "Ooh, a fresh gripe. The goblin is gnawing on it now.",
+    "*tiny hammer tapping* Your gripe is in the queue, boss.",
+    "Gripe stashed under the goblin's hat. Pretending it is not there.",
+    "The goblin nibbles the gripe like cold ramen. Bitter, but filed.",
+    "*clank* Tiny wrench up. The gripe is getting a proper look.",
+    "The goblin wrote it on a napkin and tucked it in its pocket.",
+    "The goblin will fix it before the tacos get cold. Probably.",
+    "The goblin hauls your gripe to the rock pile. Heavy stuff.",
+    "The goblin sets your gripe on the table, next to the leftovers.",
   ],
   empty: [
     "Yes? The goblin is listening. What is wrong?",
     "You summoned the goblin and then said nothing. What is the gripe?",
     "The goblin pokes you with a stick. What is bothering you?",
+    "*pokes the table with a tiny fork* Say something, or the goblin naps.",
+    "The goblin is hungry for a gripe. Feed it, ideally one with words.",
+    "*clank* Goblin is here, hat on, rock ready. What is up?",
   ],
   full: [
     "The goblin is full. Too many gripes, try again later.",
     "Burp. The goblin cannot eat another gripe right now. Try later.",
+    "The goblin's hat is stuffed. Come back once it has room.",
+    "*wheezes* Too many gripes in the goblin's belly. Later, friend.",
   ],
 } as const;
 
-/** One line of the list, at random. */
-export function goblinLine(kind: keyof typeof GOBLIN_LINES): string {
-  const lines = GOBLIN_LINES[kind];
-  return lines[crypto.randomInt(lines.length)];
+export type GoblinKind = keyof typeof GOBLIN_LINES;
+
+/** The last line given for each kind, so the same line is not handed out twice in a row. */
+const lastGiven: Partial<Record<GoblinKind, string>> = {};
+
+/** One line of the list, at random, never the same one as last time when the list has a choice. */
+export function goblinLine(kind: GoblinKind): string {
+  const lines: readonly string[] = GOBLIN_LINES[kind];
+  const last = lastGiven[kind];
+  const pool = lines.length > 1 && last !== undefined ? lines.filter((line) => line !== last) : lines;
+  const line = pool[crypto.randomInt(pool.length)];
+  lastGiven[kind] = line;
+  return line;
 }
 
 /** The message with the @Goblin mentions (from findMentions) taken out. */

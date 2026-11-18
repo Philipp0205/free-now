@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v118 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v119 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v118");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v119");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -664,19 +664,31 @@ test("the build label is hangry-v118 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the GIF entry is the newest, in plain words without an em dash", () => {
+test("the Goblin more-lines entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-18-gif-reactions");
+  assert.equal(top.id, "2026-11-18-more-goblin-lines");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-18");
   assert.ok(top.title.length <= 60);
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
-  assert.match(top.bullets.join(" "), /GIF/);
-  assert.match(top.bullets.join(" "), /reaction bar/i);
-  assert.match(top.bullets.join(" "), /Giphy/);
+  assert.match(top.bullets.join(" "), /@Goblin in chat/);
+  assert.ok(RAW.some((item) => item.id === "2026-11-18-gif-reactions"), "the GIF entry is kept");
 });
+
+test("the GIF entry is kept, in plain words without an em dash", () => {
+  const gif = RAW.find((item) => item.id === "2026-11-18-gif-reactions")!;
+  assert.ok(gif, "GIF entry");
+  assert.equal(gif.date, "2026-11-18");
+  assert.equal(gif.title, "Send GIFs in chat");
+  for (const text of [gif.title, ...gif.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of gif.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(gif.bullets.join(" "), /GIF/);
+  assert.match(gif.bullets.join(" "), /reaction bar/i);
+  assert.match(gif.bullets.join(" "), /Giphy/);
+});
+
 
 test("the event payments entry is kept, in plain words without an em dash", () => {
   const top = RAW.find((item) => item.id === "2026-11-18-event-payments");
