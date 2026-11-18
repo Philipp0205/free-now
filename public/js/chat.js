@@ -7,7 +7,7 @@ import { render } from "./render.js";
 import { navigate } from "./native.js";
 import { chatTargetUrl, eventUnread, forgetOpenUnread, syncChatAlerts } from "./alerts.js";
 import { tick } from "./replies.js";
-import { el, icon, run, scheduleErrorClear } from "./lib.js";
+import { copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { batch } from "@preact/signals";
 import {
   bumpThread,
@@ -388,6 +388,14 @@ export function closeReactUi() {
   return true;
 }
 
+/** Copy from the bar: the plain message text goes to the clipboard and a short toast says so. */
+function copyMessage(message) {
+  tick();
+  put({ chatReactFor: null, chatWho: null });
+  repaint();
+  void copyText(message.text, "Copied");
+}
+
 async function reactTo(messageId, emoji) {
   const thread = state.chatThread;
   const message = thread?.messages?.find((item) => item.id === messageId);
@@ -553,6 +561,7 @@ const ACTIONS = {
   rowCancel,
   rowMenu,
   openReactionBar,
+  copyMessage,
   confirmDelete: confirmDeleteMessage,
   send: sendChat,
   onInput,

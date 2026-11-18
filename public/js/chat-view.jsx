@@ -1,5 +1,6 @@
 import { render } from "preact";
 import { findMentions, GOBLIN, REACTIONS } from "./mentions.js";
+import { messageParts } from "./links.js";
 import { clockText, zonedParts } from "./when.js";
 import { ICONS } from "./lib.js";
 import {
@@ -104,7 +105,7 @@ function SystemLine({ message }) {
   );
 }
 
-/** Message text with each @Name of someone in the chat in their colour. Yours is a little stronger. */
+/** Message text with each @Name of someone in the chat in their colour, and http(s) links. Yours is a little stronger. */
 function MessageText({ text }) {
   const { thread } = chatThread.value;
   const colors = new Map();
@@ -112,20 +113,34 @@ function MessageText({ text }) {
   for (const person of thread?.participants || []) colors.set(person.name.toLowerCase(), person.color);
   colors.set(GOBLIN.name.toLowerCase(), GOBLIN.color);
   const hits = findMentions(text, [...colors.keys()]);
-  if (!hits.length) return <p>{text}</p>;
+  const pieces = messageParts(text, hits);
+  if (pieces.length === 1 && pieces[0].type === "text") return <p>{text}</p>;
   const me = chatMeName.value.trim().toLowerCase();
-  const parts = [];
-  let at = 0;
-  for (const hit of hits) {
-    if (hit.start > at) parts.push(text.slice(at, hit.start));
-    const key = hit.name.toLowerCase();
-    parts.push(
-      <span class={key === me ? "mention me" : "mention"} style={`--person:${colors.get(key)}`}>{text.slice(hit.start, hit.end)}</span>,
-    );
-    at = hit.end;
-  }
-  if (at < text.length) parts.push(text.slice(at));
-  return <p>{parts}</p>;
+  // Text nodes and <a> children only: the message is never parsed as HTML.
+  return (
+    <p>
+      {pieces.map((piece) => {
+        if (piece.type === "link") {
+          return (
+            <a
+              href={piece.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (A.pressConsumed()) event.preventDefault();
+              }}
+            >{piece.text}</a>
+          );
+        }
+        if (piece.type === "mention") {
+          const key = piece.name.toLowerCase();
+          return <span class={key === me ? "mention me" : "mention"} style={`--person:${colors.get(key)}`}>{piece.text}</span>;
+        }
+        return piece.text;
+      })}
+    </p>
+  );
 }
 
 function Quote({ quote }) {
@@ -149,27 +164,37 @@ function Quote({ quote }) {
 function ReactionBar({ message, replyable }) {
   return (
     <div class="react-bar" role="toolbar" aria-label="React">
-      {REACTIONS.map((emoji) => {
-        const mine = (message.reactions || []).some((item) => item.emoji === emoji && item.mine);
-        return (
+      <div class="react-row">
+        {REACTIONS.map((emoji) => {
+          const mine = (message.reactions || []).some((item) => item.emoji === emoji && item.mine);
+          return (
+            <button
+              key={emoji}
+              class={mine ? "react-pick mine" : "react-pick"}
+              type="button"
+              aria-label={`React ${emoji}`}
+              aria-pressed={mine ? "true" : "false"}
+              onClick={() => { if (!A.pressConsumed()) void A.reactTo(message.id, emoji); }}
+            >{emoji}</button>
+          );
+        })}
+      </div>
+      <div class="react-actions">
+        {replyable ? (
           <button
-            key={emoji}
-            class={mine ? "react-pick mine" : "react-pick"}
+            class="react-reply"
             type="button"
-            aria-label={`React ${emoji}`}
-            aria-pressed={mine ? "true" : "false"}
-            onClick={() => { if (!A.pressConsumed()) void A.reactTo(message.id, emoji); }}
-          >{emoji}</button>
-        );
-      })}
-      {replyable ? (
+            onMouseDown={keepFocus}
+            onClick={() => { if (!A.pressConsumed()) A.startReply(message); }}
+          >Reply</button>
+        ) : null}
         <button
-          class="react-reply"
+          class="react-copy"
           type="button"
           onMouseDown={keepFocus}
-          onClick={() => { if (!A.pressConsumed()) A.startReply(message); }}
-        >Reply</button>
-      ) : null}
+          onClick={() => { if (!A.pressConsumed()) A.copyMessage(message); }}
+        >Copy</button>
+      </div>
     </div>
   );
 }

@@ -194,6 +194,8 @@ export function scheduleErrorClear() {
   }, 3200);
 }
 
+let copyTimer = 0;
+
 export async function copyText(value, message) {
   try {
     await navigator.clipboard.writeText(value);
@@ -202,7 +204,9 @@ export async function copyText(value, message) {
     state.error = value;
   }
   render();
-  setTimeout(() => {
+  // A second copy right after the first keeps its own full toast time.
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => {
     if (state.error === message) {
       state.error = "";
       render();
