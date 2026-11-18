@@ -100,7 +100,8 @@ async function padSheet(page: Page) {
 }
 
 async function grab(page: Page) {
-  const box = (await page.locator(".sheet .grabber").boundingBox())!;
+  // .phone is the live page. A sheet that was just closed is still sliding off on the body for a moment.
+  const box = (await page.locator(".phone .sheet .grabber").boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 

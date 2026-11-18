@@ -9,6 +9,7 @@ import { defaultCurrentWhere, stopWhereSearch, whereBlock, whereFromSocial } fro
 import { clock, copyText, el, mySocial, ttlLabel } from "./lib.js";
 import { busyAtBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen, offeringTomorrow, onCreatePlan, onFree, paintBusyAt, paintSummary, planDateField, planHeading, planThrough, planTimeError, saveOnlyFromButton, sheetField, timeBlock, whenBlock } from "./composer.js";
 import { circleNameSheet, joinLinkSheet } from "./circles.js";
+import { sheetLeaving } from "./sheet-out.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -142,6 +143,8 @@ export function openSheet(name, { planDate = "" } = {}) {
 }
 
 export function closeSheet() {
+  // The sheet slides down from where it is; the state below closes at once.
+  if (state.sheet) sheetLeaving(document.querySelector(".sheet:not(.gif-sheet)"));
   if (state.sheet === "feedback" && state.feedbackSent) resetFeedback();
   if (state.sheet === "whats-new") state.whatsNewView = null;
   if (state.sheet === "event-detail") state.eventDetail = null;

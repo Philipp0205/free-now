@@ -1021,6 +1021,8 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
 .tabbar {
   position: fixed;
   left: 50%;
+  right: auto;
+  margin: 0;
   bottom: 0;
   transform: translateX(-50%);
   width: min(var(--phone), 100%);
@@ -2460,8 +2462,9 @@ html.kb-open .sheet .help { margin-top: 0; }
 }
 
 /* ⋯ button and its menu. Same press timing as the other buttons, plus a lit state while open.
- * app.js adds .menu-in only on the render that opens the menu, so a refresh does not replay it.
- * Only transform and opacity animate, and nothing blocks taps while it runs. */
+ * cards.js pops the menu in and out with the kit (.ak-pop, .ak-pop-out) only on the render that opens or closes it,
+ * so a refresh does not replay it. The origins below win over the kit's centre origin. Only transform and
+ * opacity animate, and nothing blocks taps while it runs. */
 .card-more {
   transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 120ms ease-out;
 }
@@ -2472,33 +2475,7 @@ html.kb-open .sheet .help { margin-top: 0; }
 .card-menu button { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 80ms ease-out; }
 .card-menu button:active { background: rgba(255, 255, 255, 0.12); transform: scale(0.98); }
 
-/* Tabs: the icon dips while held. The tab you land on gets .tab-in and its page .page-in, once per switch. */
-.tab .icon { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1); }
-.tab:active .icon { transform: scale(0.9); transition-duration: 80ms; transition-timing-function: ease-out; }
-
-@media (prefers-reduced-motion: no-preference) {
-  .card-menu.menu-in { animation: menu-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1); }
-  .tab.tab-in { animation: tab-in 180ms ease-out; }
-  .tab.tab-in .icon { animation: tab-icon-in 220ms cubic-bezier(0.3, 1.45, 0.6, 1); }
-  .page-in { animation: page-in 160ms ease-out; }
-}
-@keyframes menu-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes tab-in {
-  from { color: var(--muted); }
-  to { color: var(--text); }
-}
-@keyframes tab-icon-in {
-  0% { transform: scale(0.86); }
-  100% { transform: scale(1); }
-}
-/* Opacity only: page content never moves, so measurements (Leaflet, scroll) match during and after. */
-@keyframes page-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+/* Tabs: the kit dips the icon while held and plays the landing (.ak-tab-in, .ak-page-in) once per switch. */
 
 @media (prefers-reduced-motion: reduce) {
   :where(button, [role="button"], [role="menuitem"], a.map-link, label.chip):where(:not(.scrim, .leaflet-container *)),
@@ -2506,8 +2483,7 @@ html.kb-open .sheet .help { margin-top: 0; }
     transition: filter 100ms ease-out;
   }
   .card-more, .card-menu button { transition: filter 100ms ease-out, background-color 100ms ease-out; }
-  .card-menu button:active, .tab:active .icon { transform: none; }
-  .tab .icon { transition: none; }
+  .card-menu button:active { transform: none; }
   :where(button, [role="button"], a.map-link, label.chip):where(:not(.scrim, .card-body, :disabled, .leaflet-container *)):where(:active),
   .card:has(> .card-bg:active),
   .card:has(.card-body:active):not(:has(.card-body :is(button, a, [role="button"]):active)),
@@ -2530,7 +2506,7 @@ html.ak-native :is(button, [role="button"], [role="menuitem"]):where(:not(.scrim
 html.ak-native .card-more { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 120ms ease-out; }
 html.ak-native .card-menu button { transition: transform 120ms cubic-bezier(0.3, 1.45, 0.6, 1), filter 120ms ease-out, background-color 80ms ease-out; }
 html.ak-native .map-card-close { transition: background-color 100ms ease-out, color 100ms ease-out; }
-html.ak-native :is(button, [role="button"], a.map-link, label.chip):not(.scrim, .card-body, :disabled, .leaflet-container *):active {
+html.ak-native :is(button, [role="button"], a.map-link, label.chip):not(.scrim, .tab, .card-body, :disabled, .leaflet-container *):active {
   opacity: 1;
   transform: scale(0.96);
   filter: brightness(0.88);
@@ -2675,7 +2651,7 @@ html.ak-native .card-body[role="button"]:active { opacity: 1; }
 .detail-actions { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
 .detail-actions .chat-row { background: #2c2c2e; }
 @media (prefers-reduced-motion: no-preference) {
-  .cal-fade { animation: page-in 160ms ease-out; }
+  .cal-fade { animation: ak-page-in 160ms ease-out; }
 }
 /* Calendar availability: busy or free for friends, the owner's own day before I'm in. */
 .calendar-sync .stack { gap: 12px; }
