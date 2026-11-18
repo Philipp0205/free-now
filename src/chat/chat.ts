@@ -13,6 +13,7 @@ import {
   type MemberRow,
 } from "../db.js";
 import { colorHex } from "./chat-color.js";
+import { isSingleEmoji } from "./emoji.js";
 import { fileGripe, gripeText, GOBLIN_COLOR, GOBLIN_NAME, type GoblinAsk } from "./goblin.js";
 import { notifyUsers } from "../push/notify.js";
 import type { PushSender } from "../push/push.js";
@@ -376,8 +377,8 @@ async function pingNow(deps: ChatDeps, chat: ChatRow, recipients: string[], text
 
 /** Adds or removes your emoji on a message. `on` null flips it; true or false sets it, so a repeat is a no-op. `added` is set only for a new reaction. */
 export function toggleReaction(deps: ChatDeps, userId: string, messageId: string, raw: unknown, on: boolean | null = null) {
-  const emoji = typeof raw === "string" ? raw : "";
-  if (!(REACTIONS as readonly string[]).includes(emoji)) throw new ChatError(400, "Pick one of the quick reactions.");
+  if (!isSingleEmoji(raw)) throw new ChatError(400, "Pick one emoji.");
+  const emoji = raw;
   const row = one<{ id: string; chat_id: string; user_id: string; body: string; kind: string; deleted_at: number | null }>(
     deps.db,
     "SELECT id, chat_id, user_id, body, kind, deleted_at FROM messages WHERE id = ?",
@@ -406,7 +407,7 @@ export function toggleReaction(deps: ChatDeps, userId: string, messageId: string
 
 type ReactionSummary = { emoji: string; count: number; mine: boolean; names: string[] };
 
-/** Reactions per message: allowlist order, names oldest first and capped. */
+/** Reactions per message: the quick six first in allowlist order, then any other emoji by first use. Names oldest first and capped. */
 function reactionsFor(db: DatabaseSync, messageIds: string[], userId: string): Map<string, ReactionSummary[]> {
   const out = new Map<string, ReactionSummary[]>();
   if (messageIds.length === 0) return out;
@@ -418,8 +419,9 @@ function reactionsFor(db: DatabaseSync, messageIds: string[], userId: string): M
     ...messageIds,
   );
   const order = REACTIONS as readonly string[];
+  // Not in the quick set: after it, and the stable sort keeps these in first-use order (rows are oldest first).
+  const rank = (emoji: string) => (order.includes(emoji) ? order.indexOf(emoji) : order.length);
   for (const row of rows) {
-    if (!order.includes(row.emoji)) continue;
     const list = out.get(row.message_id) ?? [];
     let pill = list.find((item) => item.emoji === row.emoji);
     if (!pill) {
@@ -431,7 +433,7 @@ function reactionsFor(db: DatabaseSync, messageIds: string[], userId: string): M
     if (pill.names.length < REACTION_NAMES_MAX) pill.names.push(row.name);
     out.set(row.message_id, list);
   }
-  for (const list of out.values()) list.sort((a, b) => order.indexOf(a.emoji) - order.indexOf(b.emoji));
+  for (const list of out.values()) list.sort((a, b) => rank(a.emoji) - rank(b.emoji));
   return out;
 }
 

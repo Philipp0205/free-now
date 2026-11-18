@@ -33,6 +33,8 @@ export const chatMention = signal(null);
 export const chatReactFor = signal(null);
 /** Pill whose names are showing: { id, emoji }. */
 export const chatWho = signal(null);
+/** Message id whose emoji picker is open under its reaction bar. It closes with the bar (see setChat). */
+export const chatPicker = signal(null);
 /** Message the composer replies to: { id, name, text, mine, color }. */
 export const chatReplyTo = signal(null);
 /** Message id lit up for a moment after a jump to its quote. */
@@ -44,6 +46,8 @@ export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chat
 /** Writes chat fields to the signals only. Callers write `state` first. Only the views that read a changed field repaint. */
 export function setChat(patch) {
   batch(() => {
+    // A bar that closes or moves to another message takes its picker with it. A repaint of the same bar keeps it.
+    if ("chatReactFor" in patch && patch.chatReactFor !== chatReactFor.peek()) chatPicker.value = null;
     for (const [key, value] of Object.entries(patch)) CHAT_FIELDS[key].value = value;
   });
 }
@@ -75,6 +79,7 @@ export function resetChatSignals() {
     chatMeName.value = "";
     chatStatus.value = "";
     chatFlash.value = null;
+    chatPicker.value = null;
     for (const sig of Object.values(CHAT_FIELDS)) sig.value = sig === chatDraft ? "" : null;
   });
 }

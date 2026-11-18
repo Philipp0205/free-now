@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -54,6 +55,8 @@ export async function serveStatic(req: http.IncomingMessage, res: http.ServerRes
       const headers = staticHeaders(ext, data.length);
       // Third-party files at a fixed version. A new version gets a new path.
       if (relative.startsWith(`vendor${path.sep}`)) headers["cache-control"] = VENDOR_CACHE;
+      // The emoji picker asks for an ETag before it re-downloads its data (assets/ holds only that one file).
+      if (relative.startsWith(`assets${path.sep}`)) headers.etag = `"${crypto.createHash("sha1").update(data).digest("base64")}"`;
       if (req.method === "HEAD") {
         res.writeHead(200, headers);
         res.end();

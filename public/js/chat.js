@@ -14,6 +14,7 @@ import {
   chatFlash,
   chatMeId,
   chatMeName,
+  chatPicker,
   chatStatus,
   mentionChoices,
   resetChatSignals,
@@ -388,6 +389,31 @@ export function closeReactUi() {
   return true;
 }
 
+/** The + in the bar: opens or closes the full emoji picker under it. */
+function togglePicker(message) {
+  const open = chatPicker.peek() !== message.id;
+  chatPicker.value = open ? message.id : null;
+  repaint();
+  if (open) host?.querySelector(".react-picker")?.scrollIntoView({ block: "nearest" });
+}
+
+/** The <emoji-picker> for one message, loaded the first time anyone taps + (its own chunk, not in app.js). Null if it cannot load. */
+async function buildPicker(messageId) {
+  try {
+    const { createEmojiPicker } = await import("./emoji-picker.js");
+    const picker = createEmojiPicker((emoji) => { void reactTo(messageId, emoji); });
+    // A phone keeps its keyboard down until the search box is tapped. A mouse or keyboard can type at once.
+    if (!prefersTouchUi()) requestAnimationFrame(() => picker.shadowRoot?.getElementById("search")?.focus({ preventScroll: true }));
+    return picker;
+  } catch {
+    chatPicker.value = null;
+    state.error = "Couldn't load the emoji list. Try again.";
+    scheduleErrorClear();
+    render();
+    return null;
+  }
+}
+
 /** Copy from the bar: the plain message text goes to the clipboard and a short toast says so. */
 function copyMessage(message) {
   tick();
@@ -561,6 +587,8 @@ const ACTIONS = {
   rowCancel,
   rowMenu,
   openReactionBar,
+  togglePicker,
+  buildPicker,
   copyMessage,
   confirmDelete: confirmDeleteMessage,
   send: sendChat,

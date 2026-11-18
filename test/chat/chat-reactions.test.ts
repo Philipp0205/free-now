@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { flushChatNotices } from "../../src/chat/chat.js";
 import { api, withApp, testEmail } from "../http.js";
@@ -18,7 +19,7 @@ async function circleOf(port: number, names: string[]) {
   return people;
 }
 
-async function withChat(fn: (ctx: { port: number; advance: (ms: number) => void }) => Promise<void>) {
+async function withChat(fn: (ctx: { port: number; db: DatabaseSync; advance: (ms: number) => void }) => Promise<void>) {
   await withApp(async (ctx) => {
     try {
       await fn(ctx);
@@ -68,7 +69,7 @@ test("a reaction toggles on and off, a second person adds to the count, and a re
   });
 });
 
-test("only the quick emoji, only text messages, and only the chat's people may react", async () => {
+test("only one emoji, only text messages, and only the chat's people may react", async () => {
   await withChat(async ({ port }) => {
     const [alex, ada, sam] = await circleOf(port, ["Alex", "Ada", "Sam"]);
     const outsider: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Out" }, status: 201 });
@@ -76,7 +77,7 @@ test("only the quick emoji, only text messages, and only the chat's people may r
     const posted = await api(port, "POST", "/api/circles/chat", { token: alex.token, body: { text: "hi" }, status: 201 });
     const id = posted.chat.messages.at(-1).id;
 
-    for (const bad of ["🍕", "👍🏽", "", 7, null]) await react(port, ada, id, bad, 400);
+    for (const bad of ["", 7, null, "x", "thumbs up", "👍👍", 0, 1, "1"]) await react(port, ada, id, bad, 400);
     await react(port, outsider, id, "👍", 404);
     await react(port, ada, "no-such-message", "👍", 404);
 
@@ -130,5 +131,71 @@ test("a closed chat still takes reactions on its messages", async () => {
     assert.equal(closed.chat.closed, true);
     const done = await react(port, ada, id, "❤️");
     assert.deepEqual(done.reactions, [{ emoji: "❤️", count: 1, mine: true, names: ["Ada"] }]);
+  });
+});
+
+const emojiOf = (list: Array<{ emoji: string }>) => list.map((item) => item.emoji);
+
+test("any emoji can react: it is stored as the character, counted, shared, toggled off, and sorted after the quick six", async () => {
+  await withChat(async ({ port, advance, db }) => {
+    const [alex, ada, nia] = await circleOf(port, ["Alex", "Ada", "Nia"]);
+    const posted = await api(port, "POST", "/api/circles/chat", { token: alex.token, body: { text: "Party?" }, status: 201 });
+    const id = posted.chat.messages.at(-1).id;
+
+    const first = await react(port, ada, id, "🎉");
+    assert.deepEqual(first.reactions, [{ emoji: "🎉", count: 1, mine: true, names: ["Ada"] }]);
+    advance(1000);
+    // Two people can use the same custom emoji.
+    const shared = await react(port, nia, id, "🎉");
+    assert.deepEqual(shared.reactions, [{ emoji: "🎉", count: 2, mine: true, names: ["Ada", "Nia"] }]);
+    advance(1000);
+    await react(port, ada, id, "👋");
+    advance(1000);
+    // Quick ones come first in allowlist order, then the others by first use, whatever the order they arrived in.
+    await react(port, alex, id, "🔥");
+    advance(1000);
+    await react(port, alex, id, "👍");
+    const mixed = await react(port, nia, id, "👨‍👩‍👧‍👦");
+    assert.deepEqual(emojiOf(mixed.reactions), ["👍", "🔥", "🎉", "👋", "👨‍👩‍👧‍👦"]);
+    assert.deepEqual(mixed.reactions[2], { emoji: "🎉", count: 2, mine: true, names: ["Ada", "Nia"] });
+
+    const thread = await api(port, "GET", "/api/circles/chat", { token: ada.token });
+    const message = thread.chat.messages.find((item: { id: string }) => item.id === id);
+    assert.deepEqual(emojiOf(message.reactions), ["👍", "🔥", "🎉", "👋", "👨‍👩‍👧‍👦"]);
+    assert.equal(message.reactions[2].mine, true);
+    assert.equal(message.reactions[4].mine, false);
+
+    // The row holds the character itself, not an index into the quick list.
+    const rows = db.prepare("SELECT emoji FROM message_reactions WHERE message_id = ? ORDER BY created_at, rowid").all(id) as Array<{ emoji: string }>;
+    assert.deepEqual(rows.map((row) => row.emoji), ["🎉", "🎉", "👋", "🔥", "👍", "👨‍👩‍👧‍👦"]);
+    assert.ok(rows.every((row) => typeof row.emoji === "string" && !/^\d+$/.test(row.emoji)));
+    const off = await react(port, ada, id, "🎉");
+    assert.deepEqual(off.reactions.find((item: { emoji: string }) => item.emoji === "🎉"), { emoji: "🎉", count: 1, mine: false, names: ["Nia"] });
+    await react(port, nia, id, "🎉");
+    const gone = await api(port, "GET", "/api/circles/chat", { token: ada.token });
+    assert.deepEqual(emojiOf(gone.chat.messages.find((item: { id: string }) => item.id === id).reactions), ["👍", "🔥", "👋", "👨‍👩‍👧‍👦"]);
+
+    // Skin tones and flags are one emoji too.
+    for (const ok of ["👍🏽", "🇩🇪", "1️⃣", "🏳️‍🌈"]) {
+      const added = await react(port, ada, id, ok);
+      assert.ok(emojiOf(added.reactions).includes(ok), ok);
+    }
+  });
+});
+
+test("a bad reaction value is a 400 with a plain error and stores nothing", async () => {
+  await withChat(async ({ port }) => {
+    const [alex, ada] = await circleOf(port, ["Alex", "Ada"]);
+    const posted = await api(port, "POST", "/api/circles/chat", { token: alex.token, body: { text: "hi" }, status: 201 });
+    const id = posted.chat.messages.at(-1).id;
+    const tooLong = "👍".repeat(40);
+    const zwjSoup = Array.from({ length: 20 }, () => "👩").join("\u200d");
+    for (const bad of ["hello", "a", "👍👎", "🎉🎉", "", " ", "👍 ", tooLong, zwjSoup, 0, 3, "3", true, null, ["👍"], { emoji: "👍" }, "\u200d", "\u{1F3FD}x"]) {
+      const result = await react(port, ada, id, bad, 400);
+      assert.equal(typeof result.error, "string");
+      assert.ok(!("reactions" in result));
+    }
+    const thread = await api(port, "GET", "/api/circles/chat", { token: ada.token });
+    assert.deepEqual(thread.chat.messages.find((item: { id: string }) => item.id === id).reactions, []);
   });
 });

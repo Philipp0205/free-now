@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-18-any-emoji",
+    "date": "2026-11-18",
+    "title": "React with any emoji in chat",
+    "bullets": [
+      "Tap + at the end of the reaction bar to pick any emoji. You can search or browse by category.",
+      "The six quick reactions are still one tap away, and every reaction shows who picked it."
+    ]
+  },
+  {
     "id": "2026-11-18-chat-links-copy",
     "date": "2026-11-18",
     "title": "Tap links in chat and copy messages",

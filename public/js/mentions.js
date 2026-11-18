@@ -86,5 +86,7 @@ export function toggledReactions(list, emoji, myName) {
     return next;
   }
   next.push({ emoji, count: 1, mine: true, names: [myName] });
-  return next.sort((a, b) => REACTIONS.indexOf(a.emoji) - REACTIONS.indexOf(b.emoji));
+  // The quick six first in their own order; any other emoji after them, in the order they came (the sort is stable).
+  const rank = (value) => (REACTIONS.includes(value) ? REACTIONS.indexOf(value) : REACTIONS.length);
+  return next.sort((a, b) => rank(a.emoji) - rank(b.emoji));
 }

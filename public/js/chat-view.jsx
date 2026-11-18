@@ -11,6 +11,7 @@ import {
   chatMeId,
   chatMeName,
   chatMention,
+  chatPicker,
   chatReactFor,
   chatReplyTo,
   chatStatus,
@@ -162,8 +163,9 @@ function Quote({ quote }) {
 }
 
 function ReactionBar({ message, replyable }) {
+  const picking = chatPicker.value === message.id;
   return (
-    <div class="react-bar" role="toolbar" aria-label="React">
+    <div class={picking ? "react-bar picking" : "react-bar"} role="toolbar" aria-label="React">
       <div class="react-row">
         {REACTIONS.map((emoji) => {
           const mine = (message.reactions || []).some((item) => item.emoji === emoji && item.mine);
@@ -178,7 +180,15 @@ function ReactionBar({ message, replyable }) {
             >{emoji}</button>
           );
         })}
+        <button
+          class="react-more"
+          type="button"
+          aria-label="More emoji"
+          aria-expanded={picking ? "true" : "false"}
+          onClick={() => { if (!A.pressConsumed()) A.togglePicker(message); }}
+        >+</button>
       </div>
+      {picking ? <div class="react-picker" data-id={message.id} ref={mountPicker} /> : null}
       <div class="react-actions">
         {replyable ? (
           <button
@@ -197,6 +207,14 @@ function ReactionBar({ message, replyable }) {
       </div>
     </div>
   );
+}
+
+/** Fills the picker box with the lazy-loaded <emoji-picker>. A fixed function, so a repaint does not run it again. */
+function mountPicker(node) {
+  if (!node) return;
+  void A.buildPicker(node.dataset.id).then((picker) => {
+    if (picker && node.isConnected) node.append(picker);
+  });
 }
 
 function ReactionPills({ message, live }) {
