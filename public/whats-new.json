@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-18-chat-event-details",
+    "date": "2026-11-18",
+    "title": "Tap a chat title for the event details",
+    "bullets": [
+      "In an event chat, tap the title at the top to see who is in and where, the same details as on the cards.",
+      "Close it and you are back in the chat, right where you were reading."
+    ]
+  },
+  {
     "id": "2026-11-18-pull-to-refresh",
     "date": "2026-11-18",
     "title": "Pull down to refresh",

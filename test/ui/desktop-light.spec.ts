@@ -299,6 +299,38 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await page.locator(".chat-msg", { hasText: "Running 5 min late" }).waitFor();
     await page.locator(".chat-msg.goblin").waitFor();
     await assertContrast(page, ".chat-head h1", "Chat title");
+    await assertContrast(page, ".chat-head h1 .chat-title", "Chat title button");
+
+    // The title is a button: a click opens the event details at full height on top of the chat, and closing returns to it.
+    const titleButton = page.getByRole("button", { name: "Event details" });
+    assert.equal((await titleButton.textContent())?.trim(), "Ramen", "the title button still shows the event name");
+    assert.equal(await titleButton.evaluate((node) => getComputedStyle(node).cursor), "pointer", "the title has a pointer cursor");
+    await page.locator("#chat-log").evaluate((node) => { node.scrollTop = 0; });
+    const chatScroll = await page.locator("#chat-log").evaluate((node) => node.scrollTop);
+    await titleButton.click();
+    const chatDetails = page.getByRole("dialog", { name: "Details" });
+    await chatDetails.waitFor();
+    await settle(page);
+    await shot(page, "chat-event-details");
+    const chatDetailBox = (await chatDetails.boundingBox())!;
+    assert.ok(chatDetailBox.y >= 0 && chatDetailBox.y + chatDetailBox.height <= viewportHeight + 1, `the chat details sheet is inside the window: ${JSON.stringify(chatDetailBox)}`);
+    assert.equal(await chatDetails.evaluate((node) => (node as HTMLElement).style.maxHeight), "", "the chat details sheet is not held at a half stop");
+    assert.match((await chatDetails.getAttribute("data-snap")) || "", /^event-detail:social:/);
+    assert.equal((await chatDetails.locator("h2").textContent())?.trim(), "Ramen");
+    await chatDetails.getByText("Who's in").waitFor();
+    assert.equal(await page.locator(".chat-screen").count(), 1, "the chat stays under the sheet");
+    await page.locator(".scrim").click({ position: { x: 10, y: 10 } });
+    await chatDetails.waitFor({ state: "detached" });
+    await screen.waitFor();
+    assert.equal(await page.locator("#chat-log").evaluate((node) => node.scrollTop), chatScroll, "the log keeps its place");
+    // Keyboard: the title button takes focus, and Enter opens the sheet; Escape closes it and leaves the chat open.
+    await titleButton.focus();
+    await page.keyboard.press("Enter");
+    await chatDetails.waitFor();
+    await page.keyboard.press("Escape");
+    await chatDetails.waitFor({ state: "detached" });
+    await screen.waitFor();
+    await page.locator(".chat-msg", { hasText: "Running 5 min late" }).waitFor();
     const input = page.locator("#chat-input");
     await input.click();
     await page.keyboard.type("On my way, save me a seat");
