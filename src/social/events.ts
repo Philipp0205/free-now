@@ -2,8 +2,10 @@ import type { AppDeps } from "../app.js";
 import { closeEventChat, recordEventLine } from "../chat/chat.js";
 import {
   type CircleRow,
+  type EventKind,
   type PlanRow,
   type UserRow,
+  listEventPaid,
   addSocialJoin,
   blockPlanGuest,
   blockSocialGuest,
@@ -29,14 +31,19 @@ import {
   planInCircle,
   removePlanJoin,
   removeSocialJoin,
+  setEventCollector,
+  setEventPaid,
+  setEventPrice,
   unlinkPlanCircle,
 } from "../db.js";
 import { HttpError } from "../lib/http.js";
+import { readPriceCents } from "../lib/payment-url.js";
 import { clockLabel, isoDate, shortDate } from "../lib/time.js";
 import { cleanDescription, cleanNote, cleanPlace, parseId, readClock, readPoint, readStart } from "../lib/validate.js";
 import { audiencePlace, eventTitle, notifyUsers } from "../push/notify.js";
 import { requireCircle } from "./circles.js";
 import { planPayload, socialPayload } from "./payload.js";
+import { canBeCollector, canSetPaid, effectiveCollectorId, goingPeople, type PayEvent } from "./payments.js";
 import { assertPlanClock, newPlanNotice, readPlanDate } from "./plans.js";
 
 export async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -237,6 +244,7 @@ export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, bo
   assertEventHost(deps, user, circle.id, social.creator_id);
   // Only plans can live in more than one circle. Say so instead of silently dropping it.
   if (body.circleIds !== undefined) throw new HttpError(400, "Only plans can be shared with other circles.");
+  const savePayment = readPaymentEdit(deps, user, "social", social, listSocialJoins(deps.db, social.id), body);
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
   const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (social.place ?? "");
   let lat = social.lat;
@@ -262,6 +270,7 @@ export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, bo
   const placeChanged = place !== (social.place ?? "") || lat !== social.lat || lng !== social.lng;
   const timeChanged = startsAt !== social.starts_at;
   patchSocialDetails(deps.db, social.id, note, place, lat, lng, startsAt, remindedAt, expiresAt);
+  savePayment?.();
   const changes = [];
   if (noteChanged) changes.push({ name: "Note", next: note });
   if (timeChanged) changes.push({ name: "Time", next: startsAt == null ? "" : clockLabel(startsAt, deps.config.tz) });
@@ -342,9 +351,11 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
     ? cleanDescription(body.description)
     : (plan.description ?? "");
   const wantedCircles = body.circleIds === undefined ? null : readPlanCircles(deps, user, plan, body.circleIds);
+  const savePayment = readPaymentEdit(deps, user, "plan", plan, listPlanJoins(deps.db, plan.id), body);
   const contentChanged = dateChanged || timeChanged || note !== plan.note || place !== (plan.place ?? "")
     || (description || null) !== (plan.description || null);
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null);
+  savePayment?.();
   // Unlinked circles go first, so a move in the same save does not ping them.
   const kept = wantedCircles ? unlinkDropped(deps, plan.id, wantedCircles) : [];
   // Only a move (day, time, or place) pings people. Note or description edits stay quiet.
@@ -371,6 +382,86 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
   if (!fresh) throw new HttpError(500, "plan missing");
   if (wantedCircles) await linkAdded(deps, user, fresh, kept, wantedCircles, now, today);
   return planPayload(deps.db, fresh, today, user.id, deps.now());
+}
+
+const has = (body: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(body, key);
+
+/**
+ * Reads price and collectorId from an edit body. Organizer only, never circle admins.
+ * Validates everything now and returns the write to run later, so a 400 or 403 happens before any other change is saved.
+ */
+function readPaymentEdit(
+  deps: AppDeps,
+  user: UserRow,
+  kind: EventKind,
+  event: PayEvent,
+  joins: Array<{ id: string; name: string; reply: string | null }>,
+  body: Record<string, unknown>,
+): (() => void) | null {
+  const hasPrice = has(body, "price");
+  const hasCollector = has(body, "collectorId");
+  if (!hasPrice && !hasCollector) return null;
+  if (user.id !== event.creator_id) throw new HttpError(403, "Only the organizer can change the price.");
+  const price = hasPrice ? readPriceCents(body.price) : event.price_cents;
+  let collector = event.collector_id;
+  if (hasCollector) {
+    const raw = body.collectorId;
+    if (raw === null || raw === "") collector = null;
+    else if (typeof raw !== "string") throw new HttpError(400, "collectorId must be a person");
+    else {
+      if (price == null) throw new HttpError(400, "Set a price first.");
+      const id = parseId(raw);
+      const going = goingPeople(event, joins as Parameters<typeof goingPeople>[1]);
+      const paid = new Set(listEventPaid(deps.db, kind, event.id).map((row) => row.user_id));
+      if (!canBeCollector(id, event.creator_id, going, paid)) {
+        throw new HttpError(400, "The collector must be you or someone who is going and has already paid.");
+      }
+      collector = id === event.creator_id ? null : id;
+    }
+  }
+  return () => {
+    if (hasPrice) setEventPrice(deps.db, kind, event.id, price);
+    if (price != null && hasCollector) setEventCollector(deps.db, kind, event.id, collector);
+  };
+}
+
+/** Tick or untick who has paid. The organizer, the collector, or the person themselves. Allowed after the event ended. */
+export function markPaid(
+  deps: AppDeps,
+  user: UserRow,
+  kind: EventKind,
+  rawId: string,
+  body: Record<string, unknown>,
+  requested: string | null = null,
+) {
+  const id = parseId(rawId);
+  const circle = requireCircle(deps, user.id, requested);
+  const event = kind === "plan" ? getPlan(deps.db, id) : getSocial(deps.db, id);
+  if (!event) throw new HttpError(404, `${kind} not found`);
+  if (kind === "plan" ? !planInCircle(deps.db, event.id, circle.id) : (event as { circle_id: string }).circle_id !== circle.id) {
+    throw new HttpError(404, `${kind} not found`);
+  }
+  if (typeof body.paid !== "boolean") throw new HttpError(400, "paid must be true or false");
+  const targetId = body.userId === undefined || body.userId === null ? user.id : parseId(String(body.userId));
+  if (event.price_cents == null) throw new HttpError(400, "This has no price.");
+  const joins = kind === "plan" ? listPlanJoins(deps.db, event.id) : listSocialJoins(deps.db, event.id);
+  const going = goingPeople(event, joins);
+  const collectorId = effectiveCollectorId(event, going);
+  if (!canSetPaid(user.id, event.creator_id, collectorId, targetId)) {
+    throw new HttpError(403, "Only the organizer, the collector or that person can do that.");
+  }
+  if (!going.some((person) => person.id === targetId)) throw new HttpError(400, "That person is not going.");
+  if (targetId === collectorId) throw new HttpError(400, "The collector does not pay.");
+  setEventPaid(deps.db, kind, event.id, targetId, body.paid, user.id, deps.now());
+  const now = deps.now();
+  if (kind === "plan") {
+    const fresh = getPlan(deps.db, event.id);
+    if (!fresh) throw new HttpError(500, "plan missing");
+    return planPayload(deps.db, fresh, isoDate(now, deps.config.tz), user.id, now);
+  }
+  const fresh = getSocial(deps.db, event.id);
+  if (!fresh) throw new HttpError(500, "social missing");
+  return socialPayload(deps.db, fresh, user.id, now);
 }
 
 /** circleIds is the full set. Creator only, their own circles only. The home circle always stays. */

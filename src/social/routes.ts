@@ -37,6 +37,7 @@ import {
   joinSocial,
   leavePlan,
   leaveSocial,
+  markPaid,
   removePlanGuest,
   removeSocialGuest,
 } from "./events.js";
@@ -84,6 +85,12 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
   const socialReply = matchPath(pathname, /^\/api\/socials\/([^/]+)\/reply$/);
   if (socialReply && method === "POST") {
     sendJson(res, 200, { social: await replySocial(deps, me, socialReply[1], body, requested) });
+    return true;
+  }
+
+  const socialPaid = matchPath(pathname, /^\/api\/socials\/([^/]+)\/paid$/);
+  if (socialPaid && method === "POST") {
+    sendJson(res, 200, { social: markPaid(deps, me, "social", socialPaid[1], body, requested) });
     return true;
   }
 
@@ -162,6 +169,12 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
   const planReply = matchPath(pathname, /^\/api\/plans\/([^/]+)\/reply$/);
   if (planReply && method === "POST") {
     sendJson(res, 200, { plan: await replyPlan(deps, me, planReply[1], body, requested) });
+    return true;
+  }
+
+  const planPaid = matchPath(pathname, /^\/api\/plans\/([^/]+)\/paid$/);
+  if (planPaid && method === "POST") {
+    sendJson(res, 200, { plan: markPaid(deps, me, "plan", planPaid[1], body, requested) });
     return true;
   }
 

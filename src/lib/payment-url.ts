@@ -33,6 +33,54 @@ export function cleanPaymentUrl(value: unknown): string | null {
   return url.href;
 }
 
+export const PRICE_MAX_CENTS = 999999;
+const BAD_PRICE = "Price must be an amount in euros, like 12.50";
+const PAYPAL_HANDLE = /^[A-Za-z0-9]{1,20}$/;
+
+/**
+ * A price per person in integer cents, or null for an empty value (clear).
+ * Accepts a number or a string, with a dot or comma decimal. Positive, at most 2 decimals, 0.01 to 9999.99.
+ */
+export function readPriceCents(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "number" && typeof raw !== "string") throw new HttpError(400, BAD_PRICE);
+  const text = String(raw).trim().replace(",", ".");
+  if (!text) return null;
+  const match = /^(\d{1,7})(?:\.(\d{1,2}))?$/.exec(text);
+  if (!match) throw new HttpError(400, BAD_PRICE);
+  const cents = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  if (cents < 1) throw new HttpError(400, "Price must be more than zero");
+  if (cents > PRICE_MAX_CENTS) throw new HttpError(400, "Price can be at most 9999.99");
+  return cents;
+}
+
+/** Two decimals always: 1250 is "12.50", 1000 is "10.00". */
+export function formatCents(cents: number): string {
+  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+}
+
+/**
+ * A paypal.me link with the amount in EUR, built from a stored payment link.
+ * Only the handle is used. The stored query, extra path, port and userinfo never reach the result.
+ */
+export function paypalAmountUrl(stored: string | null | undefined, cents: number): string | null {
+  if (!stored || !Number.isInteger(cents) || cents < 1) return null;
+  let url: URL;
+  try {
+    url = new URL(stored);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
+  const host = url.hostname.toLowerCase();
+  const parts = url.pathname.split("/").filter(Boolean);
+  let handle: string | undefined;
+  if (host === "paypal.me" || host === "www.paypal.me") handle = parts[0];
+  else if (host === "www.paypal.com" && parts[0]?.toLowerCase() === "paypalme") handle = parts[1];
+  if (!handle || !PAYPAL_HANDLE.test(handle)) return null;
+  return `https://www.paypal.me/${handle}/${formatCents(cents)}EUR`;
+}
+
 /** Payment links the viewer may see: their own, and anyone sharing a circle with them. No viewer, none. */
 export function visiblePaymentUrls(db: DatabaseSync, viewerId: string | null): Map<string, string> {
   return visibleValues(db, viewerId, "payment_url");

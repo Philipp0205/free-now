@@ -9,6 +9,7 @@ import { inReply } from "./composer.js";
 import { arrivalDefault, arriveClock, avatarStack, inToggle, replySummary, sendReply } from "./replies.js";
 import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
+import { priceLine } from "./event-pay.js";
 
 /** Card menu opened by the latest ⋯ tap; its next render plays the open animation once. */
 let menuJustOpened = null;
@@ -42,6 +43,7 @@ export function socialCard(social) {
         el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
         el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
         replySummary(social),
+        priceLine(social),
         placeLine(social.location, social.place, { kind: "social", id: social.id }),
         removedNote(social),
       ]),
@@ -78,6 +80,7 @@ export function planCard(plan) {
         planCirclesLine(plan),
         planDescription(plan),
         planReplySummary(plan),
+        priceLine(plan),
         placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
         removedNote(plan),
       ]),

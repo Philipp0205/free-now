@@ -53,6 +53,8 @@ export type SocialRow = {
   starts_at: number | null;
   reminded_at: number | null;
   buzzed_at: number | null;
+  price_cents: number | null;
+  collector_id: string | null;
 };
 
 export type DueStartReminder = {
@@ -95,6 +97,8 @@ export type PlanRow = {
   reminded_at: number | null;
   /** Last content change or end, for calendar SEQUENCE. Null until the first one. */
   updated_at: number | null;
+  price_cents: number | null;
+  collector_id: string | null;
 };
 
 export type PushSubRow = {
@@ -377,6 +381,16 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
   last_used_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_agent_tokens_user ON agent_tokens(user_id);
+
+-- Who has paid for an event with a price. Polymorphic on kind (plan or social), so no FK on the event; sweep() drops orphans.
+CREATE TABLE IF NOT EXISTS event_payments (
+  kind TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  set_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  set_at INTEGER NOT NULL,
+  PRIMARY KEY (kind, event_id, user_id)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -412,6 +426,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "socials", "starts_at", "starts_at INTEGER");
   ensureColumn(db, "socials", "reminded_at", "reminded_at INTEGER");
   ensureColumn(db, "socials", "buzzed_at", "buzzed_at INTEGER");
+  ensureColumn(db, "socials", "price_cents", "price_cents INTEGER");
+  ensureColumn(db, "socials", "collector_id", "collector_id TEXT");
   ensureColumn(db, "social_joins", "reply", "reply TEXT NOT NULL DEFAULT 'join'");
   ensureColumn(db, "social_joins", "eta_min", "eta_min INTEGER");
   ensureColumn(db, "social_joins", "arrive_at", "arrive_at INTEGER");
@@ -463,6 +479,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "description", "description TEXT");
   ensureColumn(db, "plans", "reminded_at", "reminded_at INTEGER");
   ensureColumn(db, "plans", "updated_at", "updated_at INTEGER");
+  ensureColumn(db, "plans", "price_cents", "price_cents INTEGER");
+  ensureColumn(db, "plans", "collector_id", "collector_id TEXT");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -2184,6 +2202,49 @@ export function clearExpiredLocations(db: DatabaseSync, now: number, today: stri
 
 export const HISTORY_DAYS = 90;
 
+export type EventKind = "plan" | "social";
+
+export type PaidRow = { user_id: string; set_by: string; set_by_name: string; set_at: number };
+
+/** Sets or clears the price. Clearing it also clears the collector and every paid mark. */
+export function setEventPrice(db: DatabaseSync, kind: EventKind, id: string, cents: number | null): void {
+  const table = kind === "plan" ? "plans" : "socials";
+  if (cents == null) {
+    db.prepare(`UPDATE ${table} SET price_cents = NULL, collector_id = NULL WHERE id = ?`).run(id);
+    db.prepare("DELETE FROM event_payments WHERE kind = ? AND event_id = ?").run(kind, id);
+    return;
+  }
+  db.prepare(`UPDATE ${table} SET price_cents = ? WHERE id = ?`).run(cents, id);
+}
+
+/** Null means the organizer collects. */
+export function setEventCollector(db: DatabaseSync, kind: EventKind, id: string, collectorId: string | null): void {
+  const table = kind === "plan" ? "plans" : "socials";
+  db.prepare(`UPDATE ${table} SET collector_id = ? WHERE id = ?`).run(collectorId, id);
+}
+
+export function listEventPaid(db: DatabaseSync, kind: EventKind, id: string): PaidRow[] {
+  return all<PaidRow>(
+    db,
+    `SELECT e.user_id, e.set_by, u.name AS set_by_name, e.set_at
+     FROM event_payments e JOIN users u ON u.id = e.set_by
+     WHERE e.kind = ? AND e.event_id = ?`,
+    kind,
+    id,
+  );
+}
+
+export function setEventPaid(db: DatabaseSync, kind: EventKind, id: string, userId: string, paid: boolean, setBy: string, now: number): void {
+  if (!paid) {
+    db.prepare("DELETE FROM event_payments WHERE kind = ? AND event_id = ? AND user_id = ?").run(kind, id, userId);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO event_payments (kind, event_id, user_id, set_by, set_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (kind, event_id, user_id) DO UPDATE SET set_by = excluded.set_by, set_at = excluded.set_at`,
+  ).run(kind, id, userId, setBy, now);
+}
+
 export function sweep(db: DatabaseSync, now: number, planCutoff: string, today = ""): void {
   if (today) clearExpiredLocations(db, now, today);
   const socialCutoff = now - HISTORY_DAYS * 24 * 60 * 60 * 1000;
@@ -2196,6 +2257,8 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   deleteEventChats(db, "plan", oldPlan, planDay, socialCutoff);
   dropPlanLinks(db, oldPlan, planDay, socialCutoff);
   db.prepare(`DELETE FROM plans WHERE ${oldPlan}`).run(planDay, socialCutoff);
+  db.prepare("DELETE FROM event_payments WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
+  db.prepare("DELETE FROM event_payments WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM auth_links WHERE expires_at < ?").run(now);
@@ -2203,14 +2266,16 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 
 const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, s.note,
-         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at, s.buzzed_at
+         s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at, s.buzzed_at,
+         s.price_cents, s.collector_id
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
 
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
-         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at
+         p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at,
+         p.price_cents, p.collector_id
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
