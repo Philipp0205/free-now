@@ -17,6 +17,7 @@ import { whereBlock, wherePayload } from "./where.js";
 import { guestDetailRow, planReplyLine } from "./map-card.js";
 import { avatar } from "./avatars.js";
 import { closeSheet } from "./sheets.js";
+import { euro, paidList, paySection, paymentBody, paymentEditState, paymentFields } from "./event-pay.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -86,6 +87,7 @@ export function eventDetailSheet() {
         calendar && kind === "plan" ? planCirclesLine(item) : null,
         kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
+        item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,
         deliveryLine(kind, item),
         calendar ? el("div", { class: "detail-actions" }, [
           chatRow(kind, item),
@@ -99,6 +101,8 @@ export function eventDetailSheet() {
         crowd.cant.length ? el("div", { class: "list cant-list" }, crowd.cant.map((person) => (
           personRow(line(person), person)
         ))) : null,
+        paySection(item),
+        paidList(kind, item),
       ]),
       !over && canManageEvent(item) ? el("div", { class: "sheet-dock" }, [
         el("button", {
@@ -193,6 +197,7 @@ export function openAdminEdit(kind, item) {
     day,
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
+    ...paymentEditState(item),
     ...session,
   };
   state.sheet = "admin-edit";
@@ -202,6 +207,7 @@ export function openAdminEdit(kind, item) {
 export function adminEditSheet() {
   const edit = state.adminEdit;
   if (!edit) return el("div");
+  const paymentItem = findEvent(edit.kind, edit.id);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("form", { class: "sheet", role: "dialog", "aria-label": "Edit", ...saveOnlyFromButton(saveAdminEdit) }, [
@@ -227,6 +233,7 @@ export function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           whereBlock(edit),
+          paymentItem && paymentItem.creator?.id === state.me.user.id ? paymentFields(edit, paymentItem) : null,
           edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
         ]),
       ]),
@@ -388,6 +395,8 @@ async function saveAdminEdit(event) {
       ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
       : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
+    const paymentItem = findEvent(edit.kind, edit.id);
+    if (paymentItem) Object.assign(body, paymentBody(edit, paymentItem));
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;
     await refresh({ initial: true });

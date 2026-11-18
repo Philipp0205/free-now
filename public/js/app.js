@@ -9,7 +9,7 @@ import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install
 import { scheduleErrorClear } from "./lib.js";
 
 /** The build label. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v116";
+export const APP_VERSION = "hangry-v117";
 
 // The kit keeps the browser bar colour equal to the page background, and follows scheme and width changes.
 window.AppKit?.themeColor?.start({ media: ["(max-width: 719px)"] });

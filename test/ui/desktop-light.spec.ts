@@ -176,6 +176,10 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     .repeat(8).trim();
   const climbing = await post("/api/plans", { note: "Climbing", time: "19:30" }, alex.token);
   await hangry.call("PATCH", `/api/plans/${climbing.plan.id}`, alex.token, { description });
+  // A plan Bea is in, and Alex's PayPal link, for the payment steps.
+  await hangry.call("PATCH", "/api/me", alex.token, { paymentUrl: "https://paypal.me/HangryAlex" });
+  const pizza = await post("/api/plans", { note: "Pizza", time: "20:00" }, alex.token);
+  await post(`/api/plans/${pizza.plan.id}/reply`, { reply: "in" }, bea.token);
 
   // The sign-in screen: the Continue button has a visible fill.
   const out = await desktop();
@@ -223,6 +227,8 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await shot(page, "now");
 
     // The kit's pull to refresh is touch only: a mouse drag down from the top of Now starts nothing and leaves no spinner.
+    // The pull test starts at the top. The contrast checks above scroll to each card, and there are three cards now.
+    await page.evaluate(() => window.scrollTo(0, 0));
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains("ak-no-bounce")), true, "html keeps ak-no-bounce");
     assert.equal(await page.evaluate(() => document.scrollingElement!.scrollTop), 0);
     await page.mouse.move(720, 120);
@@ -252,6 +258,45 @@ test("a light OS still gets the readable, mouse-friendly dark Hangry on desktop"
     await assertContrastOverPaint(page, details.locator("h2"), "Event sheet title");
     await page.locator(".scrim").click({ position: { x: 10, y: 10 } });
     await details.waitFor({ state: "detached" });
+
+    // Payments with a mouse: set a price in the edit sheet, Bea sees a PayPal link with the amount, Alex ticks her paid.
+    const pizza = page.locator("article", { has: page.locator("h3", { hasText: "Pizza" }) });
+    await pizza.getByRole("button", { name: "More for Pizza" }).click();
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
+    const editSheet = page.getByRole("dialog", { name: "Edit" });
+    await editSheet.waitFor();
+    await editSheet.getByLabel("Price per person").fill("12.50");
+    await settle(page);
+    await shot(page, "payments-edit");
+    await editSheet.getByRole("button", { name: "Save" }).click();
+    await editSheet.waitFor({ state: "detached" });
+    await pizza.getByText("€12.50 per person").waitFor();
+    await pizza.locator("h3").click();
+    await details.waitFor();
+    const paidGroup = details.getByRole("group", { name: "Who paid" });
+    await paidGroup.getByRole("checkbox", { name: "Mark Bea paid" }).check();
+    await paidGroup.getByText("Paid · by Alex").waitFor();
+    await settle(page);
+    await shot(page, "payments-organizer");
+    await page.locator(".scrim").click({ position: { x: 10, y: 10 } });
+    await details.waitFor({ state: "detached" });
+
+    const friend = await desktop(bea.token);
+    try {
+      await friend.page.goto(hangry.baseUrl);
+      await friend.page.locator(".tabbar").waitFor();
+      await friend.page.locator("article h3", { hasText: "Pizza" }).click();
+      const friendDetails = friend.page.getByRole("dialog", { name: "Details" });
+      await friendDetails.waitFor();
+      const paypal = friendDetails.getByRole("link", { name: "Pay €12.50 with PayPal" });
+      assert.equal(await paypal.getAttribute("href"), "https://www.paypal.me/HangryAlex/12.50EUR");
+      await friendDetails.getByRole("group", { name: "Who paid" }).getByText("Paid · by Alex").waitFor();
+      await assertContrast(friend.page, ".pay-section h3", "Pay section heading");
+      await shot(friend.page, "payments-friend");
+      assert.deepEqual(friend.errors, [], "no page errors for the friend");
+    } finally {
+      await friend.context.close();
+    }
 
     // Events
     await tabs.getByRole("button", { name: "Events", exact: true }).click();

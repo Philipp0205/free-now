@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-18-event-payments",
+    "date": "2026-11-18",
+    "title": "Set a price and see who has paid",
+    "bullets": [
+      "Add a price per person in euros when you edit a plan or a free post.",
+      "Friends who are in get a PayPal link with the amount, or the Wero email with a copy button.",
+      "Everyone sees a Who paid list. The organizer or collector ticks it, and you can tick yourself."
+    ]
+  },
+  {
     "id": "2026-11-18-chat-event-details",
     "date": "2026-11-18",
     "title": "Tap a chat title for the event details",

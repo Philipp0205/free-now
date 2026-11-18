@@ -14,6 +14,7 @@ import { visiblePaymentUrls, visibleWeroEmails } from "../lib/payment-url.js";
 import { dayLabel } from "../lib/time.js";
 import { type PushSummary, pushSummaryForPlan, pushSummaryForViewer } from "../push/push-status.js";
 import { remindAgainAt } from "./plans.js";
+import { paymentPayload } from "./payments.js";
 import { type PersonStatus, visibleStatuses } from "./status.js";
 
 function pointPayload(lat: number | null, lng: number | null): { lat: number; lng: number } | null {
@@ -30,6 +31,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
   const statuses = visibleStatuses(db, viewerId, now);
   const payments = visiblePaymentUrls(db, viewerId);
   const weroEmails = visibleWeroEmails(db, viewerId);
+  const joins = listSocialJoins(db, social.id);
   return {
     id: social.id,
     note: social.note,
@@ -43,7 +45,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     circleName: getCircleById(db, social.circle_id)?.name ?? "",
     creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null, weroEmail: weroEmails.get(social.creator_id) ?? null },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
-    joined: listSocialJoins(db, social.id).map((join) => ({
+    joined: joins.map((join) => ({
       id: join.id,
       name: join.name,
       color: colorHex(join.id, join.color),
@@ -56,6 +58,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
       etaMin: join.eta_min ?? null,
       arriveAt: join.arrive_at ?? null,
     })),
+    payment: paymentPayload(db, "social", social, joins, viewerId),
     ...withStatuses(pushField(db, social.circle_id, "social", social.id, social.creator_id, viewerId), statuses),
   };
 }
@@ -64,6 +67,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
   const statuses = visibleStatuses(db, viewerId, now);
   const payments = visiblePaymentUrls(db, viewerId);
   const weroEmails = visibleWeroEmails(db, viewerId);
+  const joins = listPlanJoins(db, plan.id);
   return {
     id: plan.id,
     note: plan.note,
@@ -85,7 +89,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
-    joined: listPlanJoins(db, plan.id).map((join) => ({
+    joined: joins.map((join) => ({
       id: join.id,
       name: join.name,
       color: colorHex(join.id, join.color),
@@ -97,6 +101,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
       reply: join.reply ?? "coming",
       arriveAt: join.arrive_at ?? null,
     })),
+    payment: paymentPayload(db, "plan", plan, joins, viewerId),
     // Every linked circle, so people reached by "Share with other circles" show too.
     ...withStatuses(optionalPush(pushSummaryForPlan(db, plan.id, plan.creator_id, viewerId)), statuses),
   };
