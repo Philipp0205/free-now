@@ -470,8 +470,8 @@ function openGif(message) {
   // render() so the scroll lock, the Back entry and the focus rules apply like any other sheet.
   render();
   void loadGifs("");
-  // A phone keeps its keyboard down until the search box is tapped. A mouse or keyboard can type at once.
-  if (!prefersTouchUi()) document.getElementById("gif-query")?.focus({ preventScroll: true });
+  // Type at once, on a phone too (the keyboard comes up). preventScroll keeps the page and chat log where they are.
+  document.getElementById("gif-query")?.focus({ preventScroll: true });
 }
 
 export function closeGif() {

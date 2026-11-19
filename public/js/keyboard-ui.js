@@ -80,6 +80,7 @@ function syncKeyboardInset() {
 
 /** Pull a sheet down when bottom offset and a resized visual viewport both lift it. */
 export function anchorOpenSheet() {
+  // Not the GIF sheet: it is bottom: 0 inside the chat screen, which is already as tall as the visible viewport.
   const sheet = document.querySelector(".sheet:not(.gif-sheet)");
   const vv = window.visualViewport;
   if (!sheet || !vv) return;
@@ -105,6 +106,9 @@ function scheduleReveal(node) {
 
 function revealField(node) {
   if (!node.isConnected || document.activeElement !== node) return;
+  // The GIF sheet sits in the chat screen, which already follows the visual viewport, so its field is always in view.
+  // Scrolling here could only move the page or chat behind the sheet.
+  if (node.id === "gif-query") return;
   if (node.id === "where-query") {
     scrollFieldAboveDock(node);
     revealWhereResults();
