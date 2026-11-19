@@ -656,6 +656,24 @@ a.btn.pay-paypal { display: flex; align-items: center; justify-content: center; 
 .paid-row .paid-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paid-row .paid-status { flex: none; font-size: 13px; color: var(--muted); }
 .paid-row:not(:has(.paid-box)) .paid-name { padding-left: 36px; }
+.bills-totals { display: flex; flex-direction: column; gap: 8px; }
+.bills-total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.bills-total strong { font-size: 20px; }
+.bills-totals .bills-settled { margin: 0; font-size: 18px; font-weight: 650; color: var(--text); }
+.bills-totals .help { margin: 0; }
+.you-section .bills-note { margin: 0 16px 12px; }
+.bill-group { display: flex; flex-direction: column; gap: 10px; }
+.bill { display: flex; flex-direction: column; gap: 10px; }
+.bill-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.bill-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bill-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bill-meta { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bill-amount { flex: none; font-weight: 650; }
+.bill-people { display: flex; flex-direction: column; }
+.bill-person { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; }
+.bill-person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bill-person-amount { flex: none; font-size: 13px; color: var(--muted); }
+.bill-person .text-btn { flex: none; min-height: 44px; padding: 8px 4px; }
 
 .card-copy {
   position: absolute;

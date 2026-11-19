@@ -144,6 +144,8 @@ export const state = {
   busyPreview: null,
   /** Assistant tokens on the You tab: { loaded, failed, tokens, busy, draft, secret }. secret is set only right after making one. */
   agentTokens: null,
+  /** Open bills on the You tab: { loaded, loading, failed, stale, at, owe, owed, totals }. Null until first asked. */
+  bills: null,
   /** Open You sub-screen: null (the menu) or one of YOU_SECTIONS ids. */
   youSection: null,
   /** Busy people at a later time on the create sheet: { at, people: [{ id, state, until }] }. */

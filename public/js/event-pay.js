@@ -1,6 +1,7 @@
 import { state } from "./state.js";
 import { api } from "./session.js";
 import { render } from "./render.js";
+import { actingCircle } from "./events.js";
 import { el, scheduleErrorClear, weroEntry } from "./lib.js";
 
 /** "12.50" to "€12.50". The server sends the amount already formatted. */
@@ -30,14 +31,26 @@ function statusText(item, member) {
   return member.paid ? `Paid · by ${member.setByName || "someone"}` : `Owes ${euro(item.payment.amount)}`;
 }
 
-/** Puts a fresh event from the server into every list that may show it. */
-function replaceEvent(kind, fresh) {
+/**
+ * Puts a fresh event from the server into every list that may show it, and into the open detail sheet when that
+ * sheet came from Bills (a settled event has left the bills list, so the sheet keeps its own copy).
+ * Bills are marked stale so the next look reloads them.
+ */
+export function replaceEvent(kind, fresh) {
   const lists = kind === "plan"
     ? [state.plans, state.mapPlans, state.calendarPlans]
     : [state.socials, state.mapSocials, state.calendarSocials];
   for (const list of lists) {
     const at = (list || []).findIndex((row) => row.id === fresh.id);
     if (at >= 0) list[at] = fresh;
+  }
+  const detail = state.eventDetail;
+  if (detail?.item && detail.kind === kind && detail.id === fresh.id) detail.item = fresh;
+  if (state.bills) {
+    state.bills.stale = true;
+    for (const bill of [...(state.bills.owe || []), ...(state.bills.owed || [])]) {
+      if (bill.kind === kind && bill.id === fresh.id) bill.event = fresh;
+    }
   }
 }
 
@@ -109,7 +122,7 @@ async function tick(kind, item, member, box, status) {
   const want = box.checked;
   box.disabled = true;
   try {
-    const result = await api(`/api/${kind}s/${item.id}/paid`, { method: "POST", body: { userId: member.id, paid: want } });
+    const result = await api(`/api/${kind}s/${item.id}/paid`, { method: "POST", body: { userId: member.id, paid: want }, circle: actingCircle(item) });
     const fresh = result[kind];
     replaceEvent(kind, fresh);
     const row = fresh.payment?.members.find((entry) => entry.id === member.id);

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-19-open-bills",
+    "date": "2026-11-19",
+    "title": "One place for who owes what",
+    "bullets": [
+      "A new Bills page under You adds up what you owe and what friends owe you, across all your circles.",
+      "Mark someone paid right there, or open the event to see who has paid.",
+      "Past events stay in the list until everyone has paid, so nothing slips away."
+    ]
+  },
+  {
     "id": "2026-11-18-color-tokens",
     "date": "2026-11-18",
     "title": "Hangry follows your light or dark setting",

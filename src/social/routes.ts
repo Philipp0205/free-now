@@ -28,6 +28,7 @@ import {
   readPoint,
   readStart,
 } from "../lib/validate.js";
+import { loadBills } from "./bills.js";
 import { requireCircle } from "./circles.js";
 import {
   editPlan,
@@ -48,6 +49,12 @@ import { publishSocial, replySocial } from "./socials.js";
 
 export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boolean> {
   const { res, deps, url, method, pathname, body, requested, me } = ctx;
+  if (method === "GET" && pathname === "/api/bills") {
+    const now = deps.now();
+    sendJson(res, 200, loadBills(deps.db, me.id, now, isoDate(now, deps.config.tz), deps.config.tz));
+    return true;
+  }
+
   if (method === "GET" && pathname === "/api/socials" && isAllCircles(method, pathname, url)) {
     const now = deps.now();
     const merged = new Map<string, SocialRow>();

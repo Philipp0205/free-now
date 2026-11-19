@@ -13,9 +13,11 @@ import { openFeedback, openWhatsNewList } from "./whats-new-ui.js";
 import { copyText, el, field, icon, paymentUrlError, run, scheduleErrorClear, viewerTz, weroEmailError } from "./lib.js";
 import { avatar, onRemovePhoto, pickPhoto } from "./avatars.js";
 import { emailField, onResendEmail, saveEmail } from "./account.js";
+import { billsSection, billsSummary, ensureBills, loadBills } from "./bills.js";
 
 const YOU_SECTIONS = [
   { id: "profile", title: "Profile" },
+  { id: "bills", title: "Bills" },
   { id: "availability", title: "Availability & calendar" },
   { id: "notifications", title: "Notifications" },
   { id: "assistants", title: "Assistants" },
@@ -24,6 +26,7 @@ const YOU_SECTIONS = [
 
 function openYouSection(id) {
   state.youSection = id;
+  if (id === "bills") void loadBills();
   render();
 }
 
@@ -35,6 +38,7 @@ export function closeYouSection() {
 
 function youSectionSummary(id) {
   if (id === "profile") return state.me.user.name;
+  if (id === "bills") return billsSummary();
   if (id === "availability") {
     const status = activeStatus(state.me.user.status);
     if (status) return statusLine(status, Date.now(), viewerTz());
@@ -63,6 +67,7 @@ export function youMenuRow(title, summary, onclick) {
 
 export function youScreen() {
   if (state.youSection) return youSectionScreen(state.youSection);
+  ensureBills();
   return el("div", {}, [
     screenHeader("You"),
     el("div", { class: "panel panel-rows" }, YOU_SECTIONS.map((section) => (
@@ -80,6 +85,7 @@ function youSectionScreen(id) {
   const section = YOU_SECTIONS.find((item) => item.id === id);
   const bodies = {
     profile: profileSection,
+    bills: billsSection,
     availability: () => [statusPanel(), friendsViewPanel(), busyHoursPanel(), calendarFeedPanel(), calendarSyncPanel()],
     notifications: notificationsSection,
     assistants: () => [agentTokensPanel()],

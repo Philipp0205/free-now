@@ -430,6 +430,7 @@ export function clearSession() {
   state.calendarSync = null;
   state.busyPreview = null;
   state.agentTokens = null;
+  state.bills = null;
   state.youSection = null;
   state.busyAt = null;
 }

@@ -11,6 +11,7 @@ const hangry = useHangry();
 const SIZE = { width: 360, height: 640 } as const;
 const SECTIONS = [
   "Profile",
+  "Bills",
   "Availability & calendar",
   "Notifications",
   "Assistants",
