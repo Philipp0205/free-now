@@ -143,12 +143,22 @@ test("a push without a row id shows the notification and sends no ack", async ()
   assert.deepEqual(worker.order, ["shown"]);
 });
 
-test("the build label moved to v126 and the worker no longer keeps a cache name of its own", () => {
-  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v126");
+test("the build label moved to v127 and the worker no longer keeps a cache name of its own", () => {
+  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v127");
   const version = Number(/export const APP_VERSION = "hangry-v(\d+)"/.exec(APP)?.[1]);
   assert.ok(version >= 106);
   assert.doesNotMatch(SOURCE, /const CACHE = /);
   assert.doesNotMatch(SOURCE, /const SHELL = /);
+});
+
+test("the worker still skips waiting and claims clients, which the page-side update relies on", () => {
+  assert.match(SOURCE, /self\.skipWaiting\(\)/);
+  assert.match(SOURCE, /self\.clients\.claim\(\)/);
+  const loader = fs.readFileSync(new URL("../public/js/app-update.js", import.meta.url), "utf8");
+  assert.match(loader, /controllerchange/);
+  assert.match(loader, /\.update\(\)/);
+  assert.match(APP, /initAppUpdates\(/);
+  assert.doesNotMatch(APP, /serviceWorker\.register/);
 });
 
 test("the worker precaches what the build lists, and activate deletes the old hangry-vN caches only", async () => {
