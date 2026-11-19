@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-18-color-tokens",
+    "date": "2026-11-18",
+    "title": "Hangry follows your light or dark setting",
+    "bullets": [
+      "If your phone is set to light, Hangry is now light too. Dark phones look the same as before.",
+      "Menus, sheets, the calendar and the emoji picker all switch with it.",
+      "Plan cards and the map card stay dark so the pictures and colours still pop."
+    ]
+  },
+  {
     "id": "2026-11-18-app-kit-070",
     "date": "2026-11-18",
     "title": "Smoother tabs, sheets and menus",

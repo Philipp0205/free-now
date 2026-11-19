@@ -135,7 +135,7 @@ test("html wears ak-native and ak-no-bounce, the kit files load, and inputs stay
   }
 });
 
-test("the tab bar is dark glass whatever the OS scheme, and the page scrolls under it", { timeout: 120_000 }, async () => {
+test("the tab bar is glass in the OS scheme, and the page scrolls under it", { timeout: 120_000 }, async () => {
   const host = await seed();
   for (const [width, height] of SIZES) {
     const page = await phone(host.token, width, height);
@@ -158,12 +158,15 @@ test("the tab bar is dark glass whatever the OS scheme, and the page scrolls und
         assert.ok(alpha(bar.background) < 1 && alpha(bar.background) > 0, `${width} ${scheme}: translucent, got ${bar.background}`);
         assert.ok(alpha(bar.border) > 0, `${width} ${scheme}: hairline is visible`);
         assert.equal(bar.position, "fixed");
-        // Hangry is always dark: a light OS setting gets the same dark bar.
+        // The bar follows the OS: dark glass in dark, light glass in light.
         const [r] = /\d+/.exec(bar.background)!.map(Number);
-        assert.ok(r < 50, `${width} ${scheme}: bar colour ${bar.background}`);
+        if (scheme === "dark") assert.ok(r < 50, `${width} ${scheme}: bar colour ${bar.background}`);
+        else assert.ok(r > 200, `${width} ${scheme}: bar colour ${bar.background}`);
         // The current tab stays readable on the bar.
         const current = await page.locator(".tabbar .tab[aria-current='page']").evaluate((node) => getComputedStyle(node).color);
-        assert.ok(Number(/\d+/.exec(current)![0]) > 200, `${width} ${scheme}: current tab colour ${current}`);
+        const [c] = /\d+/.exec(current)!.map(Number);
+        if (scheme === "dark") assert.ok(c > 200, `${width} ${scheme}: current tab colour ${current}`);
+        else assert.ok(c < 50, `${width} ${scheme}: current tab colour ${current}`);
 
         // Content really sits under the bar: scrolled down, the last card reaches behind it.
         await page.evaluate(() => window.scrollTo(0, 400));
