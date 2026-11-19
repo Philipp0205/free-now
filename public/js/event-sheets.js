@@ -361,9 +361,9 @@ async function stopSharing(edit) {
   });
 }
 
-function descriptionField(edit) {
+export function descriptionField(edit, id = "admin-description") {
   const area = el("textarea", {
-    id: "admin-description",
+    id,
     class: "sheet-control sheet-textarea",
     rows: "3",
     maxlength: "280",

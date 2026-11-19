@@ -1548,11 +1548,12 @@ export function insertPlan(
     lng: number | null;
     place: string;
     atTime?: string | null;
+    description?: string | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     plan.id,
     plan.circleId,
@@ -1564,6 +1565,7 @@ export function insertPlan(
     plan.lng,
     plan.place,
     plan.atTime ?? null,
+    plan.description || null,
   );
   linkPlanCircle(db, plan.id, plan.circleId, plan.createdAt);
 }

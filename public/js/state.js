@@ -76,6 +76,7 @@ export const state = {
   shareLocation: localStorage.getItem(SHARE_KEY) === "1",
   placeDraft: "",
   planTime: "",
+  planDraft: { description: "" },
   planDay: "tomorrow",
   planDate: "",
   planWhere: emptyWhereSession(),

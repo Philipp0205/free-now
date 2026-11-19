@@ -389,10 +389,12 @@ export async function onCreatePlan(event) {
   const locationNote = state.error;
   if (locationNote) render();
   await run(async () => {
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date } });
+    const description = document.getElementById("sheet-description")?.value ?? state.planDraft.description;
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description } });
     state.sheet = null;
     state.placeDraft = "";
     state.planTime = "";
+    state.planDraft = { description: "" };
     state.planDay = "pick";
     state.planDate = "";
     state.planWhere = emptyWhereSession();

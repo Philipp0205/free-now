@@ -3,7 +3,7 @@ import { destroyWhereMap, shareToggle } from "./map-card.js";
 import { render } from "./render.js";
 import { notificationsSheet, pushSheet } from "./push-install.js";
 import { memberSheet } from "./members.js";
-import { adminEditSheet, arrivalSheet, eventDetailSheet, shareCirclesSheet } from "./event-sheets.js";
+import { adminEditSheet, arrivalSheet, descriptionField, eventDetailSheet, shareCirclesSheet } from "./event-sheets.js";
 import { feedbackSheet, resetFeedback, whatsNewSheet } from "./whats-new-ui.js";
 import { defaultCurrentWhere, stopWhereSearch, whereBlock, whereFromSocial } from "./where.js";
 import { clock, copyText, el, mySocial, ttlLabel } from "./lib.js";
@@ -72,6 +72,7 @@ export function sheet() {
             placeholder: planning ? "Amanda's inviting everyone for free tacos" : "Rooftop coffee??",
             maxlength: "80",
           }),
+          planning ? descriptionField(state.planDraft, "sheet-description") : null,
           planning ? planDateField() : null,
           planning ? el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: "Time (optional)" }),
@@ -129,6 +130,7 @@ export function openSheet(name, { planDate = "" } = {}) {
   if (name === "free" || name === "plan") {
     state.placeDraft = "";
     state.planTime = "";
+    state.planDraft = { description: "" };
     state.planDay = "pick";
     state.planDate = name === "plan" ? planDate : "";
     state.planWhere = emptyWhereSession();

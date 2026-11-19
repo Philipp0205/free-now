@@ -222,6 +222,7 @@ export const openapi = {
               date: { type: "string", format: "date", description: "YYYY-MM-DD. Default is tomorrow." },
               time: { type: "string", pattern: "^\\d{2}:\\d{2}$", description: "HH:MM, 24 hour." },
               place,
+              description: { type: "string", description: "Optional. One line, longer text is cut at 280." },
               lat,
               lng,
               ...circleBody,

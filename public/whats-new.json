@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-19-add-description",
+    "date": "2026-11-19",
+    "title": "Add a description when you plan",
+    "bullets": [
+      "The Description box is now on the Plan sheet, so you can add the details up front.",
+      "It shows on the plan card and in the event, and you can still change it in Edit."
+    ]
+  },
+  {
     "id": "2026-11-19-open-bills",
     "date": "2026-11-19",
     "title": "One place for who owes what",
