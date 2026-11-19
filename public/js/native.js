@@ -3,6 +3,7 @@
 import { state } from "./state.js";
 import { sheetIsOpen } from "./sheets.js";
 import { refresh } from "./session.js";
+import { checkForUpdate, holdUpdateReload } from "./app-update.js";
 
 let titleBinding = null;
 
@@ -48,11 +49,16 @@ export const PTR_MIN_MS = 700;
  */
 export async function refreshHeld() {
   const started = Date.now();
+  // A pull also looks for a new build. If one takes over meanwhile, its reload waits for the end of the hold.
+  const release = holdUpdateReload();
+  const found = checkForUpdate({ force: true });
   try {
     await refresh();
   } finally {
     const left = PTR_MIN_MS - (Date.now() - started);
     if (left > 0) await new Promise((resolve) => setTimeout(resolve, left));
+    await found;
+    release();
   }
 }
 

@@ -7,16 +7,16 @@ import { checkGoogleReturn, landCalendar } from "./calendar-sync.js";
 import { resolveShareLink } from "./plan-share.js";
 import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install.js";
 import { scheduleErrorClear } from "./lib.js";
+import { checkForUpdate, initAppUpdates } from "./app-update.js";
 
 /** The build label. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v126";
+export const APP_VERSION = "hangry-v127";
 
 // The kit keeps the browser bar colour equal to the page background, and follows scheme and width changes.
 window.AppKit?.themeColor?.start({ media: ["(max-width: 719px)"] });
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
-}
+// Registers the worker, and reloads into a new build when one takes over and nothing unsent would be lost.
+initAppUpdates(() => state);
 
 boot();
 setInterval(() => {
@@ -34,6 +34,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   refresh().catch(() => {});
   void checkGoogleReturn();
+  // Only the worker check is throttled (about once a minute). The data refresh above runs every time.
+  void checkForUpdate();
 });
 
 /* iOS Safari only applies :active press styles once the page listens for touches. Passive, so scrolling is untouched. */

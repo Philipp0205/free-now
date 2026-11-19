@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-19-update-on-refresh",
+    "date": "2026-11-19",
+    "title": "New versions show up when you pull",
+    "bullets": [
+      "Pull to refresh, or come back to Hangry, and a new version of the app loads on its own.",
+      "It never interrupts you while you type or when you have unsent text, and waits until you are done."
+    ]
+  },
+  {
     "id": "2026-11-19-gif-autofocus",
     "date": "2026-11-19",
     "title": "Type straight into the GIF picker",
