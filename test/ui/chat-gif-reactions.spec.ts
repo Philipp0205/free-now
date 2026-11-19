@@ -7,6 +7,7 @@ import type { GiphyFetch } from "../../src/chat/giphy.js";
 import { skipWhatsNew } from "./whats-new-seen.js";
 import { SIZES, UA, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
+import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
 
 // Fake people, a fake key and a fake Giphy. The server gets a stub fetch and the browser gets mocked images, so
 // nothing here reaches giphy.com. Screenshots go to test/ui/screenshots (gitignored).
@@ -131,7 +132,7 @@ for (const [width, height] of SIZES) {
       assert.match(asked[asked.length - 1], /\/gifs\/trending\?/);
       assert.equal(new URL(asked[asked.length - 1]).searchParams.get("rating"), "pg-13");
       await sheet.getByText("Powered by GIPHY").waitFor();
-      assert.equal(await page.evaluate(() => document.activeElement?.id === "gif-query"), false, "a phone keeps its keyboard down");
+      assert.equal(await page.evaluate(() => document.activeElement?.id === "gif-query"), true, "the search box is focused on open, on a phone too");
       const box = (await sheet.boundingBox())!;
       assert.ok(box.x >= 0 && box.x + box.width <= width + 0.5 && box.y >= 0 && box.y + box.height <= height + 0.5, `the sheet fits the screen: ${JSON.stringify(box)}`);
       await loaded(sheet.locator(".gif-pick img").first());
@@ -221,6 +222,97 @@ for (const [width, height] of SIZES) {
       const html = await page.content();
       assert.ok(!html.includes(KEY), "the page never has the key");
       assert.ok(asked.every((url) => new URL(url).searchParams.get("api_key") === KEY), "the server added the key");
+      assert.deepEqual(outside, [], "no request leaves the app but the GIF images");
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+for (const [width, height] of SIZES) {
+  test(`the GIF search is focused on open, types without a tap, and the sheet fits with the keyboard up at ${width}x${height}`, { timeout: 120_000 }, async () => {
+    const { alex } = await seed(on);
+    const { context, page, errors, outside } = await phone(on, alex.token, width, height);
+    // Record every scrollIntoView, to prove the GIF field never asks the page to scroll.
+    await context.addInitScript(() => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function scrollIntoView(this: Element, ...args: []) {
+        (window as unknown as { __scrolled: string[] }).__scrolled = [...((window as unknown as { __scrolled?: string[] }).__scrolled || []), this.id || this.tagName];
+        return original.apply(this, args);
+      };
+    });
+    try {
+      fs.mkdirSync(shotsDir, { recursive: true });
+      await openChat(page, on);
+      const logTop = () => page.evaluate(() => document.querySelector(".chat-log")!.scrollTop);
+      const pageScroll = () => page.evaluate(() => ({ x: window.scrollX, y: window.scrollY, doc: document.scrollingElement!.scrollTop }));
+      const logBefore = await logTop();
+
+      await page.locator(".chat-compose").getByRole("button", { name: /GIF/ }).tap();
+      const sheet = page.getByRole("dialog", { name: "GIFs" });
+      const search = sheet.getByRole("searchbox", { name: "Search GIFs" });
+      await search.waitFor();
+      // Focused straight away, with no tap on the field, and the page and chat log have not moved.
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "gif-query", "the search box is focused on open");
+      assert.deepEqual(await pageScroll(), { x: 0, y: 0, doc: 0 }, "focusing does not scroll the page");
+      assert.equal(await logTop(), logBefore, "focusing does not move the chat log");
+
+      // Typing works at once and shows results from the fake Giphy.
+      await page.keyboard.type("dog");
+      assert.equal(await search.inputValue(), "dog");
+      await sheet.getByRole("button", { name: "Send GIF: dog one" }).waitFor();
+      assert.equal(await sheet.getByRole("button", { name: /^Send GIF:/ }).count(), 2);
+      assert.ok(asked.some((url) => new URL(url).pathname.endsWith("/search") && new URL(url).searchParams.get("q") === "dog"));
+
+      // The keyboard comes up: the layout viewport shrinks by 280px, as on a phone that resizes its content.
+      const shrunk = Math.max(260, height - 280);
+      await page.setViewportSize({ width, height: shrunk });
+      await page.waitForTimeout(FIELD_REVEAL_MS + 300);
+      const placed = await page.evaluate(() => {
+        const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+        const view = window.visualViewport!;
+        const log = document.querySelector(".chat-log")!;
+        const scroll = rect(".gif-scroll");
+        return {
+          viewTop: view.offsetTop,
+          viewBottom: view.offsetTop + view.height,
+          viewWidth: view.width,
+          sheet: rect(".gif-sheet"),
+          head: rect(".gif-sheet .sheet-head"),
+          field: rect("#gif-query"),
+          scroll,
+          dock: rect(".gif-credit"),
+          focused: document.activeElement?.id,
+          sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          logGap: log.scrollHeight - log.scrollTop - log.clientHeight,
+          scrolled: (window as unknown as { __scrolled?: string[] }).__scrolled || [],
+          page: { x: window.scrollX, y: window.scrollY, doc: document.scrollingElement!.scrollTop },
+        };
+      });
+      const note = JSON.stringify(placed);
+      assert.equal(placed.focused, "gif-query", "the field keeps focus with the keyboard up");
+      assert.ok(placed.sheet.top >= placed.viewTop - 1 && placed.sheet.bottom <= placed.viewBottom + 1, `the sheet is inside the visible viewport: ${note}`);
+      assert.ok(placed.sheet.left >= -1 && placed.sheet.right <= placed.viewWidth + 1, `the sheet fits sideways: ${note}`);
+      assert.ok(placed.head.top >= placed.viewTop - 1, `the sheet head is visible: ${note}`);
+      assert.ok(placed.field.top >= placed.head.top - 1 && placed.field.bottom <= placed.sheet.bottom + 1, `the search field is in the sheet: ${note}`);
+      assert.ok(placed.field.bottom <= placed.viewBottom, `the search field is above the keyboard: ${note}`);
+      assert.ok(placed.scroll.top >= placed.field.bottom - 1, `the results sit under the field: ${note}`);
+      assert.ok(placed.scroll.height > 40, `the results keep some room: ${note}`);
+      assert.ok(placed.dock.top >= placed.scroll.bottom - 1 && placed.dock.top >= placed.field.bottom, `the credit does not cover the field: ${note}`);
+      assert.ok(placed.dock.bottom <= placed.viewBottom + 1, `the credit is above the keyboard: ${note}`);
+      assert.equal(placed.sideways, false, `no sideways scroll: ${note}`);
+      assert.deepEqual(placed.page, { x: 0, y: 0, doc: 0 }, `the page did not jump: ${note}`);
+      assert.ok(placed.logGap < 48, `the chat log is still at its end: ${note}`);
+      assert.ok(!placed.scrolled.includes("gif-query"), `the field did not scroll the page: ${note}`);
+      await page.screenshot({ path: path.join(shotsDir, `focus-keyboard-${width}x${height}.png`) });
+
+      // The sheet still works with the keyboard up, and gives the room back when it goes.
+      await sheet.getByRole("button", { name: "Send GIF: dog two" }).waitFor();
+      await page.setViewportSize({ width, height });
+      await page.waitForTimeout(300);
+      const restored = (await sheet.boundingBox())!;
+      assert.ok(restored.y >= 0 && restored.y + restored.height <= height + 0.5, `the sheet fits after the keyboard goes: ${JSON.stringify(restored)}`);
       assert.deepEqual(outside, [], "no request leaves the app but the GIF images");
       assert.deepEqual(errors, [], "no page errors");
     } finally {

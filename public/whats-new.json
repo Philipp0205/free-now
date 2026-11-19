@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-19-gif-autofocus",
+    "date": "2026-11-19",
+    "title": "Type straight into the GIF picker",
+    "bullets": [
+      "Opening the GIF picker now puts your cursor in the search box, so you can type right away.",
+      "On a phone the keyboard comes up with it, and the picker still fits above the keyboard."
+    ]
+  },
+  {
     "id": "2026-11-19-pull-to-refresh-hold",
     "date": "2026-11-19",
     "title": "Pull to refresh takes its time",

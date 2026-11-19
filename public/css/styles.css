@@ -1462,9 +1462,16 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
   background: var(--lift);
   -webkit-user-drag: none;
 }
-/* The sheet is inside the transformed chat screen, which is already as tall as the visible viewport. */
+/* The sheet is inside the transformed chat screen, which is already as tall as the visible viewport.
+   So it is bottom: 0 of the visible area and does not use --kb-offset, which would count the keyboard twice.
+   With the keyboard up that area is short: the sheet takes most of it so the results keep some room under the field. */
 .chat-screen .gif-scrim { top: 0; height: 100%; }
-.chat-screen .gif-sheet { bottom: 0; height: min(78%, 620px); max-height: calc(100% - var(--sheet-margin)); }
+.chat-screen .gif-sheet {
+  bottom: 0;
+  height: min(78%, 620px);
+  min-height: min(340px, calc(100% - var(--sheet-margin)));
+  max-height: calc(100% - var(--sheet-margin));
+}
 .gif-query { margin: 12px 0 4px; }
 .gif-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; }
 .gif-intro .help { flex-basis: 100%; }
