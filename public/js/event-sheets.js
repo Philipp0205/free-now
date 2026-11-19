@@ -22,7 +22,8 @@ import { euro, paidList, paySection, paymentBody, paymentEditState, paymentField
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
   state.cardMenu = null;
-  state.eventDetail = { kind, id: item.id, from };
+  // Bills can show an event no list holds (over and settled), so that sheet keeps its own copy.
+  state.eventDetail = { kind, id: item.id, from, ...(from === "bills" ? { item } : {}) };
   state.sheet = "event-detail";
   render();
 }
@@ -30,7 +31,7 @@ export function openEventDetail(kind, item, from = "") {
 function eventDetailItem() {
   const detail = state.eventDetail;
   if (!detail) return null;
-  return findEvent(detail.kind, detail.id);
+  return findEvent(detail.kind, detail.id) || detail.item || null;
 }
 
 /** An event by id from Home, then the map, then the calendar month. */
@@ -63,7 +64,7 @@ export function eventDetailSheet() {
   const kind = detail.kind;
   const title = item.note || (kind === "plan" ? "Plan" : "Free now");
   const calendar = detail.from === "calendar";
-  const over = calendar && (kind === "plan" ? calPlanOver(item) : calSocialOver(item));
+  const over = (calendar || detail.from === "bills") && (kind === "plan" ? calPlanOver(item) : calSocialOver(item));
   const mine = item.creator?.id === state.me.user.id;
   let when;
   if (kind === "plan") when = `${item.whenLabel}${item.time ? ` · ${item.time}` : ""}${over ? " · Ended" : ""}`;

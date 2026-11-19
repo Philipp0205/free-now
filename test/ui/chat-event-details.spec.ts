@@ -61,7 +61,8 @@ async function openAs(token: string, width: number, height: number): Promise<Pag
 }
 
 async function closeByScrim(page: Page) {
-  await page.locator(".scrim").click({ position: { x: 10, y: 10 } });
+  // A sheet that just closed lingers as an inert copy for a moment; only the live scrim counts.
+  await page.locator(".scrim:not([inert] *)").click({ position: { x: 10, y: 10 } });
   await page.getByRole("dialog", { name: "Details" }).waitFor({ state: "detached" });
 }
 

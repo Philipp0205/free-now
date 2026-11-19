@@ -1411,6 +1411,15 @@ export function listActiveSocials(db: DatabaseSync, circleId: string, now: numbe
   );
 }
 
+/** Every social in the circle with a price, live or over. The bills view needs debts that outlive the event. */
+export function listPricedSocials(db: DatabaseSync, circleId: string): SocialRow[] {
+  return all<SocialRow>(
+    db,
+    `${SOCIAL_SELECT} WHERE s.circle_id = ? AND s.price_cents IS NOT NULL ORDER BY s.created_at DESC`,
+    circleId,
+  );
+}
+
 export function getSocial(db: DatabaseSync, id: string): SocialRow | undefined {
   return one<SocialRow>(db, `${SOCIAL_SELECT} WHERE s.id = ?`, id);
 }
@@ -1568,6 +1577,15 @@ export function listVisiblePlans(db: DatabaseSync, circleId: string, today: stri
     circleId,
     today,
     through,
+  );
+}
+
+/** Every plan linked to the circle with a price, past, ended or ahead. */
+export function listPricedPlans(db: DatabaseSync, circleId: string): PlanRow[] {
+  return all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND p.price_cents IS NOT NULL ORDER BY p.for_date DESC, p.created_at DESC`,
+    circleId,
   );
 }
 
