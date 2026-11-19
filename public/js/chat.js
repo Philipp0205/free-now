@@ -7,6 +7,7 @@ import { render } from "./render.js";
 import { navigate } from "./native.js";
 import { chatTargetUrl, eventUnread, forgetOpenUnread, syncChatAlerts } from "./alerts.js";
 import { tick } from "./replies.js";
+import { forgetRain, noteRainThread } from "./emoji-rain.js";
 import { openEventDetail } from "./event-sheets.js";
 import { copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { batch } from "@preact/signals";
@@ -31,18 +32,24 @@ export async function openChat(target) {
   state.chatStick = true;
   state.chatReplyTo = null;
   forgetOpenUnread(target);
+  // Whatever is in the chat when it opens is old: the first thread only marks messages seen.
+  forgetRain();
   // Event chats show their screen (Loading…) at once. The thread fills in when the GET lands, or on the next poll.
   // The circle Chat tab keeps the tab bar while it loads, so a later tab tap wins.
   if (target.kind !== "circle") void navigate(render, "push");
   await run(async () => {
     const chat = (await api(chatTargetUrl(target))).chat;
     // Another tab was tapped while this loaded; that tap wins.
-    if (state.chat === target) state.chatThread = chat;
+    if (state.chat === target) {
+      state.chatThread = chat;
+      noteRainThread(chat);
+    }
     void syncChatAlerts(target);
   });
 }
 
 export function closeChat() {
+  forgetRain();
   state.chat = null;
   state.chatThread = null;
   state.chatDraft = "";
@@ -525,7 +532,10 @@ async function pickGif(item) {
     const chat = (await api(chatTargetUrl(target), { method: "POST", body })).chat;
     gifSending = false;
     void syncChatAlerts(target);
-    if (state.chat && state.chat.kind === target.kind && state.chat.id === target.id) state.chatThread = chat;
+    if (state.chat && state.chat.kind === target.kind && state.chat.id === target.id) {
+      state.chatThread = chat;
+      noteRainThread(chat);
+    }
     state.statusMessage = "";
     state.chatStick = true;
     sentReply(replyTo);
@@ -620,6 +630,7 @@ async function sendChat(event) {
   state.chatQueue = { target, text, replyTo };
   try {
     state.chatThread = (await api(chatTargetUrl(target), { method: "POST", body: chatBody(text, replyTo) })).chat;
+    if (state.chat?.kind === target.kind && state.chat.id === target.id) noteRainThread(state.chatThread);
     void syncChatAlerts(target);
     state.chatQueue = null;
     state.chatDraft = unsentTail(state.chatDraft, text);
@@ -656,6 +667,7 @@ export async function flushChatQueue() {
     state.statusMessage = "";
     if (state.chat && state.chat.kind === queued.target.kind && state.chat.id === queued.target.id) {
       state.chatThread = thread;
+      noteRainThread(thread);
     }
     state.chatStick = true;
     render();
