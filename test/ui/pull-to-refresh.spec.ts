@@ -29,8 +29,11 @@ async function seed() {
 }
 
 /** A phone with the 3s poll switched off in the page (test only), so every /api/socials GET is a refresh we caused. */
-async function phone(token: string, width: number, height: number) {
-  const context = await hangry.browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, colorScheme: "dark" });
+async function phone(token: string, width: number, height: number, { reducedMotion = false } = {}) {
+  const context = await hangry.browser.newContext({
+    viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: UA, colorScheme: "dark",
+    ...(reducedMotion ? { reducedMotion: "reduce" as const } : {}),
+  });
   await skipWhatsNew(context);
   await context.addInitScript((value) => {
     localStorage.setItem("fn_token", value);
@@ -118,6 +121,87 @@ async function pullAndRefresh(page: Page, calls: { socials: number }, what: stri
   await page.waitForTimeout(700);
   assert.equal(calls.socials - before, 1, `${what}: exactly one refresh`);
 }
+
+/** The minimum the spinner stays up, read from the source (the page code cannot be imported into node). */
+const PTR_MIN_MS = Number(/export const PTR_MIN_MS = (\d+);/.exec(fs.readFileSync(path.resolve("public/js/native.js"), "utf8"))?.[1]);
+
+/**
+ * Watch the indicator's class in the page, so timing is not skewed by test round trips. Records when the loading
+ * state starts and ends, and the opacity in the same turn the loading state ends and 90ms later.
+ */
+async function watchIndicator(page: Page) {
+  await page.evaluate(() => {
+    const node = document.querySelector(".ak-ptr")!;
+    const log: { start?: number; end?: number; opacityAtEnd?: number; opacityLater?: number } = {};
+    (window as unknown as { __ptr: typeof log }).__ptr = log;
+    new MutationObserver(() => {
+      const loading = node.classList.contains("ak-ptr-loading");
+      if (loading && log.start === undefined) log.start = performance.now();
+      if (!loading && log.start !== undefined && log.end === undefined) {
+        log.end = performance.now();
+        log.opacityAtEnd = Number(getComputedStyle(node).opacity);
+        setTimeout(() => { log.opacityLater = Number(getComputedStyle(node).opacity); }, 90);
+      }
+    }).observe(node, { attributes: true, attributeFilter: ["class"] });
+  });
+}
+
+const watched = (page: Page) => page.evaluate(() => (window as unknown as { __ptr: { start?: number; end?: number; opacityAtEnd?: number; opacityLater?: number } }).__ptr);
+
+for (const [width, height] of SIZES) {
+  test(`a fast refresh keeps the spinner up for the minimum, then fades it out, ${width}x${height}`, { timeout: 120_000 }, async () => {
+    assert.ok(PTR_MIN_MS >= 600 && PTR_MIN_MS <= 800, "the minimum is read from native.js");
+    const host = await seed();
+    const { page, calls, errors } = await phone(host.token, width, height);
+    try {
+      const before = calls.socials;
+      const lift = await pullDown(page);
+      await indicator(page).waitFor();
+      await watchIndicator(page);
+      await lift();
+      await page.waitForFunction(() => document.querySelector(".ak-ptr")?.classList.contains("ak-ptr-loading"));
+      // The network is not held: the refresh itself is far quicker than the minimum.
+      await page.waitForFunction(() => (window as unknown as { __ptr: { end?: number } }).__ptr.end !== undefined);
+      const log = await watched(page);
+      assert.equal(calls.socials - before, 1, "one refresh");
+      const shownFor = log.end! - log.start!;
+      assert.ok(shownFor >= PTR_MIN_MS - 60, `the spinner stayed up ${Math.round(shownFor)}ms, at least about ${PTR_MIN_MS}ms`);
+      assert.ok(shownFor < PTR_MIN_MS + 1500, `and not much longer (${Math.round(shownFor)}ms)`);
+      // The hide is a fade: not already gone in the turn loading ends, partway a moment later.
+      assert.ok(log.opacityAtEnd! > 0.5, `not hidden in the same turn (opacity ${log.opacityAtEnd})`);
+      await page.waitForFunction(() => (window as unknown as { __ptr: { opacityLater?: number } }).__ptr.opacityLater !== undefined);
+      const later = (await watched(page)).opacityLater!;
+      assert.ok(later > 0 && later < 1, `fading partway after 90ms (opacity ${later})`);
+      await indicatorHidden(page);
+      assert.equal(await indicatorOpacity(page), 0, "gone once the fade is over");
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.context().close();
+    }
+  });
+}
+
+test("with reduced motion the spinner still ends and hides without a fade", { timeout: 120_000 }, async () => {
+  const host = await seed();
+  const { page, calls, errors } = await phone(host.token, 390, 844, { reducedMotion: true });
+  try {
+    assert.equal(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches), true);
+    const before = calls.socials;
+    const lift = await pullDown(page);
+    await indicator(page).waitFor();
+    await watchIndicator(page);
+    await lift();
+    await page.waitForFunction(() => document.querySelector(".ak-ptr")?.classList.contains("ak-ptr-loading"));
+    await indicatorHidden(page);
+    const log = await watched(page);
+    assert.equal(log.opacityAtEnd, 0, "no fade flourish with reduced motion");
+    assert.equal(await indicator(page).evaluate((node) => node.classList.contains("ak-ptr-loading")), false, "no stuck spinner");
+    assert.equal(calls.socials - before, 1, "one refresh");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.context().close();
+  }
+});
 
 for (const [width, height] of SIZES) {
   test(`pull to refresh on Now: one refresh, indicator shows then hides, ${width}x${height}`, { timeout: 120_000 }, async () => {
