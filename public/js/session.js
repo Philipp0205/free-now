@@ -5,6 +5,7 @@ import { isTyping } from "./lib.js";
 import { render, useNamedCircleDefault } from "./render.js";
 import { applyAlertUnread, chatTargetUrl, forgetOpenUnread, markChatAlertsRead, noteNewestAlert } from "./alerts.js";
 import { flushChatQueue, openChat } from "./chat.js";
+import { noteRainThread } from "./emoji-rain.js";
 import { considerReminders, noteInviteJoin, reportDisplay, syncPushDetail } from "./push-install.js";
 import { considerWhatsNew, markNewAccountSeen } from "./whats-new-ui.js";
 import { actingCircle, forgetMapAll, loadCalendar, refreshMapAll } from "./events.js";
@@ -227,7 +228,10 @@ export async function refresh({ initial = false } = {}) {
   if (state.chat) forgetOpenUnread(state.chat);
   if (thread?.chat) {
     state.chatThread = thread.chat;
-    if (state.chat) markChatAlertsRead(state.chat);
+    if (state.chat) {
+      noteRainThread(thread.chat);
+      markChatAlertsRead(state.chat);
+    }
   }
   noteNewestAlert();
   const signature = JSON.stringify({

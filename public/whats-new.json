@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-19-emoji-rain",
+    "date": "2026-11-19",
+    "title": "Make it rain in chat",
+    "bullets": [
+      "Write taco in a chat and tacos rain for everyone who has it open. Reduce motion turns the rain off.",
+      "Start a message with /makeitrain and an emoji to rain that emoji, flags and skin tones too.",
+      "/makeitrain with no emoji rains tacos. Your message stays in the chat as you wrote it.",
+      "Missed a recent rain because the chat was closed? It plays when you open it (about an hour, once per device)."
+    ]
+  },
+  {
     "id": "2026-11-19-add-description",
     "date": "2026-11-19",
     "title": "Add a description when you plan",

@@ -2837,3 +2837,23 @@ html.ak-native .card-body[role="button"]:active { opacity: 1; }
 .buzzer.reduced.show { opacity: 1; }
 .buzzer.reduced .buzzer-name { font-size: 40px; font-weight: 800; line-height: 1.1; max-width: 100%; overflow-wrap: anywhere; }
 .buzzer.reduced .buzzer-sub { font-size: 22px; font-weight: 500; color: #d1d1d6; }
+
+/* Emoji rain in chat (js/emoji-rain.js). It never takes a tap, and it is not drawn at all with reduced motion. */
+.emoji-rain { position: fixed; inset: 0; z-index: 9000; overflow: hidden; pointer-events: none; }
+.emoji-rain-drop {
+  position: absolute;
+  top: 0;
+  left: var(--x);
+  font-size: var(--size);
+  line-height: 1;
+  opacity: 0;
+  will-change: transform;
+  animation: emoji-rain-fall var(--dur) linear var(--delay) both;
+}
+@keyframes emoji-rain-fall {
+  0% { opacity: 1; transform: translate3d(0, -12vh, 0) rotate(0deg); }
+  100% { opacity: 1; transform: translate3d(0, 112vh, 0) rotate(var(--spin)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .emoji-rain { display: none; }
+}
