@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-19-pull-to-refresh-hold",
+    "date": "2026-11-19",
+    "title": "Pull to refresh takes its time",
+    "bullets": [
+      "The spinner now stays up for a moment while it refreshes, instead of flashing and vanishing.",
+      "When it is done, it eases out smoothly."
+    ]
+  },
+  {
     "id": "2026-11-19-emoji-rain",
     "date": "2026-11-19",
     "title": "Make it rain in chat",

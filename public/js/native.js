@@ -38,6 +38,24 @@ export function bindLargeTitle() {
 
 let pullBinding = null;
 
+/** The pull spinner stays up at least this long (ms), so a fast refresh is not just a flash. */
+export const PTR_MIN_MS = 700;
+
+/**
+ * The refresh the kit runs on a pull. The kit hides the spinner the moment this settles, so wait out the rest of
+ * PTR_MIN_MS first, also when refresh() throws (the rejection still goes on to the kit). Reduced motion keeps the hold
+ * (a still spinner is not motion); the kit and styles.css drop the slide and fade there.
+ */
+export async function refreshHeld() {
+  const started = Date.now();
+  try {
+    await refresh();
+  } finally {
+    const left = PTR_MIN_MS - (Date.now() - started);
+    if (left > 0) await new Promise((resolve) => setTimeout(resolve, left));
+  }
+}
+
 /** A main tab page (Now, Events calendar, Circle, You) is showing with nothing over it. */
 function pullIsEligible() {
   if (state.chat || state.past || sheetIsOpen()) return false;
@@ -58,5 +76,5 @@ export function bindPullToRefresh() {
     return;
   }
   if (pullBinding || typeof window.AppKit?.pullToRefresh !== "function") return;
-  pullBinding = window.AppKit.pullToRefresh({ onRefresh: () => refresh() });
+  pullBinding = window.AppKit.pullToRefresh({ onRefresh: refreshHeld });
 }
