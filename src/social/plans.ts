@@ -54,6 +54,7 @@ export async function publishPlan(
   time: string | null = null,
   requested: string | null = null,
   date: unknown = undefined,
+  description = "",
 ) {
   const circle = requireCircle(deps, user.id, requested);
   const now = deps.now();
@@ -76,6 +77,7 @@ export async function publishPlan(
     lng: point?.lng ?? null,
     place,
     atTime: time,
+    description,
   });
   // Made now so the first Share tap needs no round trip. Old plans get one on first share.
   ensureShareId(deps.db, id);

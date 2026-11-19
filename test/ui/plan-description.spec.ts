@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
@@ -9,6 +11,7 @@ const LONG = "Meet at the side door, not the front. Bring a jacket because we si
   + "Menu is at https://example.com/menu and we split the bill. Text me if you run late, I will save you a seat.";
 
 const hangry = useHangry();
+const SHOT_DIR = path.resolve("test/ui/screenshots/plan-description");
 
 const vvMock = `(() => {
   const bucket = { height: null, offsetTop: 0 };
@@ -48,10 +51,11 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
   try {
     await signIn(page, "Alex");
     await addPlan(page, "Dinner on the roof");
-    // Create sheet stays as it was: no description there.
+    // The create sheet has the same field, empty to start with.
     await openPlanSheet(page);
     await page.locator("#sheet-note").waitFor();
-    assert.equal(await page.locator(".sheet textarea").count(), 0);
+    assert.equal(await page.locator(".sheet textarea").count(), 1);
+    assert.equal(await page.locator("#sheet-description").inputValue(), "");
     await page.locator(".scrim").click({ position: { x: 20, y: 20 } });
     await page.locator("#sheet-note").waitFor({ state: "detached" });
 
@@ -147,6 +151,60 @@ test("at 320 the Save button stays clear of the keyboard with the description fo
     }
   }
 });
+
+test("a plan added with a description shows it on the card, the details and the Edit sheet", { timeout: 120_000 }, async () => {
+  for (const [width, height] of [[320, 568], [412, 915]]) {
+    const page = await phone(width, height, false);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(String(error)));
+    try {
+      await signIn(page, "Alex");
+      await openPlanSheet(page);
+      const area = page.locator("#sheet-description");
+      await area.waitFor();
+      assert.equal(await page.locator(".sheet-group", { hasText: "Description" }).count(), 1);
+      assert.equal(await area.getAttribute("maxlength"), "280");
+      assert.equal(await page.locator("#admin-description").count(), 0);
+      await page.locator("#sheet-note").fill("Tacos on the roof");
+      await area.fill(LONG);
+      await shot(page, `add-sheet-${width}`);
+      const created = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/plans"));
+      await page.locator(".sheet-dock").getByRole("button", { name: "Add plan" }).click();
+      const response = await created;
+      assert.equal(response.request().postDataJSON().description, LONG);
+      assert.equal((await response.json()).plan.description, LONG);
+
+      const desc = page.locator(".card-plan .plan-desc");
+      await desc.waitFor();
+      assert.match((await desc.textContent()) ?? "", /^Meet at the side door/);
+      await desc.scrollIntoViewIfNeeded();
+      await shot(page, `card-${width}`);
+
+      await page.locator(".card-plan").getByRole("heading", { name: "Tacos on the roof" }).click();
+      const detail = page.locator(".sheet .detail-desc");
+      await detail.waitFor();
+      assert.match((await detail.textContent()) ?? "", /^Meet at the side door/);
+      await page.locator(".scrim").click({ position: { x: 20, y: 20 } });
+      await detail.waitFor({ state: "detached" });
+
+      await page.locator(".card-plan").getByRole("button", { name: /^More for / }).click();
+      await page.getByRole("menuitem", { name: "Edit" }).click();
+      const edit = page.locator("#admin-description");
+      await edit.waitFor();
+      assert.equal(await edit.inputValue(), LONG);
+      await shot(page, `edit-sheet-${width}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.context().close();
+    }
+  }
+});
+
+async function shot(page: Page, name: string) {
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: path.join(SHOT_DIR, `${name}.png`) });
+}
 
 async function phone(width: number, height: number, mockViewport: boolean) {
   const context = await hangry.browser.newContext({

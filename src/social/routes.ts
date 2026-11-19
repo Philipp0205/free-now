@@ -19,6 +19,7 @@ import { HttpError, matchPath, requestOrigin, safeDecode, sendEmpty, sendJson } 
 import { PUBLIC_DIR, staticHeaders } from "../lib/static.js";
 import { addDays, isoDate } from "../lib/time.js";
 import {
+  cleanDescription,
   cleanNote,
   cleanPlace,
   isAllCircles,
@@ -162,7 +163,8 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const note = cleanNote(body.note, true);
     const place = cleanPlace(body.place);
     const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date) });
+    const description = cleanDescription(body.description);
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description) });
     return true;
   }
 

@@ -45,19 +45,27 @@ test("the description column is added once and reopening is safe", () => {
   }
 });
 
-test("create ignores a description and the payload starts with an empty string", async () => {
+test("create keeps a cleaned description, cuts it at 280, and works without one", async () => {
   await withApp(async ({ port, db }) => {
     const { alex } = await circle(port);
-    const made = await api(port, "POST", "/api/plans", {
-      token: alex.token,
-      body: { note: "Dinner", description: "Sneaky text" },
-      status: 201,
-    });
-    assert.equal(made.plan.description, "");
-    const row = db.prepare("SELECT description FROM plans WHERE id = ?").get(made.plan.id) as { description: string | null };
-    assert.equal(row.description, null);
+    const create = (body: Record<string, unknown>, status = 201) =>
+      api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner", ...body }, status });
+    const none = await create({});
+    assert.equal(none.plan.description, "");
+    const row = (id: string) => db.prepare("SELECT description FROM plans WHERE id = ?").get(id) as { description: string | null };
+    assert.equal(row(none.plan.id).description, null);
+
+    const made = await create({ description: "  Bring snacks.\nLink: https://example.com/menu\u0007  " });
+    assert.equal(made.plan.description, "Bring snacks. Link: https://example.com/menu");
+    assert.equal(row(made.plan.id).description, "Bring snacks. Link: https://example.com/menu");
+
+    assert.equal((await create({ description: "x".repeat(281) })).plan.description, "x".repeat(280));
+    assert.equal((await create({ description: "   " })).plan.description, "");
+    assert.equal((await create({ description: 42 }, 400)).error, "description must be a string");
+
     const listed = await api(port, "GET", "/api/plans", { token: alex.token, status: 200 });
-    assert.equal(listed.plans[0].description, "");
+    assert.ok(listed.plans.some((plan: { id: string; description: string }) =>
+      plan.id === made.plan.id && plan.description === "Bring snacks. Link: https://example.com/menu"));
   });
 });
 
