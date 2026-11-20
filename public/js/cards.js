@@ -1,4 +1,4 @@
-import { gradientClass } from "./card-grad.js";
+import { compactTone, gradientClass } from "./card-grad.js";
 import { state } from "./state.js";
 import { render } from "./render.js";
 import { chatRow } from "./chat.js";
@@ -148,7 +148,7 @@ export function compactRow(kind, item) {
   const focused = kind === "plan" ? state.focusPlan === item.id : state.focusSocial === item.id;
   const happening = eventIsNow(kind, item, now);
   return el("button", {
-    class: ["compact-row", focused ? "focused" : "", happening ? "happening-now" : ""].filter(Boolean).join(" "),
+    class: ["compact-row", compactTone(kind, item.id), focused ? "focused" : "", happening ? "happening-now" : ""].filter(Boolean).join(" "),
     type: "button",
     [`data-${kind}`]: item.id,
     "data-happening-now": happening ? "1" : null,
