@@ -149,21 +149,87 @@ for (const [width, height] of SIZES) {
   });
 }
 
-test("reduce motion shows no rain at all", { timeout: 120_000 }, async () => {
+/**
+ * The rain under reduced motion is really falling: the overlay is drawn, there are drops (fewer than 200, none spinning),
+ * their fall animation runs, some are on screen, and they move between two samples.
+ */
+async function assertFalling(page: Page, label: string) {
+  const look = () =>
+    page.locator(RAIN).evaluate((layer) => {
+      const list = [...layer.querySelectorAll<HTMLElement>(".emoji-rain-drop")];
+      const box = layer.getBoundingClientRect();
+      const onScreen = list.filter((drop) => {
+        const r = drop.getBoundingClientRect();
+        return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+      });
+      const style = getComputedStyle(layer);
+      const animations = list.flatMap((drop) => drop.getAnimations());
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        covers: box.width >= innerWidth && box.height >= innerHeight,
+        drops: list.length,
+        spins: [...new Set(list.map((drop) => drop.style.getPropertyValue("--spin")))],
+        animated: animations.length,
+        names: [...new Set(animations.map((a) => (a as CSSAnimation).animationName))],
+        running: animations.filter((a) => a.playState === "running").length,
+        onScreen: onScreen.length,
+        tops: onScreen.slice(0, 5).map((drop) => Math.round(drop.getBoundingClientRect().top)),
+        opacity: onScreen.length ? getComputedStyle(onScreen[0]).opacity : "0",
+      };
+    });
+  await page.waitForTimeout(1000);
+  const first = await look();
+  assert.notEqual(first.display, "none", `${label}: the overlay is drawn`);
+  assert.equal(first.visibility, "visible", label);
+  assert.ok(first.covers, `${label}: it covers the screen`);
+  assert.ok(first.drops > 0 && first.drops < 200, `${label}: a lighter rain, got ${first.drops} drops`);
+  assert.deepEqual(first.spins, ["0deg"], `${label}: no spin`);
+  assert.equal(first.animated, first.drops, `${label}: every drop has an animation`);
+  assert.deepEqual(first.names, ["emoji-rain-fall"], label);
+  assert.ok(first.running > 0, `${label}: the fall animation is running`);
+  assert.ok(first.onScreen > 0, `${label}: drops are on screen`);
+  assert.equal(first.opacity, "1", `${label}: drops are visible`);
+  await page.waitForTimeout(300);
+  const second = await look();
+  assert.ok(second.onScreen > 0, `${label}: still falling`);
+  assert.notDeepEqual(second.tops, first.tops, `${label}: the drops moved, it is not a static pile`);
+}
+
+test("reduce motion still rains, lighter and without spin, on taco and /makeitrain", { timeout: 120_000 }, async () => {
   const { alex, bea } = await setup();
   const a = await openCircleChat(alex.token, 360, 640, "reduce");
   const b = await openCircleChat(bea.token, 360, 640, "reduce");
+  const errors: string[] = [];
+  for (const page of [a, b]) page.on("pageerror", (error) => errors.push(error.message));
   try {
+    fs.mkdirSync(shotsDir, { recursive: true });
+    assert.equal(await a.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches), true, "reduced motion is on");
     await say(a, "taco time");
-    await a.locator(".chat-msg", { hasText: "taco time" }).waitFor();
-    await b.locator(".chat-msg", { hasText: "taco time" }).waitFor({ timeout: SEEN_MS });
+    await a.locator(RAIN).waitFor();
+    assert.equal(await a.locator(RAIN).getAttribute("data-emoji-rain"), "🌮");
+    assert.equal(await drops(a).first().textContent(), "🌮");
+    await assertFalling(a, "taco on the sender");
+    await a.screenshot({ path: path.join(shotsDir, "reduced-taco-sender-360x640.png") });
+    await b.locator(RAIN).waitFor({ timeout: SEEN_MS });
+    await assertFalling(b, "taco on the friend");
+    await b.screenshot({ path: path.join(shotsDir, "reduced-taco-friend-360x640.png") });
+    // It cleans up after itself.
+    await a.locator(RAIN).waitFor({ state: "detached", timeout: SEEN_MS });
+    await b.locator(RAIN).waitFor({ state: "detached", timeout: SEEN_MS });
+    assert.equal(await a.locator(".emoji-rain-drop").count(), 0, "no drops left behind");
+
     await say(a, "/makeitrain 🥚");
-    await b.locator(".chat-msg", { hasText: "/makeitrain 🥚" }).waitFor({ timeout: SEEN_MS });
-    await b.waitForTimeout(500);
-    for (const page of [a, b]) {
-      assert.equal(await page.locator(RAIN).count(), 0, "no rain node");
-      assert.equal(await page.locator(".emoji-rain-drop").count(), 0, "no static pile");
-    }
+    await a.locator(RAIN).waitFor();
+    assert.equal(await a.locator(RAIN).getAttribute("data-emoji-rain"), "🥚");
+    assert.equal(await drops(a).first().textContent(), "🥚");
+    await assertFalling(a, "/makeitrain on the sender");
+    await a.screenshot({ path: path.join(shotsDir, "reduced-eggs-sender-360x640.png") });
+    await b.locator(RAIN).waitFor({ timeout: SEEN_MS });
+    assert.equal(await b.locator(RAIN).getAttribute("data-emoji-rain"), "🥚");
+    await a.locator(RAIN).waitFor({ state: "detached", timeout: SEEN_MS });
+    await b.locator(RAIN).waitFor({ state: "detached", timeout: SEEN_MS });
+    assert.deepEqual(errors, [], "no page errors");
   } finally {
     await a.context().close();
     await b.context().close();
@@ -239,16 +305,28 @@ test("a rain older than the catch-up window does not play when the chat is opene
   }
 });
 
-test("reduce motion plays no missed rain on open either", { timeout: 120_000 }, async () => {
+test("reduce motion still plays a recent missed rain when the chat is opened", { timeout: 120_000 }, async () => {
   const { alex, bea } = await setup();
   const b = await openApp(bea.token, 360, 640, "reduce");
+  const errors: string[] = [];
+  b.on("pageerror", (error) => errors.push(error.message));
   try {
+    fs.mkdirSync(shotsDir, { recursive: true });
     await post("/api/circles/chat", { text: "taco night", }, alex.token);
+    await b.waitForTimeout(500);
+    assert.equal(await b.locator(RAIN).count(), 0, "nothing rains while the chat is closed");
     await CHAT_TAB(b).click();
     await b.locator(".chat-msg", { hasText: "taco night" }).waitFor();
-    await b.waitForTimeout(1000);
-    assert.equal(await b.locator(RAIN).count(), 0);
-    assert.equal(await b.locator(".emoji-rain-drop").count(), 0);
+    await b.locator(RAIN).waitFor();
+    assert.equal(await b.locator(RAIN).count(), 1, "one overlay");
+    assert.equal(await b.locator(RAIN).getAttribute("data-emoji-rain"), "🌮");
+    await assertFalling(b, "missed rain");
+    await b.screenshot({ path: path.join(shotsDir, "reduced-missed-rain-360x640.png") });
+    await b.locator(RAIN).waitFor({ state: "detached", timeout: SEEN_MS });
+    assert.equal(await b.locator(".emoji-rain-drop").count(), 0, "it cleans up");
+    await b.waitForTimeout(1500);
+    assert.equal(await b.locator(RAIN).count(), 0, "it does not play a second time");
+    assert.deepEqual(errors, [], "no page errors");
   } finally {
     await b.context().close();
   }

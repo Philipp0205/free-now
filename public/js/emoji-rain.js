@@ -132,6 +132,8 @@ export function noteRainThread(thread, { now = Date.now(), storage = deviceStora
 /* The overlay. */
 
 const DROPS = 200;
+/** Under reduced motion the rain still falls, but with fewer drops and no spin. */
+const REDUCED_DROPS = 40;
 const MAX_RAINS = 2;
 const FALL_MIN_MS = 2200;
 const FALL_SPREAD_MS = 600;
@@ -144,14 +146,20 @@ function reducedMotion() {
   return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
 }
 
-/** Drops about 200 of `emoji` over the page for about 3.5 seconds, then removes itself. Returns false when it did not start. */
+/** How many drops fall, and whether they spin. Reduced motion gets a lighter rain, not no rain. */
+export function rainStyle(reduced) {
+  return reduced ? { drops: REDUCED_DROPS, spin: false } : { drops: DROPS, spin: true };
+}
+
+/** Drops about 200 of `emoji` (fewer, without spin, under reduced motion) for about 3.5 seconds, then removes itself. Returns false when it did not start. */
 export function startRain(emoji) {
-  if (active >= MAX_RAINS || reducedMotion()) return false;
+  if (active >= MAX_RAINS) return false;
+  const { drops, spin } = rainStyle(reducedMotion());
   const layer = document.createElement("div");
   layer.className = "emoji-rain";
   layer.setAttribute("data-emoji-rain", emoji);
   layer.setAttribute("aria-hidden", "true");
-  for (let i = 0; i < DROPS; i += 1) {
+  for (let i = 0; i < drops; i += 1) {
     const drop = document.createElement("span");
     drop.className = "emoji-rain-drop";
     drop.textContent = emoji;
@@ -159,7 +167,7 @@ export function startRain(emoji) {
     drop.style.setProperty("--size", `${Math.round(20 + Math.random() * 16)}px`);
     drop.style.setProperty("--dur", `${Math.round(FALL_MIN_MS + Math.random() * FALL_SPREAD_MS)}ms`);
     drop.style.setProperty("--delay", `${Math.round(Math.random() * DELAY_SPREAD_MS)}ms`);
-    drop.style.setProperty("--spin", `${Math.round(Math.random() * 240 - 120)}deg`);
+    drop.style.setProperty("--spin", `${spin ? Math.round(Math.random() * 240 - 120) : 0}deg`);
     layer.append(drop);
   }
   document.body.append(layer);

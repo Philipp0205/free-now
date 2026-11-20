@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_RAIN, RAIN_CATCHUP_MS, RAIN_PLAYED_KEY, RAIN_PLAYED_MAX, firstEmoji, forgetRain, noteRainThread, rainFor, readPlayed } from "../../public/js/emoji-rain.js";
+import { DEFAULT_RAIN, RAIN_CATCHUP_MS, RAIN_PLAYED_KEY, RAIN_PLAYED_MAX, firstEmoji, forgetRain, noteRainThread, rainFor, rainStyle, readPlayed } from "../../public/js/emoji-rain.js";
+
+test("the rain keeps 200 spinning drops by default and a lighter, spin-free rain under reduced motion", () => {
+  assert.deepEqual(rainStyle(false), { drops: 200, spin: true });
+  const reduced = rainStyle(true);
+  assert.equal(reduced.spin, false);
+  assert.ok(reduced.drops > 0 && reduced.drops < 200, "some drops, fewer than usual");
+});
 
 test("the word taco rains tacos, any case, with punctuation around it", () => {
   for (const text of ["taco", "tacos", "Taco!", "TACOS", "who wants tacos?", "(taco)", "free-taco night", "taco, taco, taco", "I like Tacos.\nA lot"]) {

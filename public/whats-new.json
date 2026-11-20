@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-20-rain-reduced-motion",
+    "date": "2026-11-20",
+    "title": "Chat rain now plays with reduced motion",
+    "bullets": [
+      "Taco and /makeitrain rain now falls even when your phone is set to reduce motion.",
+      "It is a lighter rain with fewer drops and no spin, and it is over in a few seconds."
+    ]
+  },
+  {
     "id": "2026-11-20-compact-home",
     "date": "2026-11-20",
     "title": "A compact list on the Now tab",
