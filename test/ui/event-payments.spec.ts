@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { SIZES, UA, useHangry } from "./harness.js";
+import { SIZES, UA, dismissPaymentReminder, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
 // Fake people only. Screenshots go to test/ui/screenshots (gitignored).
@@ -56,6 +56,7 @@ async function openAs(token: string, width: number, height: number, note: string
   await page.locator(".tabbar").waitFor();
   const later = page.locator(".sheet button.btn.ghost", { hasText: "Not now" });
   if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
+  await dismissPaymentReminder(page);
   await page.locator("article h3", { hasText: note }).first().waitFor();
   return page;
 }

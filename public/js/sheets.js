@@ -10,6 +10,7 @@ import { clock, copyText, el, mySocial, ttlLabel } from "./lib.js";
 import { busyAtBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen, offeringTomorrow, onCreatePlan, onFree, paintBusyAt, paintSummary, planDateField, planHeading, planThrough, planTimeError, saveOnlyFromButton, sheetField, timeBlock, whenBlock } from "./composer.js";
 import { circleNameSheet, joinLinkSheet } from "./circles.js";
 import { sheetLeaving } from "./sheet-out.js";
+import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -23,6 +24,7 @@ export function sheet() {
   if (state.sheet === "push") return pushSheet();
   if (state.sheet === "whats-new") return whatsNewSheet();
   if (state.sheet === "feedback") return feedbackSheet();
+  if (state.sheet === "payment-reminder") return paymentReminderSheet();
   if (state.sheet === "action") {
     return el("div", {}, [
       el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
@@ -152,6 +154,7 @@ export function closeSheet() {
   if (state.sheet === "event-detail") state.eventDetail = null;
   if (state.sheet === "arrival") state.arrivalPick = null;
   if (state.sheet === "share-circles") state.shareCircles = null;
+  if (state.sheet === "payment-reminder") noteReminderClosed();
   state.cardMenu = null;
   state.sheet = null;
   state.whereMap = false;

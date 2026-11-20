@@ -8,9 +8,10 @@ import { resolveShareLink } from "./plan-share.js";
 import { considerReminders, noteInviteJoin, reportDisplay } from "./push-install.js";
 import { scheduleErrorClear } from "./lib.js";
 import { checkForUpdate, initAppUpdates } from "./app-update.js";
+import { requestReminder, stepReminder } from "./payment-reminder-ui.js";
 
 /** The build label. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v127";
+export const APP_VERSION = "hangry-v128";
 
 // The kit keeps the browser bar colour equal to the page background, and follows scheme and width changes.
 window.AppKit?.themeColor?.start({ media: ["(max-width: 719px)"] });
@@ -22,6 +23,8 @@ boot();
 setInterval(() => {
   // A later buzzer turns live, and a live one ends, without a new answer from the server.
   if (!document.hidden && state.me?.user && state.me.user.email !== null) refreshPins();
+  // A payment reminder that was waiting for another sheet to close gets its turn.
+  if (!document.hidden) stepReminder();
   if (!document.hidden && state.token) {
     pollRefresh().catch((error) => {
       if (error?.status === 401) return;
@@ -36,6 +39,8 @@ document.addEventListener("visibilitychange", () => {
   void checkGoogleReturn();
   // Only the worker check is throttled (about once a minute). The data refresh above runs every time.
   void checkForUpdate();
+  // Coming back may show the payment reminder. It skips itself inside the throttle window.
+  requestReminder();
 });
 
 /* iOS Safari only applies :active press styles once the page listens for touches. Passive, so scrolling is untouched. */
@@ -99,6 +104,8 @@ async function boot() {
       refresh({ initial: true }).catch(() => {});
       rememberViewerLocation();
       void considerReminders();
+      // Cold start: the payment reminder waits for the bills and for any install or push step ahead of it.
+      requestReminder();
       // The map and its header load in the background, so the Map tab opens without a wait.
       if (state.me?.user) warmMap();
     }

@@ -70,7 +70,7 @@ export function addDays(iso, days) {
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
-function daysBetween(from, to) {
+export function daysBetween(from, to) {
   const utc = (iso) => {
     const [year, month, day] = iso.split("-").map(Number);
     return Date.UTC(year, month - 1, day);

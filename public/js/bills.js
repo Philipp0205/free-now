@@ -6,6 +6,7 @@ import { shortDate } from "./when.js";
 import { calToday } from "./events.js";
 import { euro, paySection, replaceEvent } from "./event-pay.js";
 import { openEventDetail } from "./event-sheets.js";
+import { noteBillsLoaded } from "./payment-reminder-ui.js";
 
 /** A list this old is fetched again the next time the You menu shows. */
 const FRESH_MS = 30000;
@@ -25,14 +26,18 @@ export async function loadBills() {
   const who = userId();
   const prev = state.bills;
   state.bills = { ...(prev || {}), loading: true, failed: false, stale: false };
+  let ok = false;
   try {
     const data = await api("/api/bills", { circle: null });
     if (seq !== billsSeq || !who || who !== userId()) return;
     state.bills = { loaded: true, loading: false, at: Date.now(), stale: false, owe: data.owe, owed: data.owed, totals: data.totals };
+    ok = true;
   } catch {
     if (seq !== billsSeq || !who || who !== userId()) return;
     state.bills = { ...(prev || {}), loading: false, failed: true, at: Date.now() };
   }
+  // The payment reminder decides from every finished load, whichever tab is open.
+  noteBillsLoaded(ok);
   if (state.tab !== "you") return;
   if (state.youSection === "bills") render();
   // On the menu only the one summary line changes, so patch it in place instead of rebuilding the page.
@@ -59,7 +64,7 @@ export function billsSummary() {
   return parts.join(" · ");
 }
 
-async function onMarkPaid(bill, personId) {
+export async function onMarkPaid(bill, personId) {
   await run(async () => {
     const result = await api(`/api/${bill.kind}s/${bill.id}/paid`, {
       method: "POST",
