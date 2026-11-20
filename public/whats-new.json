@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-20-payment-reminder",
+    "date": "2026-11-20",
+    "title": "A nudge when you still owe money",
+    "bullets": [
+      "When you open Hangry with a bill you have not paid, a sheet lists who you owe and how much.",
+      "Mark paid or pay with PayPal or Wero right from the sheet. Tap Later to close it.",
+      "The longer a bill stays open, and the more often you close the sheet, the cheekier the words get."
+    ]
+  },
+  {
     "id": "2026-11-19-update-on-refresh",
     "date": "2026-11-19",
     "title": "New versions show up when you pull",

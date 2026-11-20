@@ -48,6 +48,14 @@ export async function waitForEventChat(page: Page, title: string): Promise<void>
 /** The three phone sizes we check UI at. */
 export const SIZES = [[320, 568], [360, 640], [412, 915]] as const;
 
+/** A viewer who owes money gets the payment reminder on a cold start. Specs about something else close it with Later. */
+export async function dismissPaymentReminder(page: Page, wait = 2500): Promise<void> {
+  const sheet = page.getByRole("dialog", { name: "Payment reminder" });
+  if (!(await sheet.waitFor({ timeout: wait }).then(() => true).catch(() => false))) return;
+  await sheet.getByRole("button", { name: "Later" }).click();
+  await sheet.waitFor({ state: "detached" });
+}
+
 export type ServerOptions = {
   /** APP_TZ for the server. Defaults to Europe/Berlin. */
   tz?: string;
