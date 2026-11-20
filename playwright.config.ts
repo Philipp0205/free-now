@@ -2,10 +2,11 @@ import { defineConfig } from "@playwright/test";
 
 // Each spec file starts its own app (in-memory db) and a browser through useHangry (test/ui/harness.ts),
 // so files run in parallel workers while tests inside a file stay serial.
-// useHangry picks the browser from the project name: "desktop-firefox" and "desktop-webkit" launch those
-// engines, every other project launches Chrome. Contexts come from playwright-core, so the projects
-// only choose which specs run.
+// useHangry picks the browser from the project name: "desktop-firefox" launches Firefox, "desktop-webkit"
+// and "iphone-webkit" launch WebKit, every other project launches Chrome. Contexts come from playwright-core,
+// so the projects only choose which specs run.
 const DESKTOP_SMOKE = "desktop-light.spec.ts";
+const IOS_SAFARI = "ios-safari.spec.ts";
 
 export default defineConfig({
   testDir: "./test/ui",
@@ -19,10 +20,12 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   projects: [
     // The full suite, on phone-sized contexts.
-    { name: "phone", testMatch: "*.spec.ts", testIgnore: DESKTOP_SMOKE },
+    { name: "phone", testMatch: "*.spec.ts", testIgnore: [DESKTOP_SMOKE, IOS_SAFARI] },
     // The desktop smoke spec only, on a 1440x900 mouse-and-keyboard browser with a light OS setting.
     { name: "desktop-chrome", testMatch: DESKTOP_SMOKE },
     { name: "desktop-firefox", testMatch: DESKTOP_SMOKE },
     { name: "desktop-webkit", testMatch: DESKTOP_SMOKE },
+    // The iOS Safari set only: WebKit with the iPhone 13 device, never the whole suite.
+    { name: "iphone-webkit", testMatch: IOS_SAFARI },
   ],
 });

@@ -11,7 +11,7 @@ import { checkForUpdate, initAppUpdates } from "./app-update.js";
 import { requestReminder, stepReminder } from "./payment-reminder-ui.js";
 
 /** The build label. Sent with feedback so a report names the build it came from. */
-export const APP_VERSION = "hangry-v132";
+export const APP_VERSION = "hangry-v133";
 
 // The kit keeps the browser bar colour equal to the page background, and follows scheme and width changes.
 window.AppKit?.themeColor?.start({ media: ["(max-width: 719px)"] });
