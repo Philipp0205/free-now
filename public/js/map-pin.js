@@ -12,6 +12,11 @@ export function socialPinState(social, now = Date.now()) {
   return "now";
 }
 
+/** The map's now rule for any event: a live social is now, a plan never is. Cards and compact rows use this. */
+export function eventIsNow(kind, item, now = Date.now()) {
+  return kind === "social" && socialPinState(item, now) === "now";
+}
+
 /**
  * The label under a pin, in words the app already uses: "Later today 19:00" while the
  * time is still ahead, "Today" once it has passed, "Tomorrow", then "Sat 14 Nov".

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { goingCrowd, isGoing, pinLabel, pinWhenLabel, socialPinState } from "../../public/js/map-pin.js";
+import { eventIsNow, goingCrowd, isGoing, pinLabel, pinWhenLabel, socialPinState } from "../../public/js/map-pin.js";
 
 const BERLIN = "Europe/Berlin";
 // Sat 14 Nov 2026, 15:00 in Berlin (UTC+1 in November).
@@ -17,6 +17,19 @@ test("a free-now social is now only while it runs", () => {
   assert.equal(socialPinState({ startsAt: null, expiresAt: NOW }, NOW), "ended", "the end instant is already over");
   assert.equal(socialPinState({ startsAt: null }, NOW), "ended", "no end time is not treated as live");
   assert.equal(socialPinState(null, NOW), "ended");
+});
+
+test("cards use the map's now rule: live socials only, never plans", () => {
+  const live = { startsAt: null, expiresAt: NOW + 60 * MIN };
+  assert.equal(eventIsNow("social", live, NOW), true);
+  assert.equal(eventIsNow("social", { startsAt: NOW - 5 * MIN, expiresAt: NOW + 60 * MIN }, NOW), true, "a later social that has started");
+  assert.equal(eventIsNow("social", { startsAt: NOW + 30 * MIN, expiresAt: NOW + 150 * MIN }, NOW), false, "later");
+  assert.equal(eventIsNow("social", { startsAt: null, expiresAt: NOW - MIN }, NOW), false, "ended");
+  assert.equal(eventIsNow("social", null, NOW), false);
+  assert.equal(eventIsNow("plan", { forDate: "2026-11-14", time: "15:00", expiresAt: NOW + 60 * MIN }, NOW), false, "plans are never now");
+  for (const item of [live, { startsAt: NOW + 30 * MIN, expiresAt: NOW + 150 * MIN }, { startsAt: null, expiresAt: NOW - MIN }]) {
+    assert.equal(eventIsNow("social", item, NOW), socialPinState(item, NOW) === "now", "the same answer as the map");
+  }
 });
 
 test("a live buzzer has no date label; a later one shows its start", () => {
