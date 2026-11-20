@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-20-compact-home",
+    "date": "2026-11-20",
+    "title": "A compact list on the Now tab",
+    "bullets": [
+      "Tap Compact above your events on the Now tab to see one short line per event.",
+      "Each line shows the name, who is going and the day. Tap a line to open the event.",
+      "Tap Cards to go back. Hangry remembers your choice on this phone."
+    ]
+  },
+  {
     "id": "2026-11-20-payment-reminder",
     "date": "2026-11-20",
     "title": "A nudge when you still owe money",
