@@ -143,8 +143,8 @@ test("a push without a row id shows the notification and sends no ack", async ()
   assert.deepEqual(worker.order, ["shown"]);
 });
 
-test("the build label moved to v131 and the worker no longer keeps a cache name of its own", () => {
-  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v131");
+test("the build label moved to v132 and the worker no longer keeps a cache name of its own", () => {
+  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v132");
   const version = Number(/export const APP_VERSION = "hangry-v(\d+)"/.exec(APP)?.[1]);
   assert.ok(version >= 106);
   assert.doesNotMatch(SOURCE, /const CACHE = /);

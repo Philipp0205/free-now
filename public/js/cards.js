@@ -11,6 +11,7 @@ import { avatar } from "./avatars.js";
 import { compactTitle, compactWhen, compactWho } from "./compact-home.js";
 import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
+import { eventIsNow } from "./map-pin.js";
 import { priceLine } from "./event-pay.js";
 
 /** Card menu opened by the latest ⋯ tap; the render that draws it pops it in once. */
@@ -62,13 +63,16 @@ export function ghostClosedMenu(captured) {
 export function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
   const upcoming = social.startsAt && social.startsAt > Date.now();
+  const happening = eventIsNow("social", social);
   const menuOpen = state.cardMenu === `social:${social.id}`;
   return el("article", {
     class: [
       state.focusSocial === social.id ? "card card-now focused" : upcoming ? "card card-now later" : "card card-now",
+      happening ? "happening-now" : "",
       menuOpen ? "menu-open" : "",
     ].filter(Boolean).join(" "),
     "data-social": social.id,
+    "data-happening-now": happening ? "1" : null,
   }, [
     el("div", { class: "card-bg", onclick: () => openEventDetail("social", social) }),
     cardOverflow("social", social),
@@ -142,10 +146,12 @@ export function compactRow(kind, item) {
   const when = compactWhen(kind, item, now, appTz());
   const who = compactWho(item.creator, item.joined);
   const focused = kind === "plan" ? state.focusPlan === item.id : state.focusSocial === item.id;
+  const happening = eventIsNow(kind, item, now);
   return el("button", {
-    class: focused ? "compact-row focused" : "compact-row",
+    class: ["compact-row", focused ? "focused" : "", happening ? "happening-now" : ""].filter(Boolean).join(" "),
     type: "button",
     [`data-${kind}`]: item.id,
+    "data-happening-now": happening ? "1" : null,
     onclick: () => openEventDetail(kind, item),
   }, [
     el("strong", { class: "compact-title", text: title }),

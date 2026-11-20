@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-20-now-card",
+    "date": "2026-11-20",
+    "title": "Events happening now stand out",
+    "bullets": [
+      "An event that is on right now gets a pink ring on its card, like the pin on the map.",
+      "It works in the Compact list too, with a pink line and a small dot.",
+      "With reduce motion on, the ring stays but it does not pulse."
+    ]
+  },
+  {
     "id": "2026-11-20-taco-hurricane",
     "date": "2026-11-20",
     "title": "Taco hurricane",
