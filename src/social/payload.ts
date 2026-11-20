@@ -13,6 +13,7 @@ import {
 import { visiblePaymentUrls, visibleWeroEmails } from "../lib/payment-url.js";
 import { dayLabel } from "../lib/time.js";
 import { type PushSummary, pushSummaryForPlan, pushSummaryForViewer } from "../push/push-status.js";
+import { buzzAnimationField } from "./buzz-animation.js";
 import { remindAgainAt } from "./plans.js";
 import { paymentPayload } from "./payments.js";
 import { type PersonStatus, visibleStatuses } from "./status.js";
@@ -43,7 +44,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     location: pointPayload(social.lat, social.lng),
     circleId: social.circle_id,
     circleName: getCircleById(db, social.circle_id)?.name ?? "",
-    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null, weroEmail: weroEmails.get(social.creator_id) ?? null },
+    creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null, weroEmail: weroEmails.get(social.creator_id) ?? null, ...buzzAnimationField(social.creator_buzz_animation) },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     joined: joins.map((join) => ({
       id: join.id,

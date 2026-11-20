@@ -12,6 +12,48 @@ import {
   nextBuzzIndex,
   pickBuzz,
 } from "../public/js/buzzer.js";
+import { buzzLines } from "../public/js/buzzer/birthday-copy.js";
+import { animationFor, payloadAnimation } from "../public/js/buzzer/birthday-rules.js";
+
+const flagged = (id: string, buzzedAt: unknown, buzzAnimation: unknown, name = "Mia") =>
+  ({ id, buzzedAt, creator: { id: `u-${id}`, name, buzzAnimation } });
+
+test("consumeBuzz returns the birthday animation only when the payload says birthday", () => {
+  assert.equal(consumeBuzz([flagged("a", NOW - 1_000, "birthday")], fakeStorage(), NOW)?.animation, "birthday");
+  for (const value of [undefined, null, "", "bell", "Birthday", "birthday ", 1, true, {}]) {
+    const buzz = consumeBuzz([flagged("a", NOW - 1_000, value)], fakeStorage(), NOW);
+    assert.equal(buzz?.animation, undefined, `value ${JSON.stringify(value)}`);
+    assert.equal(buzz?.social.id, "a");
+  }
+  assert.equal(consumeBuzz([social("a", NOW - 1_000)], fakeStorage(), NOW)?.animation, undefined);
+  assert.equal(payloadAnimation(null), undefined);
+  assert.equal(payloadAnimation({ creator: null }), undefined);
+});
+
+test("a birthday buzz does not use a slot in the rotation", () => {
+  const storage = fakeStorage();
+  const next = () => nextBuzzIndex(storage);
+  const birthday = consumeBuzz([flagged("a", NOW - 1_000, "birthday")], fakeStorage(), NOW);
+  const normal = consumeBuzz([social("b", NOW - 1_000)], fakeStorage(), NOW);
+  assert.equal(animationFor(normal, next), "shockwave");
+  assert.equal(animationFor(birthday, next), "birthday");
+  assert.equal(animationFor(birthday, next), "birthday");
+  assert.equal(storage.data.get(BUZZ_INDEX_KEY), "1");
+  assert.equal(animationFor(normal, next), "slam");
+  assert.equal(animationFor(normal, next), "flood");
+  assert.equal(animationFor(birthday, next), "birthday");
+  assert.equal(animationFor(normal, next), "bell");
+  assert.equal(animationFor(normal, next), "shockwave");
+  assert.equal(animationFor(null, next), "slam");
+  assert.deepEqual(BUZZ_ANIMATIONS, ["shockwave", "slam", "flood", "bell"]);
+});
+
+test("the birthday greeting is formatted from the payload name in one place", () => {
+  assert.equal(buzzLines("birthday", "Mia").name, "Happy birthday Mia");
+  assert.equal(buzzLines("birthday", "Mia").sr, "Happy birthday Mia");
+  assert.deepEqual(buzzLines("slam", "Sam"), { name: "Sam", sub: "is free now", sr: "Sam is free now" });
+  assert.equal(buzzLines(undefined, "Sam").sr, "Sam is free now");
+});
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));

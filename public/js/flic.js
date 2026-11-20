@@ -1,4 +1,5 @@
 import { consumeBuzz, buzzerPlaying, playBuzzer, nextBuzzIndex } from "./buzzer.js";
+import { animationFor } from "./buzzer/birthday-rules.js";
 import { state } from "./state.js";
 import { api } from "./session.js";
 import { render } from "./render.js";
@@ -13,7 +14,7 @@ export function noteBuzz() {
   try {
     const buzz = consumeBuzz(state.socials, localStorage);
     if (!buzz || document.hidden || buzzerPlaying()) return;
-    playBuzzer({ name: buzz.name, animation: nextBuzzIndex(localStorage) });
+    playBuzzer({ name: buzz.name, animation: animationFor(buzz, () => nextBuzzIndex(localStorage)) });
   } catch {
     /* the overlay is a nicety */
   }
