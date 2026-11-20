@@ -19,7 +19,7 @@ Full `scripts/check.sh` takes about 8 to 10 minutes with 4 workers, mostly `test
 
 - Run it once, after your last edit, with a bash timeout of at least 2700000 ms (45 min).
 - If it fails, fix the cause and rerun only the failing file (`npx playwright test test/ui/<name>.spec.ts` or `npx tsx --test test/<name>.test.ts`) until it passes. Then run the full check one final time.
-- If a single UI spec fails in the full run but passes alone without changes, report it as a flake with its name and size. Do not start another full run for it.
+- If the full run is red only on UI specs that pass alone without changes (one or several), report each as a flake with its name and size, and stop. Start another full run only after you changed code to fix a real failure.
 - Once the full check is green after your last edit, stop testing. Do not rerun it or its parts just to re-confirm.
 
 ## Tools
