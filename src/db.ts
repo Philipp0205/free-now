@@ -25,6 +25,8 @@ export type UserRow = {
   email_verified_at?: number | null;
   /** sha256 of the recovery code. Independent of buzz_token once rotated. */
   recovery_hash?: string | null;
+  /** Special buzzer animation every receiver plays for this person's Flic press ("birthday"), or null for the rotation. */
+  buzz_animation?: string | null;
 };
 
 export type CircleRow = {
@@ -43,6 +45,7 @@ export type SocialRow = {
   creator_name: string;
   creator_color: number | null;
   creator_avatar_rev: number | null;
+  creator_buzz_animation?: string | null;
   note: string;
   created_at: number;
   expires_at: number;
@@ -462,6 +465,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "users", "email", "email TEXT");
   ensureColumn(db, "users", "email_verified_at", "email_verified_at INTEGER");
   ensureColumn(db, "users", "recovery_hash", "recovery_hash TEXT");
+  ensureColumn(db, "users", "buzz_animation", "buzz_animation TEXT");
   migrateAccounts(db);
   backfillUserColors(db);
   ensureColumn(db, "notifications", "circle_id", "circle_id TEXT");
@@ -796,6 +800,11 @@ export function updateUserName(db: DatabaseSync, id: string, name: string): void
 
 export function setPaymentUrl(db: DatabaseSync, id: string, url: string | null): void {
   db.prepare("UPDATE users SET payment_url = ? WHERE id = ?").run(url, id);
+}
+
+/** Sets or clears (null) the special buzzer animation. The caller has already checked the value. */
+export function setBuzzAnimation(db: DatabaseSync, id: string, animation: string | null): void {
+  db.prepare("UPDATE users SET buzz_animation = ? WHERE id = ?").run(animation, id);
 }
 
 export function setWeroEmail(db: DatabaseSync, id: string, email: string | null): void {
@@ -2295,7 +2304,8 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
 }
 
 const SOCIAL_SELECT = `
-  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, s.note,
+  SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev,
+         u.buzz_animation AS creator_buzz_animation, s.note,
          s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at, s.buzzed_at,
          s.price_cents, s.collector_id
   FROM socials s

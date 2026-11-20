@@ -20,11 +20,12 @@ import {
   updateFeedback,
 } from "./feedback.js";
 import type { AppDeps } from "../app.js";
-import { deleteCircle, getCircleById, getUserById, isCircleAdmin, listUserAvatarRevs, setCircleAdmin } from "../db.js";
+import { deleteCircle, getCircleById, getUserById, isCircleAdmin, listUserAvatarRevs, setBuzzAnimation, setCircleAdmin } from "../db.js";
 import { avatarFile } from "../lib/avatar.js";
 import type { RouteContext } from "../lib/context.js";
 import { sendJson } from "../lib/http.js";
 import { UUID_RE, parseId } from "../lib/validate.js";
+import { parseBuzzAnimation } from "../social/buzz-animation.js";
 
 export async function handleAdminRoutes(ctx: RouteContext): Promise<boolean> {
   const { req, res, deps, method, pathname, body } = ctx;
@@ -69,6 +70,10 @@ async function handleAdmin(
   }
   if (method === "POST" && /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname)) {
     setMemberAdminAsOperator(res, deps, pathname, body);
+    return;
+  }
+  if (method === "POST" && /^\/api\/admin\/users\/[^/]+\/buzz-animation$/.test(pathname)) {
+    setBuzzAnimationAsOperator(res, deps, pathname, body);
     return;
   }
   if (method === "GET" && pathname === "/api/admin/feedback") {
@@ -131,6 +136,7 @@ function isOperatorPath(pathname: string): boolean {
     || pathname === "/api/admin/schema"
     || /^\/api\/admin\/circles\/[^/]+\/delete$/.test(pathname)
     || /^\/api\/admin\/circles\/[^/]+\/members\/[^/]+\/admin$/.test(pathname)
+    || /^\/api\/admin\/users\/[^/]+\/buzz-animation$/.test(pathname)
     || pathname === "/api/admin/feedback"
     || /^\/api\/admin\/feedback\/[^/]+$/.test(pathname)
     || pathname === "/api/admin/avatars"
@@ -283,6 +289,39 @@ function deleteCircleAsOperator(res: http.ServerResponse, deps: AppDeps, pathnam
     console.log("admin circle delete denied");
     sendJson(res, 404, { error: "not found" });
   }
+}
+
+/** Sets ("birthday") or clears (null) the special buzzer animation for one user. Unknown user 404, any other value 400. */
+function setBuzzAnimationAsOperator(
+  res: http.ServerResponse,
+  deps: AppDeps,
+  pathname: string,
+  body: Record<string, unknown>,
+): void {
+  const match = /^\/api\/admin\/users\/([^/]+)\/buzz-animation$/.exec(pathname);
+  let userId = "";
+  try {
+    userId = parseId(match?.[1] ?? "");
+  } catch {
+    console.log("admin buzz animation denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const user = getUserById(deps.db, userId);
+  if (!user) {
+    console.log("admin buzz animation denied");
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const animation = parseBuzzAnimation(body.buzzAnimation);
+  if (animation === undefined) {
+    console.log("admin buzz animation denied");
+    sendJson(res, 400, { error: "invalid buzzAnimation" });
+    return;
+  }
+  setBuzzAnimation(deps.db, user.id, animation);
+  console.log(`admin buzz animation ok user=${user.id} animation=${animation}`);
+  sendJson(res, 200, { ok: true, user: { id: user.id, name: user.name }, buzzAnimation: animation });
 }
 
 function setMemberAdminAsOperator(

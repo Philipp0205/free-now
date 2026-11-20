@@ -5,6 +5,10 @@
  * textContent in the reduced-motion variant), never as HTML.
  */
 
+import { birthday } from "./buzzer/birthday-drawer.js";
+import { buzzLines } from "./buzzer/birthday-copy.js";
+import { payloadAnimation } from "./buzzer/birthday-rules.js";
+
 export const BUZZ_ANIMATIONS = ["shockwave", "slam", "flood", "bell"];
 export const BUZZ_INDEX_KEY = "fn_buzz_index";
 export const BUZZ_SEEN_KEY = "fn_buzz_seen";
@@ -82,7 +86,8 @@ export function consumeBuzz(socials, storage, now = Date.now()) {
   }
   if (!social) return null;
   const creator = social.creator && social.creator.name;
-  return { social, name: String(creator ?? social.creatorName ?? "").trim() || "Someone" };
+  const animation = payloadAnimation(social);
+  return { social, name: String(creator ?? social.creatorName ?? "").trim() || "Someone", ...(animation ? { animation } : {}) };
 }
 
 /** A name that is safe to draw: one line, at most BUZZ_NAME_MAX characters, never empty. */
@@ -626,7 +631,7 @@ const bellConfetti = {
   },
 };
 
-const DRAWERS = { shockwave, slam, flood, bell: bellConfetti };
+const DRAWERS = { shockwave, slam, flood, bell: bellConfetti, birthday };
 
 /* ---------- DOM ---------- */
 
@@ -653,6 +658,7 @@ export function buzzerPlaying() {
 export function playBuzzer({ name, animation, onEnd } = {}) {
   if (active || typeof document === "undefined") return false;
   const who = cleanBuzzName(name);
+  const lines = buzzLines(animation, who);
   const drawer = DRAWERS[animation] || DRAWERS[BUZZ_ANIMATIONS[0]];
 
   const overlay = document.createElement("div");
@@ -737,11 +743,11 @@ export function playBuzzer({ name, animation, onEnd } = {}) {
     const nameEl = document.createElement("div");
     nameEl.className = "buzzer-name";
     nameEl.setAttribute("aria-hidden", "true");
-    nameEl.textContent = who;
+    nameEl.textContent = lines.name;
     const subEl = document.createElement("div");
     subEl.className = "buzzer-sub";
     subEl.setAttribute("aria-hidden", "true");
-    subEl.textContent = "is free now";
+    subEl.textContent = lines.sub;
     overlay.append(nameEl, subEl);
   } else {
     overlay.append(canvas);
@@ -750,7 +756,7 @@ export function playBuzzer({ name, animation, onEnd } = {}) {
   // Added after the live region is in the page so screen readers announce it.
   const sr = document.createElement("span");
   sr.className = "buzzer-sr";
-  sr.textContent = who + " is free now";
+  sr.textContent = lines.sr;
   overlay.append(sr);
 
   if (still) {
