@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_RAIN, RAIN_CATCHUP_MS, RAIN_PLAYED_KEY, RAIN_PLAYED_MAX, firstEmoji, forgetRain, noteRainThread, rainFor, rainStyle, readPlayed } from "../../public/js/emoji-rain.js";
+import { DEFAULT_RAIN, HURRICANE_COUNT, HURRICANE_WINDOW_MS, RAIN_CATCHUP_MS, RAIN_PLAYED_KEY, RAIN_PLAYED_MAX, firstEmoji, forgetRain, hurricaneEnd, noteRainThread, rainFor, rainStyle, readPlayed } from "../../public/js/emoji-rain.js";
 
 test("the rain keeps 200 spinning drops by default and a lighter, spin-free rain under reduced motion", () => {
   assert.deepEqual(rainStyle(false), { drops: 200, spin: true });
@@ -183,4 +183,136 @@ test("an unreadable or missing store is treated as empty and never throws", () =
   const rains: string[] = [];
   noteRainThread(thread([msg("b", "taco", MIN)]), { now: NOW, storage: broken as never, start: (emoji: string) => { rains.push(emoji); return true; } });
   assert.deepEqual(rains, ["🌮"]);
+});
+
+/* The taco hurricane. */
+
+/** Like note(), but a hurricane shows up as "🌮 hurricane" so it can be told from a normal rain. */
+function noteKinds(t: ReturnType<typeof thread>, storage: ReturnType<typeof fakeStorage>) {
+  const rains: string[] = [];
+  noteRainThread(t, { now: NOW, storage, start: (emoji: string, hurricane?: boolean) => { rains.push(hurricane ? `${emoji} hurricane` : emoji); return true; } });
+  return rains;
+}
+const SEC = 1000;
+
+test("the hurricane rule is 3 taco messages within 60 seconds", () => {
+  assert.equal(HURRICANE_COUNT, 3);
+  assert.equal(HURRICANE_WINDOW_MS, 60_000);
+});
+
+test("hurricaneEnd: threshold, window and since", () => {
+  const t = (ago: number) => NOW - ago;
+  assert.equal(hurricaneEnd([t(20 * SEC), t(10 * SEC)], [t(10 * SEC)]), null, "two are not enough");
+  assert.equal(hurricaneEnd([t(20 * SEC), t(10 * SEC), t(0)], [t(0)]), t(0), "three are");
+  assert.equal(hurricaneEnd([t(70 * SEC), t(35 * SEC), t(0)], [t(0)]), null, "too far apart");
+  assert.equal(hurricaneEnd([t(60 * SEC), t(30 * SEC), t(0)], [t(0)]), t(0), "exactly the window apart still counts");
+  assert.equal(hurricaneEnd([t(20 * SEC), t(10 * SEC), t(0)], []), null, "nothing new, nothing to play");
+  assert.equal(hurricaneEnd([t(20 * SEC), t(10 * SEC), t(0)], [t(0)], t(15 * SEC)), null, "messages before `since` are ignored");
+  assert.equal(hurricaneEnd(undefined, undefined), null);
+});
+
+test("two taco messages in the window rain normally, the third plays one hurricane", () => {
+  forgetRain();
+  const storage = fakeStorage();
+  const one = msg("a", "taco", 30 * SEC);
+  const two = msg("b", "tacos please", 20 * SEC);
+  const three = msg("c", "TACO", 10 * SEC);
+  assert.deepEqual(noteKinds(thread([msg("h", "Hi all", 5 * MIN)]), storage), []);
+  assert.deepEqual(noteKinds(thread([msg("h", "Hi all", 5 * MIN), one]), storage), ["🌮"]);
+  assert.deepEqual(noteKinds(thread([msg("h", "Hi all", 5 * MIN), one, two]), storage), ["🌮"], "two still rain normally");
+  assert.deepEqual(noteKinds(thread([msg("h", "Hi all", 5 * MIN), one, two, three]), storage), ["🌮 hurricane"], "the third is the hurricane, not another rain");
+  assert.deepEqual(noteKinds(thread([msg("h", "Hi all", 5 * MIN), one, two, three]), storage), [], "a later poll does not replay it");
+});
+
+test("three taco messages spread wider than the window do not hurricane, three inside it do", () => {
+  forgetRain();
+  const storage = fakeStorage();
+  note(thread([msg("h", "Hi all", 20 * MIN)]), storage);
+  const wide = [msg("h", "Hi all", 20 * MIN), msg("a", "taco", 3 * MIN), msg("b", "taco", 2 * MIN)];
+  assert.deepEqual(noteKinds(thread(wide), storage), ["🌮"]);
+  assert.deepEqual(noteKinds(thread([...wide, msg("c", "taco", 0)]), storage), ["🌮"], "the third is more than a minute after the first");
+  forgetRain();
+  const close = fakeStorage();
+  note(thread([msg("h", "Hi all", 20 * MIN)]), close);
+  const near = [msg("h", "Hi all", 20 * MIN), msg("a", "taco", 50 * SEC), msg("b", "taco", 25 * SEC), msg("c", "taco", 0)];
+  assert.deepEqual(noteKinds(thread(near), close), ["🌮 hurricane"]);
+});
+
+test("messages from different senders count, other rains, GIF, system and Goblin lines do not", () => {
+  forgetRain();
+  const storage = fakeStorage();
+  note(thread([msg("h", "Hi all", 20 * MIN)]), storage);
+  const people = [
+    { ...msg("a", "taco", 30 * SEC), sender: "alex" },
+    { ...msg("b", "tacos!", 20 * SEC), sender: "bea" },
+    { ...msg("c", "/makeitrain", 10 * SEC), sender: "cy" },
+  ];
+  assert.deepEqual(noteKinds(thread([msg("h", "Hi all", 20 * MIN), ...people]), storage), ["🌮 hurricane"], "three people, one burst");
+
+  forgetRain();
+  const other = fakeStorage();
+  note(thread([msg("h", "Hi all", 20 * MIN)]), other);
+  const noise = [
+    msg("h", "Hi all", 20 * MIN),
+    msg("a", "taco", 40 * SEC),
+    msg("e", "/makeitrain 🥚", 35 * SEC),
+    { ...msg("g", "taco", 30 * SEC), gif: { id: "1" } },
+    { ...msg("s", "taco", 25 * SEC), system: true },
+    { ...msg("o", "taco", 20 * SEC), goblin: true },
+    msg("t", "tacotruck", 15 * SEC),
+    msg("l", "🌮", 12 * SEC),
+    msg("b", "taco", 10 * SEC),
+  ];
+  assert.deepEqual(noteKinds(thread(noise), other), ["🌮"], "two real taco messages are not a hurricane");
+});
+
+test("a burst plays one hurricane: a fourth taco in the window does not start another, a later burst can", () => {
+  forgetRain();
+  const storage = fakeStorage();
+  const hi = msg("h", "Hi all", 30 * MIN);
+  note(thread([hi]), storage);
+  const burst = [hi, msg("a", "taco", 20 * MIN), msg("b", "taco", 20 * MIN - 10 * SEC), msg("c", "taco", 20 * MIN - 20 * SEC)];
+  assert.deepEqual(noteKinds(thread(burst), storage), ["🌮 hurricane"]);
+  const fourth = [...burst, msg("d", "taco", 20 * MIN - 40 * SEC)];
+  assert.deepEqual(noteKinds(thread(fourth), storage), ["🌮"], "the fourth is a normal rain, not a second hurricane");
+  const fifth = [...fourth, msg("e", "taco", 20 * MIN - 50 * SEC)];
+  assert.deepEqual(noteKinds(thread(fifth), storage), ["🌮"], "still the same burst");
+  // A fresh set after the window can hurricane again.
+  const later = [...fifth, msg("f", "taco", 10 * MIN), msg("g", "taco", 10 * MIN - 10 * SEC)];
+  assert.deepEqual(noteKinds(thread(later), storage), ["🌮"], "two are not a new burst yet");
+  const again = [...later, msg("i", "taco", 10 * MIN - 20 * SEC)];
+  assert.deepEqual(noteKinds(thread(again), storage), ["🌮 hurricane"], "a new burst hurricanes again");
+});
+
+test("opening a chat with 3 unplayed taco messages in the window plays one hurricane and marks them played", () => {
+  forgetRain();
+  const storage = fakeStorage();
+  const missed = [msg("a", "taco", 20 * MIN), msg("b", "taco", 20 * MIN - 15 * SEC), msg("c", "taco", 20 * MIN - 30 * SEC), msg("z", "ok", MIN)];
+  assert.deepEqual(noteKinds(thread(missed), storage), ["🌮 hurricane"]);
+  assert.deepEqual([...readPlayed(storage, NOW).keys()].sort(), ["a", "b", "c"]);
+  assert.deepEqual(noteKinds(thread(missed), storage), [], "the same thread again");
+  forgetRain();
+  assert.deepEqual(noteKinds(thread(missed), storage), [], "a reopen with the same played store");
+  forgetRain();
+  assert.deepEqual(noteKinds(thread([...missed, msg("d", "taco", 20 * MIN - 45 * SEC)]), storage), ["🌮"], "a fourth in the same burst is only a normal rain");
+});
+
+test("a catch-up with two missed taco messages is a normal rain, and older than the catch-up window plays nothing", () => {
+  forgetRain();
+  assert.deepEqual(noteKinds(thread([msg("a", "taco", 20 * MIN), msg("b", "taco", 20 * MIN - 5 * SEC)]), fakeStorage()), ["🌮"]);
+  forgetRain();
+  const old = RAIN_CATCHUP_MS + MIN;
+  assert.deepEqual(noteKinds(thread([msg("a", "taco", old), msg("b", "taco", old - 5 * SEC), msg("c", "taco", old - 10 * SEC)]), fakeStorage()), []);
+});
+
+test("a hurricane style is bigger than the rain, and gentler without spin or shake under reduced motion", () => {
+  const rain = rainStyle(false);
+  const full = rainStyle(false, true);
+  assert.ok(full.drops > rain.drops && full.hurricane && full.spin && full.shake);
+  assert.ok(full.cleanupMs! > 3500 + 1000, "it lasts longer than the usual rain");
+  const gentle = rainStyle(true, true);
+  assert.ok(gentle.drops > 0 && gentle.drops < full.drops && gentle.drops < 200);
+  assert.equal(gentle.spin, false);
+  assert.equal(gentle.shake, false);
+  assert.deepEqual(rainStyle(true), { drops: 40, spin: false });
 });

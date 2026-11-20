@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-20-taco-hurricane",
+    "date": "2026-11-20",
+    "title": "Taco hurricane",
+    "bullets": [
+      "Three taco messages in a minute, from anyone in the chat, now start a taco hurricane.",
+      "It is a bigger, swirling rain that lasts a bit longer, with a short shake.",
+      "With reduce motion on, it is a gentler hurricane with fewer tacos, no spin and no shake."
+    ]
+  },
+  {
     "id": "2026-11-20-rain-reduced-motion",
     "date": "2026-11-20",
     "title": "Chat rain now plays with reduced motion",
