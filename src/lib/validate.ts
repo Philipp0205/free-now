@@ -136,6 +136,18 @@ export function cleanDescription(value: unknown): string {
   return text.slice(0, 280).trim();
 }
 
+/** How many plan card colours there are. Keep in step with GRADIENT_COUNT in public/js/card-grad.js. */
+export const CARD_COLOR_COUNT = 14;
+
+/** A plan card colour slot 0..13, or null for "no pick" (null, undefined or empty). Anything else is a 400. */
+export function readCardColor(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value >= CARD_COLOR_COUNT) {
+    throw new HttpError(400, `cardColor must be a whole number from 0 to ${CARD_COLOR_COUNT - 1}, or null`);
+  }
+  return value;
+}
+
 export function cleanCode(value: unknown): string {
   if (typeof value !== "string") throw new HttpError(400, "invite code is required");
   const code = value.toUpperCase().replace(/[^A-Z2-9]/g, "");

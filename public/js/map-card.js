@@ -1,6 +1,6 @@
 import { bindMap } from "./map.js";
 import { formatDistance, haversine, audiencePlace } from "./place.js";
-import { gradientClass } from "./card-grad.js";
+import { planGradientClass } from "./card-grad.js";
 import { cardCrowd } from "./map-pin.js";
 import { statusLine } from "./status.js";
 import { availabilityText } from "./freebusy.js";
@@ -45,7 +45,7 @@ function mapCard(pin) {
   const kind = social?.creator ? "social" : plan?.creator ? "plan" : pin.kind;
   const menuOpen = item ? state.cardMenu === `${kind}:${item.id}` : false;
   const own = Boolean(pin.own);
-  const grad = pin.kind === "plan" ? `card-grad ${gradientClass(pin.id)}` : "";
+  const grad = pin.kind === "plan" ? `card-grad ${planGradientClass(plan || pin)}` : "";
   return el("article", { class: ["map-card", grad, menuOpen ? "menu-open" : ""].filter(Boolean).join(" ") }, [
     el("div", { class: "map-card-head" }, [
       el("strong", {

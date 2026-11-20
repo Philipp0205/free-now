@@ -34,12 +34,13 @@ import {
   setEventCollector,
   setEventPaid,
   setEventPrice,
+  setPlanCardColor,
   unlinkPlanCircle,
 } from "../db.js";
 import { HttpError } from "../lib/http.js";
 import { readPriceCents } from "../lib/payment-url.js";
 import { clockLabel, isoDate, shortDate } from "../lib/time.js";
-import { cleanDescription, cleanNote, cleanPlace, parseId, readClock, readPoint, readStart } from "../lib/validate.js";
+import { cleanDescription, cleanNote, cleanPlace, parseId, readCardColor, readClock, readPoint, readStart } from "../lib/validate.js";
 import { audiencePlace, eventTitle, notifyUsers } from "../push/notify.js";
 import { requireCircle } from "./circles.js";
 import { planPayload, socialPayload } from "./payload.js";
@@ -351,7 +352,7 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
     ? cleanDescription(body.description)
     : (plan.description ?? "");
   const wantedCircles = body.circleIds === undefined ? null : readPlanCircles(deps, user, plan, body.circleIds);
-  const savePayment = readPaymentEdit(deps, user, "plan", plan, listPlanJoins(deps.db, plan.id), body);
+  const savePayment = withColorEdit(readPaymentEdit(deps, user, "plan", plan, listPlanJoins(deps.db, plan.id), body), deps, plan.id, body);
   const contentChanged = dateChanged || timeChanged || note !== plan.note || place !== (plan.place ?? "")
     || (description || null) !== (plan.description || null);
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null);
@@ -385,6 +386,19 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
 }
 
 const has = (body: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(body, key);
+
+/**
+ * Adds the cardColor write (0..13, or null to go back to the id hash) to the payment write. It is read now, so a 400
+ * happens before any change is saved. The host rule is already checked. Never a move: no push, no SEQUENCE bump.
+ */
+function withColorEdit(payment: (() => void) | null, deps: AppDeps, planId: string, body: Record<string, unknown>): (() => void) | null {
+  if (!has(body, "cardColor")) return payment;
+  const color = readCardColor(body.cardColor);
+  return () => {
+    payment?.();
+    setPlanCardColor(deps.db, planId, color);
+  };
+}
 
 /**
  * Reads price and collectorId from an edit body. Organizer only, never circle admins.

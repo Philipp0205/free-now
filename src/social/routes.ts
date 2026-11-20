@@ -25,6 +25,7 @@ import {
   isAllCircles,
   parseId,
   readClock,
+  readCardColor,
   readPlace,
   readPoint,
   readStart,
@@ -164,7 +165,8 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const place = cleanPlace(body.place);
     const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
     const description = cleanDescription(body.description);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description) });
+    const cardColor = readCardColor(body.cardColor);
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor) });
     return true;
   }
 

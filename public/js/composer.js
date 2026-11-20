@@ -390,7 +390,7 @@ export async function onCreatePlan(event) {
   if (locationNote) render();
   await run(async () => {
     const description = document.getElementById("sheet-description")?.value ?? state.planDraft.description;
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description } });
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, cardColor: state.planDraft.cardColor ?? null } });
     state.sheet = null;
     state.placeDraft = "";
     state.planTime = "";

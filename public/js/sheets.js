@@ -11,6 +11,7 @@ import { busyAtBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen,
 import { circleNameSheet, joinLinkSheet } from "./circles.js";
 import { sheetLeaving } from "./sheet-out.js";
 import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.js";
+import { cardColorField } from "./plans/card-color-ui.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -75,6 +76,7 @@ export function sheet() {
             maxlength: "80",
           }),
           planning ? descriptionField(state.planDraft, "sheet-description") : null,
+          planning ? cardColorField(state.planDraft) : null,
           planning ? planDateField() : null,
           planning ? el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: "Time (optional)" }),
