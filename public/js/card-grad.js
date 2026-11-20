@@ -17,3 +17,8 @@ export function gradientIndex(id) {
 export function gradientClass(id) {
   return `grad-${gradientIndex(id)}`;
 }
+
+/** Classes that colour a compact row: a plan keeps its card's .grad-N, a social gets the social tint (never .card-now). */
+export function compactTone(kind, id) {
+  return kind === "plan" ? `compact-plan ${gradientClass(id)}` : "compact-social";
+}

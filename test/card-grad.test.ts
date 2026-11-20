@@ -1,35 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { GRADIENT_COUNT, gradientClass, gradientIndex } from "../public/js/card-grad.js";
+import { GRADIENT_COUNT, compactTone, gradientClass, gradientIndex } from "../public/js/card-grad.js";
+import { type Rgb, contrast, hex, over } from "./contrast.js";
 
 const CSS = fs.readFileSync(new URL("../public/css/styles.css", import.meta.url), "utf8");
-
-type Rgb = [number, number, number];
-
-function hex(value: string): Rgb {
-  return [1, 3, 5].map((at) => parseInt(value.slice(at, at + 2), 16)) as Rgb;
-}
-
-function channel(value: number): number {
-  const c = value / 255;
-  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-
-function luminance([r, g, b]: Rgb): number {
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
-
-function contrast(a: Rgb, b: Rgb): number {
-  const x = luminance(a);
-  const y = luminance(b);
-  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
-}
-
-/** rgba(fg, alpha) painted over an opaque bg. */
-function over(fg: Rgb, alpha: number, bg: Rgb): Rgb {
-  return fg.map((v, i) => v * alpha + bg[i] * (1 - alpha)) as Rgb;
-}
 
 /** Palette stops, read straight from styles.css. Plan cards are dark art in both schemes, so there is only one set. */
 function stops(): Rgb[][] {
@@ -100,6 +75,52 @@ test("card text, chat row, badge, In toggle and ⋯ stay AA on every stop", () =
         }
         // The In toggle outline is a non-text UI edge: 3:1.
         assert.ok(contrast(over(WHITE, 0.85, stop), stop) >= 3, `${scheme} grad-${slot} toggle ring`);
+      }
+    }
+  }
+});
+
+/** The compact row tint percentages for a scheme, read from styles.css (light is the prefers-color-scheme override). */
+function tints(scheme: "dark" | "light"): { plan: number; social: number } {
+  const dark = /\.compact-row \{ --tint: (\d+)%; --tint-social: (\d+)%;/.exec(CSS);
+  const light = /@media \(prefers-color-scheme: light\) \{\n  \.compact-row \{ --tint: (\d+)%; --tint-social: (\d+)%; \}/.exec(CSS);
+  const hit = scheme === "dark" ? dark : light;
+  assert.ok(hit, `${scheme} compact tint`);
+  return { plan: Number(hit[1]) / 100, social: Number(hit[2]) / 100 };
+}
+
+/** --row-sub in styles.css is --muted mixed 75% with --text; the date and +N use it. */
+const sub = (muted: Rgb, text: Rgb): Rgb => over(muted, 0.75, text);
+const SURFACES = {
+  dark: { lift: hex("#1c1c1e"), text: hex("#ffffff"), muted: sub(hex("#8e8e93"), hex("#ffffff")) },
+  light: { lift: hex("#f2f2f7"), text: hex("#000000"), muted: sub(hex("#636366"), hex("#000000")) },
+};
+const PINK = hex("#ff2d78");
+const ORANGE = hex("#ff6e28");
+
+test("a compact row is a social or a plan tone, and a plan keeps its card's grad-N", () => {
+  assert.equal(compactTone("plan", "abc"), `compact-plan ${gradientClass("abc")}`);
+  assert.equal(compactTone("social", "abc"), "compact-social");
+  assert.doesNotMatch(compactTone("social", "abc"), /card-now|grad-/);
+  assert.notEqual(compactTone("plan", "plan-0"), compactTone("plan", "plan-1"));
+});
+
+test("compact title, date and +N stay AA on every tinted row, with and without the now wash, in dark and light", () => {
+  const rows = stops();
+  assert.equal(rows.filter(Boolean).length, GRADIENT_COUNT);
+  for (const scheme of ["dark", "light"] as const) {
+    const { lift, text, muted } = SURFACES[scheme];
+    const tint = tints(scheme);
+    const bases: Array<[string, Rgb]> = [["social start", over(PINK, tint.social, lift)], ["social end", over(ORANGE, tint.social, lift)]];
+    for (const [slot, [g1, g2]] of rows.entries()) {
+      bases.push([`grad-${slot} start`, over(g1, tint.plan, lift)], [`grad-${slot} end`, over(g2, tint.plan, lift)]);
+    }
+    for (const [name, base] of bases) {
+      for (const [state, bg] of [["", base], [" happening now", over(PINK, 0.12, base)]] as Array<[string, Rgb]>) {
+        for (const [what, fg] of [["title", text], ["date and +N", muted]] as Array<[string, Rgb]>) {
+          const ratio = contrast(fg, bg);
+          assert.ok(ratio >= 4.5, `${scheme} ${name}${state} ${what}: ${ratio.toFixed(2)}`);
+        }
       }
     }
   }

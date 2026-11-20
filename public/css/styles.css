@@ -386,11 +386,37 @@ html.ak-native .tabbar { view-transition-name: ak-tabbar; }
   gap: 10px;
   padding: 8px 12px;
   border-radius: 14px;
-  background: var(--lift);
+  /* Layers, top to bottom: the happening-now wash, the accent edge, the card-colour tint over the row surface.
+     Plans and socials fill --row-edge, --row-t1 and --row-t2 below; the now rule only fills --row-wash. */
+  --row-wash: transparent;
+  --row-edge: transparent;
+  --row-t1: var(--lift);
+  --row-t2: var(--lift);
+  background:
+    linear-gradient(var(--row-wash), var(--row-wash)),
+    linear-gradient(90deg, var(--row-edge) 0 6px, transparent 6px),
+    linear-gradient(155deg, var(--row-t1), var(--row-t2)),
+    var(--lift);
   color: var(--text);
   text-align: left;
   font: inherit;
   overflow: hidden;
+}
+/* Card colour on a compact row. A plan reuses its card's .grad-N stops (--g1, --g2) and a social the .card-now
+   pink and orange, each mixed into the row surface so --text and --muted keep their contrast (test/card-grad.test.ts). */
+.compact-row { --tint: 30%; --tint-social: 8%; --row-sub: color-mix(in srgb, var(--muted) 75%, var(--text)); }
+.compact-plan {
+  --row-edge: color-mix(in srgb, var(--g1) 70%, var(--text));
+  --row-t1: color-mix(in srgb, var(--g1) var(--tint), var(--lift));
+  --row-t2: color-mix(in srgb, var(--g2) var(--tint), var(--lift));
+}
+.compact-social {
+  --row-edge: color-mix(in srgb, #ff6e28 85%, var(--text));
+  --row-t1: color-mix(in srgb, #ff2d78 var(--tint-social), var(--lift));
+  --row-t2: color-mix(in srgb, #ff6e28 var(--tint-social), var(--lift));
+}
+@media (prefers-color-scheme: light) {
+  .compact-row { --tint: 8%; --tint-social: 6%; }
 }
 .compact-row.focused { outline: 2px solid var(--ring); outline-offset: 2px; }
 .compact-title { flex: 1 1 0; min-width: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -399,8 +425,8 @@ html.ak-native .tabbar { view-transition-name: ak-tabbar; }
 .compact-faces > * { margin-left: -7px; }
 .compact-faces > :first-child { margin-left: 0; }
 .compact-faces .avatar { font-size: 10px; border-width: 1.5px; }
-.compact-more { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
-.compact-when { flex: 0 1 auto; min-width: 0; max-width: 40%; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-more { margin-left: 4px; color: var(--row-sub); font-size: 12px; font-weight: 650; }
+.compact-when { flex: 0 1 auto; min-width: 0; max-width: 40%; color: var(--row-sub); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .card {
   position: relative;
@@ -464,7 +490,7 @@ html.ak-native .tabbar { view-transition-name: ak-tabbar; }
   animation: now-card-ring 1.6s ease-out 3;
 }
 .compact-row.happening-now {
-  background: color-mix(in srgb, #ff2d78 12%, var(--lift));
+  --row-wash: color-mix(in srgb, #ff2d78 12%, transparent);
   box-shadow: inset 0 0 0 2px #ff2d78;
 }
 .compact-row.happening-now::before {
