@@ -14,12 +14,15 @@ import { copyText, el, field, icon, paymentUrlError, run, scheduleErrorClear, vi
 import { avatar, onRemovePhoto, pickPhoto } from "./avatars.js";
 import { emailField, onResendEmail, saveEmail } from "./account.js";
 import { billsSection, billsSummary, ensureBills, loadBills } from "./bills.js";
+import { themePanel, themeSummary } from "./app-meta/theme-ui.js";
+import { THEME_COPY } from "./app-meta/theme-copy.js";
 
 const YOU_SECTIONS = [
   { id: "profile", title: "Profile" },
   { id: "bills", title: "Bills" },
   { id: "availability", title: "Availability & calendar" },
   { id: "notifications", title: "Notifications" },
+  { id: "appearance", title: THEME_COPY.section },
   { id: "assistants", title: "Assistants" },
   { id: "account", title: "Account" },
 ];
@@ -47,6 +50,7 @@ function youSectionSummary(id) {
     return "No status";
   }
   if (id === "notifications") return notificationStatusLabel();
+  if (id === "appearance") return themeSummary();
   if (id === "assistants") {
     const tokens = state.agentTokens;
     if (!tokens?.loaded || tokens.failed) return "";
@@ -88,6 +92,7 @@ function youSectionScreen(id) {
     bills: billsSection,
     availability: () => [statusPanel(), friendsViewPanel(), busyHoursPanel(), calendarFeedPanel(), calendarSyncPanel()],
     notifications: notificationsSection,
+    appearance: () => [themePanel()],
     assistants: () => [agentTokensPanel()],
     account: accountSection,
   };

@@ -17,11 +17,26 @@ const HOST = "calendar.example.test";
 /** Titles only Alex may ever see in his own calendar. */
 const SECRET_TITLES = ["Tennis lesson", "Dentist", "Team lunch", "Secret Street"];
 
+/** A block around now, clamped to today so a late-evening run still overlaps now and has a same-day end time. */
+function todayLiveBlock(now = Math.floor(Date.now() / MIN) * MIN) {
+  const today = isoDate(now, TZ);
+  const dayStart = zonedDateTime(today, "00:00", TZ);
+  const lastMinute = zonedDateTime(today, "23:59", TZ);
+  let start = Math.max(now - 30 * MIN, dayStart);
+  let end = Math.min(now + 90 * MIN, lastMinute);
+  if (end <= start) {
+    end = lastMinute;
+    start = Math.max(dayStart, lastMinute - 30 * MIN);
+  }
+  return { start, end };
+}
+
 function aliceIcs(): string {
   const now = Math.floor(Date.now() / MIN) * MIN;
   const tomorrow = addDays(isoDate(now, TZ), 1);
+  const today = todayLiveBlock(now);
   const events = [
-    { title: "Dentist", start: now - 30 * MIN, end: now + 90 * MIN },
+    { title: "Dentist", start: today.start, end: today.end },
     { title: "Tennis lesson", start: zonedDateTime(tomorrow, "11:00", TZ), end: zonedDateTime(tomorrow, "12:00", TZ) },
     { title: "Team lunch", start: zonedDateTime(tomorrow, "15:00", TZ), end: zonedDateTime(tomorrow, "16:00", TZ) },
   ];
@@ -128,7 +143,7 @@ for (const [width, height] of SIZES) {
   test(`at ${width}: Alex sees the same busy times as Bea, no titles, and Check now works`, { timeout: 120_000 }, async () => {
     const { now, tomorrow } = nowParts();
     const { alex, bea, friends } = await seed(`p${width}`, true);
-    const busyUntil = untilText(now + 90 * MIN, Date.now(), TZ);
+    const busyUntil = untilText(todayLiveBlock(now).end, Date.now(), TZ);
 
     // What Bea sees in the plan sheet.
     const beaPage = await phone(width, height, bea.token, friends.id);
