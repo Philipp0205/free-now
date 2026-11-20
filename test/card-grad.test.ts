@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { GRADIENT_COUNT, compactTone, gradientClass, gradientIndex } from "../public/js/card-grad.js";
+import { GRADIENT_COUNT, compactTone, gradientClass, gradientIndex, isCardColor, planGradientClass } from "../public/js/card-grad.js";
 import { type Rgb, contrast, hex, over } from "./contrast.js";
 
 const CSS = fs.readFileSync(new URL("../public/css/styles.css", import.meta.url), "utf8");
@@ -103,6 +103,26 @@ test("a compact row is a social or a plan tone, and a plan keeps its card's grad
   assert.equal(compactTone("social", "abc"), "compact-social");
   assert.doesNotMatch(compactTone("social", "abc"), /card-now|grad-/);
   assert.notEqual(compactTone("plan", "plan-0"), compactTone("plan", "plan-1"));
+});
+
+test("a picked cardColor wins, and no pick or a bad value falls back to the id hash", () => {
+  const id = "4f0c2b8e-6f1a-4c55-9d0e-8a7b3c2d1e0f";
+  for (let slot = 0; slot < GRADIENT_COUNT; slot += 1) {
+    assert.equal(planGradientClass({ id, cardColor: slot }), `grad-${slot}`);
+    assert.equal(compactTone("plan", id, slot), `compact-plan grad-${slot}`, "the compact row follows the same slot");
+  }
+  const hash = gradientClass(id);
+  for (const bad of [null, undefined, -1, GRADIENT_COUNT, 99, 1.5, "3", NaN, true, {}]) {
+    assert.equal(planGradientClass({ id, cardColor: bad }), hash, `${String(bad)} falls back`);
+    assert.equal(compactTone("plan", id, bad as number), `compact-plan ${hash}`);
+    assert.equal(isCardColor(bad), false);
+  }
+  assert.equal(planGradientClass({ id }), hash, "a plan with no cardColor field");
+  assert.equal(planGradientClass(undefined), gradientClass(undefined));
+  assert.equal(compactTone("plan", id), `compact-plan ${hash}`, "the default call is unchanged");
+  assert.equal(compactTone("social", id, 3), "compact-social", "a social never takes a plan color");
+  assert.equal(isCardColor(0), true);
+  assert.equal(isCardColor(GRADIENT_COUNT - 1), true);
 });
 
 test("compact title, date and +N stay AA on every tinted row, with and without the now wash, in dark and light", () => {

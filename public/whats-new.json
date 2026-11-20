@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-20-card-color",
+    "date": "2026-11-20",
+    "title": "Pick a color for your plan card",
+    "bullets": [
+      "When you make or edit a plan, you can pick its card color from a small palette.",
+      "Friends see the same color on the card, in the Compact list and on the map card.",
+      "Auto keeps the color a plan always had. Changing the color does not send a notification."
+    ]
+  },
+  {
     "id": "2026-11-20-compact-colors",
     "date": "2026-11-20",
     "title": "Compact rows keep their card colors",

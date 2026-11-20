@@ -1,6 +1,7 @@
 import { shortDate, planDayChoice, planDayDate } from "./when.js";
 import { cardCrowd } from "./map-pin.js";
-import { gradientClass } from "./card-grad.js";
+import { planGradientClass } from "./card-grad.js";
+import { cardColorField } from "./plans/card-color-ui.js";
 import { audiencePlace } from "./place.js";
 import { emptyWhereSession, state } from "./state.js";
 import { api, isNetworkFailure, refresh } from "./session.js";
@@ -78,7 +79,7 @@ export function eventDetailSheet() {
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),
     el("div", { class: "sheet", role: "dialog", "aria-label": "Details", "data-snap": `event-detail:${kind}:${item.id}` }, [
-      el("div", { class: kind === "plan" ? `sheet-head card-grad ${gradientClass(item.id)}` : "sheet-head" }, [
+      el("div", { class: kind === "plan" ? `sheet-head card-grad ${planGradientClass(item)}` : "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: title }),
         el("p", { class: "help", text: `${when} · ${item.creator.name}` }),
@@ -193,7 +194,7 @@ export function openAdminEdit(kind, item) {
     kind,
     id: item.id,
     note: item.note || "",
-    description: item.description || "",
+    description: item.description || "", cardColor: item.cardColor ?? null,
     time,
     day,
     date: item.forDate || "",
@@ -221,6 +222,7 @@ export function adminEditSheet() {
         el("div", { class: "sheet-form" }, [
           sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
           edit.kind === "plan" ? descriptionField(edit) : null,
+          edit.kind === "plan" ? cardColorField(edit) : null,
           edit.kind === "plan" ? planDayBlock(edit, "admin") : null,
           el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
@@ -394,7 +396,7 @@ async function saveAdminEdit(event) {
   await run(async () => {
     const body = edit.kind === "social"
       ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
-      : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
+      : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng, cardColor: edit.cardColor ?? null };
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     const paymentItem = findEvent(edit.kind, edit.id);
     if (paymentItem) Object.assign(body, paymentBody(edit, paymentItem));

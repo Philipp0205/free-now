@@ -1,4 +1,4 @@
-import { compactTone, gradientClass } from "./card-grad.js";
+import { compactTone, planGradientClass } from "./card-grad.js";
 import { state } from "./state.js";
 import { render } from "./render.js";
 import { chatRow } from "./chat.js";
@@ -104,7 +104,7 @@ export function planCard(plan) {
   return el("article", {
     class: [
       state.focusPlan === plan.id ? "card card-plan focused" : "card card-plan",
-      `card-grad ${gradientClass(plan.id)}`,
+      `card-grad ${planGradientClass(plan)}`,
       menuOpen ? "menu-open" : "",
     ].filter(Boolean).join(" "),
     "data-plan": plan.id,
@@ -148,7 +148,7 @@ export function compactRow(kind, item) {
   const focused = kind === "plan" ? state.focusPlan === item.id : state.focusSocial === item.id;
   const happening = eventIsNow(kind, item, now);
   return el("button", {
-    class: ["compact-row", compactTone(kind, item.id), focused ? "focused" : "", happening ? "happening-now" : ""].filter(Boolean).join(" "),
+    class: ["compact-row", compactTone(kind, item.id, item.cardColor), focused ? "focused" : "", happening ? "happening-now" : ""].filter(Boolean).join(" "),
     type: "button",
     [`data-${kind}`]: item.id,
     "data-happening-now": happening ? "1" : null,

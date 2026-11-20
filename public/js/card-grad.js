@@ -18,7 +18,17 @@ export function gradientClass(id) {
   return `grad-${gradientIndex(id)}`;
 }
 
-/** Classes that colour a compact row: a plan keeps its card's .grad-N, a social gets the social tint (never .card-now). */
-export function compactTone(kind, id) {
-  return kind === "plan" ? `compact-plan ${gradientClass(id)}` : "compact-social";
+/** True for a picked slot: a whole number 0..13. Null, missing and anything else mean "no pick". */
+export function isCardColor(value) {
+  return Number.isInteger(value) && value >= 0 && value < GRADIENT_COUNT;
+}
+
+/** The .grad-N for a plan: its picked cardColor when valid, else the id hash as before. */
+export function planGradientClass(plan) {
+  return isCardColor(plan?.cardColor) ? `grad-${plan.cardColor}` : gradientClass(plan?.id);
+}
+
+/** Classes that colour a compact row: a plan keeps its card's .grad-N (the pick, else the hash), a social gets the social tint (never .card-now). */
+export function compactTone(kind, id, cardColor = null) {
+  return kind === "plan" ? `compact-plan ${planGradientClass({ id, cardColor })}` : "compact-social";
 }

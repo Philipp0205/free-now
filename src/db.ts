@@ -99,6 +99,8 @@ export type PlanRow = {
   updated_at: number | null;
   price_cents: number | null;
   collector_id: string | null;
+  /** Card colour slot 0..13 picked by the host. Null means the id hash default. */
+  card_color: number | null;
 };
 
 export type PushSubRow = {
@@ -481,6 +483,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "updated_at", "updated_at INTEGER");
   ensureColumn(db, "plans", "price_cents", "price_cents INTEGER");
   ensureColumn(db, "plans", "collector_id", "collector_id TEXT");
+  ensureColumn(db, "plans", "card_color", "card_color INTEGER");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -1549,11 +1552,12 @@ export function insertPlan(
     place: string;
     atTime?: string | null;
     description?: string | null;
+    cardColor?: number | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description, card_color)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     plan.id,
     plan.circleId,
@@ -1566,6 +1570,7 @@ export function insertPlan(
     plan.place,
     plan.atTime ?? null,
     plan.description || null,
+    plan.cardColor ?? null,
   );
   linkPlanCircle(db, plan.id, plan.circleId, plan.createdAt);
 }
@@ -1849,6 +1854,11 @@ export function patchPlanDetails(
     `UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ?, description = ?,
      updated_at = COALESCE(?, updated_at) WHERE id = ?`,
   ).run(note, place, lat, lng, atTime, forDate, description, updatedAt, id);
+}
+
+/** Sets or clears (null) the card colour. Not a content change, so updated_at stays. */
+export function setPlanCardColor(db: DatabaseSync, id: string, cardColor: number | null): void {
+  db.prepare("UPDATE plans SET card_color = ? WHERE id = ?").run(cardColor, id);
 }
 
 /** The feed token hash for this person, if the feed is on. */
@@ -2295,7 +2305,7 @@ const SOCIAL_SELECT = `
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
          p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at,
-         p.price_cents, p.collector_id
+         p.price_cents, p.collector_id, p.card_color
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;

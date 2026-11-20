@@ -72,6 +72,8 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     id: plan.id,
     note: plan.note,
     description: plan.description ?? "",
+    // Card colour slot 0..13, or null for the id hash default. Not creator.color, which is a chat hex.
+    cardColor: plan.card_color ?? null,
     place: plan.place ?? "",
     forDate: plan.for_date,
     whenLabel: dayLabel(plan.for_date, today),

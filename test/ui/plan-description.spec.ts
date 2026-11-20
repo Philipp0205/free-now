@@ -56,7 +56,8 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
     await page.locator("#sheet-note").waitFor();
     assert.equal(await page.locator(".sheet textarea").count(), 1);
     assert.equal(await page.locator("#sheet-description").inputValue(), "");
-    await page.locator(".scrim").click({ position: { x: 20, y: 20 } });
+    // The palette makes this sheet tall enough to cover the scrim's corner, so close it with the scrim's own click.
+    await page.locator(".scrim").dispatchEvent("click");
     await page.locator("#sheet-note").waitFor({ state: "detached" });
 
     await page.locator(".card-plan").getByRole("button", { name: /^More for / }).click();
