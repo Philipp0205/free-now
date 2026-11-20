@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-11-20-ios-safari",
+    "date": "2026-11-20",
+    "title": "Smoother on Safari and iPhone",
+    "bullets": [
+      "Date fields use a big enough font size, so the page does not zoom in when you tap one.",
+      "The welcome page now has the home-screen status bar and name, like the app.",
+      "No more grey tap flash on iPhone, and hover looks only show up with a mouse.",
+      "Notes and extra info in sheets fit on short screens when the keyboard is up."
+    ]
+  },
+  {
     "id": "2026-11-20-now-card",
     "date": "2026-11-20",
     "title": "Events happening now stand out",

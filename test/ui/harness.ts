@@ -81,10 +81,10 @@ export async function launchChrome(): Promise<Browser> {
   catch { return await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: true }); }
 }
 
-/** The browser for a Playwright project: desktop-firefox and desktop-webkit use those engines, anything else Chrome. */
+/** The browser for a Playwright project: desktop-firefox uses Firefox, desktop-webkit and iphone-webkit use WebKit, anything else Chrome. */
 export async function launchBrowser(project: string): Promise<Browser> {
   if (project === "desktop-firefox") return firefox.launch({ headless: true });
-  if (project === "desktop-webkit") return webkit.launch({ headless: true });
+  if (project === "desktop-webkit" || project === "iphone-webkit") return webkit.launch({ headless: true });
   return launchChrome();
 }
 

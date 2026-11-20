@@ -94,6 +94,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
+html { -webkit-tap-highlight-color: transparent; }
 /* Do not set touch-action: manipulation on html (or any ancestor of text fields).
    A child cannot re-enable what a parent disabled, and it steals caret taps in
    focused inputs on iOS, which closes the keyboard. Buttons set it themselves. */
@@ -142,7 +143,10 @@ button:disabled { cursor: default; opacity: 0.55; }
 .wordmark { font-size: 34px; font-weight: 700; letter-spacing: -0.045em; margin: 0; }
 .lede { color: var(--muted); margin: 0; font-size: 17px; line-height: 1.35; }
 .gate-about { align-self: center; margin-top: 6px; padding: 8px 12px; color: var(--faint); font-size: 14px; text-decoration: none; }
-.gate-about:hover { color: var(--muted); }
+.gate-about:active { color: var(--muted); }
+@media (hover: hover) {
+  .gate-about:hover { color: var(--muted); }
+}
 .gate-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .gate-links .gate-about { margin-top: 0; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
@@ -698,9 +702,13 @@ html.ak-native .tabbar { view-transition-name: ak-tabbar; }
   transition: background-color 100ms ease-out, color 100ms ease-out;
 }
 .map-card-close .icon, .map-card-close .icon svg { width: 20px; height: 20px; display: block; }
-.map-card-close:hover, .map-card-close:active { background: var(--control); color: var(--text); }
+.map-card-close:active { background: var(--control); color: var(--text); }
 .map-card.card-grad .map-card-close { color: color-mix(in srgb, var(--text) 82%, transparent); }
-.map-card.card-grad .map-card-close:hover, .map-card.card-grad .map-card-close:active { background: rgba(0, 0, 0, 0.22); color: var(--text); }
+.map-card.card-grad .map-card-close:active { background: rgba(0, 0, 0, 0.22); color: var(--text); }
+@media (hover: hover) {
+  .map-card-close:hover { background: var(--control); color: var(--text); }
+  .map-card.card-grad .map-card-close:hover { background: rgba(0, 0, 0, 0.22); color: var(--text); }
+}
 .map-card.menu-open { overflow: visible; z-index: 1100; }
 .map-card .chat-row { background: var(--control); }
 .map-card .in-toggle { margin-top: 10px; }
@@ -1155,7 +1163,7 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; 
   font-size: 16px;
   color: var(--text);
 }
-input[type="text"], input[type="email"], input[type="url"], input[type="time"] {
+input[type="text"], input[type="email"], input[type="url"], input[type="time"], input[type="date"] {
   width: 100%;
   background: var(--lift);
   border: 0;
@@ -1960,7 +1968,7 @@ textarea.sheet-control {
   display: block;
   width: 100%;
   min-height: 132px;
-  max-height: 40vh;
+  max-height: min(40vh, 40dvh, calc(var(--vv-height, 100dvh) * 0.4));
   resize: none;
   background: var(--control);
   border: 0;
@@ -2867,7 +2875,7 @@ html.ak-native .card-body[role="button"]:active { opacity: 1; }
 .avail-tag.busy { color: var(--warn-text); }
 .busy-at:empty { display: none; }
 .busy-at { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 14px; color: var(--warn-text); line-height: 1.35; }
-.sheet-extra { max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; margin: 0 0 16px; }
+.sheet-extra { max-height: min(40vh, 40dvh, calc(var(--vv-height, 100dvh) * 0.4)); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; margin: 0 0 16px; }
 .cal-check { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 /* The I'm in check list is scoped under .cal-check so it never overrides the Events month day list. */
 .cal-check .cal-event {
