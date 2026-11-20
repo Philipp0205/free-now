@@ -17,14 +17,16 @@ const HOST = "calendar.example.test";
 /** Titles only Alex may ever see in his own calendar. */
 const SECRET_TITLES = ["Tennis lesson", "Dentist", "Team lunch", "Secret Street"];
 
-/** A block around now, kept on today's calendar date so a late-evening run still has a same-day end time. */
+/** A block around now, clamped to today so a late-evening run still overlaps now and has a same-day end time. */
 function todayLiveBlock(now = Math.floor(Date.now() / MIN) * MIN) {
-  let start = now - 30 * MIN;
-  let end = now + 90 * MIN;
   const today = isoDate(now, TZ);
-  if (isoDate(start, TZ) !== today || isoDate(end, TZ) !== today) {
-    start = zonedDateTime(today, "12:00", TZ);
-    end = zonedDateTime(today, "13:30", TZ);
+  const dayStart = zonedDateTime(today, "00:00", TZ);
+  const lastMinute = zonedDateTime(today, "23:59", TZ);
+  let start = Math.max(now - 30 * MIN, dayStart);
+  let end = Math.min(now + 90 * MIN, lastMinute);
+  if (end <= start) {
+    end = lastMinute;
+    start = Math.max(dayStart, lastMinute - 30 * MIN);
   }
   return { start, end };
 }
