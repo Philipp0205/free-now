@@ -4,9 +4,11 @@ import { render } from "./render.js";
 import { chatRow } from "./chat.js";
 import { youAreAdmin } from "./members.js";
 import { canShareCircles, endManaged, mapsUrl, openAdminEdit, openArrivalPicker, openEventDetail, openShareCircles, planCirclesLine } from "./event-sheets.js";
-import { clock, el, icon, remaining } from "./lib.js";
+import { clock, appTz, el, icon, remaining } from "./lib.js";
 import { inReply } from "./composer.js";
 import { arrivalDefault, arriveClock, avatarStack, inToggle, replySummary, sendReply } from "./replies.js";
+import { avatar } from "./avatars.js";
+import { compactTitle, compactWhen, compactWho } from "./compact-home.js";
 import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
 import { priceLine } from "./event-pay.js";
@@ -126,6 +128,35 @@ export function planCard(plan) {
       chatRow("plan", plan),
       cardActions("plan", plan, { locked: mine }),
     ]),
+  ]);
+}
+
+/**
+ * One line for the compact Now list: the event name, a few faces with "+N", and the date.
+ * The whole line is one button that opens the details, like a card tap. Only the name and the date
+ * take the ellipsis, so a long name never pushes the row wider than the screen.
+ */
+export function compactRow(kind, item) {
+  const now = Date.now();
+  const title = compactTitle(kind, item, now);
+  const when = compactWhen(kind, item, now, appTz());
+  const who = compactWho(item.creator, item.joined);
+  const focused = kind === "plan" ? state.focusPlan === item.id : state.focusSocial === item.id;
+  return el("button", {
+    class: focused ? "compact-row focused" : "compact-row",
+    type: "button",
+    [`data-${kind}`]: item.id,
+    onclick: () => openEventDetail(kind, item),
+  }, [
+    el("strong", { class: "compact-title", text: title }),
+    el("span", { class: "compact-who" }, [
+      el("span", { class: "compact-faces", "aria-hidden": "true" }, [
+        ...who.shown.map((person) => avatar(person, 22)),
+        who.more ? el("span", { class: "compact-more", text: `+${who.more}` }) : null,
+      ]),
+      el("span", { class: "visually-hidden", text: who.text }),
+    ]),
+    el("span", { class: "compact-when", text: when }),
   ]);
 }
 

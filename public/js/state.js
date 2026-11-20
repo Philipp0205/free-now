@@ -1,3 +1,5 @@
+import { readCompactHome } from "./compact-home.js";
+
 export const TOKEN_KEY = "fn_token";
 export const CIRCLE_KEY = "fn_circle";
 export const MAP_ALL_KEY = "hangry-map-all";
@@ -27,6 +29,8 @@ export const state = {
   mapAllCircles: localStorage.getItem(MAP_ALL_KEY) === "1",
   mapSocials: [],
   mapPlans: [],
+  /** Now tab: true lists events as one compact line each, false as cards. Saved per device. */
+  compactHome: readCompactHome(),
   /** Events tab: "calendar" or "map". Same circle scope (mapAllCircles) for both. */
   eventsView: readEventsView(),
   /** First of the month the calendar shows, and the picked day. Set on first show. */

@@ -2,7 +2,8 @@ import { state } from "./state.js";
 import { api } from "./session.js";
 import { render } from "./render.js";
 import { screenHeader } from "./circles.js";
-import { planCard, socialCard } from "./cards.js";
+import { compactRow, planCard, socialCard } from "./cards.js";
+import { writeCompactHome } from "./compact-home.js";
 import { awayLine } from "./members.js";
 import { homeChatBanner } from "./alerts.js";
 import { chatChip } from "./chat.js";
@@ -47,12 +48,47 @@ export function home() {
   if (away) parts.push(away);
   const live = state.socials.filter((social) => isLiveSocial(social) || social.creator.id === state.me.user.id);
   const later = state.socials.filter((social) => !isLiveSocial(social) && social.creator.id !== state.me.user.id);
-  const feed = [...live.map(socialCard), ...later.map(socialCard), ...sortedPlans(state.plans).map(planCard)];
-  if (feed.length) parts.push(el("div", { class: "section" }, [el("div", { class: "cards" }, feed)]));
+  const events = [
+    ...live.map((social) => ["social", social]),
+    ...later.map((social) => ["social", social]),
+    ...sortedPlans(state.plans).map((plan) => ["plan", plan]),
+  ];
+  if (events.length) {
+    parts.push(el("div", { class: "section" }, [
+      listToggle(),
+      state.compactHome
+        ? el("div", { class: "compact-list" }, events.map(([kind, item]) => compactRow(kind, item)))
+        : el("div", { class: "cards" }, events.map(([kind, item]) => (kind === "plan" ? planCard(item) : socialCard(item)))),
+    ]));
+  }
   parts.push(el("div", { class: "past-entry" }, [
     el("button", { class: "text-btn", type: "button", text: "Past events", onclick: () => { void openPast(); } }),
   ]));
   return el("div", {}, parts);
+}
+
+function setCompactHome(on) {
+  if (state.compactHome === on) return;
+  state.compactHome = on;
+  writeCompactHome(on);
+  state.cardMenu = null;
+  render();
+}
+
+/** Cards / Compact, on the same small segment the Events tab uses. Not drawn when there is nothing to list. */
+function listToggle() {
+  const option = (name, on) => el("button", {
+    id: `home-list-${name.toLowerCase()}`,
+    type: "button",
+    class: state.compactHome === on ? "on" : "",
+    "aria-pressed": state.compactHome === on ? "true" : "false",
+    text: name,
+    onclick: () => setCompactHome(on),
+  });
+  return el("div", { class: "home-list-toggle segment", role: "group", "aria-label": "Event list" }, [
+    option("Cards", false),
+    option("Compact", true),
+  ]);
 }
 
 /** Plans by day, then time (no time last that day), like the server sends them. */
