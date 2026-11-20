@@ -2901,3 +2901,20 @@ html.ak-native .card-body[role="button"]:active { opacity: 1; }
   0% { opacity: 1; transform: translate3d(0, -12vh, 0) rotate(0deg); }
   100% { opacity: 1; transform: translate3d(0, 112vh, 0) rotate(var(--spin)); }
 }
+/* The taco hurricane: drops swirl left and right while the wind pushes them across. --sway and --wind are small under reduced motion, which also has no spin and no shake. */
+.emoji-rain-drop-hurricane { animation-name: emoji-rain-hurricane; }
+@keyframes emoji-rain-hurricane {
+  0% { opacity: 1; transform: translate3d(0, -12vh, 0) rotate(0deg); }
+  25% { opacity: 1; transform: translate3d(var(--sway), 20vh, 0) rotate(calc(var(--spin) * 0.25)); }
+  50% { opacity: 1; transform: translate3d(calc(var(--sway) * -0.7 + var(--wind) * 0.5), 50vh, 0) rotate(calc(var(--spin) * 0.5)); }
+  75% { opacity: 1; transform: translate3d(calc(var(--sway) * 0.5 + var(--wind) * 0.8), 80vh, 0) rotate(calc(var(--spin) * 0.75)); }
+  100% { opacity: 1; transform: translate3d(var(--wind), 112vh, 0) rotate(var(--spin)); }
+}
+.emoji-rain-shake { animation: emoji-rain-shake 0.9s ease-in-out 0.3s 2 both; }
+@keyframes emoji-rain-shake {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-6px, 3px, 0); }
+  40% { transform: translate3d(5px, -4px, 0); }
+  60% { transform: translate3d(-4px, -2px, 0); }
+  80% { transform: translate3d(4px, 3px, 0); }
+}

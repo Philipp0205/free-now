@@ -238,6 +238,202 @@ test("reduce motion still rains, lighter and without spin, on taco and /makeitra
 
 const CHAT_TAB = (page: Page) => page.locator(".tabbar").getByRole("button", { name: /^Chat/ });
 
+/* The taco hurricane: three taco messages within a minute play one bigger rain. */
+
+const HURRICANE = '[data-emoji-rain-kind="hurricane"]';
+const NORMAL = '[data-emoji-rain-kind="rain"]';
+
+/** What the hurricane layer looks like right now. */
+function lookAtHurricane(page: Page) {
+  return page.locator(HURRICANE).evaluate((layer) => {
+    const list = [...layer.querySelectorAll<HTMLElement>(".emoji-rain-drop")];
+    const onScreen = list.filter((drop) => {
+      const r = drop.getBoundingClientRect();
+      return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+    });
+    const drops = list.flatMap((drop) => drop.getAnimations());
+    const own = layer.getAnimations().filter((a) => (a as CSSAnimation).animationName === "emoji-rain-shake");
+    const box = layer.getBoundingClientRect();
+    return {
+      display: getComputedStyle(layer).display,
+      events: getComputedStyle(layer).pointerEvents,
+      covers: box.width >= innerWidth && box.height >= innerHeight,
+      emoji: layer.getAttribute("data-emoji-rain"),
+      drops: list.length,
+      spins: [...new Set(list.map((drop) => drop.style.getPropertyValue("--spin")))],
+      names: [...new Set(drops.map((a) => (a as CSSAnimation).animationName))],
+      running: drops.filter((a) => a.playState === "running").length,
+      shaking: own.filter((a) => a.playState === "running").length,
+      onScreen: onScreen.length,
+      tops: onScreen.slice(0, 5).map((drop) => Math.round(drop.getBoundingClientRect().top)),
+      lefts: onScreen.slice(0, 5).map((drop) => Math.round(drop.getBoundingClientRect().left)),
+    };
+  });
+}
+
+/** Waits until every rain layer, normal or hurricane, is gone. */
+async function allGone(page: Page) {
+  await page.waitForFunction(() => document.querySelectorAll("[data-emoji-rain]").length === 0, undefined, { timeout: SEEN_MS + 5000 });
+}
+
+async function sayAndWait(page: Page, text: string) {
+  const before = await page.locator(".chat-msg", { hasText: text }).count();
+  await say(page, text);
+  await page.locator(".chat-msg", { hasText: text }).nth(before).waitFor();
+}
+
+for (const [width, height] of SIZES) {
+  test(`one taco rains normally, three tacos in a minute start the hurricane at ${width}x${height}`, { timeout: 170_000 }, async () => {
+    const { alex, bea } = await setup();
+    const a = await openCircleChat(alex.token, width, height, "no-preference");
+    const b = await openCircleChat(bea.token, width, height, "no-preference");
+    const errors: string[] = [];
+    for (const page of [a, b]) page.on("pageerror", (error) => errors.push(error.message));
+    try {
+      fs.mkdirSync(shotsDir, { recursive: true });
+      // One taco: the normal rain only, as before.
+      await say(a, "taco number one");
+      await a.locator(NORMAL).waitFor();
+      assert.equal(await a.locator(HURRICANE).count(), 0, "one taco is not a hurricane");
+      assert.equal(await a.locator(NORMAL).getAttribute("data-emoji-rain"), "🌮");
+      assert.equal(await a.locator(`${NORMAL} .emoji-rain-drop`).count(), 200);
+      const fall = await a.locator(`${NORMAL} .emoji-rain-drop`).evaluateAll((list) => [...new Set(list.flatMap((drop) => drop.getAnimations().map((x) => (x as CSSAnimation).animationName)))]);
+      assert.deepEqual(fall, ["emoji-rain-fall"]);
+
+      // The second taco is still a normal rain.
+      await sayAndWait(a, "second taco");
+      await a.waitForTimeout(300);
+      assert.equal(await a.locator(HURRICANE).count(), 0, "two tacos are not a hurricane");
+
+      // The third one, inside the minute, is the hurricane, once.
+      await sayAndWait(a, "third taco!");
+      await a.locator(HURRICANE).waitFor();
+      assert.equal(await a.locator(HURRICANE).count(), 1, "one hurricane");
+      await a.waitForTimeout(1500);
+      const first = await lookAtHurricane(a);
+      assert.equal(first.emoji, "🌮");
+      assert.ok(first.drops > 200, `more tacos than the usual 200, got ${first.drops}`);
+      assert.equal(first.events, "none");
+      assert.ok(first.covers, "it covers the screen");
+      assert.deepEqual(first.names, ["emoji-rain-hurricane"]);
+      assert.ok(first.running > 0, "the hurricane motion is running");
+      assert.ok(first.shaking > 0, "the screen shake is running");
+      assert.ok(first.onScreen > 0, "tacos are on screen");
+      assert.ok(first.spins.some((spin) => spin !== "0deg"), "the tacos spin");
+      await a.screenshot({ path: path.join(shotsDir, `hurricane-sender-${width}x${height}.png`) });
+      await a.waitForTimeout(300);
+      const second = await lookAtHurricane(a);
+      assert.notDeepEqual([second.tops, second.lefts], [first.tops, first.lefts], "the tacos move");
+      // The chat is usable under it.
+      const hit = await a.evaluate(() => document.elementFromPoint(innerWidth / 2, innerHeight - 30)?.closest("[data-emoji-rain]") !== null);
+      assert.equal(hit, false, "a tap goes through the hurricane");
+      await a.locator("#chat-input").tap();
+      await a.locator("#chat-input").pressSequentially("still here");
+      assert.equal(await a.locator("#chat-input").inputValue(), "still here");
+      await a.locator("#chat-input").fill("");
+
+      // The friend sees a hurricane too, once.
+      await b.locator(HURRICANE).waitFor({ timeout: SEEN_MS });
+      await b.waitForTimeout(1500);
+      assert.ok((await lookAtHurricane(b)).drops > 200);
+      await b.screenshot({ path: path.join(shotsDir, `hurricane-friend-${width}x${height}.png`) });
+
+      // It cleans up after itself, and a poll does not replay it.
+      await allGone(a);
+      await allGone(b);
+      assert.equal(await a.locator(".emoji-rain-drop").count(), 0);
+      await a.waitForTimeout(3500);
+      assert.equal(await a.locator(HURRICANE).count() + (await b.locator(HURRICANE).count()), 0, "no replay on a poll");
+
+      // A fourth taco in the same burst is a normal rain, not a second hurricane.
+      await sayAndWait(a, "fourth taco");
+      await a.locator(NORMAL).waitFor();
+      await a.waitForTimeout(500);
+      assert.equal(await a.locator(HURRICANE).count(), 0, "no second hurricane in the same burst");
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await a.context().close();
+      await b.context().close();
+    }
+  });
+}
+
+test("reduce motion still plays a gentle taco hurricane: fewer tacos, no spin, no shake, but falling", { timeout: 120_000 }, async () => {
+  const { alex } = await setup();
+  const a = await openCircleChat(alex.token, 360, 640, "reduce");
+  const errors: string[] = [];
+  a.on("pageerror", (error) => errors.push(error.message));
+  try {
+    fs.mkdirSync(shotsDir, { recursive: true });
+    assert.equal(await a.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches), true, "reduced motion is on");
+    await say(a, "taco one");
+    await a.locator(NORMAL).waitFor();
+    assert.equal(await a.locator(`${NORMAL} .emoji-rain-drop`).count(), 40, "a normal rain is still the v130 rain");
+    await sayAndWait(a, "taco two");
+    await sayAndWait(a, "taco three");
+    await a.locator(HURRICANE).waitFor();
+    await a.waitForTimeout(1200);
+    const first = await lookAtHurricane(a);
+    assert.notEqual(first.display, "none", "the overlay is drawn");
+    assert.ok(first.covers);
+    assert.ok(first.drops > 40 && first.drops < 200, `a gentle hurricane, got ${first.drops} tacos`);
+    assert.deepEqual(first.spins, ["0deg"], "no spin");
+    assert.equal(first.shaking, 0, "no shake");
+    assert.deepEqual(first.names, ["emoji-rain-hurricane"]);
+    assert.ok(first.running > 0, "the animation is running");
+    assert.ok(first.onScreen > 0, "tacos are on screen");
+    assert.equal(await a.locator(`${HURRICANE}.emoji-rain-shake`).count(), 0);
+    await a.screenshot({ path: path.join(shotsDir, "reduced-hurricane-360x640.png") });
+    await a.waitForTimeout(300);
+    const second = await lookAtHurricane(a);
+    assert.ok(second.onScreen > 0, "still falling");
+    assert.notDeepEqual(second.tops, first.tops, "the tacos moved, it is not a static pile");
+    await allGone(a);
+    assert.equal(await a.locator(".emoji-rain-drop").count(), 0, "it cleans up");
+    assert.deepEqual(errors, [], "no page errors");
+  } finally {
+    await a.context().close();
+  }
+});
+
+test("a burst of tacos missed while the chat was closed plays one hurricane when it is opened", { timeout: 120_000 }, async () => {
+  const { alex, bea } = await setup();
+  const b = await openApp(bea.token, 360, 640, "no-preference");
+  const errors: string[] = [];
+  b.on("pageerror", (error) => errors.push(error.message));
+  try {
+    fs.mkdirSync(shotsDir, { recursive: true });
+    await post("/api/circles/chat", { text: "taco one" }, alex.token);
+    await post("/api/circles/chat", { text: "two tacos" }, alex.token);
+    await post("/api/circles/chat", { text: "taco three" }, alex.token);
+    await b.waitForTimeout(500);
+    assert.equal(await b.locator("[data-emoji-rain]").count(), 0, "nothing rains while the chat is closed");
+    await CHAT_TAB(b).click();
+    await b.locator(".chat-msg", { hasText: "taco three" }).waitFor();
+    await b.locator(HURRICANE).waitFor();
+    assert.equal(await b.locator("[data-emoji-rain]").count(), 1, "one overlay, a hurricane and no normal rain");
+    assert.ok((await lookAtHurricane(b)).drops > 200);
+    await b.waitForTimeout(1500);
+    await b.screenshot({ path: path.join(shotsDir, "missed-hurricane-360x640.png") });
+    await allGone(b);
+    // Out and back in, and a reload: it does not play again.
+    await b.locator(".chat-screen").getByRole("button", { name: "Back" }).click();
+    await b.locator(".tabbar").waitFor();
+    await CHAT_TAB(b).click();
+    await b.locator(".chat-msg", { hasText: "taco three" }).waitFor();
+    await b.waitForTimeout(3500);
+    assert.equal(await b.locator("[data-emoji-rain]").count(), 0, "no replay when the chat is opened again");
+    await b.reload();
+    await CHAT_TAB(b).click();
+    await b.locator(".chat-msg", { hasText: "taco three" }).waitFor();
+    await b.waitForTimeout(3500);
+    assert.equal(await b.locator("[data-emoji-rain]").count(), 0, "no replay after a reload");
+    assert.deepEqual(errors, [], "no page errors");
+  } finally {
+    await b.context().close();
+  }
+});
+
 test("a recent rain missed while the chat was closed plays once when it is opened", { timeout: 170_000 }, async () => {
   const { alex, bea } = await setup();
   // Bea is in the app but not in the chat. Alex sends two triggers meanwhile.
