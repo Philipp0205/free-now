@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#000000" />
+    <!-- Sets the saved theme (fn_theme: dark or light) on html before the stylesheets, so the first paint is right. System leaves it unset. -->
+    <script>try{var t=localStorage.getItem("fn_theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-ak-scheme",t)}catch(e){}</script>
     <meta name="description" content="Hangry — let a private circle of friends know you're free." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-20-theme-setting",
+    "date": "2026-11-20",
+    "title": "Choose Dark, Light or System",
+    "bullets": [
+      "You, then Appearance, lets you pick System, Dark or Light for this device.",
+      "System follows your phone, like before. Dark and Light stay put until you change them.",
+      "Plan cards keep their dark look in both."
+    ]
+  },
+  {
     "id": "2026-11-20-card-color",
     "date": "2026-11-20",
     "title": "Pick a color for your plan card",

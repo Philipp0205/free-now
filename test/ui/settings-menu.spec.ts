@@ -14,6 +14,7 @@ const SECTIONS = [
   "Bills",
   "Availability & calendar",
   "Notifications",
+  "Appearance",
   "Assistants",
   "Account",
 ] as const;

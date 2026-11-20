@@ -80,10 +80,12 @@ test("card text, chat row, badge, In toggle and ⋯ stay AA on every stop", () =
   }
 });
 
-/** The compact row tint percentages for a scheme, read from styles.css (light is the prefers-color-scheme override). */
+/** The compact row tint percentages for a scheme, read from styles.css (light is the prefers-color-scheme override, also forced by data-ak-scheme). */
 function tints(scheme: "dark" | "light"): { plan: number; social: number } {
   const dark = /\.compact-row \{ --tint: (\d+)%; --tint-social: (\d+)%;/.exec(CSS);
-  const light = /@media \(prefers-color-scheme: light\) \{\n  \.compact-row \{ --tint: (\d+)%; --tint-social: (\d+)%; \}/.exec(CSS);
+  const light = /@media \(prefers-color-scheme: light\) \{\n  :root:not\(\[data-ak-scheme="dark"\]\) \.compact-row \{ --tint: (\d+)%; --tint-social: (\d+)%; \}/.exec(CSS);
+  const forced = /html\[data-ak-scheme="light"\] \.compact-row \{ --tint: (\d+)%; --tint-social: (\d+)%; \}/.exec(CSS);
+  assert.deepEqual(forced?.slice(1), light?.slice(1), "forcing Light tints the rows like a light phone");
   const hit = scheme === "dark" ? dark : light;
   assert.ok(hit, `${scheme} compact tint`);
   return { plan: Number(hit[1]) / 100, social: Number(hit[2]) / 100 };
