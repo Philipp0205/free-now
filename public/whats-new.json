@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-lizard-ios",
+    "date": "2026-11-21",
+    "title": "A lizard song on a buzz, now on iPhone too",
+    "bullets": [
+      "A friend's buzz now plays a 15 second lizard song.",
+      "On iPhone, tap the screen once after opening the app, and the sound plays when a buzz arrives.",
+      "A new buzz restarts the song, so two clips never overlap."
+    ]
+  },
+  {
     "id": "2026-11-21-chat-polls",
     "date": "2026-11-21",
     "title": "Polls in event chats",
@@ -413,7 +423,7 @@
     "date": "2026-11-13",
     "title": "Admins can end events from the details",
     "bullets": [
-      "Open an event and circle admins and hosts now see an End button there, as well as in the ⋯ menu on the card.",
+      "Open an event and circle admins and hosts now see an End button there, as well as in the \u22ef menu on the card.",
       "When an admin ends someone else's hangout, it disappears for everyone and the host is told."
     ]
   },
