@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-lizard-sound",
+    "date": "2026-11-21",
+    "title": "A lizard sound when a buzz arrives",
+    "bullets": [
+      "A short lizard sound now plays when a friend's buzz arrives.",
+      "Test buzzer plays it too, so you can hear what your friends hear.",
+      "If your phone blocks sound until you tap the screen, the buzz still shows."
+    ]
+  },
+  {
     "id": "2026-11-20-theme-setting",
     "date": "2026-11-20",
     "title": "Choose Dark, Light or System",

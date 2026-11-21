@@ -27,6 +27,7 @@ const MIME: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".txt": "text/plain; charset=utf-8",
   ".woff2": "font/woff2",
+  ".m4a": "audio/mp4",
 };
 
 export async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
