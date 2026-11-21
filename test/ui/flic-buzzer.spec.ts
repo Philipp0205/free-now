@@ -94,6 +94,8 @@ test("four presses cycle shockwave, slam, flood, bell, then start over, across a
       await dismiss(page);
     }
     assert.deepEqual(seen, [...ORDER, "shockwave"]);
+    // Real buzzes from a member never use birthday and never touch the Test cycle.
+    assert.equal(await page.evaluate(() => localStorage.getItem("fn_buzz_test_index")), null);
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
@@ -134,13 +136,16 @@ test("the presser's own open page plays the overlay for their own press", { time
   }
 });
 
-test("Test buzzer plays locally, sends nothing, and shares the cycle", { timeout: 90_000 }, async () => {
+test("Test buzzer plays locally, sends nothing, and walks its own cycle with birthday last", { timeout: 120_000 }, async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
   const { alex, bea } = await seed();
   for (const [width, height] of [[390, 844], [360, 640]] as const) {
     const { context, page, errors } = await phone(alex.token, width, height);
     try {
-      await page.evaluate(() => localStorage.removeItem("fn_buzz_index"));
+      await page.evaluate(() => {
+        localStorage.removeItem("fn_buzz_index");
+        localStorage.removeItem("fn_buzz_test_index");
+      });
       await openYouSection(page, "Account");
       await page.getByRole("button", { name: "Set up a Flic button" }).click();
       const test = page.getByRole("button", { name: "Test buzzer", exact: true });
@@ -155,7 +160,7 @@ test("Test buzzer plays locally, sends nothing, and shares the cycle", { timeout
 
       assert.equal(await socialCount(alex.token), 0);
       const seen: string[] = [];
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 5; i++) {
         await test.scrollIntoViewIfNeeded();
         await test.click();
         seen.push(await seeBuzz(page));
@@ -163,13 +168,20 @@ test("Test buzzer plays locally, sends nothing, and shares the cycle", { timeout
           // A second click while one plays does nothing, and does not use up an animation.
           await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Test buzzer")!.click());
           assert.equal(await page.locator(".buzzer").count(), 1);
-          assert.equal(await page.evaluate(() => localStorage.getItem("fn_buzz_index")), "1");
+          assert.equal(await page.evaluate(() => localStorage.getItem("fn_buzz_test_index")), "1");
           await page.waitForTimeout(1000);
           if (width === 390) await page.screenshot({ path: new URL("test-buzzer-overlay.png", SHOTS).pathname });
         }
+        if (i === 4) {
+          // The birthday step greets the signed-in user by name.
+          assert.equal(await page.locator(".buzzer .buzzer-sr").textContent(), "Happy birthday Alex");
+          await page.waitForTimeout(1000);
+          await page.screenshot({ path: new URL(`test-buzzer-birthday-${width}.png`, SHOTS).pathname });
+        }
         await dismiss(page);
       }
-      assert.deepEqual(seen, ORDER);
+      assert.deepEqual(seen, [...ORDER, "birthday"]);
+      assert.equal(await page.evaluate(() => localStorage.getItem("fn_buzz_index")), null, "Test presses never write the real index");
       assert.equal(await socialCount(alex.token), 0);
       assert.equal(await socialCount(bea.token), 0);
       assert.equal(await page.locator("pre.curl").count(), 1, "the panel is still open");
@@ -179,3 +191,4 @@ test("Test buzzer plays locally, sends nothing, and shares the cycle", { timeout
     }
   }
 });
+

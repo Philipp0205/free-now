@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v137 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v138 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v137");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v138");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,23 +665,9 @@ test("the build label is hangry-v137 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the birthday buzz entry is the newest, in plain words without an em dash", () => {
+test("the theme setting entry is the newest, in plain words without an em dash", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-21-birthday-buzz");
-  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
-  assert.equal(top.date, "2026-11-21");
-  assert.ok(top.title.length <= 60);
-  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
-  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
-  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
-  assert.match(top.bullets.join(" "), /birthday/);
-  assert.ok(RAW.some((item) => item.id === "2026-11-20-theme-setting"), "the theme setting entry is kept");
-  assert.ok(RAW.some((item) => item.id === "2026-11-20-card-color"), "the card color entry is kept");
-});
-
-test("the theme setting entry is kept, in plain words without an em dash", () => {
-  const top = RAW.find((item) => item.id === "2026-11-20-theme-setting")!;
-  assert.ok(top, "the theme setting entry is kept");
+  assert.equal(top.id, "2026-11-20-theme-setting");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-20");
   assert.ok(top.title.length <= 60);

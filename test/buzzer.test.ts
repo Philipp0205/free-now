@@ -5,11 +5,13 @@ import {
   BUZZ_FRESH_MS,
   BUZZ_INDEX_KEY,
   BUZZ_SEEN_KEY,
+  BUZZ_TEST_INDEX_KEY,
   buzzerStage,
   cleanBuzzName,
   consumeBuzz,
   fitText,
   nextBuzzIndex,
+  nextTestBuzzAnimation,
   pickBuzz,
 } from "../public/js/buzzer.js";
 import { buzzLines } from "../public/js/buzzer/birthday-copy.js";
@@ -46,6 +48,28 @@ test("a birthday buzz does not use a slot in the rotation", () => {
   assert.equal(animationFor(normal, next), "shockwave");
   assert.equal(animationFor(null, next), "slam");
   assert.deepEqual(BUZZ_ANIMATIONS, ["shockwave", "slam", "flood", "bell"]);
+});
+
+test("the Test cycle is the rotation plus birthday once, and never writes the real index", () => {
+  const storage = fakeStorage({ [BUZZ_INDEX_KEY]: "2" });
+  const seen = Array.from({ length: 6 }, () => nextTestBuzzAnimation(storage));
+  assert.deepEqual(seen, ["shockwave", "slam", "flood", "bell", "birthday", "shockwave"]);
+  assert.equal(storage.data.get(BUZZ_INDEX_KEY), "2", "fn_buzz_index is untouched by Test presses");
+  assert.equal(storage.data.get(BUZZ_TEST_INDEX_KEY), "1");
+  assert.equal(nextTestBuzzAnimation(fakeStorage({ [BUZZ_TEST_INDEX_KEY]: "4" })), "birthday");
+  assert.equal(nextTestBuzzAnimation(fakeStorage({ [BUZZ_TEST_INDEX_KEY]: "9" })), "birthday");
+  for (const bad of ["", "abc", "-1", "1.5"]) {
+    assert.equal(nextTestBuzzAnimation(fakeStorage({ [BUZZ_TEST_INDEX_KEY]: bad })), "shockwave", `value ${JSON.stringify(bad)}`);
+  }
+  assert.equal(nextTestBuzzAnimation(throwing), "shockwave");
+  assert.equal(nextTestBuzzAnimation(null), "shockwave");
+});
+
+test("nextBuzzIndex never writes the Test key, so a real buzz leaves the Test cycle alone", () => {
+  const storage = fakeStorage({ [BUZZ_TEST_INDEX_KEY]: "3" });
+  for (let i = 0; i < 5; i++) assert.notEqual(nextBuzzIndex(storage), "birthday");
+  assert.equal(storage.data.get(BUZZ_TEST_INDEX_KEY), "3");
+  assert.equal(nextTestBuzzAnimation(storage), "bell");
 });
 
 test("the birthday greeting is formatted from the payload name in one place", () => {

@@ -1,15 +1,5 @@
 [
   {
-    "id": "2026-11-21-birthday-buzz",
-    "date": "2026-11-21",
-    "title": "A birthday buzz for one special button",
-    "bullets": [
-      "When a friend with a birthday button presses it, everyone in the circle sees a birthday cake and balloons.",
-      "It plays on every press of that button, instead of the usual buzzer animations.",
-      "With reduced motion on, you get a calm still screen with the same greeting."
-    ]
-  },
-  {
     "id": "2026-11-20-theme-setting",
     "date": "2026-11-20",
     "title": "Choose Dark, Light or System",

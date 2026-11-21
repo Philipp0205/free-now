@@ -1,4 +1,4 @@
-import { consumeBuzz, buzzerPlaying, playBuzzer, nextBuzzIndex } from "./buzzer.js";
+import { consumeBuzz, buzzerPlaying, playBuzzer, nextBuzzIndex, nextTestBuzzAnimation } from "./buzzer.js";
 import { animationFor } from "./buzzer/birthday-rules.js";
 import { state } from "./state.js";
 import { api } from "./session.js";
@@ -20,11 +20,11 @@ export function noteBuzz() {
   }
 }
 
-/** The Test buzzer button: plays the next animation here. Nothing is sent. */
+/** The Test buzzer button: plays the next animation of its own cycle here. Nothing is sent. */
 function testBuzzer() {
   try {
     if (buzzerPlaying()) return;
-    playBuzzer({ name: state.me.user.name, animation: nextBuzzIndex(localStorage) });
+    playBuzzer({ name: state.me.user.name, animation: nextTestBuzzAnimation(localStorage) });
   } catch {
     /* the overlay is a nicety */
   }
