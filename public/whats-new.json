@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-chat-edit",
+    "date": "2026-11-21",
+    "title": "Edit your chat messages",
+    "bullets": [
+      "You can now edit your own chat messages. Tap Edit under a message you wrote.",
+      "Messages you changed show a small edited mark, so everyone knows.",
+      "Only you can edit your messages. Hosts and admins can still delete them."
+    ]
+  },
+  {
     "id": "2026-11-21-spontaco",
     "date": "2026-11-21",
     "title": "Hangry is now Spontaco",

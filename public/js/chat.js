@@ -11,6 +11,7 @@ import { forgetRain, noteRainThread } from "./emoji-rain.js";
 import { openEventDetail } from "./event-sheets.js";
 import { copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { batch } from "@preact/signals";
+import { EDIT_FAILED, EDIT_GONE, EDIT_OFFLINE } from "./chat/chat-copy.js";
 import {
   bumpThread,
   chatFlash,
@@ -58,6 +59,7 @@ export function closeChat() {
   state.chatWho = null;
   state.chatReplyTo = null;
   state.chatGif = null;
+  state.chatEdit = null;
   state.tab = state.chatReturn || "home";
   void navigate(() => {
     // The Preact host is dropped with the screen, so the old chat stays on screen until the slide has captured it.
@@ -114,6 +116,7 @@ export function dropChatScreen() {
   clearTimeout(gifTimer);
   gifSeq += 1;
   state.chatGif = null;
+  state.chatEdit = null;
   unmountChatView(host);
   host = null;
   hostKey = "";
@@ -136,6 +139,7 @@ function syncChatSignals() {
       chatWho: state.chatWho,
       chatReplyTo: state.chatReplyTo,
       chatGif: state.chatGif,
+      chatEdit: state.chatEdit,
     });
   });
 }
@@ -299,7 +303,7 @@ function startPress(event, message) {
   if (event.pointerType === "mouse") return;
   const pill = event.target.closest?.(".react-pill");
   // Chrome's touch adjustment can land a press on the row's Delete, so only the bar itself is left alone.
-  if (event.target.closest?.(".react-bar")) return;
+  if (event.target.closest?.(".react-bar, .chat-edit-form")) return;
   clearTimeout(pressTimer);
   pressStart = { x: event.clientX, y: event.clientY };
   pressTimer = setTimeout(() => {
@@ -330,7 +334,7 @@ let swipeUsedAt = 0;
 
 /** Touch: a short swipe right on a message starts a reply. Up or down is a scroll and lets go. */
 function startSwipe(event, message) {
-  if (event.pointerType === "mouse" || event.target.closest?.(".react-bar")) return;
+  if (event.pointerType === "mouse" || event.target.closest?.(".react-bar, .chat-edit-form")) return;
   swipe = { message, x: event.clientX, y: event.clientY, at: Date.now(), dx: 0, on: false };
 }
 
@@ -685,6 +689,72 @@ async function toggleMute() {
   });
 }
 
+/** Opens the message's text in an edit box in place, with the cursor at the end. Your own text messages only. */
+function startEdit(message) {
+  if (!message.canEdit || state.chatEdit?.busy) return;
+  tick();
+  put({ chatEdit: { id: message.id, text: message.text, busy: false }, chatReactFor: null, chatWho: null });
+  repaint();
+  const input = host?.querySelector(".chat-edit-input");
+  if (!input) return;
+  input.focus({ preventScroll: true });
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+/** Drops the edit box and leaves the original message alone. */
+export function cancelEdit() {
+  if (!state.chatEdit || state.chatEdit.busy) return false;
+  put({ chatEdit: null });
+  repaint();
+  return true;
+}
+
+/** Enter saves, Shift+Enter breaks the line, Escape cancels without closing the chat. */
+function onEditKey(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    cancelEdit();
+  } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+    event.preventDefault();
+    event.target.form?.requestSubmit();
+  }
+}
+
+/** Sends the edited text. On success the row shows the new words and the edited mark; on a failure the box stays open. */
+async function saveEdit(event) {
+  event.preventDefault();
+  const edit = state.chatEdit;
+  const text = host?.querySelector(".chat-edit-input")?.value.trim() ?? "";
+  if (!edit || edit.busy || !text) return;
+  if (text === edit.text) {
+    cancelEdit();
+    return;
+  }
+  tick();
+  state.chatEdit = { ...edit, busy: true };
+  try {
+    const result = (await api(`/api/messages/${encodeURIComponent(edit.id)}`, { method: "PATCH", body: { text } })).message;
+    const message = state.chatThread?.messages?.find((item) => item.id === edit.id);
+    if (message) Object.assign(message, { text: result.text, editedAt: result.editedAt });
+    state.chatEdit = null;
+  } catch (error) {
+    state.chatEdit = { ...edit, busy: false };
+    if (error.status === 401) return;
+    if (error.status === 403 || error.status === 404) state.chatEdit = null;
+    state.error = editErrorText(error);
+    scheduleErrorClear();
+  }
+  render();
+}
+
+/** The friendly line for a failed save. */
+function editErrorText(error) {
+  if (error.status === 0) return EDIT_OFFLINE;
+  if (error.status === 403 || error.status === 404) return EDIT_GONE;
+  return error.status === 400 && error.message ? error.message : EDIT_FAILED;
+}
+
 function confirmDeleteMessage(message) {
   state.confirm = {
     title: "Delete this message?",
@@ -733,6 +803,10 @@ const ACTIONS = {
   retryGifs,
   pickGif,
   confirmDelete: confirmDeleteMessage,
+  startEdit,
+  cancelEdit,
+  saveEdit,
+  onEditKey,
   send: sendChat,
   onInput,
   onKey: onComposerKey,

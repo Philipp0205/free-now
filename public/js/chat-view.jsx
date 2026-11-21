@@ -3,10 +3,12 @@ import { findMentions, GOBLIN, REACTIONS } from "./mentions.js";
 import { messageParts } from "./links.js";
 import { clockText, zonedParts } from "./when.js";
 import { ICONS } from "./lib.js";
+import { EDIT_CANCEL, EDIT_FIELD_LABEL, EDIT_LABEL, EDIT_SAVE, EDITED_LABEL } from "./chat/chat-copy.js";
 import {
   canReact,
   canReply,
   chatDraft,
+  chatEdit,
   chatFlash,
   chatGif,
   chatGifOn,
@@ -270,6 +272,7 @@ function MessageRow({ message }) {
   const live = canReact() && !message.goblin;
   const replyable = canReply() && !message.goblin;
   const barOpen = chatReactFor.value === message.id;
+  const editing = chatEdit.value?.id === message.id;
   // Only this row reads its swipe signal, so a drag repaints one row.
   const swipe = swipeSignal(message.id).value;
   let cls = message.mine ? "chat-msg mine" : message.goblin ? "chat-msg goblin" : "chat-msg";
@@ -304,16 +307,59 @@ function MessageRow({ message }) {
             <Icon name="reply" />
           </button>
         ) : null}
-        <time>{messageWhen(message.at)}</time>
+        <time>
+          {messageWhen(message.at)}
+          {message.editedAt ? <span class="chat-edited">{EDITED_LABEL}</span> : null}
+        </time>
       </header>
       <Quote quote={message.replyTo} />
-      {message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
+      {editing ? <EditBox /> : message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
       {live && barOpen ? <ReactionBar message={message} replyable={replyable} /> : null}
       <ReactionPills message={message} live={live} />
+      <OwnActions message={message} editing={editing} />
+    </article>
+  );
+}
+
+/** Edit and Delete under your own message. Edit only shows for text you wrote; Delete also shows for a host or admin. */
+function OwnActions({ message, editing }) {
+  if (editing) return null;
+  return (
+    <>
+      {message.canEdit ? (
+        <button class="text-btn chat-edit-btn" type="button" onClick={() => { if (!A.pressConsumed()) A.startEdit(message); }}>{EDIT_LABEL}</button>
+      ) : null}
       {message.canDelete ? (
         <button class="text-btn chat-delete" type="button" onClick={() => { if (!A.pressConsumed()) A.confirmDelete(message); }}>Delete</button>
       ) : null}
-    </article>
+    </>
+  );
+}
+
+/** The draft of an edit is the textarea's value, set once when it mounts. */
+function bindEdit(node) {
+  if (node) node.value = chatEdit.peek()?.text ?? "";
+}
+
+/** Edit in place: same look as the composer, Save or Cancel (Enter saves, Escape cancels). */
+function EditBox() {
+  return (
+    <form class="chat-edit-form" onSubmit={(event) => A.saveEdit(event)}>
+      <textarea
+        class="sheet-control chat-edit-input"
+        rows="2"
+        maxlength="1000"
+        aria-label={EDIT_FIELD_LABEL}
+        autocomplete="off"
+        enterkeyhint="done"
+        ref={bindEdit}
+        onKeyDown={(event) => A.onEditKey(event)}
+      />
+      <div class="chat-edit-actions">
+        <button class="text-btn" type="button" onClick={() => A.cancelEdit()}>{EDIT_CANCEL}</button>
+        <button class="btn chat-edit-save" type="submit">{EDIT_SAVE}</button>
+      </div>
+    </form>
   );
 }
 
