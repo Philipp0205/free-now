@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-test-birthday",
+    "date": "2026-11-21",
+    "title": "Test buzzer can play the birthday too",
+    "bullets": [
+      "The Test buzzer button now also plays the birthday animation, after bell, with your own name.",
+      "Each Test press still plays one step at a time, and nothing is sent to your circle.",
+      "A real buzz from someone else is unchanged. Only a friend's birthday button plays birthday."
+    ]
+  },
+  {
     "id": "2026-11-21-birthday-buzz",
     "date": "2026-11-21",
     "title": "A birthday buzz for one special button",

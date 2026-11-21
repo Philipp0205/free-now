@@ -7,10 +7,13 @@
 
 import { birthday } from "./buzzer/birthday-drawer.js";
 import { buzzLines } from "./buzzer/birthday-copy.js";
-import { payloadAnimation } from "./buzzer/birthday-rules.js";
+import { BIRTHDAY, payloadAnimation } from "./buzzer/birthday-rules.js";
 
 export const BUZZ_ANIMATIONS = ["shockwave", "slam", "flood", "bell"];
 export const BUZZ_INDEX_KEY = "fn_buzz_index";
+export const BUZZ_TEST_INDEX_KEY = "fn_buzz_test_index";
+/** The Test button's cycle: the rotation plus birthday once. Kept apart so real buzzes never get birthday. */
+const BUZZ_TEST_ANIMATIONS = [...BUZZ_ANIMATIONS, BIRTHDAY];
 export const BUZZ_SEEN_KEY = "fn_buzz_seen";
 /** A buzz older than this is stale: the app was closed or offline, so it plays nothing. */
 export const BUZZ_FRESH_MS = 120000;
@@ -40,6 +43,23 @@ export function nextBuzzIndex(storage) {
     // The name is still right; the next press may repeat it.
   }
   return BUZZ_ANIMATIONS[index];
+}
+
+/** The animation for one Test press, from its own cycle in storage. Never reads or writes fn_buzz_index. */
+export function nextTestBuzzAnimation(storage) {
+  let index = 0;
+  try {
+    const raw = storage.getItem(BUZZ_TEST_INDEX_KEY);
+    if (typeof raw === "string" && /^\d{1,9}$/.test(raw)) index = Number(raw) % BUZZ_TEST_ANIMATIONS.length;
+  } catch {
+    return BUZZ_TEST_ANIMATIONS[0];
+  }
+  try {
+    storage.setItem(BUZZ_TEST_INDEX_KEY, String((index + 1) % BUZZ_TEST_ANIMATIONS.length));
+  } catch {
+    // The name is still right; the next press may repeat it.
+  }
+  return BUZZ_TEST_ANIMATIONS[index];
 }
 
 function isTime(value) {
