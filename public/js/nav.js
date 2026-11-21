@@ -4,6 +4,7 @@ import { render } from "./render.js";
 import { closePast } from "./home.js";
 import { markAlertsRead } from "./alerts.js";
 import { clearReply, closeChat, closeGif, closeReactUi, openChat } from "./chat.js";
+import { closePoll } from "./chat/poll-actions.js";
 import { closeYouSection } from "./you.js";
 import { closeBusyPreview } from "./busy-preview.js";
 import { loadCalendar, refreshMapAll } from "./events.js";
@@ -34,6 +35,7 @@ function currentOverlayDepth() {
   if (state.sheet) depth += 1;
   if (!shellShown()) return depth;
   if (state.chatGif) depth += 1;
+  if (state.chatPoll) depth += 1;
   if (state.circleMenu) depth += 1;
   if (state.chat) depth += 1;
   if (state.past) depth += 1;
@@ -105,6 +107,10 @@ function dismissTopOverlay() {
   if (!shellShown()) return;
   if (state.chatGif) {
     closeGif();
+    return;
+  }
+  if (state.chatPoll) {
+    closePoll();
     return;
   }
   if (state.circleMenu) {
@@ -236,7 +242,7 @@ export function bindSheetSwipe() {
   if (!snapKey) snapMemo = null;
   else if (snapMemo?.key !== snapKey) snapMemo = { key: snapKey, half: true }; // a sheet opens on its half stop
   document.querySelectorAll(".sheet, .guide").forEach((panel) => {
-    // The GIF sheet lives in the chat host and closes by button, scrim, Escape or Back, not by swipe.
+    // The GIF and poll sheets live in the chat host and close by button, scrim, Escape or Back, not by swipe.
     if (panel.classList.contains("gif-sheet")) return;
     let tracking = false;
     let dragging = false;
@@ -440,7 +446,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // An open @ list already took this Escape in the composer. Next comes the reply preview, then the chat.
-  if (state.chat && state.chatReplyTo && !state.confirm && !state.sheet && !state.chatGif) {
+  if (state.chat && state.chatReplyTo && !state.confirm && !state.sheet && !state.chatGif && !state.chatPoll) {
     event.preventDefault();
     clearReply();
     return;

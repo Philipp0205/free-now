@@ -244,7 +244,7 @@ export async function refresh({ initial = false } = {}) {
     circles: state.me?.circles ?? null,
     banner: state.banner?.id ?? null,
     chats: state.chatSummary,
-    thread: state.chatThread?.messages?.map((message) => [message.id, (message.reactions || []).map((item) => `${item.emoji}${item.count}${item.mine ? "+" : ""}`)]) ?? null,
+    thread: state.chatThread?.messages?.map(threadMark) ?? null,
   });
   persistCachedState();
   const hadStatus = Boolean(state.statusMessage);
@@ -262,6 +262,13 @@ export async function refresh({ initial = false } = {}) {
   const y = document.scrollingElement?.scrollTop ?? 0;
   render();
   if (!initial && document.scrollingElement) document.scrollingElement.scrollTop = y;
+}
+
+/** What a thread message contributes to the refresh signature: its reactions and its poll votes, so a change repaints. */
+function threadMark(message) {
+  const reactions = (message.reactions || []).map((item) => `${item.emoji}${item.count}${item.mine ? "+" : ""}`);
+  const poll = message.poll ? message.poll.options.map((option) => `${option.count}${option.mine ? "+" : ""}${option.names.join(",")}`) : [];
+  return [message.id, reactions, poll];
 }
 
 /** The 3s poll. Skips while the previous poll refresh is still pending; explicit refresh() calls always run. */

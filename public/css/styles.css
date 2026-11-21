@@ -1560,6 +1560,55 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"], 
   letter-spacing: 0.02em;
 }
 @media (hover: hover) { .chat-gif-btn:hover, .react-gif:hover { background: var(--hover); } }
+/* Polls: a composer button beside GIF, the new-poll sheet (a gif-sheet in the chat host) and the poll in the thread. */
+.chat-poll-btn {
+  align-self: flex-end;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: var(--lift);
+  color: var(--text);
+}
+.chat-poll-btn .icon, .chat-poll-btn .icon svg { display: block; width: 22px; height: 22px; margin: auto; }
+@media (hover: hover) { .chat-poll-btn:hover { background: var(--hover); } }
+.poll-sheet .sheet-scroll { display: flex; flex-direction: column; gap: 8px; }
+.poll-option-row { display: flex; align-items: center; gap: 8px; }
+.poll-option-input { flex: 1 1 0; min-width: 0; }
+.poll-option-remove { flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 22px; background: transparent; color: var(--muted); }
+.poll-option-remove .icon, .poll-option-remove .icon svg { display: block; width: 18px; height: 18px; margin: auto; }
+.poll-add { align-self: flex-start; min-height: 44px; }
+.poll-note { margin: 0; color: var(--danger); }
+.poll-dock { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-bottom: 4px; }
+.poll-dock .btn { width: auto; min-width: 88px; }
+.chat-poll { margin: 4px 0 0; }
+.chat-msg .chat-poll p { margin: 0; }
+.chat-poll-question { font-weight: 600; }
+.chat-poll-options { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.chat-poll-option { margin: 0; padding: 0; min-width: 0; }
+.chat-poll-pick {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: linear-gradient(to right, color-mix(in srgb, var(--person, var(--me, #8e8e93)) 18%, var(--lift)) var(--share), var(--lift) var(--share));
+  color: var(--text);
+  text-align: left;
+}
+.chat-poll-pick:disabled { opacity: 1; cursor: default; }
+.chat-poll-option.mine .chat-poll-pick { border-color: color-mix(in srgb, var(--me, #8e8e93) 70%, transparent); }
+.chat-poll-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.chat-poll-you { flex: none; color: var(--muted); font-size: 12px; font-style: italic; }
+.chat-poll-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chat-msg .chat-poll-who { padding: 2px 12px 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.chat-msg .chat-poll .chat-poll-total { margin-top: 8px; color: var(--muted); font-size: 12px; }
 .react-gif {
   width: 40px;
   height: 40px;

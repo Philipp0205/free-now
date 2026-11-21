@@ -371,6 +371,15 @@ CREATE TABLE IF NOT EXISTS reaction_notices (
   PRIMARY KEY (message_id, user_id)
 );
 
+-- One vote per person per poll message. A new choice replaces the old row.
+CREATE TABLE IF NOT EXISTS poll_votes (
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  choice INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS calendar_feeds (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,

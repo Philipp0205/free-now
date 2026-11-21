@@ -43,11 +43,13 @@ export const chatFlash = signal(null);
 export const chatGif = signal(null);
 /** GIFs are on (the server has a Giphy key). Off hides the composer button and the reaction-bar control. */
 export const chatGifOn = signal(false);
+/** The open poll sheet: { question, options, busy, message }. Null when closed. */
+export const chatPoll = signal(null);
 /** The message being edited in place: { id, text, busy }. Null when none. The draft lives in the box, not here. */
 export const chatEdit = signal(null);
 
 /** The signal behind each chat field of `state`, by the same name. */
-export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chatReplyTo, chatGif, chatEdit };
+export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chatReplyTo, chatGif, chatPoll, chatEdit };
 
 /** Writes chat fields to the signals only. Callers write `state` first. Only the views that read a changed field repaint. */
 export function setChat(patch) {
