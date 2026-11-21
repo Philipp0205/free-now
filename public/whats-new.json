@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-inout-reactions",
+    "date": "2026-11-21",
+    "title": "React to who is in or out",
+    "bullets": [
+      "You can now react to the \"someone is in\" or \"someone is out\" line in an event chat.",
+      "Tap the little smile on the line, or press and hold it on your phone.",
+      "Other people see your reaction the next time the chat refreshes."
+    ]
+  },
+  {
     "id": "2026-11-21-lizard-ios",
     "date": "2026-11-21",
     "title": "A lizard song on a buzz, now on iPhone too",

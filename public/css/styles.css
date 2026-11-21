@@ -1308,8 +1308,11 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"], 
 /* Back, message text, system lines and the composer share the 16px edge; bars sit in the gutter. */
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 16px 16px; }
 .chat-system { margin: 8px 0; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
-.chat-system span { min-width: 0; overflow-wrap: anywhere; }
+.chat-system span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .chat-system time { flex: none; }
+/* The react smile on a system line sits before the time, as on a message; its margin is tuned for the line's 13px text. */
+.chat-system .chat-react-btn { margin: -6px 0; align-self: center; }
+.chat-sys-row .chat-reacts { margin: -4px 0 8px; }
 .chat-msg { position: relative; margin: 0 0 12px; }
 /* Same layout for everyone's messages, own or not; only the colour differs. */
 .chat-msg[data-color]::before { content: ""; position: absolute; top: 0; bottom: 0; left: -9px; width: 3px; border-radius: 2px; background: var(--person); }
@@ -1356,13 +1359,13 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"], 
 }
 .chat-react-btn:focus-visible, .chat-react-btn[aria-expanded="true"] { opacity: 1; background: var(--lift); }
 @media (hover: hover) {
-  .chat-msg:hover .chat-react-btn { opacity: 1; }
+  .chat-msg:hover .chat-react-btn, .chat-sys-row:hover .chat-react-btn { opacity: 1; }
   .chat-react-btn:hover { background: var(--lift); color: var(--text); }
 }
 @media (hover: none) {
   /* Touch: a long-press opens the bar, so the button stays out of the way and the hold never selects text. */
   .chat-react-btn { display: none; }
-  .chat-msg { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .chat-msg, .chat-sys-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 }
 .react-bar {
   display: flex;

@@ -8,3 +8,5 @@ export const EDIT_FIELD_LABEL = "Edit message";
 export const EDIT_OFFLINE = "You're offline. Try again in a moment.";
 export const EDIT_GONE = "That message can't be edited anymore.";
 export const EDIT_FAILED = "Couldn't save that. Try again.";
+/** The label of the quiet smile that opens the reaction bar on a system line such as "Ada is in". */
+export const REACT_LABEL = "React";
