@@ -3,7 +3,7 @@ import { findMentions, GOBLIN, REACTIONS } from "./mentions.js";
 import { messageParts } from "./links.js";
 import { clockText, zonedParts } from "./when.js";
 import { ICONS } from "./lib.js";
-import { EDIT_CANCEL, EDIT_FIELD_LABEL, EDIT_LABEL, EDIT_SAVE, EDITED_LABEL } from "./chat/chat-copy.js";
+import { EDIT_CANCEL, EDIT_FIELD_LABEL, EDIT_LABEL, EDIT_SAVE, EDITED_LABEL, REACT_LABEL } from "./chat/chat-copy.js";
 import { PollSheet, PollBody } from "./chat/poll-view.jsx";
 import { POLL_START_LABEL } from "./chat/poll-copy.js";
 import {
@@ -111,12 +111,36 @@ function messageWhen(ms) {
   return `${part.day.slice(5)} ${hm}`;
 }
 
+/** A system line such as "Ada is in": still a quiet line, with the same react bar (smile or long-press) and pills as a message. No reply, edit or delete. */
 function SystemLine({ message }) {
+  const live = canReact() && Boolean(message.id);
+  const barOpen = chatReactFor.value === message.id;
   return (
-    <p class="chat-system">
-      <span>{message.text}</span>
-      <time>{messageWhen(message.at)}</time>
-    </p>
+    <div
+      class="chat-sys-row"
+      data-id={message.id}
+      onPointerDown={live ? (event) => A.rowDown(event, message, false) : undefined}
+      onPointerMove={live ? (event) => A.rowMove(event) : undefined}
+      onPointerUp={live ? () => A.rowUp() : undefined}
+      onPointerCancel={live ? () => A.rowCancel() : undefined}
+      onContextMenu={live ? (event) => A.rowMenu(event) : undefined}
+    >
+      <p class="chat-system">
+        <span>{message.text}</span>
+        {live ? (
+          <button
+            class="chat-react-btn"
+            type="button"
+            aria-label={REACT_LABEL}
+            aria-expanded={barOpen ? "true" : "false"}
+            onClick={() => A.openReactionBar(message)}
+          >☺</button>
+        ) : null}
+        <time>{messageWhen(message.at)}</time>
+      </p>
+      {live && barOpen ? <ReactionBar message={message} replyable={false} /> : null}
+      <ReactionPills message={message} live={live} />
+    </div>
   );
 }
 

@@ -69,7 +69,7 @@ test("a reaction toggles on and off, a second person adds to the count, and a re
   });
 });
 
-test("only one emoji, only text messages, and only the chat's people may react", async () => {
+test("only one emoji, only real messages, and only the chat's people may react", async () => {
   await withChat(async ({ port }) => {
     const [alex, ada, sam] = await circleOf(port, ["Alex", "Ada", "Sam"]);
     const outsider: Person = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Out" }, status: 201 });
@@ -88,7 +88,7 @@ test("only one emoji, only text messages, and only the chat's people may react",
     const text = chat.chat.messages.find((item: { text: string }) => item.text === "on my way");
     const system = chat.chat.messages.find((item: { system: boolean }) => item.system);
     assert.deepEqual(system.reactions, []);
-    await react(port, ada, system.id, "👍", 400);
+    await react(port, ada, system.id, "👍");
     await react(port, sam, text.id, "👍", 403);
     await react(port, alex, text.id, "😂");
 

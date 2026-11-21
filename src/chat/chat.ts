@@ -69,6 +69,10 @@ export const GIF_LABEL = "GIF";
 function isPersonKind(kind: string): boolean {
   return kind === "text" || kind === "gif" || kind === "poll";
 }
+/** What takes a reaction: a person's message, or a system line such as "X is in". Never the Goblin. */
+function isReactableKind(kind: string): boolean {
+  return isPersonKind(kind) || kind === "system";
+}
 /** The words for a message in a preview, quote or notice. A GIF is its label, not its JSON. A poll is its question. */
 function plainText(kind: string, body: string): string {
   if (kind === "poll") return pollText(body);
@@ -467,7 +471,7 @@ export function toggleReaction(deps: ChatDeps, userId: string, messageId: string
   if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
   if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
-  if (!isPersonKind(row.kind)) throw new ChatError(400, "You can't react to that.");
+  if (!isReactableKind(row.kind)) throw new ChatError(400, "You can't react to that.");
   if (!chatAudience(deps.db, chat).some((member) => member.id === userId)) throw new ChatError(403, "You can't react in this chat.");
   const gone = on === true
     ? 0
@@ -787,7 +791,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   );
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
-  const reactions = reactionsFor(deps.db, messages.filter((message) => isPersonKind(message.kind)).map((message) => message.id), userId);
+  const reactions = reactionsFor(deps.db, messages.filter((message) => isReactableKind(message.kind)).map((message) => message.id), userId);
   const quotes = quotesFor(deps.db, access.chat.id, messages, userId);
   const polls = pollsFor(deps.db, messages.filter((message) => message.kind === "poll"), userId);
   return {

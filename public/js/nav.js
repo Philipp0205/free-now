@@ -442,7 +442,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     const id = state.chatReactFor;
     closeReactUi();
-    if (id) document.querySelector(`.chat-msg[data-id="${CSS.escape(id)}"] .chat-react-btn`)?.focus({ preventScroll: true });
+    if (id) document.querySelector(`:is(.chat-msg, .chat-sys-row)[data-id="${CSS.escape(id)}"] .chat-react-btn`)?.focus({ preventScroll: true });
     return;
   }
   // An open @ list already took this Escape in the composer. Next comes the reply preview, then the chat.
