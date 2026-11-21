@@ -1,5 +1,6 @@
 import { consumeBuzz, buzzerPlaying, playBuzzer, nextBuzzIndex, nextTestBuzzAnimation } from "./buzzer.js";
 import { animationFor } from "./buzzer/birthday-rules.js";
+import { isFromOtherMember } from "./buzzer/lizard-rules.js";
 import { state } from "./state.js";
 import { api } from "./session.js";
 import { render } from "./render.js";
@@ -14,7 +15,8 @@ export function noteBuzz() {
   try {
     const buzz = consumeBuzz(state.socials, localStorage);
     if (!buzz || document.hidden || buzzerPlaying()) return;
-    playBuzzer({ name: buzz.name, animation: animationFor(buzz, () => nextBuzzIndex(localStorage)) });
+    const sound = isFromOtherMember(buzz.social, state.me?.user?.id);
+    playBuzzer({ name: buzz.name, animation: animationFor(buzz, () => nextBuzzIndex(localStorage)), sound });
   } catch {
     /* the overlay is a nicety */
   }
@@ -24,7 +26,7 @@ export function noteBuzz() {
 function testBuzzer() {
   try {
     if (buzzerPlaying()) return;
-    playBuzzer({ name: state.me.user.name, animation: nextTestBuzzAnimation(localStorage) });
+    playBuzzer({ name: state.me.user.name, animation: nextTestBuzzAnimation(localStorage), sound: true });
   } catch {
     /* the overlay is a nicety */
   }

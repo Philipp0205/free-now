@@ -12,6 +12,7 @@ const COPY = [
   "vendor",
   "icons",
   "backgrounds",
+  "sounds",
   "app-kit",
   "manifest.webmanifest",
   "whats-new.json",

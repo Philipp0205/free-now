@@ -8,6 +8,7 @@
 import { birthday } from "./buzzer/birthday-drawer.js";
 import { buzzLines } from "./buzzer/birthday-copy.js";
 import { BIRTHDAY, payloadAnimation } from "./buzzer/birthday-rules.js";
+import { playLizard } from "./buzzer/lizard-sound.js";
 
 export const BUZZ_ANIMATIONS = ["shockwave", "slam", "flood", "bell"];
 export const BUZZ_INDEX_KEY = "fn_buzz_index";
@@ -674,8 +675,9 @@ export function buzzerPlaying() {
 /**
  * Plays the overlay. Returns false (and does nothing) while another one is on screen, true when
  * it started. Tap or a key press dismisses it. Nothing stays in the DOM or running afterwards.
+ * `sound: true` also plays the short lizard clip, whatever the motion setting.
  */
-export function playBuzzer({ name, animation, onEnd } = {}) {
+export function playBuzzer({ name, animation, onEnd, sound } = {}) {
   if (active || typeof document === "undefined") return false;
   const who = cleanBuzzName(name);
   const lines = buzzLines(animation, who);
@@ -758,6 +760,7 @@ export function playBuzzer({ name, animation, onEnd } = {}) {
   listen(document, "keydown", () => dismiss());
 
   active = overlay;
+  if (sound) playLizard();
   if (still) {
     overlay.classList.add("reduced");
     const nameEl = document.createElement("div");
