@@ -176,8 +176,8 @@ export function noteRainThread(thread, { now = Date.now(), storage = deviceStora
     seen.add(message.id);
     const at = typeof message.at === "number" ? message.at : null;
     if (at !== null && at > newestAt) newestAt = at;
-    // A GIF's text is only its label, and Goblin and system lines are not people writing.
-    if (message.gif || message.system || message.goblin) continue;
+    // A GIF's or a poll's text is only a label, and Goblin and system lines are not people writing.
+    if (message.gif || message.poll || message.system || message.goblin) continue;
     if (first ? at === null || now - at > RAIN_CATCHUP_MS : at !== null && at < floor) continue;
     const found = rainFor(message.text);
     if (found === DEFAULT_RAIN) tacoAts.push(at ?? now);

@@ -167,7 +167,7 @@ export function closeSheet() {
 }
 
 export function sheetIsOpen() {
-  return Boolean(state.sheet || state.chatGif || state.confirm || state.onboarding || state.joinInstall || state.installSheet || state.installOpen || state.installSteps);
+  return Boolean(state.sheet || state.chatGif || state.chatPoll || state.confirm || state.onboarding || state.joinInstall || state.installSheet || state.installOpen || state.installSteps);
 }
 
 function confirmActions(nodes) {

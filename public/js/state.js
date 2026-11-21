@@ -123,6 +123,8 @@ export const state = {
   chatReplyTo: null,
   /** The open GIF sheet: { reply, from, status, gifs, message }. Null when closed. It counts as an overlay for Back. */
   chatGif: null,
+  /** The open poll sheet: { question, options, busy, message }. Null when closed. It counts as an overlay for Back. */
+  chatPoll: null,
   /** The message being edited in place: { id, text, busy }. Null when none. */
   chatEdit: null,
   chatSummary: { circle: { unread: 0, muted: false }, events: [], unreadByCircle: {} },

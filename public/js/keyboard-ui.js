@@ -107,8 +107,8 @@ function scheduleReveal(node) {
 function revealField(node) {
   if (!node.isConnected || document.activeElement !== node) return;
   // The GIF sheet sits in the chat screen, which already follows the visual viewport, so its field is always in view.
-  // Scrolling here could only move the page or chat behind the sheet.
-  if (node.id === "gif-query") return;
+  // The poll sheet is the same (it carries the gif-sheet class). Scrolling here could only move the page or chat behind it.
+  if (node.id === "gif-query" || node.closest(".gif-sheet")) return;
   if (node.id === "where-query") {
     scrollFieldAboveDock(node);
     revealWhereResults();

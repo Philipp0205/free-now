@@ -12,6 +12,7 @@ import { openEventDetail } from "./event-sheets.js";
 import { copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { batch } from "@preact/signals";
 import { EDIT_FAILED, EDIT_GONE, EDIT_OFFLINE } from "./chat/chat-copy.js";
+import { addOption, closePoll, editOption, editQuestion, openPoll, removeOption, submitPoll, voteFor } from "./chat/poll-actions.js";
 import {
   bumpThread,
   chatFlash,
@@ -59,6 +60,7 @@ export function closeChat() {
   state.chatWho = null;
   state.chatReplyTo = null;
   state.chatGif = null;
+  state.chatPoll = null;
   state.chatEdit = null;
   state.tab = state.chatReturn || "home";
   void navigate(() => {
@@ -116,6 +118,7 @@ export function dropChatScreen() {
   clearTimeout(gifTimer);
   gifSeq += 1;
   state.chatGif = null;
+  state.chatPoll = null;
   state.chatEdit = null;
   unmountChatView(host);
   host = null;
@@ -139,6 +142,7 @@ function syncChatSignals() {
       chatWho: state.chatWho,
       chatReplyTo: state.chatReplyTo,
       chatGif: state.chatGif,
+      chatPoll: state.chatPoll,
       chatEdit: state.chatEdit,
     });
   });
@@ -802,6 +806,14 @@ const ACTIONS = {
   searchGifs,
   retryGifs,
   pickGif,
+  openPoll,
+  closePoll,
+  editQuestion,
+  editOption,
+  addOption,
+  removeOption,
+  submitPoll,
+  voteFor,
   confirmDelete: confirmDeleteMessage,
   startEdit,
   cancelEdit,

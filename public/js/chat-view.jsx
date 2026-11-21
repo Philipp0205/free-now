@@ -4,6 +4,8 @@ import { messageParts } from "./links.js";
 import { clockText, zonedParts } from "./when.js";
 import { ICONS } from "./lib.js";
 import { EDIT_CANCEL, EDIT_FIELD_LABEL, EDIT_LABEL, EDIT_SAVE, EDITED_LABEL } from "./chat/chat-copy.js";
+import { PollSheet, PollBody } from "./chat/poll-view.jsx";
+import { POLL_START_LABEL } from "./chat/poll-copy.js";
 import {
   canReact,
   canReply,
@@ -81,6 +83,7 @@ function ChatScreen() {
         <Composer />
       )}
       <GifSheet />
+      <PollSheet A={A} />
     </>
   );
 }
@@ -313,7 +316,7 @@ function MessageRow({ message }) {
         </time>
       </header>
       <Quote quote={message.replyTo} />
-      {editing ? <EditBox /> : message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
+      {editing ? <EditBox /> : message.poll ? <PollBody message={message} live={live} A={A} /> : message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
       {live && barOpen ? <ReactionBar message={message} replyable={replyable} /> : null}
       <ReactionPills message={message} live={live} />
       <OwnActions message={message} editing={editing} />
@@ -369,6 +372,7 @@ function bindInput(node) {
 }
 
 function Composer() {
+  const eventChat = chatThread.value.thread?.kind !== "circle";
   return (
     <form class="chat-compose" onSubmit={(event) => A.send(event)}>
       <ReplyPreview />
@@ -390,6 +394,11 @@ function Composer() {
         onKeyDown={(event) => A.onKey(event)}
         onBlur={(event) => A.onBlur(event)}
       />
+      {eventChat ? (
+        <button class="chat-poll-btn" type="button" aria-label={POLL_START_LABEL} onMouseDown={keepFocus} onClick={() => A.openPoll()}>
+          <Icon name="poll" />
+        </button>
+      ) : null}
       <button class="btn chat-send" type="submit">Send</button>
       <MentionList />
     </form>

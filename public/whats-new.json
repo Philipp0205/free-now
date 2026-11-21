@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-chat-polls",
+    "date": "2026-11-21",
+    "title": "Polls in event chats",
+    "bullets": [
+      "You can now post a poll in a social or plan chat. Tap the poll button next to the message box.",
+      "Tap an option to vote. You can change your vote any time.",
+      "Each option shows how many votes it has and who voted for it."
+    ]
+  },
+  {
     "id": "2026-11-21-chat-edit",
     "date": "2026-11-21",
     "title": "Edit your chat messages",

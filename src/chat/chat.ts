@@ -16,6 +16,7 @@ import { colorHex } from "./chat-color.js";
 import { isSingleEmoji } from "./emoji.js";
 import { cleanGif, gifBody, readGifBody } from "./giphy.js";
 import { fileGripe, gripeText, GOBLIN_COLOR, GOBLIN_NAME, type GoblinAsk } from "./goblin.js";
+import { cleanPoll, pollBody, pollsFor, pollText, readPollBody, type PollSummary } from "./poll.js";
 import { notifyUsers } from "../push/notify.js";
 import type { PushSender } from "../push/push.js";
 import { isoDate } from "../lib/time.js";
@@ -64,12 +65,13 @@ type MessageRow = {
 const TEXT_MAX = 1000;
 /** What a GIF is called wherever only words fit: previews, quotes, notices. Never its stored JSON. */
 export const GIF_LABEL = "GIF";
-/** A message a person wrote: words or a GIF. The others are the Goblin and system lines. */
+/** A message a person wrote: words, a GIF or a poll. The others are the Goblin and system lines. */
 function isPersonKind(kind: string): boolean {
-  return kind === "text" || kind === "gif";
+  return kind === "text" || kind === "gif" || kind === "poll";
 }
-/** The words for a message in a preview, quote or notice. A GIF is its label, not its JSON. */
+/** The words for a message in a preview, quote or notice. A GIF is its label, not its JSON. A poll is its question. */
 function plainText(kind: string, body: string): string {
+  if (kind === "poll") return pollText(body);
   return kind === "gif" ? GIF_LABEL : body;
 }
 /** Quick reactions, in the order the bar and the pills show them. */
@@ -120,12 +122,18 @@ export async function routeChat(
   }
   if (pathname === "/api/circles/chat") {
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "circle", "", requestedCircle) } };
+    if (method === "POST" && body.poll != null) throw new ChatError(400, "Polls are for event chats.");
     if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "circle", "", body.text, requestedCircle, body.replyTo, ask, body.gif) } };
   }
   const mute = /^\/api\/chats\/([^/]+)\/mute$/.exec(pathname);
   if (mute && method === "POST") {
     setMuted(deps, user.id, decodeURIComponent(mute[1]), body.muted !== false);
     return { status: 204, body: null };
+  }
+  const vote = /^\/api\/messages\/([^/]+)\/vote$/.exec(pathname);
+  if (vote && method === "POST") {
+    const messageId = decodeURIComponent(vote[1]);
+    return { status: 200, body: { messageId, poll: votePoll(deps, user.id, messageId, body.choice) } };
   }
   const react = /^\/api\/messages\/([^/]+)\/reactions$/.exec(pathname);
   if (react && method === "POST") {
@@ -147,12 +155,14 @@ export async function routeChat(
   if (social) {
     const id = decodeURIComponent(social[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "social", id, requestedCircle) } };
+    if (method === "POST" && body.poll != null) return { status: 201, body: { chat: postPoll(deps, user.id, user.name, "social", id, body.poll, requestedCircle) } };
     if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "social", id, body.text, requestedCircle, body.replyTo, ask, body.gif) } };
   }
   const plan = /^\/api\/plans\/([^/]+)\/chat$/.exec(pathname);
   if (plan) {
     const id = decodeURIComponent(plan[1]);
     if (method === "GET") return { status: 200, body: { chat: readThread(deps, user.id, "plan", id, requestedCircle) } };
+    if (method === "POST" && body.poll != null) return { status: 201, body: { chat: postPoll(deps, user.id, user.name, "plan", id, body.poll, requestedCircle) } };
     if (method === "POST") return { status: 201, body: { chat: await postThread(deps, user.id, user.name, "plan", id, body.text, requestedCircle, body.replyTo, ask, body.gif) } };
   }
   return null;
@@ -266,6 +276,43 @@ export async function postThread(
     ).run(crypto.randomUUID(), access.chat.id, userId, reply, now);
   }
   return threadPayload(deps, access, userId);
+}
+
+/** Posts a poll to an event chat. Only people already in the event's chat audience may start one. */
+function postPoll(deps: ChatDeps, userId: string, userName: string, kind: "social" | "plan", refId: string, raw: unknown, requestedCircle: string | null) {
+  const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
+  if (!chatAudience(deps.db, access.chat).some((member) => member.id === userId)) throw new ChatError(403, "You can't post a poll in this chat.");
+  const cleaned = cleanPoll(raw);
+  if (!cleaned.ok) throw new ChatError(400, cleaned.error);
+  const now = deps.now();
+  deps.db.prepare(
+    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at) VALUES (?, ?, ?, ?, 'poll', ?)",
+  ).run(crypto.randomUUID(), access.chat.id, userId, pollBody(cleaned.poll), now);
+  markRead(deps.db, access.chat.id, userId, now);
+  markChatAlertsRead(deps.db, access.chat, userId, now);
+  scheduleChatNotice(deps, access.chat.id, userId, userName, `started a poll: ${cleaned.poll.question}`);
+  return threadPayload(deps, access, userId);
+}
+
+/** Sets or changes your one vote on a poll message. Same access rules as a reaction: seen is 404 if unseen, 403 if not in the event. */
+export function votePoll(deps: ChatDeps, userId: string, messageId: string, rawChoice: unknown): PollSummary {
+  const row = one<{ id: string; chat_id: string; body: string; kind: string; deleted_at: number | null }>(
+    deps.db,
+    "SELECT id, chat_id, body, kind, deleted_at FROM messages WHERE id = ?",
+    messageId,
+  );
+  if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
+  const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
+  if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
+  const poll = row.kind === "poll" ? readPollBody(row.body) : null;
+  if (!poll) throw new ChatError(400, "That isn't a poll.");
+  if (!chatAudience(deps.db, chat).some((member) => member.id === userId)) throw new ChatError(403, "You can't vote in this chat.");
+  if (!Number.isInteger(rawChoice) || (rawChoice as number) < 0 || (rawChoice as number) >= poll.options.length) throw new ChatError(400, "Pick one of the options.");
+  deps.db.prepare(
+    `INSERT INTO poll_votes (message_id, user_id, choice, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(message_id, user_id) DO UPDATE SET choice = excluded.choice, created_at = excluded.created_at`,
+  ).run(row.id, userId, rawChoice as number, deps.now());
+  return pollsFor(deps.db, [row], userId).get(row.id)!;
 }
 
 /** A GIF to send: only when GIFs are on, and only a well-formed Giphy one. Nothing else reaches the table. */
@@ -742,6 +789,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   const host = access.chat.kind !== "circle" && access.chat.host_id === userId;
   const reactions = reactionsFor(deps.db, messages.filter((message) => isPersonKind(message.kind)).map((message) => message.id), userId);
   const quotes = quotesFor(deps.db, access.chat.id, messages, userId);
+  const polls = pollsFor(deps.db, messages.filter((message) => message.kind === "poll"), userId);
   return {
     id: access.chat.id,
     kind: access.chat.kind,
@@ -756,6 +804,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       // A GIF's words are just "GIF", so a client that does not know GIFs never shows raw JSON.
       text: plainText(message.kind, message.body),
       gif: message.kind === "gif" ? readGifBody(message.body) : null,
+      poll: polls.get(message.id) ?? null,
       at: message.created_at,
       system: message.kind === "system",
       goblin: message.kind === "goblin",
