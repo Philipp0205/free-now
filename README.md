@@ -131,6 +131,10 @@ For the dark vector map (`MAP_PMTILES_PATH`):
 
 The 16 MiB cap on a single range is our own defensive limit, not a PMTiles rule. The PMTiles spec only guarantees that the header and root directory fit in the first 16 KiB; metadata, leaf directories, and tiles have no size bound in the spec. A request over the cap gets 416, and the client falls back to the raster map.
 
+### App icon
+
+Taco emoji by Twemoji (jdecked/twemoji), CC-BY 4.0.
+
 ## Generate VAPID keys
 
 ```bash
