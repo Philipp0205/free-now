@@ -17,7 +17,7 @@ import { addDays, clockLabel, isoDate, zonedDateTime } from "../lib/time.js";
 import { HttpError, parseId } from "../app.js";
 import { isOpenPlan } from "../social/plan-share.js";
 
-/** A plan with a time lasts this long in a calendar. Hangry has no end time. */
+/** A plan with a time lasts this long in a calendar. Spontaco has no end time. */
 export const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000;
 /** The feed keeps this many days of past plans. */
 export const FEED_PAST_DAYS = 30;
@@ -25,7 +25,7 @@ export const FEED_PAST_DAYS = 30;
 export const FEED_MAX_EVENTS = 200;
 /** Feed fetches per client. Calendar servers share addresses, so this is loose. */
 export const FEED_LIMIT = { limit: 120, windowMs: 60_000 };
-export const FEED_NAME = "Hangry";
+export const FEED_NAME = "Spontaco";
 
 export type CalendarContext = {
   db: DatabaseSync;
@@ -79,7 +79,7 @@ export function planAppUrl(origin: string, planId: string): string {
   return `${origin}/?plan=${planId}`;
 }
 
-export const DURATION_NOTE = "Hangry plans have no end time, so this shows 2 hours.";
+export const DURATION_NOTE = "Spontaco plans have no end time, so this shows 2 hours.";
 
 /**
  * A note when the plan's clock time does not exist on that day (spring forward).
@@ -109,7 +109,7 @@ export function planDescription(
     const gap = gapNote(plan, when, tz);
     parts.push(gap ? `${gap}\n${DURATION_NOTE}` : DURATION_NOTE);
   }
-  parts.push(`Hangry: ${link}`);
+  parts.push(`Spontaco: ${link}`);
   return parts.join("\n\n");
 }
 
@@ -164,7 +164,7 @@ export function calendarFileName(note: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48)
     .replace(/-+$/g, "");
-  return `${slug || "hangry-plan"}.ics`;
+  return `${slug || "spontaco-plan"}.ics`;
 }
 
 const FEED_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;

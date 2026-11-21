@@ -65,7 +65,7 @@ for (const [width, height] of [...SIZES, [1280, 800] as const]) {
     await sheet.waitFor();
     // The kit slides the sheet up in 220ms; measure the PayPal link only once it has landed.
     await sheet.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
-    assert.match(await sheet.innerText(), /Hangry is free/);
+    assert.match(await sheet.innerText(), /Spontaco is free/);
     assert.match(await sheet.innerText(), /optional/i);
     assert.equal(await sheet.locator(".ak-chip").count(), 0, "no suggested amounts");
     const link = sheet.getByRole("link", { name: "Donate with PayPal" });

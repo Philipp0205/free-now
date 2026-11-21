@@ -92,7 +92,7 @@ function selectFeedUrl() {
 
 async function shareFeedLink(url) {
   try {
-    await navigator.share({ title: "Hangry calendar", url });
+    await navigator.share({ title: "Spontaco calendar", url });
   } catch (error) {
     if (error?.name !== "AbortError") await copyFeedLink(url);
   }
@@ -169,24 +169,24 @@ const CALENDAR_SYNC_STEPS = [
 ];
 
 const GOOGLE_PERMISSIONS_URL = "https://myaccount.google.com/permissions";
-const SECRET_LINK_NOTE = "A private calendar link lets Hangry download the whole calendar file, including event names. Hangry keeps only the times, plus your event names encrypted for you alone (so you can see them when you tap I'm in). It discards places, notes and people. Friends still only see busy or free.";
+const SECRET_LINK_NOTE = "A private calendar link lets Spontaco download the whole calendar file, including event names. Spontaco keeps only the times, plus your event names encrypted for you alone (so you can see them when you tap I'm in). It discards places, notes and people. Friends still only see busy or free.";
 
 function permissionsLink() {
   return el("a", { href: GOOGLE_PERMISSIONS_URL, target: "_blank", rel: "noopener noreferrer", text: "myaccount.google.com/permissions" });
 }
 
-/** Plain words on what Hangry can and cannot see once Google is connected. */
+/** Plain words on what Spontaco can and cannot see once Google is connected. */
 function googleFacts() {
   return el("div", { class: "sync-facts" }, [
-    el("h4", { text: "What Hangry can and can't see" }),
+    el("h4", { text: "What Spontaco can and can't see" }),
     el("ul", { class: "feed-steps" }, [
-      el("li", { text: "Hangry only sees when you're busy, never event names, places, people or notes." }),
-      el("li", { text: "Hangry asks Google only for the free/busy permission, and Google's consent screen says so. Hangry never receives event titles or details, and never stores them." }),
-      el("li", { text: "Hangry stores only your busy times for the next 14 days, plus an encrypted token so it can check again." }),
-      el("li", { text: "Hangry checks about every 20 minutes." }),
+      el("li", { text: "Spontaco only sees when you're busy, never event names, places, people or notes." }),
+      el("li", { text: "Spontaco asks Google only for the free/busy permission, and Google's consent screen says so. Spontaco never receives event titles or details, and never stores them." }),
+      el("li", { text: "Spontaco stores only your busy times for the next 14 days, plus an encrypted token so it can check again." }),
+      el("li", { text: "Spontaco checks about every 20 minutes." }),
       el("li", {}, ["The ", el("a", { href: "/privacy", text: "privacy policy" }), " has the same details."]),
       el("li", {}, [
-        "To disconnect, tap Remove in this panel. Hangry deletes the token and the busy times, and tells Google to revoke access. You can also revoke Hangry at ",
+        "To disconnect, tap Remove in this panel. Spontaco deletes the token and the busy times, and tells Google to revoke access. You can also revoke Spontaco at ",
         permissionsLink(),
         ".",
       ]),
@@ -238,7 +238,7 @@ export function calendarSyncPanel() {
         el("button", { class: "btn secondary", type: "submit", text: sync.busy && !sync.googleBusy ? "Connecting…" : "Connect calendar", disabled: sync.busy }),
       ]),
       el("p", { class: "help sync-note secret-link-note", text: SECRET_LINK_NOTE }),
-      el("p", { class: "help sync-note", text: "It stays off for every circle until you turn one on. Hangry keeps the link encrypted and never shows it again." }),
+      el("p", { class: "help sync-note", text: "It stays off for every circle until you turn one on. Spontaco keeps the link encrypted and never shows it again." }),
       el("ul", { class: "feed-steps" }, CALENDAR_SYNC_STEPS.map((line) => el("li", { text: line }))),
     ]);
   }
@@ -261,9 +261,9 @@ export function calendarSyncPanel() {
     ]))),
     shared.size ? null : el("p", { class: "help sync-note", text: "Off everywhere. Tick a circle to share." }),
     isGoogle
-      ? el("p", { class: "help sync-note", text: "Hangry never sees the names of your events, so they will not appear when you tap I'm in." })
+      ? el("p", { class: "help sync-note", text: "Spontaco never sees the names of your events, so they will not appear when you tap I'm in." })
       : el("p", { class: "help sync-note", text: "When you tap I'm in, you see your own events for that day first. Only you see them." }),
-    isGoogle ? el("p", { class: "help sync-note" }, ["You can revoke Hangry any time at ", permissionsLink(), "."]) : null,
+    isGoogle ? el("p", { class: "help sync-note" }, ["You can revoke Spontaco any time at ", permissionsLink(), "."]) : null,
     el("div", { class: "feed-manage" }, [
       el("button", { class: "text-btn", type: "button", text: "Check now", disabled: sync.busy, onclick: () => { void onRefreshCalendar(); } }),
       el("button", { class: "text-btn danger", type: "button", text: "Remove", disabled: sync.busy, onclick: onRemoveCalendar }),
@@ -282,7 +282,7 @@ function syncStatusLine(sync) {
   const today = zonedParts(Date.now(), appTz()).day;
   const day = zonedParts(sync.lastSyncAt, appTz()).day;
   const when = day === today ? clock(sync.lastSyncAt) : `${feedDate(sync.lastSyncAt)} ${clock(sync.lastSyncAt)}`;
-  return el("p", { class: "help sync-status", text: `Last checked ${when}. Hangry checks about every 20 minutes.` });
+  return el("p", { class: "help sync-status", text: `Last checked ${when}. Spontaco checks about every 20 minutes.` });
 }
 
 function paintCalendarSync() {
@@ -418,8 +418,8 @@ function onRemoveCalendar() {
   state.confirm = {
     title: "Remove calendar?",
     body: google
-      ? "Friends stop seeing when you're busy. Hangry deletes the token and the busy times, and tells Google to revoke access."
-      : "Friends stop seeing when you're busy. Hangry deletes the link and everything it read from it.",
+      ? "Friends stop seeing when you're busy. Spontaco deletes the token and the busy times, and tells Google to revoke access."
+      : "Friends stop seeing when you're busy. Spontaco deletes the link and everything it read from it.",
     confirmLabel: "Remove",
     action: async () => {
       await calendarSyncCall("/api/me/calendar-sync", { method: "DELETE" });

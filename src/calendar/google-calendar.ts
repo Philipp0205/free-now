@@ -154,7 +154,7 @@ export async function exchangeGoogleCode(
   if (!onlyFreebusyScope(scope)) {
     const spare = typeof refresh === "string" && refresh ? refresh : access;
     await revokeGoogleToken(config, spare);
-    throw new GoogleError("Google gave more access than Hangry asked for");
+    throw new GoogleError("Google gave more access than Spontaco asked for");
   }
   if (typeof refresh !== "string" || !refresh) throw new GoogleError("Google did not allow ongoing access");
   return { refreshToken: refresh, accessToken: access };

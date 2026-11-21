@@ -102,7 +102,7 @@ async function assertUnobtrusive(page: Page, width: number, height: number) {
   assert.ok(box.y + box.height < height / 2, "the banner sits near the top");
   assert.equal(await page.locator(".scrim").count(), 0, "no scrim behind the banner");
   assert.equal(await page.locator(".sheet").count(), 0, "the banner is not a sheet");
-  assert.equal(await page.getByText("Install Hangry as an app").count(), 0, "not the join-install sheet");
+  assert.equal(await page.getByText("Install Spontaco as an app").count(), 0, "not the join-install sheet");
   const fit = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   assert.equal(fit.scroll, fit.client, `no horizontal scroll at ${width}`);
   const targets = [bar(page).getByRole("button", { name: "Close install prompt" })];
@@ -258,7 +258,7 @@ test("iPhone Safari has no prompt: the banner shows the Share steps and the row 
   await assertUnobtrusive(page, 360, 640);
   await shot(page, "ios-banner-w360.png");
 
-  const dialog = page.getByRole("dialog", { name: "Install Hangry" });
+  const dialog = page.getByRole("dialog", { name: "Install Spontaco" });
   await openYouSection(page, "Account");
   await page.locator("button.install-row").click();
   await dialog.waitFor();
@@ -285,7 +285,7 @@ test("an Android browser without a prompt gets the menu steps from the Account r
   await signedIn(page);
   await openYouSection(page, "Account");
   await page.locator("button.install-row").click();
-  const dialog = page.getByRole("dialog", { name: "Install Hangry" });
+  const dialog = page.getByRole("dialog", { name: "Install Spontaco" });
   await dialog.waitFor();
   assert.match(await dialog.innerText(), /Open the browser menu/);
   assert.match(await dialog.innerText(), /Install app or Add to Home screen/);

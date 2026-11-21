@@ -289,7 +289,9 @@ test("serves the installable shell", async () => {
     const page = await fetch(`${origin}/`);
     const html = await page.text();
     assert.equal(page.status, 200);
-    assert.match(html, /<title>Hangry<\/title>/);
+    assert.match(html, /<title>Spontaco<\/title>/);
+    assert.match(html, /<meta name="apple-mobile-web-app-title" content="Spontaco"/);
+    assert.doesNotMatch(html, /Hangry/);
     assert.match(html, /manifest\.webmanifest/);
     assert.match(html, /apple-mobile-web-app-capable/);
     assert.match(html, /src="\/js\/app\.js"/);
@@ -304,10 +306,13 @@ test("serves the installable shell", async () => {
     assert.equal(manifestResponse.headers.get("content-type"), "application/manifest+json");
     const manifest = (await manifestResponse.json()) as {
       display: string;
-      icons: Array<{ sizes: string; purpose: string }>;
+      description: string;
+      icons: Array<{ src: string; sizes: string; purpose: string }>;
     };
-    assert.equal(manifest.name, "Hangry");
-    assert.equal(manifest.short_name, "Hangry");
+    assert.equal(manifest.name, "Spontaco");
+    assert.equal(manifest.short_name, "Spontaco");
+    assert.match(manifest.description, /^Spontaco/);
+    assert.doesNotMatch(JSON.stringify(manifest), /Hangry|\u2014/);
     assert.equal(manifest.display, "standalone");
     assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
     assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512" && icon.purpose === "maskable"));
@@ -317,7 +322,7 @@ test("serves the installable shell", async () => {
     assert.equal(sw.headers.get("cache-control"), "no-cache");
     const source = await sw.text();
     // The built worker is minified, so the quotes may be backticks.
-    assert.match(source, /title: ?["`]Hangry["`]/);
+    assert.match(source, /title: ?["`]Spontaco["`]/);
     assert.match(source, /addEventListener\(["`]push["`]/);
     assert.match(source, /showNotification/);
 

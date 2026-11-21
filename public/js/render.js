@@ -200,9 +200,9 @@ function calendarReturnScreen() {
   return el("section", { class: "gate" }, [
     el("div", { class: "hero" }, [
       el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
-      el("h1", { class: "wordmark", text: "Hangry" }),
+      el("h1", { class: "wordmark", text: "Spontaco" }),
       el("p", { class: "lede", text: calendarLanding === "google" ? "Google Calendar connected." : "Could not connect Google Calendar." }),
-      el("p", { class: "lede", text: "Go back to Hangry." }),
+      el("p", { class: "lede", text: "Go back to Spontaco." }),
     ]),
   ]);
 }
@@ -213,7 +213,7 @@ function welcome() {
   return el("section", { class: "gate" }, [
     el("div", { class: "hero" }, [
       el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
-      el("h1", { class: "wordmark", text: "Hangry" }),
+      el("h1", { class: "wordmark", text: "Spontaco" }),
       el("p", {
         class: "lede",
         text: state.invitePreview?.name
@@ -307,7 +307,7 @@ function welcome() {
     el("div", { class: "gate-links" }, [
       state.pendingCode || state.inviteError || recovering
         ? null
-        : el("a", { class: "gate-about", href: "/welcome", text: "What is Hangry?" }),
+        : el("a", { class: "gate-about", href: "/welcome", text: "What is Spontaco?" }),
       el("a", { class: "gate-about", href: "/privacy", text: "Privacy" }),
     ]),
   ]);

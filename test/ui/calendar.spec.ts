@@ -92,7 +92,7 @@ for (const [width, height] of SIZES) {
       assert.match(text, /^BEGIN:VCALENDAR\r\n/);
       assert.ok(text.includes(`UID:${plan.id}@hangry\r\n`));
       assert.ok(text.includes("STATUS:TENTATIVE\r\n"));
-      assert.ok(text.replace(/\r\n /g, "").includes("Hangry plans have no end time\\, so this shows 2 hours."), "the 2 hour note");
+      assert.ok(text.replace(/\r\n /g, "").includes("Spontaco plans have no end time\\, so this shows 2 hours."), "the 2 hour note");
       await page.locator(".toast", { hasText: SAVED }).waitFor();
       await fitsWidth(page, ".toast");
       await shot(page, "calendar-toast");

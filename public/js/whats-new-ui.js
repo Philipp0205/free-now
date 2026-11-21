@@ -136,7 +136,7 @@ export function whatsNewSheet() {
       el("div", { class: "sheet-head" }, [
         el("div", { class: "grabber" }),
         el("h2", { text: "What's new" }),
-        el("p", { class: "help", text: popup ? "Since you last opened Hangry." : "Recent changes to Hangry." }),
+        el("p", { class: "help", text: popup ? "Since you last opened Spontaco." : "Recent changes to Spontaco." }),
       ]),
       el("div", { class: "sheet-scroll" }, [
         entries.length

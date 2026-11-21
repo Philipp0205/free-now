@@ -109,7 +109,7 @@ test("the host shares a plan, a friend opens the link on the map, an outsider se
         const text = await visitor.locator("body").innerText();
         for (const leak of [PLACE, "Hana", "Finn", "Chat", circle.name]) assert.ok(!text.includes(leak), `${leak} shown`);
         assert.equal(await visitor.locator(".leaflet-container, .map-card, .tabbar").count(), 0);
-        if (signedIn) await visitor.getByRole("button", { name: "Open Hangry" }).waitFor();
+        if (signedIn) await visitor.getByRole("button", { name: "Open Spontaco" }).waitFor();
         else await visitor.getByRole("button", { name: "Sign back in" }).waitFor();
       } finally {
         await visitor.context().close();

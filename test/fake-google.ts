@@ -47,7 +47,7 @@ export async function fakeGoogle(): Promise<Fake> {
         back.searchParams.set("state", query.get("state") ?? "");
         fake.authViews.push({ scope: query.get("scope") ?? "", redirectUri: query.get("redirect_uri") ?? "" });
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(`<!doctype html><meta charset="utf-8"><title>Fake Google</title><h1>Fake Google consent</h1><p>Hangry wants to see when you are busy.</p><a id="allow" href="${back.href.replace(/&/g, "&amp;")}">Allow</a>`);
+        res.end(`<!doctype html><meta charset="utf-8"><title>Fake Google</title><h1>Fake Google consent</h1><p>Spontaco wants to see when you are busy.</p><a id="allow" href="${back.href.replace(/&/g, "&amp;")}">Allow</a>`);
         return;
       }
       if (path === "/token") {

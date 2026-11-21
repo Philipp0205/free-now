@@ -77,7 +77,7 @@ export async function handlePushRoutes(ctx: AuthedRouteContext): Promise<boolean
     await notifyUsers(deps.db, deps.push, deps.now(), [
       {
         userId: me.id,
-        title: "Hangry",
+        title: "Spontaco",
         body: "Push works",
         kind: "test",
         refId: null,

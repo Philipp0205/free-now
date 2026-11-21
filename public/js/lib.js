@@ -54,7 +54,7 @@ export function viewerTz() {
 }
 
 export function mapsHref(lat, lng, label) {
-  const name = encodeURIComponent(label || "Hangry");
+  const name = encodeURIComponent(label || "Spontaco");
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if (ios) return `https://maps.apple.com/?ll=${lat},${lng}&q=${name}`;

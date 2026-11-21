@@ -211,7 +211,7 @@ test("a lost recovery code comes back by email and the old code stops working", 
     await shot(page, "recover-link", width);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByRole("heading", { name: "You're signed in." }).waitFor();
-    await page.getByRole("button", { name: "Open Hangry" }).click();
+    await page.getByRole("button", { name: "Open Spontaco" }).click();
     await page.locator("#circle-name").waitFor();
 
     const card = page.locator(".notice", { hasText: "Save your recovery code" });

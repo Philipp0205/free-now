@@ -78,7 +78,7 @@ export function youScreen() {
       youMenuRow(section.title, youSectionSummary(section.id), () => openYouSection(section.id))
     ))),
     el("div", { class: "panel panel-rows" }, [
-      youMenuRow("What's new", "Recent changes to Hangry", () => { void openWhatsNewList(); }),
+      youMenuRow("What's new", "Recent changes to Spontaco", () => { void openWhatsNewList(); }),
       youMenuRow("Send feedback", "Ideas, bugs, anything", openFeedback),
     ]),
   ]);
@@ -285,7 +285,7 @@ function donatePanel() {
   const button = kit.button({ url: DONATE_URL });
   button.classList.add("ak-btn-secondary");
   button.addEventListener("click", () => {
-    kit.show({ url: DONATE_URL, appName: "Hangry" });
+    kit.show({ url: DONATE_URL, appName: "Spontaco" });
   });
   return el("div", { class: "panel donate-panel" }, [button]);
 }
@@ -301,7 +301,7 @@ function installPanel() {
     }, [
       el("div", { class: "grow" }, [
         el("h3", { text: "Install app" }),
-        el("p", { text: installed ? "Installed" : "Add Hangry to your home screen." }),
+        el("p", { text: installed ? "Installed" : "Add Spontaco to your home screen." }),
       ]),
     ]),
   ]);

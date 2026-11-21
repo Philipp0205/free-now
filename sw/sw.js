@@ -55,7 +55,7 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let data = { title: "Hangry", body: "Someone is free", url: "/", tag: "hangry", id: "" };
+  let data = { title: "Spontaco", body: "Someone is free", url: "/", tag: "hangry", id: "" };
   try {
     if (event.data) data = { ...data, ...event.data.json() };
   } catch {

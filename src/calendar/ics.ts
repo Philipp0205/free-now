@@ -28,7 +28,7 @@ export type IcsCalendar = {
   events: IcsEvent[];
 };
 
-export const PRODID = "-//Hangry//Calendar 1.0//EN";
+export const PRODID = "-//Spontaco//Calendar 1.0//EN";
 const CRLF = "\r\n";
 const MAX_OCTETS = 75;
 

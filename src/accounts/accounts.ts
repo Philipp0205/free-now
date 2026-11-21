@@ -26,7 +26,7 @@ export function accountsFor(deps: AppDeps, req: http.IncomingMessage, limiter: R
     store: createAuthStore(deps.db),
     mailer: deps.mailer,
     limiter,
-    appName: "Hangry",
+    appName: "Spontaco",
     now: deps.now,
     normalize: normalizeRecovery,
     revokeOtherSessions: true,

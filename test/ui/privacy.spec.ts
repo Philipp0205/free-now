@@ -48,14 +48,14 @@ async function noSideScroll(page: Page) {
 }
 
 for (const [width, height] of [...SIZES, [1280, 800]] as const) {
-  test(`at ${width}: /privacy is a dark Hangry page with the full policy`, { timeout: 60_000 }, async () => {
+  test(`at ${width}: /privacy is a dark Spontaco page with the full policy`, { timeout: 60_000 }, async () => {
     const ctx = await context(width, height);
     const page = await ctx.newPage();
     try {
       await page.goto(`${hangry.baseUrl}/privacy`);
       await page.getByRole("heading", { level: 1, name: "Privacy" }).waitFor();
-      assert.equal(await page.getByRole("link", { name: "Hangry home" }).getAttribute("href"), "/welcome");
-      assert.equal(await page.getByRole("link", { name: "Open Hangry" }).getAttribute("href"), "/");
+      assert.equal(await page.getByRole("link", { name: "Spontaco home" }).getAttribute("href"), "/welcome");
+      assert.equal(await page.getByRole("link", { name: "Open Spontaco" }).getAttribute("href"), "/");
       await page.getByText("Last updated: 15 November 2026").waitFor();
       for (const heading of ["Your account", "Location", "Calendar", "Assistant tokens", "Where it is hosted", "Deleting your data", "Contact"]) {
         await page.getByRole("heading", { level: 2, name: heading }).waitFor();
@@ -63,12 +63,12 @@ for (const [width, height] of [...SIZES, [1280, 800]] as const) {
       assert.equal(await page.locator("script").count(), 0, "no script");
       const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
       assert.equal(bg, "rgb(0, 0, 0)", "dark background");
-      const target = await page.getByRole("link", { name: "Open Hangry" }).boundingBox();
-      assert.ok(target && target.height >= 36, `Open Hangry is tappable: ${target?.height}`);
+      const target = await page.getByRole("link", { name: "Open Spontaco" }).boundingBox();
+      assert.ok(target && target.height >= 36, `Open Spontaco is tappable: ${target?.height}`);
       await noSideScroll(page);
       await shot(page, "policy-top", width);
       await shot(page, "policy-full", width, true);
-      await page.getByRole("link", { name: "Open Hangry" }).click();
+      await page.getByRole("link", { name: "Open Spontaco" }).click();
       await page.waitForURL(`${hangry.baseUrl}/`);
       await page.locator("#name").waitFor();
     } finally {
@@ -89,7 +89,7 @@ for (const [width, height] of SIZES) {
       const privacy = page.getByRole("link", { name: "Privacy" });
       assert.equal(await privacy.getAttribute("href"), "/privacy");
       assert.equal(await privacy.getAttribute("class"), "gate-about");
-      assert.equal(await page.getByRole("link", { name: "What is Hangry?" }).getAttribute("href"), "/welcome");
+      assert.equal(await page.getByRole("link", { name: "What is Spontaco?" }).getAttribute("href"), "/welcome");
       await noSideScroll(page);
       await shot(page, "login", width);
       await privacy.click();
@@ -98,7 +98,7 @@ for (const [width, height] of SIZES) {
 
       await page.goto(`${hangry.baseUrl}/join/${circle.inviteCode}`);
       await page.locator(".lede", { hasText: "Join Fake circle" }).waitFor();
-      assert.equal(await page.getByRole("link", { name: "What is Hangry?" }).count(), 0, "hidden on an invite");
+      assert.equal(await page.getByRole("link", { name: "What is Spontaco?" }).count(), 0, "hidden on an invite");
       assert.equal(await page.getByRole("link", { name: "Privacy" }).getAttribute("href"), "/privacy");
       await noSideScroll(page);
       await shot(page, "login-invite", width);
@@ -118,8 +118,8 @@ for (const [width, height] of SIZES) {
       await openYouSection(page, "Availability & calendar");
       const facts = page.locator(".sync-facts");
       await facts.waitFor();
-      await facts.getByText("What Hangry can and can't see").waitFor();
-      await facts.getByText("Hangry never receives event titles or details, and never stores them.", { exact: false }).waitFor();
+      await facts.getByText("What Spontaco can and can't see").waitFor();
+      await facts.getByText("Spontaco never receives event titles or details, and never stores them.", { exact: false }).waitFor();
       const link = facts.getByRole("link", { name: "privacy policy" });
       assert.equal(await link.getAttribute("href"), "/privacy");
       await facts.getByText("has the same details.", { exact: false }).waitFor();

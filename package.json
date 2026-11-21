@@ -2,7 +2,7 @@
   "name": "free-now",
   "version": "1.0.0",
   "private": true,
-  "description": "Hangry — an invite-only PWA so a small circle of friends can say they're free.",
+  "description": "Spontaco: an invite-only PWA so a small circle of friends can say they're free.",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"

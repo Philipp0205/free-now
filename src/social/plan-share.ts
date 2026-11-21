@@ -71,7 +71,7 @@ export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string
 
 /** Link-preview text: the note, then an absolute day ("Fri 7 Nov") and time. Read later, so never Today/Tomorrow. */
 export function shareMeta(plan: PlanRow | undefined, today: string): { title: string; description: string } {
-  if (!plan) return { title: ENDED_COPY, description: "Hangry" };
+  if (!plan) return { title: ENDED_COPY, description: "Spontaco" };
   const day = shortDate(plan.for_date, today);
   return { title: plan.note, description: plan.at_time ? `${day} · ${plan.at_time}` : day };
 }
@@ -90,9 +90,9 @@ export function shareHtml(template: string, meta: { title: string; description: 
   const title = escapeHtml(meta.title);
   const description = escapeHtml(meta.description);
   const tags = [
-    `<title>${title} · Hangry</title>`,
+    `<title>${title} · Spontaco</title>`,
     `<meta property="og:type" content="website" />`,
-    `<meta property="og:site_name" content="Hangry" />`,
+    `<meta property="og:site_name" content="Spontaco" />`,
     `<meta property="og:title" content="${title}" />`,
     `<meta property="og:description" content="${description}" />`,
     `<meta property="og:url" content="${escapeHtml(url)}" />`,

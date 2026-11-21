@@ -57,7 +57,7 @@ test("dates and stamps", () => {
 });
 
 test("a calendar has the required header, CRLF everywhere, and a trailing CRLF", () => {
-  const text = buildCalendar({ name: "Hangry", tz: "Europe/Berlin", events: [BASE] });
+  const text = buildCalendar({ name: "Spontaco", tz: "Europe/Berlin", events: [BASE] });
   assert.ok(text.endsWith("\r\n"));
   assert.equal(text.replace(/\r\n/g, "").includes("\n"), false, "no bare LF");
   assert.equal(text.replace(/\r\n/g, "").includes("\r"), false, "no bare CR");
@@ -65,10 +65,10 @@ test("a calendar has the required header, CRLF everywhere, and a trailing CRLF",
   assert.deepEqual(lines.slice(0, 7), [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Hangry//Calendar 1.0//EN",
+    "PRODID:-//Spontaco//Calendar 1.0//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:Hangry",
+    "X-WR-CALNAME:Spontaco",
     "X-WR-TIMEZONE:Europe/Berlin",
   ]);
   assert.equal(lines.at(-1), "END:VCALENDAR");
@@ -132,22 +132,22 @@ test("uid host, description, and file name", () => {
   const timed = { for_date: "2026-06-02", at_time: "19:00" };
   assert.equal(
     planDescription({ creator_name: "Alex", description: "Bring snacks", ...timed }, "https://h.example/?plan=p1", BERLIN),
-    `Hosted by Alex\n\nBring snacks\n\n${DURATION_NOTE}\n\nHangry: https://h.example/?plan=p1`,
+    `Hosted by Alex\n\nBring snacks\n\n${DURATION_NOTE}\n\nSpontaco: https://h.example/?plan=p1`,
   );
-  assert.equal(planDescription({ creator_name: "Alex", description: "  ", ...timed }, "L", BERLIN), `Hosted by Alex\n\n${DURATION_NOTE}\n\nHangry: L`);
+  assert.equal(planDescription({ creator_name: "Alex", description: "  ", ...timed }, "L", BERLIN), `Hosted by Alex\n\n${DURATION_NOTE}\n\nSpontaco: L`);
   assert.equal(
     planDescription({ creator_name: "Alex", description: null, for_date: "2026-06-02", at_time: null }, "L", BERLIN),
-    "Hosted by Alex\n\nHangry: L",
+    "Hosted by Alex\n\nSpontaco: L",
     "an all-day plan has no length to explain",
   );
   assert.equal(calendarFileName("Sushi night!"), "sushi-night.ics");
   assert.equal(calendarFileName("Café über Straße"), "cafe-uber-stra-e.ics");
-  assert.equal(calendarFileName("🍣🍣"), "hangry-plan.ics");
+  assert.equal(calendarFileName("🍣🍣"), "spontaco-plan.ics");
   assert.ok(calendarFileName("a".repeat(100)).length <= 52);
 });
 
 test("the 2 hour note is exactly this sentence", () => {
-  assert.equal(DURATION_NOTE, "Hangry plans have no end time, so this shows 2 hours.");
+  assert.equal(DURATION_NOTE, "Spontaco plans have no end time, so this shows 2 hours.");
 });
 
 /** A plan row with only what planEvent reads. */
@@ -184,7 +184,7 @@ test("spring forward: 02:30 does not exist in Berlin, it starts at 03:30 CEST an
   assert.ok(lines.includes("DTSTART:20260329T013000Z"));
   assert.ok(lines.includes("DTEND:20260329T033000Z"));
   const description = lines.find((line) => line.startsWith("DESCRIPTION:")) ?? "";
-  assert.equal(description, `DESCRIPTION:Hosted by Alex\\n\\n${escapeText(note)}\\n${escapeText(DURATION_NOTE)}\\n\\nHangry: https://h.example/?plan=p1`);
+  assert.equal(description, `DESCRIPTION:Hosted by Alex\\n\\n${escapeText(note)}\\n${escapeText(DURATION_NOTE)}\\n\\nSpontaco: https://h.example/?plan=p1`);
 
   // The edges of the gap: 01:59 and 03:00 are real times, so no note.
   for (const [time, stamp] of [["01:59", "20260329T005900Z"], ["03:00", "20260329T010000Z"]]) {

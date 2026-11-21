@@ -180,7 +180,7 @@ function makeRandom(seed = 1234567) {
 
 const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
 
-/** The Hangry orb. */
+/** The Spontaco orb. */
 function orb(ctx, x, y, r, glow = 1) {
   ctx.save();
   ctx.shadowColor = "rgba(255,50,120," + 0.75 * glow + ")";

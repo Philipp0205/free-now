@@ -15,7 +15,7 @@ const IOS_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) Apple
 const IOS_CHROME = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.0.0 Mobile/15E148 Safari/604.1";
 const IPAD_SAFARI = "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const DESKTOP = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
-const TITLE = "Install Hangry as an app";
+const TITLE = "Install Spontaco as an app";
 const STANDALONE = `(() => {
   const real = window.matchMedia.bind(window);
   window.matchMedia = function (query) {
@@ -123,7 +123,7 @@ for (const [width, height] of SIZES) {
     assert.equal(steps.length, 3);
     assert.match(steps[0], /Tap the Share button/);
     assert.match(steps[1], /Tap Add to Home Screen/);
-    assert.match(steps[2], /Open Hangry from the icon/);
+    assert.match(steps[2], /Open Spontaco from the icon/);
     assert.equal(await sheet.getByRole("button", { name: "Install app" }).count(), 0, "no fake install button on iPhone");
     const later = sheet.getByRole("button", { name: "Not now" });
     const box = await later.boundingBox();

@@ -29,7 +29,7 @@ function flat(guide: ReturnType<typeof installGuide>): string {
   ].join("\n");
 }
 
-test("iPhone Safari is told to add Hangry to the Home Screen before allowing notifications", () => {
+test("iPhone Safari is told to add Spontaco to the Home Screen before allowing notifications", () => {
   const guide = guideFor(IOS_SAFARI);
   const text = flat(guide);
   assert.equal(guide.platform, "ios");
@@ -67,7 +67,7 @@ test("a denied iPhone is shown the Settings path", () => {
   assert.equal(guide.status, "denied");
   const text = flat(guide);
   assert.match(text, /Settings/);
-  assert.match(text, /Notifications → Hangry/);
+  assert.match(text, /Notifications → Spontaco/);
   assert.match(text, /Allow Notifications/);
 });
 
@@ -96,7 +96,7 @@ test("Android Firefox gets its own install steps and is not sent to Chrome", () 
   assert.match(text, /Open the menu ⋮, tap Install/);
   assert.match(text, /Add to Home screen/);
   assert.match(text, /confirm/i);
-  assert.doesNotMatch(text, /open Hangry in Chrome/i);
+  assert.doesNotMatch(text, /open Spontaco in Chrome/i);
   assert.doesNotMatch(text, /Copy link/);
   const fennec = guideFor("Mozilla/5.0 (Android 14; Mobile; rv:68.0) Gecko/68.0 Fennec/68.0");
   assert.equal(fennec.status, "install");
@@ -113,7 +113,7 @@ test("browsers that cannot install are still sent to Chrome", () => {
   const duck = guideFor(ANDROID_DUCK);
   assert.equal(duck.status, "wrong-browser");
   assert.equal(duck.offerCopyLink, true);
-  assert.match(flat(duck), /For notifications, open Hangry in Chrome and tap Install app/);
+  assert.match(flat(duck), /For notifications, open Spontaco in Chrome and tap Install app/);
   const focus = guideFor("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Focus/126.0 Chrome/126.0.0.0 Mobile Safari/537.36");
   assert.equal(focus.status, "wrong-browser");
   assert.equal(guideFor(ANDROID_SAMSUNG).status, "install");
@@ -137,7 +137,7 @@ test("a denied Android phone is shown site permission and battery steps", () => 
   assert.equal(guide.status, "denied");
   const text = flat(guide);
   assert.match(text, /Site settings → Notifications/);
-  assert.match(text, /Apps → Hangry → Notifications/);
+  assert.match(text, /Apps → Spontaco → Notifications/);
   assert.match(text, /Battery, choose Unrestricted/);
 });
 
@@ -165,14 +165,14 @@ test("a signed-in phone is reminded until this device is subscribed", () => {
     standalone: true,
   }));
   assert.equal(iosDenied?.kind, "denied");
-  assert.match(iosDenied?.steps.join(" ") ?? "", /iPhone Settings → Notifications → Hangry/);
+  assert.match(iosDenied?.steps.join(" ") ?? "", /iPhone Settings → Notifications → Spontaco/);
 
   const androidDenied = pushReminder(readInstallSignals({
     userAgent: ANDROID_CHROME,
     notificationPermission: "denied",
   }));
   assert.equal(androidDenied?.kind, "denied");
-  assert.match(androidDenied?.steps.join(" ") ?? "", /Apps → Hangry → Notifications/);
+  assert.match(androidDenied?.steps.join(" ") ?? "", /Apps → Spontaco → Notifications/);
   assert.match(androidDenied?.steps.join(" ") ?? "", /Unrestricted/);
 
   const iosTab = pushReminder(readInstallSignals({
@@ -194,7 +194,7 @@ test("a signed-in phone is reminded until this device is subscribed", () => {
     notificationPermission: "default",
   }));
   assert.equal(duckReminder?.kind, "guide");
-  assert.match(duckReminder?.lede ?? "", /open Hangry in Chrome and tap Install app/);
+  assert.match(duckReminder?.lede ?? "", /open Spontaco in Chrome and tap Install app/);
 
   assert.equal(pushTestMessage(0), "0 devices subscribed, turn on notifications first");
   assert.equal(pushTestMessage(1), "Test sent to 1 device");
@@ -227,7 +227,7 @@ test("install reminders depend on the browser and how long ago Not now was", () 
   assert.equal(needsInstallForPush(readInstallSignals({ userAgent: ANDROID_FIREFOX })), false);
   const duckSheet = installPrompt(readInstallSignals({ userAgent: ANDROID_DUCK }));
   assert.equal(duckSheet.copyLink, true);
-  assert.match(duckSheet.lede, /open Hangry in Chrome and tap Install app/);
+  assert.match(duckSheet.lede, /open Spontaco in Chrome and tap Install app/);
   const desktop = installPrompt(readInstallSignals({
     userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     notificationPermission: "default",
@@ -253,7 +253,7 @@ test("the post-join install step uses the same steps per browser and skips insta
   const signals = (userAgent: string, extra: Record<string, unknown> = {}) => readInstallSignals({ userAgent, notificationPermission: "default", ...extra });
 
   const ios = joinInstallStep(signals(IOS_SAFARI));
-  assert.equal(ios?.title, "Install Hangry as an app");
+  assert.equal(ios?.title, "Install Spontaco as an app");
   assert.equal(ios?.kind, "ios");
   assert.deepEqual(ios?.steps, installPrompt(signals(IOS_SAFARI)).steps);
   assert.match(ios?.steps.join(" ") ?? "", /Share button.*Add to Home Screen/);

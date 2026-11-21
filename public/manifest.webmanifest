@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Hangry",
-  "short_name": "Hangry",
-  "description": "Hangry — let a private circle of friends know you're free.",
+  "name": "Spontaco",
+  "short_name": "Spontaco",
+  "description": "Spontaco: let a private circle of friends know you're free.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

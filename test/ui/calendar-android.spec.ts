@@ -111,9 +111,9 @@ for (const [width, height] of SIZES) {
       await page.waitForFunction(() => (window as unknown as { __shares: unknown[] }).__shares.length === 1);
       const shared = await page.evaluate(() => {
         const [data] = (window as unknown as { __shares: Array<{ title?: string; url?: string }> }).__shares;
-        return data?.title === "Hangry calendar" && data?.url === document.querySelector(".calendar-feed .feed-url")?.textContent && /^https?:/.test(data.url ?? "");
+        return data?.title === "Spontaco calendar" && data?.url === document.querySelector(".calendar-feed .feed-url")?.textContent && /^https?:/.test(data.url ?? "");
       });
-      check(shared, "Send link shares the https link with the Hangry calendar title");
+      check(shared, "Send link shares the https link with the Spontaco calendar title");
 
       await noSideScroll(page);
       await page.locator(".toast").waitFor({ state: "detached", timeout: 5000 }).catch(() => {});

@@ -1,8 +1,8 @@
 // Plain-text guide served at GET /llms.txt. Static, public, no user data.
 
-export const llmsTxt = `# Hangry
+export const llmsTxt = `# Spontaco
 
-Hangry is an invite-only app for friends to say when they are free and to make plans.
+Spontaco is an invite-only app for friends to say when they are free and to make plans.
 This guide is for AI agents and scripts acting for one person.
 Origin: https://imhangry.app
 Full request and response shapes: GET https://imhangry.app/api/openapi.json

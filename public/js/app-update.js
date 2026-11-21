@@ -1,5 +1,5 @@
 /**
- * Picks up a new Hangry build while the app stays open. sw/sw.js already skipWaiting()s and claim()s, so a new worker
+ * Picks up a new Spontaco build while the app stays open. sw/sw.js already skipWaiting()s and claim()s, so a new worker
  * takes over by itself, but the page keeps running the old JS until it reloads. This module asks the browser to look
  * for a new worker (a pull to refresh, or coming back to the app at most once a minute) and reloads into it once
  * that is safe: not while a field has focus, and not while the composer or a sheet holds text that was not sent.

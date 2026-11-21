@@ -89,7 +89,7 @@ test("a signed-in token does not change /welcome or /", async () => {
 test("the landing page holds no private data and links to the app", () => {
   assert.doesNotMatch(WELCOME, /fn_token|localStorage|<script/i, "no script, no session access");
   assert.doesNotMatch(WELCOME, /\u2014/, "no em dashes");
-  assert.match(WELCOME, /href="\/"[^>]*>Open Hangry</);
+  assert.match(WELCOME, /href="\/"[^>]*>Open Spontaco</);
   assert.match(WELCOME, /href="\/"[^>]*>Get started</);
   assert.match(WELCOME, /Example/);
   assert.match(WELCOME, /href="\/css\/welcome\.css"/);
@@ -119,7 +119,7 @@ test("the landing page leads with the button: tap, friends are told, whoever can
   assert.match(visibleText(hero), /You tap the buzzer.*Your friends are told.*Whoever can, comes/);
   assert.doesNotMatch(visibleText(hero), /\bplans?\b|calendar|schedul/i, "planning is not in the hero");
   assert.ok(text.indexOf("Hit the buzzer") < text.indexOf("Plans for any day"), "the buzzer comes before planning");
-  assert.match(text, /Also in Hangry/, "planning is presented as extra");
+  assert.match(text, /Also in Spontaco/, "planning is presented as extra");
   // Truthful about what the button does: it opens a sheet, then I'm free sends it.
   assert.match(text, /press I'm free/);
   assert.match(text, /Tap the buzzer Tap the glowing buzzer, add a note or a place if you like, and press I'm free/);
@@ -135,7 +135,7 @@ test("the landing page makes no tracking, count, or testimonial claims", () => {
   const text = visibleText(WELCOME);
   assert.doesNotMatch(text, /live location|real[- ]time location|track(s|ing)? (your )?friends|see where (your )?friends are|follow your friends|always on/i);
   assert.match(text, /Pins are meetup spots, not people\./);
-  assert.match(text, /Hangry does not follow anyone's location in the background\./);
+  assert.match(text, /Spontaco does not follow anyone's location in the background\./);
   assert.match(text, /rounded to about 100 metres, only if they tap for it/);
   assert.doesNotMatch(text, /\b\d[\d,]*\+?\s+(users|people|friends|circles|meetups|downloads)\b/i, "no made-up counts");
   assert.doesNotMatch(text, /testimonial|★|rated|loved by|trusted by|best app/i);

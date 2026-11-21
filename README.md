@@ -1,8 +1,8 @@
-# Hangry
+# Spontaco
 
-Hangry is a small, installable web app for an invite-only circle of friends. Tap once when you're free. Everyone in the circle gets a push. They tap Join, and you hear about it.
+Spontaco is a small, installable web app for an invite-only circle of friends. Tap once when you're free. Everyone in the circle gets a push. They tap Join, and you hear about it.
 
-It is a PWA: home-screen install on Android and on iPhone (iOS 16.4+), no app store. The server, the SQLite database, and the web push setup all live in this repo. The repo and the npm package are named `free-now`. The name people see is Hangry. The public site is whatever you set in `PUBLIC_BASE_URL`. Requests that still arrive on the previous Railway hostname are redirected there.
+It is a PWA: home-screen install on Android and on iPhone (iOS 16.4+), no app store. The server, the SQLite database, and the web push setup all live in this repo. The repo and the npm package are named `free-now`. The name people see is Spontaco (it used to be Hangry, and the domain and some internal identifiers still say hangry). The public site is whatever you set in `PUBLIC_BASE_URL`. Requests that still arrive on the previous Railway hostname are redirected there.
 
 ## Run it locally
 
@@ -106,13 +106,13 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | `MAP_PMTILES_TOKEN` | unset | Optional bearer token for `MAP_PMTILES_URL`, for private GitHub release assets (a fine-grained token with read access to the repo's contents). Sent as `Authorization: Bearer …` on the first request only; when a redirect moves to another host (GitHub sends the bytes from a signed `objects.githubusercontent.com` URL) it is dropped and not sent again. For a private asset use the API URL `https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>`; requests to `api.github.com` ask for `Accept: application/octet-stream`. The token is never logged or put in a URL. Ignored without a usable `MAP_PMTILES_URL`. |
 | `ADMIN_TOKEN` | unset | Bearer secret for operator routes. `POST /api/admin/query` and `GET /api/admin/schema` stay read-only. `POST /api/admin/circles/:id/delete` deletes a circle. `POST /api/admin/circles/:id/members/:userId/admin` with `{"admin":true}` or `{"admin":false}` sets that member's admin flag. `POST /api/admin/users/:userId/buzz-animation` with `{"buzzAnimation":"birthday"}` or `{"buzzAnimation":null}` sets or clears the special animation everyone sees for that person's Flic press (other values are 400, an unknown user is 404). `GET /api/admin/feedback` lists feedback newest first (optional `?status=`), and `POST /api/admin/feedback/:id` with `{"status","prUrl","note"}` updates one. Unset, or shorter than 32 characters, those paths stay hidden and answer 404. A bad token is also 404. Send `Authorization: Bearer <token>`. It is not shown in the app. Do not commit it. |
 | `CALENDAR_SYNC_KEY` | random key stored in the database | Encrypts calendar links, owner-only event titles, and the Google refresh token (AES-256-GCM). 64 hex characters or base64 of 32 bytes, for example `openssl rand -hex 32`. Unset, a random key is made once and kept in the database. Changing it makes stored links and tokens unreadable, and people see "Reconnect your calendar". Do not commit it. |
-| `GOOGLE_CLIENT_ID` | unset | OAuth client id (Web application) for Connect Google Calendar. The button appears only when both this and `GOOGLE_CLIENT_SECRET` are set; with one or neither, the feature is off and the pasted-link import is unchanged. Hangry asks for the `https://www.googleapis.com/auth/calendar.freebusy` scope alone, so it receives busy blocks and never event titles or details. |
+| `GOOGLE_CLIENT_ID` | unset | OAuth client id (Web application) for Connect Google Calendar. The button appears only when both this and `GOOGLE_CLIENT_SECRET` are set; with one or neither, the feature is off and the pasted-link import is unchanged. Spontaco asks for the `https://www.googleapis.com/auth/calendar.freebusy` scope alone, so it receives busy blocks and never event titles or details. |
 | `GOOGLE_CLIENT_SECRET` | unset | OAuth client secret. Set both, or the feature stays off. Never logged. Do not commit it. |
 | `GOOGLE_OAUTH_AUTH_URL`, `GOOGLE_OAUTH_TOKEN_URL`, `GOOGLE_OAUTH_FREEBUSY_URL`, `GOOGLE_OAUTH_REVOKE_URL` | the real Google endpoints | Test-only overrides (`https://accounts.google.com/o/oauth2/v2/auth`, `https://oauth2.googleapis.com/token`, `https://www.googleapis.com/calendar/v3/freeBusy`, `https://oauth2.googleapis.com/revoke`) so tests can point at a fake server. Leave unset in production. |
 
 Google Calendar: in Google Cloud, create an OAuth client of type Web application and add the authorized redirect URI `$PUBLIC_BASE_URL/api/calendar/google/callback` (for production this is `https://imhangry.app/api/calendar/google/callback`). Set `PUBLIC_BASE_URL` so that URI is stable, and set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the environment; do not commit them. A signed-in person starts with `GET /api/calendar/google/start`, which returns `{ "url" }` for Google's consent page. Google then returns the browser to the callback, which lands on `/?calendar=google` when connected or `/?calendar=google-error` when not. Only the refresh token is stored, encrypted. Disconnecting revokes it at Google.
 
-The only scope Hangry requests is `https://www.googleapis.com/auth/calendar.freebusy`. In the Google Cloud Data Access picker this scope is marked non-sensitive, so Hangry does not need [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification). While the OAuth consent screen is in Testing, only listed test users can connect, with a cap of 100 ([OAuth app state](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview)). Publishing the consent screen to production lifts that cap. No client id or secret belongs in the repo; both come from the environment.
+The only scope Spontaco requests is `https://www.googleapis.com/auth/calendar.freebusy`. In the Google Cloud Data Access picker this scope is marked non-sensitive, so Spontaco does not need [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification). While the OAuth consent screen is in Testing, only listed test users can connect, with a cap of 100 ([OAuth app state](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview)). Publishing the consent screen to production lifts that cap. No client id or secret belongs in the repo; both come from the environment.
 
 A wrong admin token is counted per client, eight failures in 60 seconds, and further wrong tokens from that address stay hidden. A correct token is accepted even during that window. Behind Railway the address is the rightmost `X-Forwarded-For` hop, the one the proxy appends; anything to the left is the caller's own header and is ignored. A direct connection uses the socket address. Each query runs in its own process and is killed after one second. A timeout is HTTP 408 `{ "error": "timeout" }`. When a result is cut at 500 rows the body includes `"truncated": true`.
 
@@ -145,26 +145,26 @@ Put the printed lines in the environment and restart. Then, on a phone:
 
 ## Install on your phone
 
-Hangry notifies a phone only after it is installed and notification permission is allowed. The in-app guide (welcome screen, and You → notifications) shows these steps for the phone you are on. The icon is a soft pink-to-red glow on black.
+Spontaco notifies a phone only after it is installed and notification permission is allowed. The in-app guide (welcome screen, and You → notifications) shows these steps for the phone you are on. The icon is a soft pink-to-red glow on black.
 
 ### iPhone (Safari, iOS 16.4 or newer)
 
 Notifications do not work in a Safari tab, or in an in-app browser such as Instagram or WhatsApp. Open the link in Safari first.
 
-1. Open Hangry in Safari.
+1. Open Spontaco in Safari.
 2. Tap the Share button, then **Add to Home Screen**.
-3. Open Hangry from the home-screen icon.
+3. Open Spontaco from the home-screen icon.
 4. Tap **Enable notifications**.
 5. Tap **Allow**.
 
-If you previously tapped Don't Allow: open iPhone Settings → Notifications → Hangry and turn **Allow Notifications** on. If Hangry is not listed, add it to the Home Screen and open it from the icon, then try Enable notifications again.
+If you previously tapped Don't Allow: open iPhone Settings → Notifications → Spontaco and turn **Allow Notifications** on. If Spontaco is not listed, add it to the Home Screen and open it from the icon, then try Enable notifications again.
 
 ### Android (Chrome or Firefox)
 
 Chrome, Edge, and Samsung Internet:
 
-1. Install Hangry. Tap the install prompt if Chrome shows one. Otherwise open the three-dot menu **⋮** and choose **Install app** or **Add to Home screen**.
-2. Open Hangry from the home-screen icon.
+1. Install Spontaco. Tap the install prompt if Chrome shows one. Otherwise open the three-dot menu **⋮** and choose **Install app** or **Add to Home screen**.
+2. Open Spontaco from the home-screen icon.
 3. Tap **Enable notifications**.
 4. Tap **Allow**.
 
@@ -172,21 +172,21 @@ Firefox for Android uses the same reminder, with its own install path:
 
 1. Open the menu **⋮**.
 2. Tap **Install**. Older versions say **Add to Home screen**. Confirm.
-3. Open Hangry from the home-screen icon, tap **Enable notifications**, then **Allow**.
+3. Open Spontaco from the home-screen icon, tap **Enable notifications**, then **Allow**.
 
 If a push never arrives, check both of these:
 
 - The site's notification permission is Allow. In Chrome, tap the lock icon → Permissions → Notifications, or menu **⋮** → Settings → Site settings → Notifications.
-- Hangry is allowed to notify you. Android Settings → Apps → Hangry → Notifications, then set Battery to **Unrestricted**.
+- Spontaco is allowed to notify you. Android Settings → Apps → Spontaco → Notifications, then set Battery to **Unrestricted**.
 
 ### Troubleshooting
 
-- **Opened from Instagram or WhatsApp.** Those in-app browsers cannot install Hangry or receive its pushes. Use the menu and open the link in Safari (iPhone) or Chrome (Android).
-- **Opened in a browser that cannot install the app.** In-app browsers, Firefox Focus, DuckDuckGo, and similar shells cannot install Hangry. Copy the link and open it in Chrome or Firefox, then install from there. Firefox itself can install Hangry and receive pushes.
+- **Opened from Instagram or WhatsApp.** Those in-app browsers cannot install Spontaco or receive its pushes. Use the menu and open the link in Safari (iPhone) or Chrome (Android).
+- **Opened in a browser that cannot install the app.** In-app browsers, Firefox Focus, DuckDuckGo, and similar shells cannot install Spontaco. Copy the link and open it in Chrome or Firefox, then install from there. Firefox itself can install Spontaco and receive pushes.
 - **Still looking at a Safari tab.** iOS only delivers Web Push to the Home Screen app, and only on iOS 16.4 or newer.
 - **The install prompt never appears.** On Android Chrome, use the three-dot menu **⋮** → Install app or Add to Home screen. In Firefox, the menu says **Install** (older versions say **Add to Home screen**). The site has to be HTTPS (localhost is the only exception).
 - **Don't Allow.** Follow the re-enable steps for that phone above. The Enable button cannot override a blocked permission.
-- **Android goes quiet after a day.** Battery optimisation paused the app. Set Hangry to Unrestricted, and confirm the site permission is still Allow.
+- **Android goes quiet after a day.** Battery optimisation paused the app. Set Spontaco to Unrestricted, and confirm the site permission is still Allow.
 - **No phone push at all, on any device.** The server has no VAPID keys, so alerts stay inside the app. Run `npm run vapid`, set the three variables, and restart.
 - **Changed the domain.** Old push subscriptions belong to the previous origin. Open the new URL, install again if needed, and tap Enable notifications.
 
@@ -228,7 +228,7 @@ The hostname is not decided yet. When it is, point it at Railway like this:
 1. In the Railway service, open **Settings → Networking → Custom Domain** and add that hostname.
 2. Railway shows the DNS record to create. Copy the target from that screen. It is usually a CNAME to a `*.up.railway.app` host, and the exact target can change.
 3. In IONOS: **Domains → your domain → DNS**. For a subdomain such as `www`, add a CNAME whose host is `www` and whose target is the Railway hostname only, with no `https://`.
-4. The zone apex (`example.com` with no subdomain) often cannot be a CNAME. If IONOS offers an ALIAS or ANAME record, point the apex at the Railway target. Otherwise serve Hangry on `www` and redirect the apex to it.
+4. The zone apex (`example.com` with no subdomain) often cannot be a CNAME. If IONOS offers an ALIAS or ANAME record, point the apex at the Railway target. Otherwise serve Spontaco on `www` and redirect the apex to it.
 5. Wait until Railway reports the domain as verified. It will request a Let's Encrypt certificate. HTTPS is not optional for installability or push.
 6. Set `PUBLIC_BASE_URL` to that exact origin and redeploy so copied invite links use it.
 7. Open the site from the new origin, install the PWA, and turn notifications on. Old push subscriptions from a different origin do not carry over.
@@ -270,13 +270,13 @@ railway.json    Dockerfile builder and health check
 
 `POST /api/buzz/<token>` is the only unauthenticated write, and the token is the credential. Everything else uses `Authorization: Bearer <device token>`.
 
-`/welcome` is a static public page about Hangry (`public/welcome.html`, `public/css/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it. Its example map is 15 fixed OpenStreetMap tiles of central Stuttgart (`tile.openstreetmap.org`, loaded lazily by the visitor's browser, with OSM attribution) and four pink free-now pins for made-up friends at real squares. It does not use the app's map code or `MAP_TILE_URL`.
+`/welcome` is a static public page about Spontaco (`public/welcome.html`, `public/css/welcome.css`). It has no script and no account data. Its buttons go to `/`, which is still the app, and nothing redirects to it. Its example map is 15 fixed OpenStreetMap tiles of central Stuttgart (`tile.openstreetmap.org`, loaded lazily by the visitor's browser, with OSM attribution) and four pink free-now pins for made-up friends at real squares. It does not use the app's map code or `MAP_TILE_URL`.
 
 Google Search Console verification uses `public/googlee48df27048aaa965.html`, served at `/googlee48df27048aaa965.html`, and a `google-site-verification` meta tag in `public/index.html`. Leave both in place. Google re-checks them. The service worker does not intercept that file, and `public/robots.txt` allows it and the homepage. `/privacy` is the public privacy policy (`public/privacy.html`), a static page like `/welcome`.
 
 ## Location
 
-Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Hangry does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
+Going free starts with nowhere. **Where?** can stay empty, use the phone's current location, or name a meetup. Search (a place or address) and a pin on a small map both come from OpenStreetMap, through the server, and a typed name is fine with no pin at all. Current location is one reading, rounded to about 100 metres. A place someone picked keeps that spot's coordinates. Spontaco does not watch location in the background. The meetup name and its coordinates are cleared as soon as the social expires. A plan's typed place name stays after that plan's day; only its pin is cleared. If location is denied, the social or plan is still created.
 
 The push says who is free and, when there is a meetup, where: `Alex is free – meet at Café Einstein`. It never includes coordinates. Tapping it opens that social.
 

@@ -31,7 +31,7 @@ test("the page loads in Chrome without a page error", { timeout: 60_000 }, async
     page.on("pageerror", (error) => errors.push(String(error)));
     const response = await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
     assert.equal(response?.status(), 200);
-    await page.locator("h1", { hasText: "Hangry" }).waitFor();
+    await page.locator("h1", { hasText: "Spontaco" }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
