@@ -123,10 +123,10 @@ const eventFields = {
 export const openapi = {
   openapi: "3.1.0",
   info: {
-    title: "Hangry agent API",
+    title: "Spontaco agent API",
     version: "1.0.0",
     description:
-      "Hangry is an invite-only friends app. An agent acts as the person who created its token, and friends see its actions as that person. Plain-text guide: /llms.txt.",
+      "Spontaco is an invite-only friends app. An agent acts as the person who created its token, and friends see its actions as that person. Plain-text guide: /llms.txt.",
   },
   servers: [{ url: "https://imhangry.app" }],
   security: [{ bearer: [] }],

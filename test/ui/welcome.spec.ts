@@ -65,7 +65,7 @@ async function overflow(page: Page) {
 const VIEWS = [...SIZES, [1280, 800]] as const;
 
 for (const [width, height] of VIEWS) {
-  test(`at ${width}: /welcome fits, shows the CTA up top, and Open Hangry goes to the app`, { timeout: 60_000 }, async () => {
+  test(`at ${width}: /welcome fits, shows the CTA up top, and Open Spontaco goes to the app`, { timeout: 60_000 }, async () => {
     const context = await phone(width, height);
     const tiles = await watchTiles(context);
     const page = await context.newPage();
@@ -80,7 +80,7 @@ for (const [width, height] of VIEWS) {
     assert.deepEqual(fit.wide, [], `nothing pokes out at ${width}`);
     const cta = page.locator("a.wl-btn[data-cta=hero]");
     const box = await cta.boundingBox();
-    assert.ok(box && box.y + box.height <= height, `Open Hangry is in the first screen at ${width} (bottom ${box?.y! + box?.height!})`);
+    assert.ok(box && box.y + box.height <= height, `Open Spontaco is in the first screen at ${width} (bottom ${box?.y! + box?.height!})`);
     assert.ok(box!.height >= 44, "CTA is a comfortable tap target");
     assert.equal(await page.locator(".wl-tag", { hasText: "Example" }).count(), 2, "the demo and the map are labelled as examples");
     // No named helpers inside evaluate: tsx would wrap them in __name, which the page lacks.
@@ -133,7 +133,7 @@ for (const [width, height] of VIEWS) {
     await page.screenshot({ path: path.join(SHOT_DIR, `welcome-full-w${width}.png`), fullPage: true });
     await cta.click();
     await page.waitForURL(`${hangry.baseUrl}/`);
-    await page.locator("h1.wordmark", { hasText: "Hangry" }).waitFor();
+    await page.locator("h1.wordmark", { hasText: "Spontaco" }).waitFor();
     await page.locator("#name").waitFor();
     assert.deepEqual(errors, []);
     await context.close();
@@ -147,7 +147,7 @@ test("signed out: the login view links to /welcome quietly, an invite link does 
   const page = await context.newPage();
   await page.goto(`${hangry.baseUrl}/`);
   await page.locator("#name").waitFor();
-  const link = page.getByRole("link", { name: "What is Hangry?" });
+  const link = page.getByRole("link", { name: "What is Spontaco?" });
   assert.equal(await link.getAttribute("href"), "/welcome");
   const privacy = page.getByRole("link", { name: "Privacy" });
   assert.equal(await privacy.getAttribute("href"), "/privacy");
@@ -161,7 +161,7 @@ test("signed out: the login view links to /welcome quietly, an invite link does 
 
   await page.goto(`${hangry.baseUrl}/join/${circle.inviteCode}`);
   await page.locator(".lede", { hasText: "Join Fake circle" }).waitFor();
-  assert.equal(await page.getByRole("link", { name: "What is Hangry?" }).count(), 0, "the invite screen stays focused");
+  assert.equal(await page.getByRole("link", { name: "What is Spontaco?" }).count(), 0, "the invite screen stays focused");
   assert.equal(await page.getByRole("link", { name: "Privacy" }).getAttribute("href"), "/privacy", "the legal link stays");
 
   await page.getByRole("button", { name: "I already have an account" }).waitFor();
@@ -181,7 +181,7 @@ test("signed in: / opens the app, deep links work, /welcome does not redirect", 
   await page.goto(`${hangry.baseUrl}/`);
   await page.locator("nav.tabbar").waitFor();
   assert.equal(page.url(), `${hangry.baseUrl}/`);
-  assert.equal(await page.getByRole("link", { name: "What is Hangry?" }).count(), 0);
+  assert.equal(await page.getByRole("link", { name: "What is Spontaco?" }).count(), 0);
 
   await page.goto(`${hangry.baseUrl}/?plan=${plan.id}&circle=${circle.id}`);
   await page.locator("nav.tabbar").waitFor();
@@ -231,7 +231,7 @@ test("PWA: manifest starts at /, and offline / still opens the cached app after 
   await context.setOffline(true);
   await page.goto(`${hangry.baseUrl}/`);
   await page.locator("#name").waitFor();
-  assert.equal(await page.locator("h1.wordmark", { hasText: "Hangry" }).count(), 1, "offline / is the app, not the landing page");
+  assert.equal(await page.locator("h1.wordmark", { hasText: "Spontaco" }).count(), 1, "offline / is the app, not the landing page");
   await page.goto(`${hangry.baseUrl}/welcome`);
   await page.getByRole("heading", { level: 1, name: H1 }).waitFor();
   await context.setOffline(false);

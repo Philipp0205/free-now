@@ -71,8 +71,8 @@ test("the policy has no script, no dashes or parentheses, and no invented email"
   assert.doesNotMatch(PRIVACY, /[\u2014\u2013]/, "no em or en dashes");
   assert.doesNotMatch(visibleText(PRIVACY), /[()]/, "no parentheses");
   assert.doesNotMatch(PRIVACY, /@|mailto:/, "no email address");
-  assert.match(PRIVACY, /href="\/welcome"[^>]*aria-label="Hangry home"/);
-  assert.match(PRIVACY, /href="\/">Open Hangry</);
+  assert.match(PRIVACY, /href="\/welcome"[^>]*aria-label="Spontaco home"/);
+  assert.match(PRIVACY, /href="\/">Open Spontaco</);
   assert.match(PRIVACY, /href="\/css\/welcome\.css"/);
   assert.match(PRIVACY, /<h1>Privacy<\/h1>/);
 });
@@ -83,7 +83,7 @@ test("the policy states the facts", () => {
   assert.match(text, /invite-only/);
   assert.match(text, /We do not show ads, and we do not sell your data\./);
   assert.match(text, /calendar\.freebusy permission, which is busy and free times/);
-  assert.match(text, /Hangry never receives event titles or details, and never stores them/);
+  assert.match(text, /Spontaco never receives event titles or details, and never stores them/);
   assert.match(text, /we delete the token and the busy times, and we tell Google to revoke access/);
   assert.match(text, /we store only a hash of it/);
   assert.match(text, /Railway in the EU, in the europe-west4 region/);

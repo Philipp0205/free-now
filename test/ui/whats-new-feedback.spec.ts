@@ -31,7 +31,7 @@ test("the popup shows unseen entries once, and Got it marks them seen on the pho
     const dialog = page.getByRole("dialog", { name: "What's new" });
     await dialog.waitFor();
     for (const entry of ENTRIES) await dialog.getByRole("heading", { name: entry.title, exact: true }).waitFor({ state: "attached" });
-    await dialog.getByText("Since you last opened Hangry.").waitFor();
+    await dialog.getByText("Since you last opened Spontaco.").waitFor();
     await waitForSeen(alex.token, LATEST);
     assert.equal(await page.evaluate(() => localStorage.getItem("fn_whats_new_seen")), LATEST);
     await dialog.getByRole("button", { name: "Got it" }).click();
@@ -120,7 +120,7 @@ test("What's new reopens from the You tab with every entry", { timeout: 90_000 }
     const dialog = page.getByRole("dialog", { name: "What's new" });
     await dialog.waitFor();
     assert.equal(await dialog.locator(".whats-new-entry").count(), ENTRIES.length);
-    await dialog.getByText("Recent changes to Hangry.").waitFor();
+    await dialog.getByText("Recent changes to Spontaco.").waitFor();
     await dialog.getByRole("button", { name: "Done" }).click();
     await dialog.waitFor({ state: "detached" });
     await page.getByRole("button", { name: /What's new/ }).click();

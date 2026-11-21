@@ -191,7 +191,7 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(shotsDir(), `${name}.png`) });
 }
 
-test("a light OS gets the readable, mouse-friendly light Hangry on desktop", { timeout: 150_000 }, async () => {
+test("a light OS gets the readable, mouse-friendly light Spontaco on desktop", { timeout: 150_000 }, async () => {
   const viewportHeight = 900;
   const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
   const { circle } = await post("/api/circles", { name: "Friends" }, alex.token);

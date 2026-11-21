@@ -1,6 +1,6 @@
 # Calendar export and feed
 
-Hangry can put plans into a calendar app in two ways:
+Spontaco can put plans into a calendar app in two ways:
 
 1. **Add to calendar**: a one-time `.ics` file for one plan.
 2. **Calendar feed**: a private link that a calendar app subscribes to. It keeps updating.
@@ -38,7 +38,7 @@ Both use the same event shape and the same UID, so a plan does not show up twice
 | `android` | Copy link, plus Send link when `navigator.share` exists. No `webcal://` link. | Google Calendar only adds a feed on a computer: calendar.google.com, + next to Other calendars, From URL, paste. It then syncs to the phone. Other apps: look for Add calendar from URL or Subscribe. |
 | `other` (desktop, unknown) | Copy link, plus Send link when `navigator.share` exists. No `webcal://` link. | Google (computer, From URL), Outlook (Add calendar, Subscribe from web), Apple (Add Subscribed Calendar). |
 
-Why there is no `webcal://` button on Android: Android has no app for `webcal://` by default, so tapping the link did nothing at all (no navigation, no error). The Google Calendar app cannot subscribe to a URL either. Send link calls `navigator.share({ title: "Hangry calendar", url })` with the https link so it can be sent to a computer. Cancelling the share sheet does nothing.
+Why there is no `webcal://` button on Android: Android has no app for `webcal://` by default, so tapping the link did nothing at all (no navigation, no error). The Google Calendar app cannot subscribe to a URL either. Send link calls `navigator.share({ title: "Spontaco calendar", url })` with the https link so it can be sent to a computer. Cancelling the share sheet does nothing.
 
 Sources:
 
@@ -67,7 +67,7 @@ Window: plans from 30 days ago and everything ahead. At most 200 events: upcomin
 | --- | --- |
 | `UID` | `<planId>@<host>`. The host is the hostname of `PUBLIC_BASE_URL`, or `hangry` when it is unset. The same UID is used in the file and the feed. |
 | `SUMMARY` | Plan title. |
-| `DESCRIPTION` | "Hosted by <host name>", the plan description if there is one, then for a timed plan "Hangry plans have no end time, so this shows 2 hours." (plus a note when the time does not exist that day, see Time zones), then "Hangry: <app link>". |
+| `DESCRIPTION` | "Hosted by <host name>", the plan description if there is one, then for a timed plan "Spontaco plans have no end time, so this shows 2 hours." (plus a note when the time does not exist that day, see Time zones), then "Spontaco: <app link>". |
 | `LOCATION` | The place text only. No coordinates. |
 | `URL` | `<origin>/?plan=<id>`, which opens the plan in the app. |
 | `DTSTART` / `DTEND` | With a time: UTC instants, start plus 2 hours. With no time (TBD): all day, `VALUE=DATE`, ending the next day. |
@@ -82,7 +82,7 @@ Never included: other guests' names, emails, attendees, chat, invite codes, shar
 
 ### Calendar wrapper
 
-`VERSION:2.0`, `PRODID:-//Hangry//Calendar 1.0//EN`, `CALSCALE:GREGORIAN`, `METHOD:PUBLISH`, `X-WR-TIMEZONE:<APP_TZ>`. The feed also sets `X-WR-CALNAME:Hangry`. Lines end in CRLF and are folded at 75 octets, counting UTF-8 bytes and never splitting a character. TEXT values escape `\`, `;`, `,` and newlines.
+`VERSION:2.0`, `PRODID:-//Spontaco//Calendar 1.0//EN`, `CALSCALE:GREGORIAN`, `METHOD:PUBLISH`, `X-WR-TIMEZONE:<APP_TZ>`. The feed also sets `X-WR-CALNAME:Spontaco`. Lines end in CRLF and are folded at 75 octets, counting UTF-8 bytes and never splitting a character. TEXT values escape `\`, `;`, `,` and newlines.
 
 ## Time zones
 
@@ -95,11 +95,11 @@ Daylight saving edge cases follow RFC 5545 (section 3.3.5), and the app's own cl
 
 ## Limitations
 
-- **Refresh is up to the calendar app.** Your calendar app decides how often it checks for changes, which can take hours. Hangry cannot push updates.
+- **Refresh is up to the calendar app.** Your calendar app decides how often it checks for changes, which can take hours. Spontaco cannot push updates.
 - **The one-time file never updates.** Use the feed for that.
 - **Revoking does not wipe copies.** After Reset link or Turn off, calendars keep showing what they last fetched until the subscription is removed there. The old link just returns 404.
 - **Removed plans just disappear.** A plan you lose access to is dropped, not sent as `CANCELLED`. Some clients only notice on their next full refresh.
-- **Fixed length.** Hangry plans have no end time, so every timed plan shows 2 hours. Each timed event says so in its description.
+- **Fixed length.** Spontaco plans have no end time, so every timed plan shows 2 hours. Each timed event says so in its description.
 - **Anyone with the link can read the feed.** Treat it like a password. Reset it if it leaks.
-- **The token is in the URL path.** Calendar servers cannot send a header, so the secret is part of `/cal/<token>.ics`. That means the hosting platform's HTTP access logs (for example Railway's request logs) and the calendar provider that fetches the feed both see it. Hangry itself never logs the feed URL: an error while serving `/cal/` is logged as "feed error" with the token replaced by `[token]`. If the link may have leaked, use Reset link (or Turn off). The old token stops working at once.
-- **Plans older than the 90-day history are deleted from Hangry,** and they are already outside the 30-day window anyway.
+- **The token is in the URL path.** Calendar servers cannot send a header, so the secret is part of `/cal/<token>.ics`. That means the hosting platform's HTTP access logs (for example Railway's request logs) and the calendar provider that fetches the feed both see it. Spontaco itself never logs the feed URL: an error while serving `/cal/` is logged as "feed error" with the token replaced by `[token]`. If the link may have leaked, use Reset link (or Turn off). The old token stops working at once.
+- **Plans older than the 90-day history are deleted from Spontaco,** and they are already outside the 30-day window anyway.

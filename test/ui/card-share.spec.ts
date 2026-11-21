@@ -281,7 +281,7 @@ test("a known link shares inside the tap with title, day and time only, and the 
     assert.deepEqual(posts, [], "no request before or after sharing");
     assert.deepEqual(Object.keys(call1.data).sort(), ["text", "title", "url"]);
     assert.equal(call1.data.title, "Bouldering");
-    assert.match(call1.data.text, /^Bouldering, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}( \d{4})? 18:30 on Hangry$/);
+    assert.match(call1.data.text, /^Bouldering, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}( \d{4})? 18:30 on Spontaco$/);
     assert.equal(call1.data.url, `${hangry.baseUrl}/p/${plan.shareId}`);
     const blob = JSON.stringify(call1.data);
     for (const leak of [PLACE, "Hauptstr", "52.52", "13.405", "Hana", "Finn", "chalk", circle.name, circle.inviteCode, plan.id]) {

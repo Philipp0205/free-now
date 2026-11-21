@@ -55,11 +55,11 @@ function iosGuide(signals) {
       platform: "ios",
       status: "on",
       headline: "Notifications on",
-      lede: "Hangry can reach this iPhone. You'll get a push when a friend is free or joins you.",
+      lede: "Spontaco can reach this iPhone. You'll get a push when a friend is free or joins you.",
       groups: [{
         label: null,
         steps: [],
-        note: "If they stop arriving, open iPhone Settings → Notifications → Hangry and leave Allow Notifications on. This only works from the home-screen icon, on iOS 16.4 or newer.",
+        note: "If they stop arriving, open iPhone Settings → Notifications → Spontaco and leave Allow Notifications on. This only works from the home-screen icon, on iOS 16.4 or newer.",
         reenable: [],
       }],
     };
@@ -69,15 +69,15 @@ function iosGuide(signals) {
       platform: "ios",
       status: "denied",
       headline: "Notifications are blocked",
-      lede: "Hangry can't notify this iPhone until you allow it again.",
+      lede: "Spontaco can't notify this iPhone until you allow it again.",
       groups: [{
         label: null,
         steps: [],
-        note: "Notifications do not work in a Safari tab, or inside Instagram or WhatsApp. Open Hangry in Safari, add it to the Home Screen, then open it from that icon.",
+        note: "Notifications do not work in a Safari tab, or inside Instagram or WhatsApp. Open Spontaco in Safari, add it to the Home Screen, then open it from that icon.",
         reenable: [
           "Open the iPhone Settings app.",
-          "Go to Notifications → Hangry and turn Allow Notifications on.",
-          "If Hangry is not in that list, add it to the Home Screen, open it from the icon, then tap Enable notifications and Allow.",
+          "Go to Notifications → Spontaco and turn Allow Notifications on.",
+          "If Spontaco is not in that list, add it to the Home Screen, open it from the icon, then tap Enable notifications and Allow.",
         ],
       }],
     };
@@ -86,7 +86,7 @@ function iosGuide(signals) {
   return {
     platform: "ios",
     status: wrongBrowser ? "wrong-browser" : "install",
-    headline: wrongBrowser ? "Open Hangry in Safari" : "Get notifications on iPhone",
+    headline: wrongBrowser ? "Open Spontaco in Safari" : "Get notifications on iPhone",
     lede: wrongBrowser
       ? "iPhone notifications need Safari, iOS 16.4 or newer, and the Home Screen app. They do not work in a Safari tab, or in Instagram or WhatsApp. Open this page in Safari first."
       : "Notifications need the Home Screen app on iOS 16.4 or newer. They do not work in a Safari tab, or inside Instagram or WhatsApp.",
@@ -94,7 +94,7 @@ function iosGuide(signals) {
       label: null,
       steps: [
         step(
-          "Open Hangry in Safari",
+          "Open Spontaco in Safari",
           "If you are in Instagram, WhatsApp, or another app, use that app's menu and choose Open in Safari.",
           safari,
         ),
@@ -105,7 +105,7 @@ function iosGuide(signals) {
         ),
         step(
           "Open the home-screen icon",
-          "Leave the Safari tab. Open Hangry from the icon you just added.",
+          "Leave the Safari tab. Open Spontaco from the icon you just added.",
           installed,
         ),
         step(
@@ -131,22 +131,22 @@ function androidGuide(signals) {
   const firefox = signals.browser === "firefox";
   if (signals.inApp) {
     return chromeInstead(
-      "Instagram, WhatsApp, and other in-app browsers can't install Hangry or deliver its notifications. Open this page in Chrome first.",
+      "Instagram, WhatsApp, and other in-app browsers can't install Spontaco or deliver its notifications. Open this page in Chrome first.",
     );
   }
   if (signals.canInstall === false) {
-    return chromeInstead("For notifications, open Hangry in Chrome and tap Install app.");
+    return chromeInstead("For notifications, open Spontaco in Chrome and tap Install app.");
   }
   if (installed && allowed) {
     return {
       platform: "android",
       status: "on",
       headline: "Notifications on",
-      lede: "Hangry can reach this phone. You'll get a push when a friend is free or joins you.",
+      lede: "Spontaco can reach this phone. You'll get a push when a friend is free or joins you.",
       groups: [{
         label: null,
         steps: [],
-        note: "If a push never arrives, open Android Settings → Apps → Hangry → Notifications and turn them on, and set Hangry's battery use to Unrestricted.",
+        note: "If a push never arrives, open Android Settings → Apps → Spontaco → Notifications and turn them on, and set Spontaco's battery use to Unrestricted.",
         reenable: [],
       }],
     };
@@ -156,11 +156,11 @@ function androidGuide(signals) {
       platform: "android",
       status: "denied",
       headline: "Notifications are blocked",
-      lede: "Hangry can't notify this phone until you allow it again.",
+      lede: "Spontaco can't notify this phone until you allow it again.",
       groups: [{
         label: null,
         steps: [],
-        note: "Also check battery optimisation. Android can silence Hangry even after you tap Allow.",
+        note: "Also check battery optimisation. Android can silence Spontaco even after you tap Allow.",
         reenable: firefox ? firefoxReenable() : chromeReenable(),
       }],
     };
@@ -170,8 +170,8 @@ function androidGuide(signals) {
     status: "install",
     headline: "Get notifications on Android",
     lede: firefox
-      ? "Install Hangry from Firefox, open it from the home-screen icon, then allow notifications."
-      : "Install Hangry from Chrome, open it from the home-screen icon, then allow notifications.",
+      ? "Install Spontaco from Firefox, open it from the home-screen icon, then allow notifications."
+      : "Install Spontaco from Chrome, open it from the home-screen icon, then allow notifications.",
     groups: [{
       label: null,
       steps: firefox ? firefoxSteps(installed, allowed) : androidSteps(installed, allowed),
@@ -185,7 +185,7 @@ function chromeInstead(lede) {
   return {
     platform: "android",
     status: "wrong-browser",
-    headline: "Open Hangry in Chrome",
+    headline: "Open Spontaco in Chrome",
     lede,
     offerCopyLink: true,
     groups: [{
@@ -200,13 +200,13 @@ function chromeInstead(lede) {
 function firefoxSteps(installed, allowed) {
   return [
     step(
-      "Install Hangry",
+      "Install Spontaco",
       "Open the menu ⋮, tap Install (older versions say Add to Home screen), and confirm.",
       installed,
     ),
     step(
       "Open the home-screen icon",
-      "Open Hangry from that icon.",
+      "Open Spontaco from that icon.",
       installed,
     ),
     step(
@@ -225,29 +225,29 @@ function firefoxSteps(installed, allowed) {
 function chromeReenable() {
   return [
     "In Chrome, tap the lock icon in the address bar, then Permissions → Notifications → Allow. Or open the menu ⋮ → Settings → Site settings → Notifications.",
-    "In Android Settings, open Apps → Hangry → Notifications and turn them on.",
-    "In Apps → Hangry → Battery, choose Unrestricted.",
+    "In Android Settings, open Apps → Spontaco → Notifications and turn them on.",
+    "In Apps → Spontaco → Battery, choose Unrestricted.",
   ];
 }
 
 function firefoxReenable() {
   return [
-    "In Firefox, open the menu ⋮ → Settings → Site permissions → Notifications, and set Hangry to Allow.",
-    "In Android Settings, open Apps → Hangry → Notifications and turn them on.",
-    "In Apps → Hangry → Battery, choose Unrestricted.",
+    "In Firefox, open the menu ⋮ → Settings → Site permissions → Notifications, and set Spontaco to Allow.",
+    "In Android Settings, open Apps → Spontaco → Notifications and turn them on.",
+    "In Apps → Spontaco → Battery, choose Unrestricted.",
   ];
 }
 
 function androidSteps(installed, allowed) {
   return [
     step(
-      "Install Hangry",
+      "Install Spontaco",
       "Tap the install prompt if Chrome shows one. Otherwise open the three-dot menu ⋮ and choose Install app or Add to Home screen.",
       installed,
     ),
     step(
       "Open the home-screen icon",
-      "Open Hangry from that icon.",
+      "Open Spontaco from that icon.",
       installed,
     ),
     step(
@@ -264,7 +264,7 @@ function androidSteps(installed, allowed) {
 }
 
 function androidNote() {
-  return "If a push still doesn't arrive, open Android Settings → Apps → Hangry → Notifications and turn them on, set this site's notification permission to Allow, and set Battery to Unrestricted.";
+  return "If a push still doesn't arrive, open Android Settings → Apps → Spontaco → Notifications and turn them on, set this site's notification permission to Allow, and set Battery to Unrestricted.";
 }
 
 function desktopGuide() {
@@ -282,7 +282,7 @@ function desktopGuide() {
     platform: "other",
     status: "install",
     headline: "Install on your phone",
-    lede: "Hangry notifies phones. Open this page on an iPhone in Safari, or on Android in Chrome or Firefox. A computer only shows alerts inside the app.",
+    lede: "Spontaco notifies phones. Open this page on an iPhone in Safari, or on Android in Chrome or Firefox. A computer only shows alerts inside the app.",
     groups: [
       { label: "iPhone", steps: ios.groups[0].steps, note: ios.groups[0].note, reenable: [] },
       { label: "Android", steps: android.groups[0].steps, note: android.groups[0].note, reenable: [] },
@@ -303,7 +303,7 @@ export function pushReminder(signals, device = {}) {
     return {
       kind: "denied",
       title: "Notifications are blocked",
-      lede: "Hangry can't notify this phone until you allow it in settings.",
+      lede: "Spontaco can't notify this phone until you allow it in settings.",
       steps: deniedSteps(signals),
     };
   }
@@ -318,7 +318,7 @@ export function pushReminder(signals, device = {}) {
   return {
     kind: "enable",
     title: "Turn on notifications",
-    lede: "Hangry can only reach this phone after you allow notifications.",
+    lede: "Spontaco can only reach this phone after you allow notifications.",
     steps: [],
   };
 }
@@ -340,13 +340,13 @@ function canSubscribeHere(signals) {
 function deniedSteps(signals) {
   if (signals.platform === "ios") {
     return [
-      "Open iPhone Settings → Notifications → Hangry and turn Allow Notifications on.",
-      "If Hangry is not listed, add it to the Home Screen and open it from the icon.",
+      "Open iPhone Settings → Notifications → Spontaco and turn Allow Notifications on.",
+      "If Spontaco is not listed, add it to the Home Screen and open it from the icon.",
     ];
   }
   if (signals.platform === "android") {
     return [
-      "Android Settings → Apps → Hangry → Notifications, and turn them on.",
+      "Android Settings → Apps → Spontaco → Notifications, and turn them on.",
       "Set Battery to Unrestricted.",
     ];
   }
@@ -363,7 +363,7 @@ export function installReminderDue(storedAt, now) {
   return now - at >= INSTALL_LATER_MS;
 }
 
-/** Push cannot work in this browser until Hangry is installed. */
+/** Push cannot work in this browser until Spontaco is installed. */
 export function needsInstallForPush(signals) {
   if (signals.platform === "ios") return !signals.standalone;
   if (signals.platform === "android") return signals.canInstall === false || Boolean(signals.inApp);
@@ -375,12 +375,12 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
     const safari = Boolean(signals.safari && !signals.inApp);
     return {
       kind: safari ? "ios" : "ios-other",
-      title: "Install Hangry",
+      title: "Install Spontaco",
       lede: safari
-        ? "Add Hangry to your Home Screen to get notifications."
-        : "Open Hangry in Safari, then add it to your Home Screen.",
+        ? "Add Spontaco to your Home Screen to get notifications."
+        : "Open Spontaco in Safari, then add it to your Home Screen.",
       steps: safari
-        ? ["Tap the Share button.", "Tap Add to Home Screen.", "Open Hangry from the icon."]
+        ? ["Tap the Share button.", "Tap Add to Home Screen.", "Open Spontaco from the icon."]
         : ["Open this page in Safari.", "Tap Share, then Add to Home Screen."],
       offerInstall: false,
       copyLink: !safari,
@@ -389,8 +389,8 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
   if (signals.platform === "android" && signals.browser === "firefox") {
     return {
       kind: "firefox",
-      title: "Install Hangry",
-      lede: "Install Hangry to get notifications.",
+      title: "Install Spontaco",
+      lede: "Install Spontaco to get notifications.",
       steps: [
         "Open the menu ⋮.",
         "Tap Install. Older versions say Add to Home screen.",
@@ -403,8 +403,8 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
   if (signals.platform === "android" && (signals.canInstall === false || signals.inApp)) {
     return {
       kind: "unsupported",
-      title: "Install Hangry",
-      lede: "For notifications, open Hangry in Chrome and tap Install app.",
+      title: "Install Spontaco",
+      lede: "For notifications, open Spontaco in Chrome and tap Install app.",
       steps: [],
       offerInstall: false,
       copyLink: true,
@@ -413,8 +413,8 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
   if (signals.platform !== "android") {
     return {
       kind: "desktop",
-      title: "Install Hangry",
-      lede: "Hangry notifies phones. On a computer, alerts stay in this browser.",
+      title: "Install Spontaco",
+      lede: "Spontaco notifies phones. On a computer, alerts stay in this browser.",
       steps: [],
       offerInstall: false,
       copyLink: false,
@@ -423,8 +423,8 @@ export function installPrompt(signals, { canPrompt = false } = {}) {
   }
   return {
     kind: "native",
-    title: "Install Hangry",
-    lede: "Install Hangry to get notifications.",
+    title: "Install Spontaco",
+    lede: "Install Spontaco to get notifications.",
     steps: canPrompt ? [] : ["Open the browser menu.", "Tap Install app or Add to Home screen."],
     offerInstall: Boolean(canPrompt),
     copyLink: false,
@@ -441,7 +441,7 @@ export function installHowTo(signals) {
   return {
     kind: prompt.kind,
     title: prompt.title,
-    lede: desktop ? "Add Hangry to your home screen or desktop so it opens like an app." : prompt.lede,
+    lede: desktop ? "Add Spontaco to your home screen or desktop so it opens like an app." : prompt.lede,
     steps: desktop ? ["Open the browser menu.", "Choose Install app or Add to Home screen."] : prompt.steps,
     copyLink: prompt.copyLink,
   };
@@ -462,13 +462,13 @@ export function joinInstallStep(signals, { canPrompt = false } = {}) {
   let lede = why;
   let steps = prompt.steps;
   if (prompt.kind === "ios-other") lede = `Open this page in Safari first. ${why}`;
-  if (prompt.kind === "unsupported") lede = "This browser can't install Hangry. Open this page in Chrome, then tap Install app.";
+  if (prompt.kind === "unsupported") lede = "This browser can't install Spontaco. Open this page in Chrome, then tap Install app.";
   if (prompt.kind === "native" && !canPrompt) {
-    steps = ["Open the three-dot menu ⋮.", "Tap Install app or Add to Home screen.", "Open Hangry from the icon."];
+    steps = ["Open the three-dot menu ⋮.", "Tap Install app or Add to Home screen.", "Open Spontaco from the icon."];
   }
   return {
     kind: prompt.kind,
-    title: "Install Hangry as an app",
+    title: "Install Spontaco as an app",
     lede,
     steps,
     offerInstall: prompt.offerInstall,
@@ -481,7 +481,7 @@ function guideLede(signals) {
     return "iPhone notifications need the Home Screen app. A Safari tab can't receive them.";
   }
   if (signals.platform === "android" && (signals.canInstall === false || signals.inApp)) {
-    return "For notifications, open Hangry in Chrome and tap Install app.";
+    return "For notifications, open Spontaco in Chrome and tap Install app.";
   }
-  return "This browser can't receive Hangry notifications yet.";
+  return "This browser can't receive Spontaco notifications yet.";
 }

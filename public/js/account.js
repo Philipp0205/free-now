@@ -83,7 +83,7 @@ export function emailGate() {
       el("h1", { class: "wordmark", text: "Add your email" }),
       el("p", {
         class: "lede",
-        text: "Hangry now keeps an email on every account, so you can always get back in. We will send a link to confirm it.",
+        text: "Spontaco now keeps an email on every account, so you can always get back in. We will send a link to confirm it.",
       }),
     ]),
     el("form", { class: "stack", onsubmit: onSaveGateEmail }, [
@@ -196,7 +196,7 @@ export function lostCodeForm() {
 const LINK_COPY = {
   verify: {
     title: "Confirm your email",
-    lede: "Tap to confirm this address for your Hangry account.",
+    lede: "Tap to confirm this address for your Spontaco account.",
     action: "Confirm email",
     done: "Email confirmed.",
   },
@@ -221,7 +221,7 @@ export function linkScreen() {
     ]),
     el("div", { class: "stack" }, [
       flow.done || failed
-        ? el("button", { class: "btn", type: "button", text: "Open Hangry", onclick: onLeaveLink })
+        ? el("button", { class: "btn", type: "button", text: "Open Spontaco", onclick: onLeaveLink })
         : el("button", {
             class: "btn",
             type: "button",

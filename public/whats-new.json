@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-spontaco",
+    "date": "2026-11-21",
+    "title": "Hangry is now Spontaco",
+    "bullets": [
+      "The app is now called Spontaco. Everything works the same as before.",
+      "It has a new icon. To see it on your home screen, remove the app and add it again.",
+      "The web address stays the same for now."
+    ]
+  },
+  {
     "id": "2026-11-21-lizard-sound",
     "date": "2026-11-21",
     "title": "A lizard sound when a buzz arrives",

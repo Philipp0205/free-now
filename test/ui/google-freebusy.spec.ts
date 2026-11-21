@@ -117,7 +117,7 @@ for (const [width, height] of SIZES) {
       const panel = await openYou(page);
       await panel.getByRole("button", { name: "Connect calendar" }).waitFor();
       assert.equal(await page.getByRole("button", { name: "Connect Google Calendar" }).count(), 0);
-      assert.equal(await panel.getByText("What Hangry can and can't see").count(), 0);
+      assert.equal(await panel.getByText("What Spontaco can and can't see").count(), 0);
       await panel.getByText("including event names", { exact: false }).waitFor();
       await panel.getByText("Friends still only see busy or free.", { exact: false }).waitFor();
       await panel.getByText("They never see what is in your calendar.", { exact: false }).waitFor();
@@ -130,7 +130,7 @@ for (const [width, height] of SIZES) {
     }
   });
 
-  test(`at ${width}: feature on, not connected, explains what Hangry sees and stores`, { timeout: 120_000 }, async () => {
+  test(`at ${width}: feature on, not connected, explains what Spontaco sees and stores`, { timeout: 120_000 }, async () => {
     const { alex, friends } = await seed(on, `n${width}`);
     const page = await phone(on, width, height, alex.token, friends.id);
     try {
@@ -148,7 +148,7 @@ for (const [width, height] of SIZES) {
         "about every 20 minutes",
         "tap Remove in this panel",
         "deletes the token and the busy times, and tells Google to revoke access",
-        "A private calendar link lets Hangry download the whole calendar file, including event names.",
+        "A private calendar link lets Spontaco download the whole calendar file, including event names.",
         "your event names encrypted for you alone",
         "It discards places, notes and people. Friends still only see busy or free.",
       ]) assert.ok(text.includes(phrase), `panel says: ${phrase}`);
@@ -205,7 +205,7 @@ for (const [width, height] of SIZES) {
       await page.locator(".toast", { hasText: "Google Calendar connected" }).waitFor();
       assert.equal(new URL(page.url()).search, "", "calendar param is stripped");
       await panel.getByText("Last checked", { exact: false }).waitFor();
-      await panel.getByText("Hangry never sees the names of your events, so they will not appear when you tap I'm in.").waitFor();
+      await panel.getByText("Spontaco never sees the names of your events, so they will not appear when you tap I'm in.").waitFor();
       assert.equal(await panel.getByText("you see your own events for that day first", { exact: false }).count(), 0);
       assert.equal(await panel.getByRole("link", { name: "myaccount.google.com/permissions" }).getAttribute("href"), PERMISSIONS);
       assert.equal(await page.getByRole("button", { name: "Connect Google Calendar" }).count(), 0);
@@ -259,7 +259,7 @@ for (const [width, height] of SIZES) {
       // Remove: the confirmation names the revoke, then the Google UI comes back.
       await panel.getByRole("button", { name: "Remove" }).click();
       const sheet = page.locator(".sheet-confirm");
-      await sheet.getByText("Friends stop seeing when you're busy. Hangry deletes the token and the busy times, and tells Google to revoke access.").waitFor();
+      await sheet.getByText("Friends stop seeing when you're busy. Spontaco deletes the token and the busy times, and tells Google to revoke access.").waitFor();
       await shot(page, "remove-confirm", width);
       await sheet.getByRole("button", { name: "Remove" }).click();
       await panel.getByRole("button", { name: "Connect Google Calendar" }).waitFor();
@@ -282,7 +282,7 @@ test("at 360: a failed start shows a short error and never the URL", { timeout: 
     await page.route("**/api/calendar/google/start", (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "boom" }) }));
     await panel.getByRole("button", { name: "Connect Google Calendar" }).click();
     await panel.getByText("Could not reach Google Calendar. Try again.").waitFor();
-    assert.ok(page.url().startsWith(on.baseUrl), "stayed in Hangry");
+    assert.ok(page.url().startsWith(on.baseUrl), "stayed in Spontaco");
     await panel.getByRole("button", { name: "Connect Google Calendar" }).waitFor();
     assert.ok(!(await panel.innerText()).includes("accounts"), "no URL in the panel");
   } finally {
@@ -331,7 +331,7 @@ async function bareTab(h: Hangry, route: string) {
 }
 
 async function noLoginForm(page: Page) {
-  await page.getByText("Go back to Hangry.").waitFor();
+  await page.getByText("Go back to Spontaco.").waitFor();
   assert.equal(await page.getByLabel("Your name").count(), 0, "no name field");
   assert.equal(await page.getByRole("button", { name: "Continue" }).count(), 0, "no Continue button");
   assert.equal(await page.getByText("A private circle", { exact: false }).count(), 0, "no login lede");

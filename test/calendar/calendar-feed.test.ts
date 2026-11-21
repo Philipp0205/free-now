@@ -122,7 +122,7 @@ test("GET /api/plans/:id/calendar.ics is one event for people who can see the pl
     assert.equal(field(event, "LOCATION"), "Sushi Bar\\, Main St\\; 2nd floor");
     assert.equal(
       field(event, "DESCRIPTION"),
-      `Hosted by Alex\\n\\nBring cash\\; table for 6\\n\\n${escapeText(DURATION_NOTE)}\\n\\nHangry: http://127.0.0.1:${port}/?plan=${plan.id}`,
+      `Hosted by Alex\\n\\nBring cash\\; table for 6\\n\\n${escapeText(DURATION_NOTE)}\\n\\nSpontaco: http://127.0.0.1:${port}/?plan=${plan.id}`,
     );
     assert.equal(field(event, "SEQUENCE"), "1", "the description edit counts as a change");
     assert.equal(field(event, "DTSTAMP"), "20260601T150000Z");
@@ -190,7 +190,7 @@ test("feed management: shown once, only the hash is stored, reset and turn off k
     assert.equal(ok.headers.get("cache-control"), "private, no-store");
     assert.equal(ok.headers.get("referrer-policy"), "no-referrer");
     assert.equal(ok.headers.get("content-disposition"), null);
-    assert.ok(lines(ok.text).includes("X-WR-CALNAME:Hangry"));
+    assert.ok(lines(ok.text).includes("X-WR-CALNAME:Spontaco"));
     assert.equal((await raw(port, feedPath(first.url), undefined, "HEAD")).status, 200);
 
     const second = await turnOnFeed(port, alex);

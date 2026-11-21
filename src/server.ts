@@ -63,7 +63,7 @@ const server = http.createServer(
 );
 
 server.listen(config.port, "0.0.0.0", () => {
-  console.log("Hangry");
+  console.log("Spontaco");
   console.log(`  listening   http://localhost:${config.port}`);
   console.log(`  database    ${config.dbPath}`);
   console.log(`  timezone    ${config.tz}`);

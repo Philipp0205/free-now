@@ -201,7 +201,7 @@ test("iOS Safari: head, safe-area rules, tap flash, hover rules and a bare date 
     const welcome = await (await fetch(`${hangry.baseUrl}/welcome`)).text();
     assert.match(welcome, /<meta name="apple-mobile-web-app-capable" content="yes"/);
     assert.match(welcome, /<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/);
-    assert.match(welcome, /<meta name="apple-mobile-web-app-title" content="Hangry"/);
+    assert.match(welcome, /<meta name="apple-mobile-web-app-title" content="Spontaco"/);
     assert.deepEqual(errors, []);
   } finally {
     await context.close();

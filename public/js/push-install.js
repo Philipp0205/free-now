@@ -11,7 +11,7 @@ import { closeSheet } from "./sheets.js";
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   state.installEvent = event;
-  // The kit's install prompt gets this same event and calls prompt() on it, so Hangry hears about an accepted install here.
+  // The kit's install prompt gets this same event and calls prompt() on it, so Spontaco hears about an accepted install here.
   const prompt = event.prompt?.bind(event);
   if (prompt) {
     event.prompt = () => {
@@ -393,13 +393,13 @@ function reenableSteps() {
     return [
       "Open the Firefox menu",
       "Settings → Site permissions → Notifications",
-      "Allow Hangry",
+      "Allow Spontaco",
     ];
   }
   return [
     "Open the Chrome menu",
     "Settings → Site settings → Notifications",
-    "Allow Hangry",
+    "Allow Spontaco",
   ];
 }
 
@@ -438,10 +438,10 @@ export function onboardingSheet() {
         el("p", {
           class: "help",
           text: denied
-            ? "Hangry can't ask again until notifications are allowed in the browser."
+            ? "Spontaco can't ask again until notifications are allowed in the browser."
             : showPush
-              ? "So a friend can reach this phone. Adding Hangry to your home screen keeps it one tap away."
-              : "Add Hangry to your home screen so it stays one tap away.",
+              ? "So a friend can reach this phone. Adding Spontaco to your home screen keeps it one tap away."
+              : "Add Spontaco to your home screen so it stays one tap away.",
         }),
       ]),
       denied
@@ -493,7 +493,7 @@ let installPromptStarted = false;
 let installPromptWasWanted = false;
 
 /**
- * Whether the install prompt may show now: every fresh load while Hangry is not running as the installed app.
+ * Whether the install prompt may show now: every fresh load while Spontaco is not running as the installed app.
  * It waits for the reminder check, so it never flashes up and then stacks with the onboarding sheet.
  * Chat and the past list are full screens of their own, so it stays out of them.
  */
@@ -533,7 +533,7 @@ export function syncInstallPrompt() {
   installPromptStarted = true;
   installPromptWasWanted = wanted;
   kit.init({
-    appName: "Hangry",
+    appName: "Spontaco",
     iconUrl: "/icons/icon-192.png",
     text: "One tap from your home screen.",
     closeLabel: "Close install prompt",

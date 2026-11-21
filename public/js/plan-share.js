@@ -10,7 +10,7 @@ import { inToggle } from "./replies.js";
 export async function shareInvite() {
   const circle = state.me?.circle;
   if (!circle) return;
-  const payload = { title: "Hangry", text: `Join ${circle.name} on Hangry`, url: circle.inviteUrl };
+  const payload = { title: "Spontaco", text: `Join ${circle.name} on Spontaco`, url: circle.inviteUrl };
   if (navigator.share) {
     try {
       await navigator.share(payload);
@@ -86,7 +86,7 @@ function calendarFileName(note) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48)
     .replace(/-+$/g, "");
-  return `${slug || "hangry-plan"}.ics`;
+  return `${slug || "spontaco-plan"}.ics`;
 }
 
 /** Fetches the .ics with the session header, then saves it as a file. The link itself is never shared. */
@@ -151,7 +151,7 @@ function planShareUrl(plan) {
 function planSharePayload(plan, url) {
   const day = shortDate(plan.forDate, zonedParts(Date.now(), appTz()).day);
   const when = [day, plan.time].filter(Boolean).join(" ");
-  return { title: plan.note, text: when ? `${plan.note}, ${when} on Hangry` : `${plan.note} on Hangry`, url };
+  return { title: plan.note, text: when ? `${plan.note}, ${when} on Spontaco` : `${plan.note} on Spontaco`, url };
 }
 
 function canSharePlanLink(kind, item) {
@@ -324,7 +324,7 @@ export function sharePreviewScreen() {
   const signedIn = Boolean(state.token && state.me);
   const head = el("div", { class: "hero" }, [
     el("button", { class: "orb small", type: "button", "aria-hidden": "true", tabindex: "-1" }),
-    el("h1", { class: "wordmark", text: "Hangry" }),
+    el("h1", { class: "wordmark", text: "Spontaco" }),
   ]);
   if (preview.ended) {
     return el("section", { class: "gate share-gate" }, [
@@ -334,7 +334,7 @@ export function sharePreviewScreen() {
         el("p", { class: "help", text: "Ask a friend for a new link." }),
       ]),
       el("div", { class: "stack" }, [
-        el("button", { class: "btn", type: "button", text: "Open Hangry", onclick: () => leaveSharePreview() }),
+        el("button", { class: "btn", type: "button", text: "Open Spontaco", onclick: () => leaveSharePreview() }),
       ]),
     ]);
   }
@@ -347,15 +347,15 @@ export function sharePreviewScreen() {
     ]),
     el("p", { class: "lede share-lede", text: signedIn
       ? "Only people in this circle can open it. Ask a friend there for an invite."
-      : "Hangry is invite-only. Sign in, or ask a friend in this circle for an invite." }),
+      : "Spontaco is invite-only. Sign in, or ask a friend in this circle for an invite." }),
     el("div", { class: "stack" }, signedIn
       ? [
-          el("button", { class: "btn", type: "button", text: "Open Hangry", onclick: () => leaveSharePreview() }),
+          el("button", { class: "btn", type: "button", text: "Open Spontaco", onclick: () => leaveSharePreview() }),
         ]
       : [
           el("button", { class: "btn", type: "button", text: "Sign back in", onclick: () => leaveSharePreview("recover") }),
           el("button", { class: "btn secondary", type: "button", text: "Add to home screen", onclick: openInstallGuide }),
-          el("button", { class: "btn ghost", type: "button", text: "Open Hangry", onclick: () => leaveSharePreview() }),
+          el("button", { class: "btn ghost", type: "button", text: "Open Spontaco", onclick: () => leaveSharePreview() }),
         ]),
   ]);
 }
