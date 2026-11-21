@@ -30,6 +30,11 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/cal/")) return;
   // Search Console checks this file and the privacy page: a failed fetch must never answer with the app shell.
   if (url.pathname === "/googlee48df27048aaa965.html" || url.pathname === "/privacy" || url.pathname === "/privacy/") return;
+  // Short sounds are read in byte ranges by iOS: slice the whole file into a 206 (offline too). Never cache the slice.
+  if (url.pathname.startsWith("/sounds/") && event.request.headers.has("range")) {
+    event.respondWith(soundSlice(event.request));
+    return;
+  }
   // Basemap archives are read in byte ranges: never cache them (a 206 cannot go in the Cache API).
   if (url.pathname.startsWith("/tiles/") || event.request.headers.has("range")) return;
   // Share pages carry a plan title: never keep them, fall back to the app shell offline.
@@ -72,6 +77,43 @@ self.addEventListener("push", (event) => {
     }).then(() => ackPush(data.id)),
   );
 });
+
+/** The whole sound from the runtime cache or a Range-less fetch (kept for offline), answered as a 206 slice. */
+async function soundSlice(request) {
+  try {
+    const cache = await caches.open(RUNTIME);
+    let whole = await cache.match(request.url);
+    if (!whole) {
+      whole = await fetch(request.url);
+      if (whole.status === 200) cache.put(request.url, whole.clone()).catch(() => {});
+    }
+    if (whole.status !== 200) return whole;
+    return sliceOf(await whole.arrayBuffer(), request.headers.get("range"), whole.headers.get("content-type"));
+  } catch {
+    return fetch(request);
+  }
+}
+
+/** One `bytes=a-b`, `bytes=a-` or `bytes=-n` range of `bytes` as a 206, or a 416 when it is outside the file. */
+function sliceOf(bytes, header, type) {
+  const size = bytes.byteLength;
+  const match = /^bytes=(\d*)-(\d*)$/.exec((header || "").trim());
+  const [from, to] = match ? [match[1], match[2]] : ["", ""];
+  const start = from === "" ? Math.max(0, size - Number(to)) : Number(from);
+  const end = from === "" || to === "" ? size - 1 : Math.min(Number(to), size - 1);
+  if (!match || (from === "" && (to === "" || to === "0")) || start >= size || start > end) {
+    return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+  }
+  return new Response(bytes.slice(start, end + 1), {
+    status: 206,
+    headers: {
+      "Content-Type": type || "audio/mp4",
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+      "Content-Length": String(end - start + 1),
+      "Accept-Ranges": "bytes",
+    },
+  });
+}
 
 function ackPush(id) {
   if (!id) return Promise.resolve("skipped");

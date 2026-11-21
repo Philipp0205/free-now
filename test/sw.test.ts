@@ -14,9 +14,10 @@ const SCRIPT = SOURCE.replace(/^import [^;]+;\n/m, "");
 type Reply = number | Error;
 
 /** Runs sw/sw.js in a sandbox. fetch answers from `replies` in order; setTimeout fires at once and records the delay. */
-function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; cacheKeys?: string[] } = {}) {
+function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; cacheKeys?: string[]; sound?: Buffer } = {}) {
   const replies = [...(options.replies ?? [])];
   const fetches: Array<{ url: string; body: string }> = [];
+  const puts: string[] = [];
   const delays: number[] = [];
   const handlers: Record<string, (event: unknown) => void> = {};
   const order: string[] = [];
@@ -24,6 +25,7 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; ca
   const deleted: string[] = [];
   const sandbox: Record<string, unknown> = {
     URL,
+    Response,
     console,
     precache: (entries: unknown) => { precached.push(entries); },
     cleanupOutdatedCaches: () => {},
@@ -34,13 +36,18 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; ca
       return 0;
     },
     fetch: async (url: string, init: { body: string }) => {
-      fetches.push({ url, body: init.body });
+      fetches.push({ url, body: init?.body });
+      if (options.sound) return new Response(options.sound, { status: 200, headers: { "content-type": "audio/mp4" } });
       order.push("ack");
       const next = replies.shift() ?? 204;
       if (next instanceof Error) throw next;
       return { status: next };
     },
-    caches: { open: async () => ({}), keys: async () => options.cacheKeys ?? [], delete: async (key: string) => { deleted.push(key); return true; } },
+    caches: {
+      open: async () => ({ match: async () => undefined, put: async (url: string) => { puts.push(url); } }),
+      keys: async () => options.cacheKeys ?? [],
+      delete: async (key: string) => { deleted.push(key); return true; },
+    },
     self: {
       __WB_MANIFEST: [],
       location: { origin: "https://hangry.test" },
@@ -67,8 +74,44 @@ function loadWorker(options: { replies?: Reply[]; show?: () => Promise<void>; ca
     handlers.push({ data: { json: () => data }, waitUntil: (promise: Promise<unknown>) => { settled = promise; } });
     return { settled };
   }
-  return { retryAck, push, fetches, delays, order, handlers, precached, deleted };
+  return { retryAck, push, fetches, puts, delays, order, handlers, precached, deleted };
 }
+
+/** Sends a GET through the worker's fetch handler. Returns the response it answered with, or null when it let the request pass. */
+async function ask(worker: ReturnType<typeof loadWorker>, path: string, range?: string): Promise<Response | null> {
+  let answer: Promise<Response> | null = null;
+  const headers = new Map(range ? [["range", range]] : []);
+  worker.handlers.fetch({
+    request: { url: `https://hangry.test${path}`, method: "GET", headers: { has: (name: string) => headers.has(name), get: (name: string) => headers.get(name) ?? null } },
+    respondWith: (promise: Promise<Response>) => { answer = promise; },
+  });
+  return answer;
+}
+
+test("a Range request for a sound is answered from the whole file as a 206 slice, and no slice is cached", async () => {
+  const bytes = Buffer.from("0123456789");
+  const worker = loadWorker({ sound: bytes });
+  const slice = (await ask(worker, "/sounds/lizard.m4a", "bytes=0-1"))!;
+  assert.equal(slice.status, 206);
+  assert.equal(slice.headers.get("content-range"), "bytes 0-1/10");
+  assert.equal(slice.headers.get("accept-ranges"), "bytes");
+  assert.equal(slice.headers.get("content-length"), "2");
+  assert.equal(Buffer.from(await slice.arrayBuffer()).toString(), "01");
+  assert.equal(worker.fetches[0].url, "https://hangry.test/sounds/lizard.m4a");
+  assert.deepEqual(worker.puts, ["https://hangry.test/sounds/lizard.m4a"], "only the whole file is cached");
+
+  const tail = (await ask(loadWorker({ sound: bytes }), "/sounds/lizard.m4a", "bytes=-3"))!;
+  assert.equal(tail.headers.get("content-range"), "bytes 7-9/10");
+  const past = (await ask(loadWorker({ sound: bytes }), "/sounds/lizard.m4a", "bytes=10-"))!;
+  assert.equal(past.status, 416);
+});
+
+test("a Range request for tiles or anything else still goes to the network untouched", async () => {
+  const worker = loadWorker({ sound: Buffer.from("x") });
+  assert.equal(await ask(worker, "/tiles/map.pmtiles", "bytes=0-1"), null);
+  assert.equal(await ask(worker, "/js/app.js", "bytes=0-1"), null);
+});
+
 
 function sender(replies: Reply[]) {
   let calls = 0;
@@ -143,8 +186,8 @@ test("a push without a row id shows the notification and sends no ack", async ()
   assert.deepEqual(worker.order, ["shown"]);
 });
 
-test("the build label moved to v142 and the worker no longer keeps a cache name of its own", () => {
-  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v142");
+test("the build label moved to v143 and the worker no longer keeps a cache name of its own", () => {
+  assert.equal(/export const APP_VERSION = "(hangry-v\d+)"/.exec(APP)?.[1], "hangry-v143");
   const version = Number(/export const APP_VERSION = "hangry-v(\d+)"/.exec(APP)?.[1]);
   assert.ok(version >= 106);
   assert.doesNotMatch(SOURCE, /const CACHE = /);

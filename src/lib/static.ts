@@ -3,6 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseRange } from "../map/range-file.js";
 import { sendJson } from "./http.js";
 
 /** The repo root (or /app in the image). Same depth under tsx (src/lib) and node (dist/lib). */
@@ -58,13 +59,9 @@ export async function serveStatic(req: http.IncomingMessage, res: http.ServerRes
       if (relative.startsWith(`vendor${path.sep}`)) headers["cache-control"] = VENDOR_CACHE;
       // The emoji picker asks for an ETag before it re-downloads its data (assets/ holds only that one file).
       if (relative.startsWith(`assets${path.sep}`)) headers.etag = `"${crypto.createHash("sha1").update(data).digest("base64")}"`;
-      if (req.method === "HEAD") {
-        res.writeHead(200, headers);
-        res.end();
-        return;
-      }
-      res.writeHead(200, headers);
-      res.end(data);
+      const { status, body } = sliceForRange(req, ext, data, headers);
+      res.writeHead(status, headers);
+      res.end(req.method === "HEAD" ? undefined : body);
     } catch {
       sendJson(res, 404, { error: "not found" });
     }
@@ -78,6 +75,28 @@ export async function serveStatic(req: http.IncomingMessage, res: http.ServerRes
   } catch {
     sendJson(res, 404, { error: "not found" });
   }
+}
+
+/** Audio answers byte ranges, because iOS media elements ask for them: 206 slice, 416 if unsatisfiable, else the whole file. */
+function sliceForRange(
+  req: http.IncomingMessage,
+  ext: string,
+  data: Buffer,
+  headers: http.OutgoingHttpHeaders,
+): { status: number; body: Buffer } {
+  if (ext !== ".m4a") return { status: 200, body: data };
+  headers["accept-ranges"] = "bytes";
+  const raw = req.headers.range;
+  const range = parseRange(Array.isArray(raw) ? raw[0] : raw, data.length);
+  if (range === null) return { status: 200, body: data };
+  if (range === "invalid") {
+    headers["content-range"] = `bytes */${data.length}`;
+    headers["content-length"] = 0;
+    return { status: 416, body: Buffer.alloc(0) };
+  }
+  headers["content-range"] = `bytes ${range.start}-${range.end}/${data.length}`;
+  headers["content-length"] = range.end - range.start + 1;
+  return { status: 206, body: data.subarray(range.start, range.end + 1) };
 }
 
 /** The public landing page. Static: same bytes for everyone, no session, no user data. */
