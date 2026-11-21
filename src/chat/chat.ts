@@ -58,6 +58,7 @@ type MessageRow = {
   name: string;
   color: number | null;
   reply_to: string | null;
+  edited_at: number | null;
 };
 
 const TEXT_MAX = 1000;
@@ -138,6 +139,9 @@ export async function routeChat(
   if (message && method === "DELETE") {
     deleteMessage(deps, user.id, decodeURIComponent(message[1]));
     return { status: 204, body: null };
+  }
+  if (message && method === "PATCH") {
+    return { status: 200, body: { message: editMessage(deps, user.id, decodeURIComponent(message[1]), body.text) } };
   }
   const social = /^\/api\/socials\/([^/]+)\/chat$/.exec(pathname);
   if (social) {
@@ -483,6 +487,24 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
   deps.db.prepare("UPDATE messages SET deleted_at = ? WHERE id = ?").run(deps.now(), row.id);
 }
 
+/** Changes the words of your own text message and stamps edited_at. Hosts and admins can delete others' messages, never edit them. */
+export function editMessage(deps: ChatDeps, userId: string, messageId: string, raw: unknown): { id: string; text: string; editedAt: number } {
+  const row = one<{ id: string; chat_id: string; user_id: string; kind: string; deleted_at: number | null }>(
+    deps.db,
+    "SELECT id, chat_id, user_id, kind, deleted_at FROM messages WHERE id = ?",
+    messageId,
+  );
+  if (!row || row.deleted_at != null) throw new ChatError(404, "message not found");
+  if (row.kind !== "text") throw new ChatError(403, "You can't edit that.");
+  const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id);
+  if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "message not found");
+  if (row.user_id !== userId) throw new ChatError(403, "You can't edit that.");
+  const text = cleanText(raw);
+  const editedAt = deps.now();
+  deps.db.prepare("UPDATE messages SET body = ?, edited_at = ? WHERE id = ?").run(text, editedAt, row.id);
+  return { id: row.id, text, editedAt };
+}
+
 export function setMuted(deps: ChatDeps, userId: string, chatId: string, muted: boolean): void {
   const chat = one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", chatId);
   if (!chat || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "chat not found");
@@ -709,7 +731,7 @@ export function chatAudience(db: DatabaseSync, chat: ChatRow): MemberRow[] {
 function threadPayload(deps: ChatDeps, access: Access, userId: string) {
   const messages = all<MessageRow>(
     deps.db,
-    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color, m.reply_to
+    `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color, m.reply_to, m.edited_at
      FROM messages m JOIN users u ON u.id = m.user_id
      WHERE m.chat_id = ? AND m.deleted_at IS NULL
      ORDER BY m.created_at ASC, m.rowid ASC
@@ -740,6 +762,8 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       mine: message.kind !== "goblin" && message.user_id === userId,
       color: isPersonKind(message.kind) ? colorHex(message.user_id, message.color) : message.kind === "goblin" ? GOBLIN_COLOR : null,
       canDelete: isPersonKind(message.kind) && (message.user_id === userId || admin || host),
+      canEdit: message.kind === "text" && message.user_id === userId,
+      editedAt: message.edited_at,
       reactions: reactions.get(message.id) ?? [],
       replyTo: message.reply_to ? quotes.get(message.reply_to) ?? goneQuote(message.reply_to) : null,
     })),

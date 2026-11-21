@@ -1319,10 +1319,19 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"], 
 .chat-msg header time { flex: none; font-variant-numeric: tabular-nums; }
 .chat-msg p { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
 .chat-msg .text-btn { min-height: 44px; }
-/* Desktop mouse: Delete shows on hover or keyboard focus, and a drag selects message text, not buttons or times. */
+.chat-msg .chat-edit-btn { margin-right: 16px; }
+/* The quiet "edited" mark rides inside the time, so the header layout does not change. */
+.chat-msg header .chat-edited { margin-left: 6px; font-size: 12px; font-style: italic; }
+.chat-edit-form { margin: 4px 0 0; }
+.chat-edit-input { width: 100%; min-height: 64px; max-height: 136px; resize: none; line-height: 22px; overflow-wrap: anywhere; }
+.chat-edit-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.chat-edit-actions .text-btn { min-width: 44px; }
+.chat-edit-actions .chat-edit-save { width: auto; min-width: 64px; min-height: 44px; padding: 0 16px; }
+/* Desktop mouse: Edit and Delete show on hover or keyboard focus, and a drag selects message text, not buttons or times. */
 @media (hover: hover) and (pointer: fine) {
-  .chat-msg .chat-delete { opacity: 0; }
-  .chat-msg:hover .chat-delete, .chat-msg:focus-within .chat-delete { opacity: 1; }
+  .chat-msg .chat-delete, .chat-msg .chat-edit-btn { opacity: 0; }
+  .chat-msg:hover .chat-delete, .chat-msg:focus-within .chat-delete,
+  .chat-msg:hover .chat-edit-btn, .chat-msg:focus-within .chat-edit-btn { opacity: 1; }
   .chat-msg button, .chat-msg header time { -webkit-user-select: none; user-select: none; }
 }
 /* @Name in the sender's chat colour; a mention of you gets a soft fill so it stands out. */
