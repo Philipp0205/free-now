@@ -60,6 +60,7 @@ Docs-only or test-only changes do not bump the version or add a What's New entry
 - UI copy (user-facing strings, such as the friendly messages in `session.js`) lives outside logic files, in a copy or strings module per domain.
 - Keep logic and UI separate. Pure logic modules (state, rules, calculations) do not touch the DOM. UI modules render and call logic. `bills.js` mixing both is the counter-example.
 - No unused folders or dead files. `docs/` is currently unused.
+- Before finishing, grep for each function, constant and copy key you added. If nothing outside its definition uses it, delete it.
 
 ## Production
 
