@@ -99,15 +99,18 @@ test("each plan card has its own gradient, kept after reload, on the map and in 
     await page.locator(".card-plan").nth(NOTES.length - 1).waitFor();
     assert.deepEqual(await backgrounds(page), first, "same plan, same gradient after reload");
 
-    // The cards are art: a light OS setting keeps the same dark stops and white type.
+    // A light OS paints the card as paper with near-black type. The class (the stop assignment) is the same.
     await page.emulateMedia({ colorScheme: "light" });
     const light = await backgrounds(page);
     for (const id of ids) {
       assert.equal(light[id].cls, first[id].cls);
-      assert.equal(light[id].image, first[id].image, `light OS keeps the dark stops for ${id}`);
+      assert.match(light[id].image, /linear-gradient/, `light OS still paints a gradient for ${id}`);
+      assert.notEqual(light[id].image, first[id].image, `light OS paints paper, not the dark stops, for ${id}`);
     }
-    assert.equal(await title.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)", "card type stays white on a light OS");
+    assert.equal(await title.evaluate((node) => getComputedStyle(node).color), "rgb(22, 18, 15)", "card type is near-black on a light OS");
     await page.emulateMedia({ colorScheme: "dark" });
+    assert.deepEqual(await backgrounds(page), first, "dark again: the same dark stops");
+    assert.equal(await title.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)", "card type is white again in dark");
 
     // Details header uses the same gradient.
     await page.locator(`.card-plan[data-plan="${ids[1]}"] .card-body`).click();

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-light-cards",
+    "date": "2026-11-22",
+    "title": "Lighter event cards in Light",
+    "bullets": [
+      "In Light, event cards and compact rows are now paper-coloured, with dark text and a small colour chip.",
+      "The happening now ring is softer on a light page.",
+      "Dark looks exactly the same as before."
+    ]
+  },
+  {
     "id": "2026-11-22-maybe-rsvp",
     "date": "2026-11-22",
     "title": "A Maybe button on every event",

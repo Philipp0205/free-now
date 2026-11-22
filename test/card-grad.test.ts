@@ -148,6 +148,25 @@ test("compact title, date and +N stay AA on every tinted row, with and without t
   }
 });
 
+test("light compact rows paint paper, and title, date and +N stay AA on every paper stop, with and without the now wash", () => {
+  const rows = stops();
+  const ink = hex("#16120f");
+  const sub = hex("#5a534d");
+  const mix = (colour: Rgb, share: number, base: string) => over(colour, share, hex(base));
+  const papers: Array<[string, Rgb, Rgb]> = [["social", PINK, ORANGE]];
+  for (const [slot, [g1, g2]] of rows.entries()) papers.push([`grad-${slot}`, g1, g2]);
+  for (const [name, g1, g2] of papers) {
+    for (const [at, paper] of [["start", mix(g1, 0.1, "#fdfbf9")], ["end", mix(g2, 0.13, "#f7f4f1")]] as Array<[string, Rgb]>) {
+      for (const [state, bg] of [["", paper], [" happening now", over(hex("#e0115f"), 0.08, paper)]] as Array<[string, Rgb]>) {
+        for (const [what, fg] of [["title", ink], ["date and +N", sub]] as Array<[string, Rgb]>) {
+          const ratio = contrast(fg, bg);
+          assert.ok(ratio >= 4.5, `light paper ${name} ${at}${state} ${what}: ${ratio.toFixed(2)}`);
+        }
+      }
+    }
+  }
+});
+
 test("the palette has a good hue spread, not one colour family", () => {
   const hue = ([r, g, b]: Rgb) => {
     const max = Math.max(r, g, b);

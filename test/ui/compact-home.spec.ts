@@ -272,9 +272,11 @@ test("compact reads well on desktop and in the light scheme", { timeout: 180_000
     await shot(light, "compact-light-360x640");
     const colors = await light.locator(".compact-row").first().evaluate((node) => ({
       bg: getComputedStyle(node).backgroundColor,
+      image: getComputedStyle(node).backgroundImage,
       page: getComputedStyle(document.body).backgroundColor,
     }));
-    assert.notEqual(colors.bg, "rgba(0, 0, 0, 0)", "the row has a surface in light");
+    // In light the row is paper: a gradient over a transparent colour.
+    assert.ok(colors.bg !== "rgba(0, 0, 0, 0)" || /linear-gradient/.test(colors.image), "the row has a surface in light");
   } finally {
     await light.context().close();
   }

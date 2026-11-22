@@ -8,7 +8,7 @@ import { UA, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
 // Hangry follows the phone's light or dark setting. Dark keeps the surfaces it always had, light uses the
-// app-kit light tokens, and plan cards stay dark art in both. Fake people only.
+// app-kit light tokens, and home cards are dark art in dark and paper in light. Fake people only.
 const shotsDir = path.resolve("test/ui/screenshots/color-scheme");
 const hangry = useHangry({ tz: "UTC" });
 
@@ -92,7 +92,7 @@ async function post(pathname: string, body: unknown, token?: string) {
 }
 
 for (const scheme of ["dark", "light"] as const) {
-  test(`${scheme} phone: page, tab bar, panel, sheet and menu follow the scheme, cards stay dark art`, { timeout: 150_000 }, async () => {
+  test(`${scheme} phone: page, tab bar, panel, sheet and menu follow the scheme, home cards follow it too`, { timeout: 150_000 }, async () => {
     const alex = await post("/api/auth/start", { email: testEmail(), name: "Alex" });
     const { circle } = await post("/api/circles", { name: "Friends" }, alex.token);
     const bea = await post("/api/auth/start", { email: testEmail(), name: "Bea", code: circle.inviteCode });
@@ -129,10 +129,11 @@ for (const scheme of ["dark", "light"] as const) {
       const themeColors = await page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map((meta) => meta.getAttribute("content")));
       assert.ok(themeColors.length > 0 && themeColors.every((value) => value === expected.hex), `${scheme} theme colour, got ${themeColors}`);
 
-      // Now: the plan card is art and keeps white type on its dark gradient in both schemes.
+      // Now: the card is dark art with white type in dark, and paper with near-black type in light.
       const title = page.locator("article.card h3", { hasText: "Ramen" });
       await title.waitFor();
-      assert.equal(await title.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)", `${scheme} card title stays white`);
+      const cardInk = scheme === "dark" ? "rgb(255, 255, 255)" : "rgb(22, 18, 15)";
+      assert.equal(await title.evaluate((node) => getComputedStyle(node).color), cardInk, `${scheme} card title ink`);
       const bar = parse(await page.locator(".tabbar").evaluate((node) => getComputedStyle(node).backgroundColor));
       const barOnPage = luminance(over(bar, parse(expected.page)));
       if (scheme === "dark") assert.ok(barOnPage < 0.05, `dark tab bar, got ${bar}`);
@@ -140,12 +141,15 @@ for (const scheme of ["dark", "light"] as const) {
       await contrastOf(page, scheme, ".tabbar .tab[aria-current='page']", "current tab");
       await shot(page, `now-${scheme}`);
 
-      // The card menu is on the art, so it stays dark in both schemes.
+      // The card menu lives on the card: it inherits the card tokens, so it is dark in dark and a light surface in light.
       await page.getByRole("button", { name: "More for Ramen" }).click();
       const cardMenu = page.locator(".card-menu");
       await cardMenu.waitFor();
       await settle(page);
-      assert.equal(await cardMenu.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(28, 28, 30)", `${scheme} card menu stays dark`);
+      const menuBg = scheme === "dark" ? "rgb(28, 28, 30)" : "rgb(255, 255, 255)";
+      assert.equal(await cardMenu.evaluate((node) => getComputedStyle(node).backgroundColor), menuBg, `${scheme} card menu surface`);
+      const menuInk = await page.locator(".card-menu button").first().evaluate((node) => getComputedStyle(node).color);
+      if (scheme === "light") assert.equal(menuInk, "rgb(22, 18, 15)", "light card menu type is near-black");
       await contrastOf(page, scheme, ".card-menu button", "card menu item");
       await shot(page, `card-menu-${scheme}`);
       await page.keyboard.press("Escape");

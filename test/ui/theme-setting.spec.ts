@@ -94,12 +94,13 @@ for (const os of ["dark", "light"] as const) {
       await assertPage(page, flip, `forced ${flip}`);
       await shot(page, `appearance-${flip}-forced-on-${os}-os`);
 
-      // Plan cards are dark art in both schemes.
+      // Home cards follow the scheme: paper with near-black type in light, dark art with white type in dark.
       await page.locator(".tabbar").getByRole("button", { name: "Now", exact: true }).click();
       const title = page.locator("article.card h3", { hasText: "Ramen" });
       await title.waitFor();
-      assert.equal(await title.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)", "card title stays white");
-      assert.equal(await page.locator("article.card").first().evaluate((node) => getComputedStyle(node).colorScheme), "dark", "the card stays dark art");
+      const cardInk = flip === "light" ? "rgb(22, 18, 15)" : "rgb(255, 255, 255)";
+      assert.equal(await title.evaluate((node) => getComputedStyle(node).color), cardInk, `card title is ${flip} ink`);
+      assert.equal(await page.locator("article.card").first().evaluate((node) => getComputedStyle(node).colorScheme), flip, `the card is ${flip}`);
       await shot(page, `now-${flip}-forced-on-${os}-os`);
 
       // A reload keeps the choice, and the page is already right before the app script has run.

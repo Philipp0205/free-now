@@ -90,7 +90,8 @@ async function assertEverywhere(page: Page, id: string, cls: string, tag: string
 /** White type on the card and the compact title and date stay at 4.5:1 on both tint stops. */
 async function assertReadable(page: Page, id: string, tag: string) {
   const title = planCard(page, id).locator("h3");
-  assert.equal(await title.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)", `${tag}: card type is white`);
+  const ink = tag.startsWith("light") ? "rgb(22, 18, 15)" : "rgb(255, 255, 255)";
+  assert.equal(await title.evaluate((node) => getComputedStyle(node).color), ink, `${tag}: card type is ${tag.startsWith("light") ? "near-black on paper" : "white"}`);
   await showCompact(page);
   const seen = await planRow(page, id).evaluate((el) => {
     const resolve = (value: string) => {

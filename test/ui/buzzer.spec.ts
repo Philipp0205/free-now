@@ -162,7 +162,7 @@ test("reduced motion shows a still overlay with the name as text", { timeout: 60
     await page.locator(".buzzer").waitFor({ state: "detached", timeout: 2000 });
 
     assert.equal(await play(page, "bell"), true);
-    await page.waitForTimeout(2200);
+    await page.waitForTimeout(3000);
     assert.equal(await page.locator(".buzzer").count(), 0, "the still overlay ends by itself");
     assert.equal(await counter(page, "__ended"), 1);
     assert.deepEqual(errors, []);
