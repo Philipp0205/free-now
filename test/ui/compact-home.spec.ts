@@ -175,6 +175,50 @@ test("Now starts on cards, Compact shows one line per event, a tap opens it, and
   assert.deepEqual(errors, []);
 });
 
+test("opening a compact row shows the full event, where I'm in works and can be undone", { timeout: 300_000 }, async () => {
+  const { friends } = await seed();
+  const errors: string[] = [];
+  for (const [width, height] of SIZES) {
+    const tag = `${width}x${height}`;
+    // Bea is not in Coffee run yet, and the compact list has no In button of its own.
+    const page = await openAs(friends[1].token, width, height);
+    page.on("pageerror", (error) => errors.push(error.message));
+    try {
+      await toggle(page).getByRole("button", { name: "Compact" }).click();
+      await page.locator(".compact-row", { hasText: "Coffee run" }).waitFor();
+      assert.equal(await page.locator(".in-toggle").count(), 0, `${tag}: no In button on the list`);
+      await page.locator(".compact-row", { hasText: "Coffee run" }).click();
+      const details = page.getByRole("dialog", { name: "Details" });
+      await details.waitFor();
+      await details.getByRole("heading", { name: "Coffee run" }).waitFor();
+      await details.getByRole("heading", { name: "Who's in" }).waitFor();
+      const inButton = details.getByRole("button", { name: "I'm in" });
+      await inButton.waitFor();
+      assert.equal(await details.locator(".list", { hasText: "Alex" }).count(), 1, `${tag}: Alex is listed`);
+      assert.equal(await details.getByText("You're in").count(), 0, `${tag}: not in yet`);
+      await shot(page, `compact-open-before-${tag}`);
+
+      await inButton.click();
+      const done = details.getByRole("button", { name: "In ✓" });
+      await done.waitFor();
+      assert.equal(await done.getAttribute("aria-pressed"), "true");
+      await details.locator(".reply-line", { hasText: "You're in" }).waitFor();
+      await page.waitForTimeout(500);
+      await shot(page, `compact-open-in-${tag}`);
+
+      // The reply can be changed from the same sheet.
+      await done.click();
+      await details.getByRole("button", { name: "I'm in" }).waitFor();
+      await details.locator(".reply-line", { hasText: "You're in" }).waitFor({ state: "detached" });
+      await page.waitForTimeout(500);
+      await shot(page, `compact-open-undone-${tag}`);
+    } finally {
+      await page.context().close();
+    }
+  }
+  assert.deepEqual(errors, []);
+});
+
 test("the toggle works from the keyboard and names itself for assistive tech", { timeout: 120_000 }, async () => {
   const { host } = await seed();
   const page = await openAs(host.token, 360, 640);

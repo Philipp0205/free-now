@@ -137,7 +137,8 @@ export function planCard(plan) {
 
 /**
  * One line for the compact Now list: the event name, a few faces with "+N", and the date.
- * The whole line is one button that opens the details, like a card tap. Only the name and the date
+ * The whole line is one button that opens the details with the reply and chat actions, since
+ * a row has no In button of its own. Only the name and the date
  * take the ellipsis, so a long name never pushes the row wider than the screen.
  */
 export function compactRow(kind, item) {
@@ -152,7 +153,7 @@ export function compactRow(kind, item) {
     type: "button",
     [`data-${kind}`]: item.id,
     "data-happening-now": happening ? "1" : null,
-    onclick: () => openEventDetail(kind, item),
+    onclick: () => openEventDetail(kind, item, "compact"),
   }, [
     el("strong", { class: "compact-title", text: title }),
     el("span", { class: "compact-who" }, [

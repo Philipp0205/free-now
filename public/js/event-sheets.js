@@ -91,7 +91,7 @@ export function eventDetailSheet() {
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,
         deliveryLine(kind, item),
-        calendar ? el("div", { class: "detail-actions" }, [
+        calendar || detail.from === "compact" ? el("div", { class: "detail-actions" }, [
           chatRow(kind, item),
           over ? null : cardActions(kind, item, { locked: mine }),
         ]) : null,

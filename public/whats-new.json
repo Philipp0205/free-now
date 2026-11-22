@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-21-compact-open",
+    "date": "2026-11-21",
+    "title": "Open a compact row to reply",
+    "bullets": [
+      "Tap a row in the compact list to see the full event, with every detail.",
+      "Tap I'm in there, or change your reply, without switching back to cards.",
+      "The event chat is in the same place too."
+    ]
+  },
+  {
     "id": "2026-11-21-inout-reactions",
     "date": "2026-11-21",
     "title": "React to who is in or out",

@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v144 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v145 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v144");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v145");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,8 +665,22 @@ test("the build label is hangry-v144 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the in and out reactions entry is the newest, in plain words without an em dash, and the lizard entry is kept", () => {
+test("the compact open entry is the newest, in plain words without an em dash, and the reactions entry is kept", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-21-compact-open");
+  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
+  assert.equal(top.date, "2026-11-21");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(top.bullets.join(" "), /row in the compact list/);
+  assert.match(top.bullets.join(" "), /I'm in/);
+  assert.equal(RAW[1].id, "2026-11-21-inout-reactions", "the reactions entry is kept");
+});
+
+test("the in and out reactions entry is kept, in plain words without an em dash, and the lizard entry follows it", () => {
+  const top = RAW[1];
   assert.equal(top.id, "2026-11-21-inout-reactions");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-21");
@@ -677,11 +691,11 @@ test("the in and out reactions entry is the newest, in plain words without an em
   assert.match(top.bullets.join(" "), /react to the "someone is in" or "someone is out" line/);
   assert.match(top.bullets.join(" "), /next time the chat refreshes/);
   assert.doesNotMatch([top.title, ...top.bullets].join(" "), /birthday|Amanda/i);
-  assert.equal(RAW[1].id, "2026-11-21-lizard-ios", "the lizard entry is kept");
+  assert.equal(RAW[2].id, "2026-11-21-lizard-ios", "the lizard entry is kept");
 });
 
 test("the lizard on iPhone entry is kept, in plain words without an em dash, and the chat polls entry follows it", () => {
-  const top = RAW[1];
+  const top = RAW[2];
   assert.equal(top.id, "2026-11-21-lizard-ios");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-21");
@@ -693,7 +707,7 @@ test("the lizard on iPhone entry is kept, in plain words without an em dash, and
   assert.match(top.bullets.join(" "), /On iPhone/);
   assert.match(top.bullets.join(" "), /restarts the song/);
   assert.doesNotMatch([top.title, ...top.bullets].join(" "), /birthday|Amanda/i);
-  assert.equal(RAW[2].id, "2026-11-21-chat-polls", "the chat polls entry is kept");
+  assert.equal(RAW[3].id, "2026-11-21-chat-polls", "the chat polls entry is kept");
 });
 
 test("the chat polls entry is kept, in plain words without an em dash", () => {
@@ -708,7 +722,7 @@ test("the chat polls entry is kept, in plain words without an em dash", () => {
   assert.match(top.bullets.join(" "), /post a poll/);
   assert.match(top.bullets.join(" "), /change your vote/);
   assert.doesNotMatch([top.title, ...top.bullets].join(" "), /birthday|Amanda/i);
-  assert.equal(RAW[3].id, "2026-11-21-chat-edit", "the chat edit entry is kept");
+  assert.equal(RAW[4].id, "2026-11-21-chat-edit", "the chat edit entry is kept");
 });
 
 test("the chat edit entry is kept, in plain words without an em dash", () => {
@@ -723,7 +737,7 @@ test("the chat edit entry is kept, in plain words without an em dash", () => {
   assert.match(top.bullets.join(" "), /edit your own/);
   assert.match(top.bullets.join(" "), /edited/);
   assert.doesNotMatch([top.title, ...top.bullets].join(" "), /birthday|Amanda/i);
-  assert.equal(RAW[4].id, "2026-11-21-spontaco", "the Spontaco entry is kept");
+  assert.equal(RAW[5].id, "2026-11-21-spontaco", "the Spontaco entry is kept");
 });
 
 test("the Spontaco rename entry is kept, in plain words without an em dash or a birthday hint", () => {
@@ -744,7 +758,7 @@ test("the Spontaco rename entry is kept, in plain words without an em dash or a 
 test("the lizard sound entry is kept, in plain words without an em dash or a birthday hint", () => {
   const top = RAW.find((item) => item.id === "2026-11-21-lizard-sound")!;
   assert.ok(top, "the lizard sound entry is kept");
-  assert.equal(RAW[5].id, "2026-11-21-lizard-sound");
+  assert.equal(RAW[6].id, "2026-11-21-lizard-sound");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-21");
   assert.ok(top.title.length <= 60);
