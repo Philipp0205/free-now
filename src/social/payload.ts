@@ -38,6 +38,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     note: social.note,
     createdAt: social.created_at,
     startsAt: social.starts_at,
+    endsAt: social.ends_at ?? null,
     buzzedAt: social.buzzed_at ?? null,
     expiresAt: social.expires_at,
     place: social.place ?? "",
@@ -79,6 +80,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     forDate: plan.for_date,
     whenLabel: dayLabel(plan.for_date, today),
     time: plan.at_time,
+    endsAt: plan.ends_at ?? null,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
     // Home circle. `circles` below still lists every linked circle.

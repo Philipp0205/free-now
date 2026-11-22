@@ -170,7 +170,7 @@ function hangoutWindow(kind, item, now = Date.now()) {
   if (kind === "plan") {
     if (!/^\d{2}:\d{2}$/.test(item.time || "")) return null;
     const start = clockInstant(item.forDate, item.time);
-    return Number.isFinite(start) ? { start, end: start + PLAN_DURATION_MS } : null;
+    return Number.isFinite(start) ? { start, end: item.endsAt || start + PLAN_DURATION_MS } : null;
   }
   const start = item.startsAt && item.startsAt > now ? item.startsAt : now;
   return Number.isFinite(item.expiresAt) && item.expiresAt > start ? { start, end: item.expiresAt } : null;
@@ -298,7 +298,7 @@ function arrivalBounds(kind, item) {
   const start = kind === "plan"
     ? clockInstant(item.forDate, "06:00")
     : (item.startsAt && item.startsAt > now ? item.startsAt : now);
-  const end = kind === "plan" ? clockInstant(item.forDate, "23:59") : item.expiresAt;
+  const end = kind === "plan" ? (item.endsAt || clockInstant(item.forDate, "23:59")) : item.expiresAt;
   if (!Number.isFinite(start) || !Number.isFinite(end)) return { min: "", max: "", sameDay: false };
   const earliest = Math.max(Math.floor(start / 60000) * 60000, Math.floor(now / 60000) * 60000);
   if (earliest > end) return { min: "", max: "", sameDay: false };

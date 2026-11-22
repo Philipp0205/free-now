@@ -938,7 +938,7 @@ function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: strin
   const today = isoDate(now, deps.config.tz);
   return {
     missing: false,
-    closed: plan.for_date < today,
+    closed: plan.for_date < today || (plan.ends_at != null && plan.ends_at <= now),
     blocked: Boolean(getPlanReply(deps.db, plan.id, userId)?.blocked),
     removedBy: getPlanReply(deps.db, plan.id, userId)?.removed_by ?? null,
     title: plan.note.trim() || "Plan",

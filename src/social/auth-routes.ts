@@ -52,7 +52,7 @@ export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
   if (sharedPlan && method === "GET") {
     if (!limits.share.hit(clientKey(req), deps.now())) throw new HttpError(429, "too many requests");
     const today = isoDate(deps.now(), deps.config.tz);
-    sendJson(res, 200, sharePreview(deps.db, safeDecode(sharedPlan[1]), user?.id ?? null, today));
+    sendJson(res, 200, sharePreview(deps.db, safeDecode(sharedPlan[1]), user?.id ?? null, today, deps.now()));
     return true;
   }
 

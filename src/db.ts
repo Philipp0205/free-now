@@ -58,6 +58,8 @@ export type SocialRow = {
   buzzed_at: number | null;
   price_cents: number | null;
   collector_id: string | null;
+  /** The end the host picked. Null means none; expires_at then falls back to the default window. */
+  ends_at: number | null;
 };
 
 export type DueStartReminder = {
@@ -104,6 +106,8 @@ export type PlanRow = {
   collector_id: string | null;
   /** Card colour slot 0..13 picked by the host. Null means the id hash default. */
   card_color: number | null;
+  /** Optional end instant on the plan's day. Null means open ended. ended_at stays the manual end. */
+  ends_at: number | null;
 };
 
 export type PushSubRow = {
@@ -443,6 +447,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "socials", "buzzed_at", "buzzed_at INTEGER");
   ensureColumn(db, "socials", "price_cents", "price_cents INTEGER");
   ensureColumn(db, "socials", "collector_id", "collector_id TEXT");
+  ensureColumn(db, "socials", "ends_at", "ends_at INTEGER");
   ensureColumn(db, "social_joins", "reply", "reply TEXT NOT NULL DEFAULT 'join'");
   ensureColumn(db, "social_joins", "eta_min", "eta_min INTEGER");
   ensureColumn(db, "social_joins", "arrive_at", "arrive_at INTEGER");
@@ -499,6 +504,7 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "price_cents", "price_cents INTEGER");
   ensureColumn(db, "plans", "collector_id", "collector_id TEXT");
   ensureColumn(db, "plans", "card_color", "card_color INTEGER");
+  ensureColumn(db, "plans", "ends_at", "ends_at INTEGER");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -1344,11 +1350,12 @@ export function insertSocial(
     lng: number | null;
     place?: string;
     startsAt?: number | null;
+    endsAt?: number | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng, place, starts_at, reminded_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    `INSERT INTO socials (id, circle_id, creator_id, note, created_at, expires_at, last_notified_at, lat, lng, place, starts_at, reminded_at, ends_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
   ).run(
     social.id,
     social.circleId,
@@ -1361,6 +1368,7 @@ export function insertSocial(
     social.lng,
     social.place ?? "",
     social.startsAt ?? null,
+    social.endsAt ?? null,
   );
 }
 
@@ -1422,6 +1430,11 @@ export function updateSocial(
     schedule.remindedAt,
     id,
   );
+}
+
+/** Sets the host's end on a live social. expires_at follows it; null restores the caller's default window. */
+export function setSocialEnd(db: DatabaseSync, id: string, endsAt: number | null, expiresAt: number): void {
+  db.prepare("UPDATE socials SET ends_at = ?, expires_at = ? WHERE id = ?").run(endsAt, expiresAt, id);
 }
 
 export function listActiveSocials(db: DatabaseSync, circleId: string, now: number): SocialRow[] {
@@ -1552,10 +1565,11 @@ export function patchSocialDetails(
   startsAt: number | null,
   remindedAt: number | null,
   expiresAt: number,
+  endsAt: number | null,
 ): void {
   db.prepare(
-    "UPDATE socials SET note = ?, place = ?, lat = ?, lng = ?, starts_at = ?, reminded_at = ?, expires_at = ? WHERE id = ?",
-  ).run(note, place, lat, lng, startsAt, remindedAt, expiresAt, id);
+    "UPDATE socials SET note = ?, place = ?, lat = ?, lng = ?, starts_at = ?, reminded_at = ?, expires_at = ?, ends_at = ? WHERE id = ?",
+  ).run(note, place, lat, lng, startsAt, remindedAt, expiresAt, endsAt, id);
 }
 
 export function insertPlan(
@@ -1573,11 +1587,12 @@ export function insertPlan(
     atTime?: string | null;
     description?: string | null;
     cardColor?: number | null;
+    endsAt?: number | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description, card_color)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description, card_color, ends_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     plan.id,
     plan.circleId,
@@ -1591,19 +1606,23 @@ export function insertPlan(
     plan.atTime ?? null,
     plan.description || null,
     plan.cardColor ?? null,
+    plan.endsAt ?? null,
   );
   linkPlanCircle(db, plan.id, plan.circleId, plan.createdAt);
 }
 
-export function listVisiblePlans(db: DatabaseSync, circleId: string, today: string, through: string): PlanRow[] {
+/** Plans still on the calendar: not ended by hand, not past their day, and (with `now`) not past their end time. */
+export function listVisiblePlans(db: DatabaseSync, circleId: string, today: string, through: string, now?: number): PlanRow[] {
   clearExpiredPlanPoints(db, today);
   return all<PlanRow>(
     db,
     `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ? AND p.for_date <= ?
+     AND (p.ends_at IS NULL OR p.ends_at > ?)
      ORDER BY p.for_date ASC, p.at_time IS NULL, p.at_time ASC, p.created_at ASC`,
     circleId,
     today,
     through,
+    now ?? 0,
   );
 }
 
@@ -1616,12 +1635,13 @@ export function listPricedPlans(db: DatabaseSync, circleId: string): PlanRow[] {
   );
 }
 
-export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string): number {
+export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string, now?: number): number {
   const row = one<{ n: number | bigint }>(
     db,
-    `SELECT COUNT(*) AS n FROM plans p WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ?`,
+    `SELECT COUNT(*) AS n FROM plans p WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ? AND (p.ends_at IS NULL OR p.ends_at > ?)`,
     circleId,
     today,
+    now ?? 0,
   );
   return Number(row?.n ?? 0);
 }
@@ -1848,12 +1868,14 @@ export function listPlansOnDays(db: DatabaseSync, circleId: string, from: string
   );
 }
 
-export function listPastPlans(db: DatabaseSync, circleId: string, today: string): PlanRow[] {
+export function listPastPlans(db: DatabaseSync, circleId: string, today: string, now?: number): PlanRow[] {
   return all<PlanRow>(
     db,
-    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND (p.for_date < ? OR p.ended_at IS NOT NULL) ORDER BY p.for_date DESC, p.created_at DESC`,
+    `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND (p.for_date < ? OR p.ended_at IS NOT NULL OR (p.ends_at IS NOT NULL AND p.ends_at <= ?))
+     ORDER BY p.for_date DESC, p.created_at DESC`,
     circleId,
     today,
+    now ?? 0,
   );
 }
 
@@ -1869,11 +1891,12 @@ export function patchPlanDetails(
   description: string | null,
   /** Set when the calendar copy changed. Null keeps the last value. */
   updatedAt: number | null = null,
+  endsAt: number | null = null,
 ): void {
   db.prepare(
     `UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ?, description = ?,
-     updated_at = COALESCE(?, updated_at) WHERE id = ?`,
-  ).run(note, place, lat, lng, atTime, forDate, description, updatedAt, id);
+     updated_at = COALESCE(?, updated_at), ends_at = ? WHERE id = ?`,
+  ).run(note, place, lat, lng, atTime, forDate, description, updatedAt, endsAt, id);
 }
 
 /** Sets or clears (null) the card colour. Not a content change, so updated_at stays. */
@@ -2318,7 +2341,7 @@ const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev,
          u.buzz_animation AS creator_buzz_animation, s.note,
          s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at, s.buzzed_at,
-         s.price_cents, s.collector_id
+         s.price_cents, s.collector_id, s.ends_at
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
@@ -2326,7 +2349,7 @@ const SOCIAL_SELECT = `
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
          p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at,
-         p.price_cents, p.collector_id, p.card_color
+         p.price_cents, p.collector_id, p.card_color, p.ends_at
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;

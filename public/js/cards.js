@@ -12,6 +12,7 @@ import { compactTitle, compactWhen, compactWho } from "./compact-home.js";
 import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
 import { eventIsNow } from "./map-pin.js";
+import { eventRange } from "./plans/event-end.js";
 import { priceLine } from "./event-pay.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
 
@@ -61,10 +62,22 @@ export function ghostClosedMenu(captured) {
   else setTimeout(done, 160);
 }
 
+/** A social's when text: its range when it has an end, else "from 19:00" or the time left. */
+function socialWhen(social) {
+  const range = eventRange("social", social, Date.now(), appTz());
+  if (range) return range;
+  return social.startsAt && social.startsAt > Date.now() ? `from ${clock(social.startsAt)}` : remaining(social.expiresAt);
+}
+
+/** A plan's time: its range when it has an end, else its start time. */
+function planTime(plan) {
+  return eventRange("plan", plan, Date.now(), appTz()) || plan.time || "";
+}
+
 export function socialCard(social) {
   const mine = social.creator.id === state.me.user.id;
   const upcoming = social.startsAt && social.startsAt > Date.now();
-  const happening = eventIsNow("social", social);
+  const happening = eventIsNow("social", social, Date.now(), appTz());
   const menuOpen = state.cardMenu === `social:${social.id}`;
   return el("article", {
     class: [
@@ -87,7 +100,7 @@ export function socialCard(social) {
       }, [
         avatarStack(social),
         el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
-        el("p", { text: upcoming ? `${social.creator.name} · from ${clock(social.startsAt)}` : `${social.creator.name} · ${remaining(social.expiresAt)}` }),
+        el("p", { text: `${social.creator.name} · ${socialWhen(social)}` }),
         replySummary(social),
         priceLine(social),
         placeLine(social.location, social.place, { kind: "social", id: social.id }),
@@ -102,13 +115,16 @@ export function socialCard(social) {
 export function planCard(plan) {
   const mine = plan.creator.id === state.me.user.id;
   const menuOpen = state.cardMenu === `plan:${plan.id}`;
+  const happening = eventIsNow("plan", plan, Date.now(), appTz());
   return el("article", {
     class: [
       state.focusPlan === plan.id ? "card card-plan focused" : "card card-plan",
       `card-grad ${planGradientClass(plan)}`,
+      happening ? "happening-now" : "",
       menuOpen ? "menu-open" : "",
     ].filter(Boolean).join(" "),
     "data-plan": plan.id,
+    "data-happening-now": happening ? "1" : null,
   }, [
     el("div", { class: "card-bg", onclick: () => openEventDetail("plan", plan) }),
     cardOverflow("plan", plan),
@@ -122,7 +138,7 @@ export function planCard(plan) {
       }, [
         avatarStack(plan),
         el("h3", { text: plan.note }),
-        el("p", { text: `${plan.whenLabel}${plan.time ? ` · ${plan.time}` : ""} · ${plan.creator.name}` }),
+        el("p", { text: `${plan.whenLabel}${planTime(plan) ? ` · ${planTime(plan)}` : ""} · ${plan.creator.name}` }),
         planCirclesLine(plan),
         planDescription(plan),
         planReplySummary(plan),
@@ -148,7 +164,7 @@ export function compactRow(kind, item) {
   const when = compactWhen(kind, item, now, appTz());
   const who = compactWho(item.creator, item.joined);
   const focused = kind === "plan" ? state.focusPlan === item.id : state.focusSocial === item.id;
-  const happening = eventIsNow(kind, item, now);
+  const happening = eventIsNow(kind, item, now, appTz());
   return el("button", {
     class: ["compact-row", compactTone(kind, item.id, item.cardColor), focused ? "focused" : "", happening ? "happening-now" : ""].filter(Boolean).join(" "),
     type: "button",

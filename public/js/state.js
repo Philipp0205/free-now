@@ -1,4 +1,5 @@
 import { readCompactHome } from "./compact-home.js";
+import { emptyEnd } from "./plans/event-end.js";
 
 export const TOKEN_KEY = "fn_token";
 export const CIRCLE_KEY = "fn_circle";
@@ -84,6 +85,8 @@ export const state = {
   planDay: "tomorrow",
   planDate: "",
   planWhere: emptyWhereSession(),
+  /** The end time picked in the create sheet. See plans/event-end.js. */
+  endDraft: emptyEnd(),
   viewerLocation: null,
   mapCenter: null,
   mapCard: null,

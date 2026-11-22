@@ -8,15 +8,24 @@ import {
   insertSocial,
   listMembers,
   setSocialReply,
+  setSocialEnd,
   updateSocial,
   type UserRow,
 } from "../db.js";
 import { eventTitle, freePushBody, notifyUsers, replyPushBody } from "../push/notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "../chat/reply-push.js";
 import { addDays, clockLabel, isoDate, zonedDateTime } from "../lib/time.js";
+import { resolveEnd, type EndSpec } from "../lib/end-time.js";
 import { activeStatus } from "./status.js";
 import { recordEventLine, replyLogText } from "../chat/chat.js";
 import { HttpError, parseId, requireCircle, socialPayload, type AppDeps } from "../app.js";
+
+/** The host's end for this buzz. Undefined keeps a saved end that is still after the start; null clears it. */
+function socialEnd(end: EndSpec | undefined, kept: number | null, anchor: number, now: number, tz: string): number | null {
+  if (end === null) return null;
+  if (end) return resolveEnd(end, anchor, now, tz);
+  return kept != null && kept > anchor ? kept : null;
+}
 
 export async function publishSocial(
   deps: AppDeps,
@@ -26,6 +35,7 @@ export async function publishSocial(
   place?: string,
   start?: number | null,
   requested: string | null = null,
+  end: EndSpec | undefined = undefined,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id, requested);
   const now = deps.now();
@@ -47,7 +57,8 @@ export async function publishSocial(
     : point;
   const nextStart = start === undefined ? (existing?.starts_at ?? null) : start;
   const anchor = nextStart != null && nextStart > now ? nextStart : now;
-  const expiresAt = anchor + deps.config.socialTtlMs;
+  const endsAt = socialEnd(end, existing?.ends_at ?? null, anchor, now, deps.config.tz);
+  const expiresAt = endsAt ?? anchor + deps.config.socialTtlMs;
   const fromTime = nextStart != null && nextStart > now ? clockLabel(nextStart, deps.config.tz) : "";
   const schedule = {
     startsAt: nextStart,
@@ -67,6 +78,7 @@ export async function publishSocial(
       lng: nextPoint?.lng ?? null,
       place: nextPlace,
       startsAt: nextStart,
+      endsAt,
     });
   } else {
     socialId = existing.id;
@@ -85,6 +97,7 @@ export async function publishSocial(
       keepWhere ? undefined : { point: nextPoint, place: nextPlace },
       start === undefined && !startChanged ? undefined : schedule,
     );
+    if (endsAt !== existing.ends_at) setSocialEnd(deps.db, existing.id, endsAt, expiresAt);
   }
   // Being free now ends a manual Busy. Away stays, and so does a later start.
   if (nextStart == null || nextStart <= now) {

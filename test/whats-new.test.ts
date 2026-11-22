@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v147 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v148 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v147");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v148");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,9 +665,24 @@ test("the build label is hangry-v147 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the light cards entry is the newest, in plain words without an em dash, and the maybe entry follows it", () => {
+test("the end time entry is the newest, in plain words without an em dash, and the light cards entry follows it", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-22-light-cards");
+  assert.equal(top.id, "2026-11-22-event-end-time");
+  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
+  assert.equal(top.date, "2026-11-22");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(top.bullets.join(" "), /pick an end: 1h, 2h, 3h, or an Until time/);
+  assert.match(top.bullets.join(" "), /19:00 - 22:00/);
+  assert.match(top.bullets.join(" "), /happening now until its end/);
+  assert.equal(RAW[1].id, "2026-11-22-light-cards", "the light cards entry follows it");
+});
+
+test("the light cards entry is kept, in plain words without an em dash, and the maybe entry is kept", () => {
+  const top = RAW.find((item) => item.id === "2026-11-22-light-cards")!;
+  assert.ok(top, "the light cards entry is kept");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-22");
   assert.ok(top.title.length <= 60);
@@ -677,7 +692,7 @@ test("the light cards entry is the newest, in plain words without an em dash, an
   assert.match(top.bullets.join(" "), /event cards and compact rows are now paper-coloured/);
   assert.match(top.bullets.join(" "), /dark text and a small colour chip/);
   assert.match(top.bullets.join(" "), /Dark looks exactly the same/);
-  assert.equal(RAW[1].id, "2026-11-22-maybe-rsvp", "the maybe entry follows it");
+  assert.ok(RAW.some((item) => item.id === "2026-11-22-maybe-rsvp"), "the maybe entry is kept");
 });
 
 test("the maybe entry is kept, in plain words without an em dash, and the compact open entry is kept", () => {

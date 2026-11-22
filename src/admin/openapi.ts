@@ -53,6 +53,11 @@ const place = { type: "string", description: "Free text place name." };
 const lat = { type: "number", minimum: -90, maximum: 90 };
 const lng = { type: "number", minimum: -180, maximum: 180 };
 const circleBody = { circleId: { type: "string", format: "uuid", description: "Alternative to the X-Circle header." } };
+/** Optional end of a social or plan. Send one of the two; endsAt null clears it. */
+const endBody = {
+  endsAt: { type: ["string", "integer", "null"], description: "End as HH:MM (24 hour, in the app time zone) or epoch ms. Null clears it." },
+  durationMin: { type: "integer", minimum: 1, maximum: 1440, description: "End this many minutes after the start. Not with endsAt." },
+};
 
 const statusBody = {
   required: true,
@@ -185,7 +190,7 @@ export const openapi = {
         tags: ["socials"],
         parameters: circleParams,
         requestBody: {
-          content: json({ type: "object", properties: { note, place, lat, lng, ...circleBody } }),
+          content: json({ type: "object", properties: { note, place, lat, lng, ...endBody, ...circleBody } }),
         },
         responses: {
           "201": ok("Created", { type: "object", properties: { social: ref("Social") } }),
@@ -224,6 +229,7 @@ export const openapi = {
               place,
               description: { type: "string", description: "Optional. One line, longer text is cut at 280." },
               cardColor: { type: ["integer", "null"], minimum: 0, maximum: 13, description: "Optional card color slot. Null or left out keeps the default." },
+              ...endBody,
               lat,
               lng,
               ...circleBody,
@@ -365,6 +371,7 @@ export const openapi = {
         properties: {
           ...eventFields,
           startsAt: nullable({ type: "integer" }),
+          endsAt: nullable({ type: "integer", description: "The host's end, epoch ms. Null when none was set." }),
           buzzedAt: nullable({ type: "integer" }),
           expiresAt: { type: "integer" },
         },
@@ -375,6 +382,7 @@ export const openapi = {
           ...eventFields,
           forDate: { type: "string", format: "date" },
           time: nullable({ type: "string" }),
+          endsAt: nullable({ type: "integer", description: "The host's end, epoch ms, on the plan's day. Null when none was set." }),
           whenLabel: { type: "string" },
           cardColor: nullable({ type: "integer", minimum: 0, maximum: 13 }),
         },

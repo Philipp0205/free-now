@@ -27,6 +27,19 @@ export function clockText(hour, minute) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+/** The instant (ms) of a clock time on a YYYY-MM-DD day in `tz`. NaN for a bad day or clock. */
+export function zonedInstant(day, hhmm, tz = "Europe/Berlin") {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || "") || !/^\d{2}:\d{2}$/.test(hhmm || "")) return NaN;
+  const wall = Date.parse(`${day}T${hhmm}:00Z`);
+  let utc = wall;
+  // Two passes settle the zone offset, also on a day the clocks change.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const got = zonedParts(utc, tz);
+    utc += wall - Date.parse(`${got.day}T${clockText(got.hour, got.minute)}:00Z`);
+  }
+  return utc;
+}
+
 export function nextLaterSlot(now = Date.now(), tz = "Europe/Berlin") {
   const earliest = now + 15 * 60 * 1000;
   const today = zonedParts(now, tz).day;

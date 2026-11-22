@@ -19,14 +19,14 @@ test("a free-now social is now only while it runs", () => {
   assert.equal(socialPinState(null, NOW), "ended");
 });
 
-test("cards use the map's now rule: live socials only, never plans", () => {
+test("cards use the map's now rule: live socials, and a plan without an end is never now", () => {
   const live = { startsAt: null, expiresAt: NOW + 60 * MIN };
   assert.equal(eventIsNow("social", live, NOW), true);
   assert.equal(eventIsNow("social", { startsAt: NOW - 5 * MIN, expiresAt: NOW + 60 * MIN }, NOW), true, "a later social that has started");
   assert.equal(eventIsNow("social", { startsAt: NOW + 30 * MIN, expiresAt: NOW + 150 * MIN }, NOW), false, "later");
   assert.equal(eventIsNow("social", { startsAt: null, expiresAt: NOW - MIN }, NOW), false, "ended");
   assert.equal(eventIsNow("social", null, NOW), false);
-  assert.equal(eventIsNow("plan", { forDate: "2026-11-14", time: "15:00", expiresAt: NOW + 60 * MIN }, NOW), false, "plans are never now");
+  assert.equal(eventIsNow("plan", { forDate: "2026-11-14", time: "15:00", expiresAt: NOW + 60 * MIN }, NOW), false, "a plan without an end is never now");
   for (const item of [live, { startsAt: NOW + 30 * MIN, expiresAt: NOW + 150 * MIN }, { startsAt: null, expiresAt: NOW - MIN }]) {
     assert.equal(eventIsNow("social", item, NOW), socialPinState(item, NOW) === "now", "the same answer as the map");
   }

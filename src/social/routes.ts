@@ -18,6 +18,7 @@ import type { AuthedRouteContext } from "../lib/context.js";
 import { HttpError, matchPath, requestOrigin, safeDecode, sendEmpty, sendJson } from "../lib/http.js";
 import { PUBLIC_DIR, staticHeaders } from "../lib/static.js";
 import { addDays, isoDate } from "../lib/time.js";
+import { readEnd } from "../lib/end-time.js";
 import {
   cleanDescription,
   cleanNote,
@@ -79,7 +80,7 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested);
+    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested, readEnd(body));
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return true;
   }
@@ -135,7 +136,7 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const through = addDays(today, PLAN_DAYS_AHEAD);
     const merged = new Map<string, PlanRow>();
     for (const circle of listCirclesForUser(deps.db, me.id)) {
-      for (const row of listVisiblePlans(deps.db, circle.id, today, through)) if (!merged.has(row.id)) merged.set(row.id, row);
+      for (const row of listVisiblePlans(deps.db, circle.id, today, through, deps.now())) if (!merged.has(row.id)) merged.set(row.id, row);
     }
     const plans = [...merged.values()]
       .sort((a, b) =>
@@ -153,7 +154,7 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const circle = requireCircle(deps, me.id, requested);
     const now = deps.now();
     const today = isoDate(now, deps.config.tz);
-    const plans = listVisiblePlans(deps.db, circle.id, today, addDays(today, PLAN_DAYS_AHEAD)).map((row) =>
+    const plans = listVisiblePlans(deps.db, circle.id, today, addDays(today, PLAN_DAYS_AHEAD), now).map((row) =>
       planPayload(deps.db, row, today, me.id, deps.now()),
     );
     sendJson(res, 200, { plans });
@@ -166,7 +167,7 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
     const description = cleanDescription(body.description);
     const cardColor = readCardColor(body.cardColor);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor) });
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor, readEnd(body)) });
     return true;
   }
 
@@ -223,7 +224,7 @@ export async function handlePlanShareRoutes(ctx: AuthedRouteContext): Promise<bo
     const circle = requireCircle(deps, me.id, requested);
     const plan = getPlan(deps.db, parseId(planShare[1]));
     if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
-    if (!isOpenPlan(plan, isoDate(deps.now(), deps.config.tz))) throw new HttpError(410, "That plan has ended.");
+    if (!isOpenPlan(plan, isoDate(deps.now(), deps.config.tz), deps.now())) throw new HttpError(410, "That plan has ended.");
     const shareId = ensureShareId(deps.db, plan.id);
     sendJson(res, 200, { shareId, url: `${requestOrigin(req, deps.config)}/p/${shareId}` });
     return true;
@@ -256,7 +257,7 @@ export async function handlePlanShareRoutes(ctx: AuthedRouteContext): Promise<bo
 export async function serveSharePage(req: http.IncomingMessage, res: http.ServerResponse, deps: AppDeps, rawId: string): Promise<void> {
   const shareId = safeDecode(rawId);
   const today = isoDate(deps.now(), deps.config.tz);
-  const plan = openSharedPlan(deps.db, shareId, today);
+  const plan = openSharedPlan(deps.db, shareId, today, deps.now());
   const origin = requestOrigin(req, deps.config);
   const template = await fs.promises.readFile(path.join(PUBLIC_DIR, "index.html"), "utf8");
   const html = shareHtml(template, shareMeta(plan, today), `${origin}/p/${encodeURIComponent(shareId)}`, origin);

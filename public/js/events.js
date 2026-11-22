@@ -2,7 +2,8 @@ import { CIRCLE_COLORS, circleColor, monthStart, gridRange, monthGrid, monthTitl
 import { zonedParts, shortDate, planDayRange } from "./when.js";
 import { audiencePlace } from "./place.js";
 import { activeStatus } from "./status.js";
-import { socialPinState, pinLabel, goingCrowd } from "./map-pin.js";
+import { socialPinState, pinLabel, goingCrowd, eventIsNow } from "./map-pin.js";
+import { eventRange } from "./plans/event-end.js";
 import { EVENTS_VIEW_KEY, MAP_ALL_KEY, state } from "./state.js";
 import { destroyLiveMap, refreshPins } from "./map-card.js";
 import { api, isNetworkFailure, noteConnectionProblem } from "./session.js";
@@ -366,16 +367,26 @@ function calFreeLine(day, events) {
   return el("div", { class: "cal-free" }, free.map((person) => avatar(person, 24)));
 }
 
+/** The when text on a plan pin: the day, then the time or the range. */
+function planPinWhen(plan) {
+  const time = eventRange("plan", plan, Date.now(), appTz()) || plan.time;
+  return time ? `${plan.whenLabel} · ${time}` : plan.whenLabel;
+}
+
+/** The when text of a calendar row. An event with an end shows its range. */
+function calendarWhen(kind, item, over) {
+  const range = eventRange(kind, item, Date.now(), appTz());
+  if (range) return range;
+  if (kind === "plan") return item.time || "";
+  if (!over && (!item.startsAt || item.startsAt <= Date.now())) return "Free now";
+  return over ? clock(item.startsAt ?? item.createdAt) : `from ${clock(item.startsAt)}`;
+}
+
 /** One event under the grid: title, when, host, the circle when All circles is on, and who is in. */
 function calendarRow(entry) {
   const { kind, item, over } = entry;
   const title = item.note || (kind === "plan" ? "Plan" : "Free now");
-  let when;
-  if (kind === "plan") when = item.time || "";
-  else if (!over && (!item.startsAt || item.startsAt <= Date.now())) when = "Free now";
-  else if (!over) when = `from ${clock(item.startsAt)}`;
-  else when = clock(item.startsAt ?? item.createdAt);
-  const bits = [when, item.creator?.name];
+  const bits = [calendarWhen(kind, item, over), item.creator?.name];
   if (state.mapAllCircles && (state.me?.circles || []).length >= 2 && item.circleName) bits.push(item.circleName);
   if (over) bits.push("Ended");
   return el("button", {
@@ -471,12 +482,12 @@ export function collectPins() {
       initial: initial(plan.creator.name),
       color: colorFor(plan.creator),
       note: place ? `${plan.note} · ${place}` : plan.note,
-      time: plan.time ? `${plan.whenLabel} · ${plan.time}` : plan.whenLabel,
+      time: planPinWhen(plan),
       own: mine,
       personId: plan.creator.id,
       photo: pinPhoto(plan.creator),
       status: activeStatus(plan.creator.status)?.type || "",
-      now: false,
+      now: eventIsNow("plan", plan, Date.now(), appTz()),
       label: pinLabel("plan", plan, Date.now(), appTz()),
       // The host is the pin itself, so the crowd is everyone else who is In.
       faces: crowd.faces.slice(1).map((person) => ({
