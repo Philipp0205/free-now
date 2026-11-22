@@ -16,6 +16,7 @@ import { eventRange } from "./plans/event-end.js";
 import { priceLine } from "./event-pay.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
 import { privateMarker } from "./plans/private-event-ui.js";
+import { repeatMarker } from "./plans/repeat-ui.js";
 import { eventPhoto, photoThumb } from "./plans/event-photo-ui.js";
 import { PRIVATE_COPY } from "./plans/private-event-copy.js";
 
@@ -145,6 +146,7 @@ export function planCard(plan) {
         el("h3", { text: plan.note }),
         el("p", { text: `${plan.whenLabel}${planTime(plan) ? ` · ${planTime(plan)}` : ""} · ${plan.creator.name}` }),
         planCirclesLine(plan),
+        repeatMarker(plan),
         privateMarker(plan),
         planDescription(plan),
         planReplySummary(plan),

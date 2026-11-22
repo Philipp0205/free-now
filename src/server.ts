@@ -8,6 +8,7 @@ import { syncCalendarFeeds } from "./calendar/freebusy.js";
 import { startPmtilesFetch } from "./map/pmtiles-fetch.js";
 import { createNoopPushSender, createWebPushSender } from "./push/push.js";
 import { sweepOrphanPhotos } from "./social/event-photo.js";
+import { materializeRecurringPlans } from "./social/recurring-plans.js";
 import { sendStartReminders } from "./push/remind.js";
 import { addDays, isoDate } from "./lib/time.js";
 
@@ -18,8 +19,15 @@ const push = config.vapid ? createWebPushSender(config.vapid) : createNoopPushSe
 function sweepNow(): void {
   const now = Date.now();
   const today = isoDate(now, config.tz);
-  sweep(db, now, addDays(today, -HISTORY_DAYS), today);
-  void sweepOrphanPhotos(db, config.eventPhotosDir);
+  // Next occurrences first, so a finished repeating plan copies its pin before the sweep clears old ones.
+  void materializeRecurringPlans({ db, push, config, now: () => Date.now() })
+    .catch((error: unknown) => {
+      console.error("recurring plans failed", error instanceof Error ? error.name : "unknown");
+    })
+    .finally(() => {
+      sweep(db, now, addDays(today, -HISTORY_DAYS), today);
+      void sweepOrphanPhotos(db, config.eventPhotosDir);
+    });
 }
 
 function clearLocationsNow(): void {

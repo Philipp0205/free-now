@@ -100,6 +100,8 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     whenLabel: dayLabel(plan.for_date, today),
     time: plan.at_time,
     endsAt: plan.ends_at ?? null,
+    // Only the rule, never the series id. The payload already goes only to people who can see the plan.
+    recurrence: plan.recurrence ?? null,
     createdAt: plan.created_at,
     location: pointPayload(plan.lat, plan.lng),
     // Home circle. `circles` below still lists every linked circle.

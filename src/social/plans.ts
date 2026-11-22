@@ -19,6 +19,7 @@ import {
 import { audiencePlace, eventTitle, notifyUsers, planRemindTitle, planReplyBody, replyPushBody, type Notice } from "../push/notify.js";
 import { addDays, clockLabel, isCalendarDate, isoDate, noticeDay, zonedDateTime } from "../lib/time.js";
 import { resolvePlanEnd, type EndSpec } from "../lib/end-time.js";
+import { anchorDayOf, type Recurrence } from "../lib/recurrence.js";
 import { recordEventLine, replyLogText } from "../chat/chat.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "../app.js";
 import { normalizeReply, readArriveAt, type Reply } from "./socials.js";
@@ -60,6 +61,7 @@ export async function publishPlan(
   cardColor: number | null = null,
   end: EndSpec | undefined = undefined,
   invitees: unknown = undefined,
+  recurrence: Recurrence | null = null,
 ) {
   const circle = requireCircle(deps, user.id, requested);
   // Read first, so a bad list is a 400 before anything is saved.
@@ -88,6 +90,9 @@ export async function publishPlan(
     description,
     cardColor,
     endsAt,
+    seriesId: recurrence ? crypto.randomUUID() : null,
+    recurrence,
+    seriesDay: recurrence ? anchorDayOf(forDate) : null,
   });
   // Made now so the first Share tap needs no round trip. Old plans get one on first share.
   ensureShareId(deps.db, id);

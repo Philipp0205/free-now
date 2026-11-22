@@ -866,8 +866,9 @@ a.btn.pay-paypal { display: flex; align-items: center; justify-content: center; 
 .plan-circles { margin: 2px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .card-copy .plan-circles { color: color-mix(in srgb, var(--text) 70%, transparent); font-size: 12px; }
 /* "Private · with Bea, Cam" on an event only some friends can see. */
-.private-line, .detail-private { margin: 2px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); overflow-wrap: anywhere; }
-.card-copy .private-line { color: color-mix(in srgb, var(--text) 78%, transparent); }
+.private-line, .detail-private, .repeat-line { margin: 2px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); overflow-wrap: anywhere; }
+.card-copy .private-line, .card-copy .repeat-line { color: color-mix(in srgb, var(--text) 78%, transparent); }
+.repeat-edit .btn { margin-top: 8px; }
 .invite-field .help { margin: 6px 0 0; }
 .invite-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .invite-chips .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

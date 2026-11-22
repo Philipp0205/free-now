@@ -112,6 +112,12 @@ export type PlanRow = {
   ends_at: number | null;
   /** Revision of the host's cover photo. Null means no photo. */
   photo_rev: number | null;
+  /** Shared by every occurrence of a repeating plan. Null for a one-off. Kept when the repeat is stopped. */
+  series_id: string | null;
+  /** "weekly", "biweekly" or "monthly" while the series goes on. Null for a one-off or a stopped series. */
+  recurrence: string | null;
+  /** Day of month a monthly series is anchored to, so a clamp to the 28th does not drift. */
+  series_day: number | null;
 };
 
 export type PushSubRow = {
@@ -533,6 +539,12 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "ends_at", "ends_at INTEGER");
   ensureColumn(db, "socials", "photo_rev", "photo_rev INTEGER");
   ensureColumn(db, "plans", "photo_rev", "photo_rev INTEGER");
+  ensureColumn(db, "plans", "series_id", "series_id TEXT");
+  ensureColumn(db, "plans", "recurrence", "recurrence TEXT");
+  ensureColumn(db, "plans", "series_day", "series_day INTEGER");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_series_date ON plans(series_id, for_date) WHERE series_id IS NOT NULL",
+  );
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -1650,11 +1662,20 @@ export function insertPlan(
     description?: string | null;
     cardColor?: number | null;
     endsAt?: number | null;
+    seriesId?: string | null;
+    recurrence?: string | null;
+    seriesDay?: number | null;
+    priceCents?: number | null;
+    collectorId?: string | null;
+    /** Skip quietly when (series_id, for_date) already exists. Returns false then. */
+    orIgnore?: boolean;
   },
-): void {
-  db.prepare(
-    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description, card_color, ends_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+): boolean {
+  const res = db.prepare(
+    `INSERT INTO plans (id, circle_id, creator_id, note, for_date, created_at, lat, lng, place, at_time, description, card_color, ends_at,
+                        series_id, recurrence, series_day, price_cents, collector_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ${plan.orIgnore ? "ON CONFLICT (series_id, for_date) WHERE series_id IS NOT NULL DO NOTHING" : ""}`,
   ).run(
     plan.id,
     plan.circleId,
@@ -1669,8 +1690,15 @@ export function insertPlan(
     plan.description || null,
     plan.cardColor ?? null,
     plan.endsAt ?? null,
+    plan.seriesId ?? null,
+    plan.recurrence ?? null,
+    plan.seriesDay ?? null,
+    plan.priceCents ?? null,
+    plan.collectorId ?? null,
   );
+  if (Number(res.changes) === 0) return false;
   linkPlanCircle(db, plan.id, plan.circleId, plan.createdAt);
+  return true;
 }
 
 /** Plans still on the calendar: not ended by hand, not past their day, and (with `now`) not past their end time. */
@@ -1883,9 +1911,12 @@ export function finishSocial(db: DatabaseSync, id: string, now: number): boolean
 
 export function finishPlan(db: DatabaseSync, id: string, now: number): boolean {
   // updated_at moves only on the first end, so a repeat end does not bump the calendar SEQUENCE.
+  // A repeating plan keeps its pin until the next occurrence has copied it. Materializing clears it.
   db.prepare(
     `UPDATE plans SET updated_at = CASE WHEN ended_at IS NULL THEN ? ELSE updated_at END,
-     ended_at = COALESCE(ended_at, ?), lat = NULL, lng = NULL WHERE id = ?`,
+     ended_at = COALESCE(ended_at, ?),
+     lat = CASE WHEN recurrence IS NULL THEN NULL ELSE lat END,
+     lng = CASE WHEN recurrence IS NULL THEN NULL ELSE lng END WHERE id = ?`,
   ).run(now, now, id);
   dropLive(db, "plan", id);
   return Boolean(one(db, "SELECT 1 AS ok FROM plans WHERE id = ?", id));
@@ -1953,6 +1984,31 @@ export function patchPlanDetails(
     `UPDATE plans SET note = ?, place = ?, lat = ?, lng = ?, at_time = ?, for_date = ?, description = ?,
      updated_at = COALESCE(?, updated_at), ends_at = ? WHERE id = ?`,
   ).run(note, place, lat, lng, atTime, forDate, description, updatedAt, endsAt, id);
+}
+
+/** Sets or clears the repeat rule. A series id is made on first use and kept when the rule is cleared. */
+export function setPlanRecurrence(db: DatabaseSync, id: string, recurrence: string | null, seriesDay: number | null): void {
+  db.prepare(
+    "UPDATE plans SET recurrence = ?, series_day = ?, series_id = CASE WHEN ? IS NULL THEN series_id ELSE COALESCE(series_id, ?) END WHERE id = ?",
+  ).run(recurrence, recurrence ? seriesDay : null, recurrence, crypto.randomUUID(), id);
+}
+
+/** Plans whose repeat rule is on, ordered so older ones go first. The caller decides which are done. */
+export function listRepeatingPlans(db: DatabaseSync): PlanRow[] {
+  return all<PlanRow>(
+    db,
+    `${PLAN_SELECT} WHERE p.series_id IS NOT NULL AND p.recurrence IS NOT NULL ORDER BY p.for_date ASC, p.created_at ASC`,
+  );
+}
+
+/** Stops a plan's repeat after its next one exists, and lets its pin go like any past plan. */
+export function retirePlanRecurrence(db: DatabaseSync, id: string): void {
+  db.prepare("UPDATE plans SET recurrence = NULL, series_day = NULL, lat = NULL, lng = NULL WHERE id = ?").run(id);
+}
+
+/** True when another plan of the series already sits on this day. The unique index would refuse the move. */
+export function seriesDateTaken(db: DatabaseSync, seriesId: string, exceptId: string, forDate: string): boolean {
+  return Boolean(one(db, "SELECT 1 AS ok FROM plans WHERE series_id = ? AND id <> ? AND for_date = ?", seriesId, exceptId, forDate));
 }
 
 /** Sets or clears (null) the card colour. Not a content change, so updated_at stays. */
@@ -2326,7 +2382,7 @@ function clearExpiredSocialPoints(db: DatabaseSync, now: number): void {
 function clearExpiredPlanPoints(db: DatabaseSync, today: string): void {
   // A typed place is not derived from the pin, so it stays after the coordinates go.
   db.prepare(
-    "UPDATE plans SET lat = NULL, lng = NULL WHERE for_date < ? AND (lat IS NOT NULL OR lng IS NOT NULL)",
+    "UPDATE plans SET lat = NULL, lng = NULL WHERE for_date < ? AND recurrence IS NULL AND (lat IS NOT NULL OR lng IS NOT NULL)",
   ).run(today);
 }
 
@@ -2440,7 +2496,8 @@ const SOCIAL_SELECT = `
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
          p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at,
-         p.price_cents, p.collector_id, p.card_color, p.ends_at, p.photo_rev
+         p.price_cents, p.collector_id, p.card_color, p.ends_at, p.photo_rev,
+         p.series_id, p.recurrence, p.series_day
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
