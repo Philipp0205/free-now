@@ -69,7 +69,7 @@ export function listInvitees(db: DatabaseSync, kind: EventKind, id: string, host
 
 /**
  * Replaces the invitee list. An empty list makes the event public again. A non-empty one also drops
- * the replies of people who are no longer on it (a removed guest stays removed).
+ * the replies and alerts of people who are no longer on it (a removed guest stays removed).
  */
 export function setInvitees(db: DatabaseSync, kind: EventKind, id: string, userIds: string[]): void {
   db.prepare("DELETE FROM event_invitees WHERE kind = ? AND event_id = ?").run(kind, id);
@@ -79,6 +79,8 @@ export function setInvitees(db: DatabaseSync, kind: EventKind, id: string, userI
   const joins = JOINS[kind];
   const marks = userIds.map(() => "?").join(", ");
   db.prepare(`DELETE FROM ${joins.table} WHERE ${joins.column} = ? AND blocked = 0 AND user_id NOT IN (${marks})`).run(id, ...userIds);
+  // Drop leftover alerts so someone taken off the list does not keep seeing the event in Alerts.
+  db.prepare(`DELETE FROM notifications WHERE ref_id = ? AND user_id NOT IN (${marks})`).run(id, ...userIds);
 }
 
 function isMemberOfAny(db: DatabaseSync, userId: string, circleIds: string[]): boolean {

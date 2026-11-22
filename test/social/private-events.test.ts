@@ -226,3 +226,15 @@ test("a private I'm free only hides the host's busy hours from the people it is 
   }, { ...ENV, tz: "Europe/Berlin" });
 });
 
+test("making a public plan private drops leftover alerts for people who are no longer on it", async () => {
+  await withApp(async (ctx) => {
+    const { alex, bea, cam, a } = await seed(ctx.port);
+    const plan = await makePlan(ctx.port, alex, a.id);
+    const alerts = async (person: Person) =>
+      (await api(ctx.port, "GET", `/api/notifications?circle=${a.id}`, { token: person.token, status: 200 })).notifications as Array<{ refId: string }>;
+    assert.ok((await alerts(cam)).some((row) => row.refId === plan.id), "Cam heard about the public plan");
+    await api(ctx.port, "PATCH", `/api/plans/${plan.id}?circle=${a.id}`, { token: alex.token, body: { invitees: ids(bea) }, status: 200 });
+    assert.ok((await alerts(bea)).some((row) => row.refId === plan.id), "Bea keeps the alert");
+    assert.ok((await alerts(cam)).every((row) => row.refId !== plan.id), "Cam's leftover alert is gone");
+  }, ENV);
+});
