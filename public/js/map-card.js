@@ -18,6 +18,7 @@ import { arriveClock, maybeLine, replySummary, whoRow, whoRowPeople } from "./re
 import { cardActions } from "./plan-share.js";
 import { avatar } from "./avatars.js";
 import { tapClosedMenu } from "./nav.js";
+import { liveCard } from "./map-places/live-ui.js";
 
 export const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refreshPins, closeMapCard, mapCardOpen, warmMap } = bindMap({
   state,
@@ -32,6 +33,7 @@ export const { mountMap, mountWhereMap, destroyLiveMap, destroyWhereMap, refresh
 });
 
 function mapCard(pin) {
+  if (pin.kind === "live") return liveCard(pin, closeMapCard);
   const distance = state.viewerLocation ? formatDistance(haversine(state.viewerLocation, pin)) : "";
   const events = mapEvents();
   const social = pin.kind === "social"

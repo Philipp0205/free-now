@@ -71,6 +71,9 @@ export const SHARE_LIMIT = { limit: 60, windowMs: 60_000 };
 /** Calendar link connects and refreshes per person. Each one fetches a remote file. */
 export const CALENDAR_SYNC_LIMIT = { limit: 10, windowMs: 60_000 };
 
+/** Live location posts per person. The app posts every 5 s at most; this leaves room for two events and a retry. */
+export const LIVE_LIMIT = { limit: 60, windowMs: 60_000 };
+
 export function createApp(deps: AppDeps): http.RequestListener {
   const limits: Limits = {
     ack: createRateLimiter(ACK_LIMIT),
@@ -81,6 +84,7 @@ export function createApp(deps: AppDeps): http.RequestListener {
     agent: createRateLimiter(AGENT_TOKEN_LIMIT),
     accounts: createRateLimiter(ACCOUNT_LIMIT),
     giphy: createRateLimiter(GIPHY_LIMIT_PER_MIN),
+    live: createRateLimiter(LIVE_LIMIT),
   };
   return (req, res) => {
     void handle(req, res, deps, limits).catch((error: unknown) => {

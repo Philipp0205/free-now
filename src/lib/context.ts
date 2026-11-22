@@ -15,6 +15,8 @@ export type Limits = {
   accounts: RateLimiter;
   /** GIF picker lookups per person (see GIPHY_LIMIT_PER_MIN). */
   giphy: RateLimiter;
+  /** Live location posts per person (see LIVE_LIMIT). */
+  live: RateLimiter;
 };
 
 /** The per-request values every route handler reads. Built once in handle(). */

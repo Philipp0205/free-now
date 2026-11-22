@@ -422,6 +422,20 @@ CREATE TABLE IF NOT EXISTS event_invitees (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (kind, event_id, user_id)
 );
+
+-- Live location while the app is open: the last point per person per event, never a history. A row with arrived_at and no
+-- point only remembers that this share already arrived, so one arrival push goes out. Polymorphic on kind, so no FK on the event; sweep() drops orphans.
+CREATE TABLE IF NOT EXISTS event_live (
+  kind TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  lat REAL,
+  lng REAL,
+  accuracy REAL,
+  updated_at INTEGER NOT NULL,
+  arrived_at INTEGER,
+  PRIMARY KEY (kind, event_id, user_id)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -1543,6 +1557,7 @@ export function blockSocialGuest(db: DatabaseSync, socialId: string, userId: str
      VALUES (?, ?, ?, 'removed', NULL, NULL, 1, ?)
      ON CONFLICT(social_id, user_id) DO UPDATE SET reply = 'removed', eta_min = NULL, arrive_at = NULL, blocked = 1, removed_by = excluded.removed_by`,
   ).run(socialId, userId, now, actorName);
+  dropLive(db, "social", socialId, userId);
 }
 
 export function setSocialReply(
@@ -1559,6 +1574,7 @@ export function setSocialReply(
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(social_id, user_id) DO UPDATE SET reply = excluded.reply, eta_min = excluded.eta_min, arrive_at = excluded.arrive_at`,
   ).run(socialId, userId, joinedAt, reply, etaMin, arriveAt);
+  if (!keepsLive(reply)) dropLive(db, "social", socialId, userId);
 }
 
 export function listComingUserIds(db: DatabaseSync, socialId: string): string[] {
@@ -1598,6 +1614,7 @@ export function rotateInvite(db: DatabaseSync, circleId: string, code: string, e
 
 export function removeSocialJoin(db: DatabaseSync, socialId: string, userId: string): void {
   db.prepare("DELETE FROM social_joins WHERE social_id = ? AND user_id = ?").run(socialId, userId);
+  dropLive(db, "social", socialId, userId);
 }
 
 export function patchSocialDetails(
@@ -1826,6 +1843,7 @@ export function blockPlanGuest(db: DatabaseSync, planId: string, userId: string,
      VALUES (?, ?, ?, 'removed', NULL, 1, ?)
      ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = 'removed', arrive_at = NULL, blocked = 1, removed_by = excluded.removed_by`,
   ).run(planId, userId, now, actorName);
+  dropLive(db, "plan", planId, userId);
 }
 
 export function setPlanReply(
@@ -1840,10 +1858,12 @@ export function setPlanReply(
     `INSERT INTO plan_joins (plan_id, user_id, joined_at, reply, arrive_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(plan_id, user_id) DO UPDATE SET reply = excluded.reply, arrive_at = excluded.arrive_at`,
   ).run(planId, userId, joinedAt, reply, arriveAt);
+  if (!keepsLive(reply)) dropLive(db, "plan", planId, userId);
 }
 
 export function removePlanJoin(db: DatabaseSync, planId: string, userId: string): void {
   db.prepare("DELETE FROM plan_joins WHERE plan_id = ? AND user_id = ?").run(planId, userId);
+  dropLive(db, "plan", planId, userId);
 }
 
 export function deletePlan(db: DatabaseSync, id: string, creatorId: string): number {
@@ -1857,6 +1877,7 @@ export function finishSocial(db: DatabaseSync, id: string, now: number): boolean
   db.prepare(
     "UPDATE socials SET expires_at = ?, lat = NULL, lng = NULL WHERE id = ? AND expires_at > ?",
   ).run(now, id, now);
+  dropLive(db, "social", id);
   return Boolean(one(db, "SELECT 1 AS ok FROM socials WHERE id = ?", id));
 }
 
@@ -1866,6 +1887,7 @@ export function finishPlan(db: DatabaseSync, id: string, now: number): boolean {
     `UPDATE plans SET updated_at = CASE WHEN ended_at IS NULL THEN ? ELSE updated_at END,
      ended_at = COALESCE(ended_at, ?), lat = NULL, lng = NULL WHERE id = ?`,
   ).run(now, now, id);
+  dropLive(db, "plan", id);
   return Boolean(one(db, "SELECT 1 AS ok FROM plans WHERE id = ?", id));
 }
 
@@ -2311,11 +2333,36 @@ function clearExpiredPlanPoints(db: DatabaseSync, today: string): void {
 export function clearExpiredLocations(db: DatabaseSync, now: number, today: string): void {
   clearExpiredSocialPoints(db, now);
   clearExpiredPlanPoints(db, today);
+  clearExpiredLive(db, now, today);
 }
 
 export const HISTORY_DAYS = 90;
 
+/** A live point older than this is never shown and the sweeper removes it. The sharer's app re-posts well inside it. */
+export const LIVE_TTL_MS = 3 * 60 * 1000;
+
 export type EventKind = "plan" | "social";
+
+/** Forgets live points: one person's on an event, or everyone's when no user is given. */
+export function dropLive(db: DatabaseSync, kind: EventKind, id: string, userId?: string): void {
+  if (userId === undefined) db.prepare("DELETE FROM event_live WHERE kind = ? AND event_id = ?").run(kind, id);
+  else db.prepare("DELETE FROM event_live WHERE kind = ? AND event_id = ? AND user_id = ?").run(kind, id, userId);
+}
+
+/** A reply that keeps a live share going. Maybe, declined and removed stop it. */
+function keepsLive(reply: string): boolean {
+  return reply === "coming" || reply === "join" || reply === "in";
+}
+
+/** Drops points past the TTL and every point of an event that is over (social expired, plan past, ended, or past its end time). */
+function clearExpiredLive(db: DatabaseSync, now: number, today: string): void {
+  db.prepare("DELETE FROM event_live WHERE updated_at <= ?").run(now - LIVE_TTL_MS);
+  db.prepare("DELETE FROM event_live WHERE kind = 'social' AND event_id IN (SELECT id FROM socials WHERE expires_at <= ?)").run(now);
+  db.prepare(
+    `DELETE FROM event_live WHERE kind = 'plan' AND event_id IN
+     (SELECT id FROM plans WHERE for_date < ? OR ended_at IS NOT NULL OR (ends_at IS NOT NULL AND ends_at <= ?))`,
+  ).run(today, now);
+}
 
 export type PaidRow = { user_id: string; set_by: string; set_by_name: string; set_at: number };
 
@@ -2374,6 +2421,8 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   db.prepare("DELETE FROM event_payments WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
   db.prepare("DELETE FROM event_invitees WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
   db.prepare("DELETE FROM event_invitees WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
+  db.prepare("DELETE FROM event_live WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
+  db.prepare("DELETE FROM event_live WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM auth_links WHERE expires_at < ?").run(now);

@@ -15,6 +15,8 @@ import { dayLabel } from "../lib/time.js";
 import { type PushSummary, pushSummaryForPlan, pushSummaryForViewer } from "../push/push-status.js";
 import { buzzAnimationField } from "./buzz-animation.js";
 import { photoField } from "./event-photo-access.js";
+import { liveField } from "./live.js";
+import { isOpenPlan } from "./plan-share.js";
 import { remindAgainAt } from "./plans.js";
 import { paymentPayload } from "./payments.js";
 import { type PersonStatus, visibleStatuses } from "./status.js";
@@ -63,6 +65,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
     ...privateField(db, "social", social, viewerId),
     ...photoField(db, "social", social, viewerId),
+    ...liveField(db, "social", social, viewerId, now, social.lat != null && social.expires_at > now),
     joined: joins.map((join) => ({
       id: join.id,
       name: join.name,
@@ -112,6 +115,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
     ...privateField(db, "plan", plan, viewerId),
     ...photoField(db, "plan", plan, viewerId),
+    ...liveField(db, "plan", plan, viewerId, now, plan.lat != null && isOpenPlan(plan, today, now)),
     joined: joins.map((join) => ({
       id: join.id,
       name: join.name,

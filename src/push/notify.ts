@@ -66,6 +66,12 @@ export function freePushBody(name: string, place: string, fromTime = "", shifted
   return extra ? `${line} – ${extra}` : line;
 }
 
+/** "Alex arrived at Cafe Lina". Only the typed place name, never coordinates. A vague or empty place says just "Alex arrived". */
+export function arrivedBody(name: string, place: string): string {
+  const tail = place.trim() ? placeTail(place) : "nearby";
+  return tail === "nearby" ? `${name} arrived` : `${name} arrived ${tail}`;
+}
+
 export function startingNowBody(name: string, place: string): string {
   const spot = place.trim();
   if (!spot) return `Starting now: ${name}`;
