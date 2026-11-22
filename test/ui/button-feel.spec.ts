@@ -210,7 +210,8 @@ test("with reduced motion there is no pop and no press scale, only the colour ch
       animationName: getComputedStyle(node).animationName,
     }));
     assert.notEqual(on.colour, offColour, "the fill still changes");
-    assert.equal(on.colour, "rgb(255, 255, 255)");
+    // This context has no colorScheme, so it runs light: the In-on pill is the solid near-black fill.
+    assert.equal(on.colour, "rgb(22, 18, 15)");
     assert.equal(on.transform, "none");
     assert.deepEqual(on.animations.filter((name) => name.startsWith("in-pop")), []);
     assert.equal(on.animationName, "none");

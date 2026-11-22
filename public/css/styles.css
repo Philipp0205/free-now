@@ -81,9 +81,11 @@ html[data-ak-scheme="light"] {
   --pk-input-line: var(--ak-surface-3);
 }
 html[data-ak-scheme="light"] :is(.panel, .cal-panel) { --control: var(--ak-surface); --lift: var(--ak-surface); }
-/* Art stays dark in both schemes: plan cards, the map card and a plan's sheet header sit on a dark gradient with
-   white type. Inside them the names above are put back to their dark values, so the rules below can use the
-   names everywhere and nothing on the art turns dark-on-dark when the phone is light. In dark this changes nothing. */
+/* Art stays dark in both schemes for the map card and a plan's sheet header: they sit on a dark gradient with
+   white type. Home cards and compact rows have a light treatment (the paper block after the plan colours, scoped to
+   light only); in dark they are still this dark art. Inside the art the names above are put back to their dark
+   values, so the rules below can use the names everywhere and nothing on the art turns dark-on-dark when the phone
+   is light. In dark this changes nothing. */
 .card, .map-card, .sheet-head.card-grad {
   color-scheme: dark;
   --bg: #000000;
@@ -2734,6 +2736,283 @@ html[data-ak-scheme="light"] .status-off::before { background: #ff9f0a; }
 .sheet-head.card-grad .grabber { background: rgba(255, 255, 255, 0.35); }
 .sheet-head.card-grad .help { color: rgba(255, 255, 255, 0.78); }
 .card-grad .removed-note { color: rgba(255, 255, 255, 0.72); }
+
+/* Light home cards and compact rows (option A): soft tinted paper, near-black type, a small colour chip and a soft
+   paper shadow. Only light: System on a light phone, or Settings forced to Light. The two blocks are identical on
+   purpose, like the light aliases at the top. Dark keeps the dark art above. Map cards and sheet heads are not
+   touched here. Uses native nesting and relative colour syntax. */
+@keyframes now-card-ring-paper {
+  0% { box-shadow: 0 0 0 2px #e0115f, 0 8px 22px -8px rgba(224, 17, 95, 0.3), 0 0 0 2px rgba(224, 17, 95, 0.55); }
+  100% { box-shadow: 0 0 0 2px #e0115f, 0 8px 22px -8px rgba(224, 17, 95, 0.3), 0 0 0 9px rgba(224, 17, 95, 0); }
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-ak-scheme="dark"]) {
+    /* Colour derivation, shared by cards and compact rows. */
+    .card, .compact-row {
+      --chip1: oklch(from var(--g1) calc(l + 0.14) calc(c * 1.7) h);
+      --chip2: oklch(from var(--g2) calc(l + 0.07) calc(c * 1.7) h);
+      --paper-1: color-mix(in srgb, var(--g1) 10%, #fdfbf9);
+      --paper-2: color-mix(in srgb, var(--g2) 13%, #f7f4f1);
+    }
+    /* Social: pink and orange. */
+    .card-now, .compact-social {
+      --g1: #ff2d78;
+      --g2: #ff6e28;
+      --chip1: #ff2d78;
+      --chip2: #ff6e28;
+    }
+
+    /* Put the tokens that the dark art block forces to dark back to light inside the card. */
+    .card {
+      color-scheme: light;
+      color: #16120f;
+      --bg: #ffffff;
+      --text: #16120f;
+      --muted: #5a534d;
+      --faint: #6a635c;
+      --soft: #4a443f;
+      --hairline: rgba(22, 18, 15, 0.12);
+      --sheet: #ffffff;
+      --danger: #a31f18;
+      --link: #0b57d0;
+      --pink-text: #9f1239;
+      --warn-text: #7a4a00;
+      --danger-soft: #a31f18;
+      --lift: #ffffff;
+      --control: #ffffff;
+      --hover: #f0ebe7;
+      --wash: rgba(22, 18, 15, 0.06);
+      --wash-2: rgba(22, 18, 15, 0.1);
+      --wash-3: rgba(22, 18, 15, 0.04);
+      --ring: #c2185b;
+      --menu-ring: rgba(22, 18, 15, 0.12);
+      --fill: #16120f;
+      --ink: #ffffff;
+      --in-ink: #ffffff;
+    }
+
+    /* Paper body and soft lift. */
+    .card-plan.card-grad .card-bg,
+    .card-now .card-bg {
+      background: linear-gradient(160deg, var(--paper-1), var(--paper-2));
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.07), inset 0 0 0 1px rgba(22, 18, 15, 0.05);
+    }
+    /* Accent chip: top left, level with the avatar row. The avatars step right to make room. */
+    .card .card-bg::before {
+      content: "";
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 36px;
+      height: 28px;
+      border-radius: 10px;
+      background:
+        radial-gradient(circle at 78% 26%, rgba(255, 255, 255, 0.28) 0 4px, transparent 5px),
+        linear-gradient(155deg, var(--chip1), var(--chip2));
+      box-shadow: 0 3px 8px color-mix(in srgb, var(--chip1) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+    .card .card-body > .avatars { padding-left: 46px; }
+
+    .card .card-copy h3 { text-shadow: none; }
+    .card .removed-note { color: var(--muted); }
+    .card .chat-row-preview.muted { color: var(--muted); }
+
+    /* Controls on paper. */
+    .card .card-more {
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(22, 18, 15, 0.06);
+    }
+    .card .card-more[aria-expanded="true"] { background: #ebe5e0; }
+    .card .card-tools .event-tool {
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--text);
+      box-shadow: inset 0 0 0 1px rgba(22, 18, 15, 0.07);
+    }
+    .card .chat-row {
+      background: rgba(255, 255, 255, 0.8);
+      box-shadow: inset 0 0 0 1px rgba(22, 18, 15, 0.07);
+    }
+    /* In: outlined in ink when off, solid ink with white type when on (tokens above). */
+    .card .in-toggle.on { box-shadow: none; }
+
+    /* Happening now: clear pink ring, small bloom. */
+    .card.happening-now {
+      box-shadow: 0 0 0 2px #e0115f, 0 8px 22px -8px rgba(224, 17, 95, 0.3);
+      animation: now-card-ring-paper 1.6s ease-out 3;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card.happening-now {
+        animation: none;
+        box-shadow: 0 0 0 3px #e0115f, 0 8px 22px -8px rgba(224, 17, 95, 0.3);
+      }
+    }
+
+    /* Compact: same paper, chip on the left instead of the dark edge. */
+    .compact-row {
+      --row-wash: transparent;
+      --row-edge: transparent;
+      --row-sub: #5a534d;
+      color: #16120f;
+      background:
+        linear-gradient(var(--row-wash), var(--row-wash)),
+        linear-gradient(160deg, var(--paper-1), var(--paper-2));
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.05), inset 0 0 0 1px rgba(22, 18, 15, 0.05);
+    }
+    .compact-row::before {
+      content: "";
+      flex: none;
+      width: 22px;
+      height: 22px;
+      margin: 0 2px 0 0;
+      border-radius: 7px;
+      background: linear-gradient(155deg, var(--chip1), var(--chip2));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      animation: none;
+    }
+    .compact-row.happening-now {
+      --row-wash: rgba(224, 17, 95, 0.08);
+      box-shadow: inset 0 0 0 2px #e0115f, 0 4px 12px rgba(224, 17, 95, 0.14);
+    }
+    .compact-row.happening-now::before {
+      background: linear-gradient(155deg, #ff2d78, #ff6e28);
+      box-shadow: 0 0 0 3px rgba(224, 17, 95, 0.2);
+    }
+  }
+}
+html[data-ak-scheme="light"] {
+  /* Colour derivation, shared by cards and compact rows. */
+  .card, .compact-row {
+    --chip1: oklch(from var(--g1) calc(l + 0.14) calc(c * 1.7) h);
+    --chip2: oklch(from var(--g2) calc(l + 0.07) calc(c * 1.7) h);
+    --paper-1: color-mix(in srgb, var(--g1) 10%, #fdfbf9);
+    --paper-2: color-mix(in srgb, var(--g2) 13%, #f7f4f1);
+  }
+  /* Social: pink and orange. */
+  .card-now, .compact-social {
+    --g1: #ff2d78;
+    --g2: #ff6e28;
+    --chip1: #ff2d78;
+    --chip2: #ff6e28;
+  }
+
+  /* Put the tokens that the dark art block forces to dark back to light inside the card. */
+  .card {
+    color-scheme: light;
+    color: #16120f;
+    --bg: #ffffff;
+    --text: #16120f;
+    --muted: #5a534d;
+    --faint: #6a635c;
+    --soft: #4a443f;
+    --hairline: rgba(22, 18, 15, 0.12);
+    --sheet: #ffffff;
+    --danger: #a31f18;
+    --link: #0b57d0;
+    --pink-text: #9f1239;
+    --warn-text: #7a4a00;
+    --danger-soft: #a31f18;
+    --lift: #ffffff;
+    --control: #ffffff;
+    --hover: #f0ebe7;
+    --wash: rgba(22, 18, 15, 0.06);
+    --wash-2: rgba(22, 18, 15, 0.1);
+    --wash-3: rgba(22, 18, 15, 0.04);
+    --ring: #c2185b;
+    --menu-ring: rgba(22, 18, 15, 0.12);
+    --fill: #16120f;
+    --ink: #ffffff;
+    --in-ink: #ffffff;
+  }
+
+  /* Paper body and soft lift. */
+  .card-plan.card-grad .card-bg,
+  .card-now .card-bg {
+    background: linear-gradient(160deg, var(--paper-1), var(--paper-2));
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.07), inset 0 0 0 1px rgba(22, 18, 15, 0.05);
+  }
+  /* Accent chip: top left, level with the avatar row. The avatars step right to make room. */
+  .card .card-bg::before {
+    content: "";
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    width: 36px;
+    height: 28px;
+    border-radius: 10px;
+    background:
+      radial-gradient(circle at 78% 26%, rgba(255, 255, 255, 0.28) 0 4px, transparent 5px),
+      linear-gradient(155deg, var(--chip1), var(--chip2));
+    box-shadow: 0 3px 8px color-mix(in srgb, var(--chip1) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  }
+  .card .card-body > .avatars { padding-left: 46px; }
+
+  .card .card-copy h3 { text-shadow: none; }
+  .card .removed-note { color: var(--muted); }
+  .card .chat-row-preview.muted { color: var(--muted); }
+
+  /* Controls on paper. */
+  .card .card-more {
+    background: rgba(255, 255, 255, 0.82);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(22, 18, 15, 0.06);
+  }
+  .card .card-more[aria-expanded="true"] { background: #ebe5e0; }
+  .card .card-tools .event-tool {
+    background: rgba(255, 255, 255, 0.82);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(22, 18, 15, 0.07);
+  }
+  .card .chat-row {
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow: inset 0 0 0 1px rgba(22, 18, 15, 0.07);
+  }
+  /* In: outlined in ink when off, solid ink with white type when on (tokens above). */
+  .card .in-toggle.on { box-shadow: none; }
+
+  /* Happening now: clear pink ring, small bloom. */
+  .card.happening-now {
+    box-shadow: 0 0 0 2px #e0115f, 0 8px 22px -8px rgba(224, 17, 95, 0.3);
+    animation: now-card-ring-paper 1.6s ease-out 3;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card.happening-now {
+      animation: none;
+      box-shadow: 0 0 0 3px #e0115f, 0 8px 22px -8px rgba(224, 17, 95, 0.3);
+    }
+  }
+
+  /* Compact: same paper, chip on the left instead of the dark edge. */
+  .compact-row {
+    --row-wash: transparent;
+    --row-edge: transparent;
+    --row-sub: #5a534d;
+    color: #16120f;
+    background:
+      linear-gradient(var(--row-wash), var(--row-wash)),
+      linear-gradient(160deg, var(--paper-1), var(--paper-2));
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.05), inset 0 0 0 1px rgba(22, 18, 15, 0.05);
+  }
+  .compact-row::before {
+    content: "";
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin: 0 2px 0 0;
+    border-radius: 7px;
+    background: linear-gradient(155deg, var(--chip1), var(--chip2));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    animation: none;
+  }
+  .compact-row.happening-now {
+    --row-wash: rgba(224, 17, 95, 0.08);
+    box-shadow: inset 0 0 0 2px #e0115f, 0 4px 12px rgba(224, 17, 95, 0.14);
+  }
+  .compact-row.happening-now::before {
+    background: linear-gradient(155deg, #ff2d78, #ff6e28);
+    box-shadow: 0 0 0 3px rgba(224, 17, 95, 0.2);
+  }
+}
 
 /* Card color palette on the Plan and Edit sheets. Each swatch is a native radio, so the arrow keys work. */
 .color-pick { display: flex; flex-wrap: wrap; gap: 8px; }

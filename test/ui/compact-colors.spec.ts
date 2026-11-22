@@ -83,7 +83,7 @@ function stopsOf(node: Locator) {
   });
 }
 
-/** Resolved colours of a row: its two tint stops, its now wash, and the text colours on it. */
+/** Resolved colours of a row: its tint stops, its paper stops (light only), its now wash, and the text colours on it. */
 async function paint(row: Locator) {
   return row.evaluate((el) => {
     const resolve = (value: string) => {
@@ -101,6 +101,8 @@ async function paint(row: Locator) {
     return {
       t1: resolve("var(--row-t1)"),
       t2: resolve("var(--row-t2)"),
+      p1: resolve("var(--paper-1)"),
+      p2: resolve("var(--paper-2)"),
       wash: resolve("var(--row-wash)"),
       title: ink(".compact-title"),
       when: ink(".compact-when"),
@@ -109,13 +111,14 @@ async function paint(row: Locator) {
   });
 }
 
-/** Title, date and +N against both tint stops, with the now wash painted over them when the row is happening now. */
-async function assertReadable(row: Locator, tag: string) {
+/** Title, date and +N against the painted stops (tint in dark, paper in light), with the now wash over them when the row is happening now. */
+async function assertReadable(row: Locator, tag: string, scheme: "dark" | "light" = "dark") {
   const seen = await paint(row);
   const wash = parseCss(seen.wash);
-  for (const stop of [seen.t1, seen.t2]) {
+  const stops = scheme === "light" ? [seen.p1, seen.p2] : [seen.t1, seen.t2];
+  for (const stop of stops) {
     const tint = parseCss(stop);
-    assert.equal(tint.alpha, 1, `${tag}: the tint is opaque`);
+    assert.equal(tint.alpha, 1, `${tag}: the painted stop is opaque`);
     const behind: Rgb = wash.alpha > 0 ? over(wash.rgb, wash.alpha, tint.rgb) : tint.rgb;
     for (const [what, ink] of [["title", seen.title], ["date", seen.when], ["+N", seen.more]] as const) {
       if (!ink) continue;
@@ -212,11 +215,17 @@ test("title, date and +N stay readable on every tinted row in dark and in light"
       await page.locator(".card-plan").first().waitFor();
       await toggle(page).getByRole("button", { name: "Compact" }).click();
       await page.locator(".compact-row").first().waitFor();
-      for (const plan of plans) await assertReadable(planRow(page, plan.id), `${scheme} ${plan.note}`);
+      for (const plan of plans) await assertReadable(planRow(page, plan.id), `${scheme} ${plan.note}`, scheme);
       assert.ok((await paint(planRow(page, plans[0].id))).more, `${scheme}: the first plan shows +N`);
-      await assertReadable(page.locator(`.compact-row[data-social="${coffee.id}"]`), `${scheme} live social`);
-      const surface = await page.locator(".compact-row").first().evaluate((el) => getComputedStyle(el).backgroundColor);
-      assert.equal(parseCss(surface).alpha, 1, `${scheme}: the row has a surface`);
+      await assertReadable(page.locator(`.compact-row[data-social="${coffee.id}"]`), `${scheme} live social`, scheme);
+      if (scheme === "light") {
+        const chip = await planRow(page, plans[0].id).evaluate((el) => ({ width: getComputedStyle(el, "::before").width, height: getComputedStyle(el, "::before").height }));
+        assert.deepEqual(chip, { width: "22px", height: "22px" }, "light rows carry the 22px chip");
+      }
+      // Dark rows paint a solid colour, light rows paint a paper gradient over a transparent colour.
+      const surface = await page.locator(".compact-row").first().evaluate((el) => ({ color: getComputedStyle(el).backgroundColor, image: getComputedStyle(el).backgroundImage }));
+      if (scheme === "light") assert.match(surface.image, /linear-gradient/, `${scheme}: the row has a paper surface`);
+      else assert.equal(parseCss(surface.color).alpha, 1, `${scheme}: the row has a surface`);
       await shot(page, `compact-${scheme}-360x640`);
     } finally {
       await page.context().close();

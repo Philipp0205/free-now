@@ -98,7 +98,10 @@ async function look(node: Locator) {
   });
 }
 
-async function checkCards(page: Page, tag: string, ids: Awaited<ReturnType<typeof seed>>) {
+/** The pink of the ring: #ff2d78 in dark, the softer #e0115f (224, 17, 95) on paper in light. */
+const ringPink = (scheme: "dark" | "light") => (scheme === "light" ? /224, 17, 95/ : /255, 45, 120/);
+
+async function checkCards(page: Page, tag: string, ids: Awaited<ReturnType<typeof seed>>, scheme: "dark" | "light" = "dark") {
   const live = page.locator(`article.card-now[data-social="${ids.coffee.id}"]`);
   const long = page.locator(`article.card-now[data-social="${ids.long.id}"]`);
   await live.waitFor();
@@ -107,7 +110,7 @@ async function checkCards(page: Page, tag: string, ids: Awaited<ReturnType<typeo
   for (const card of [live, long]) {
     assert.equal(await card.getAttribute("data-happening-now"), "1", `${tag}: live card marker`);
     assert.equal(await card.evaluate((el) => el.classList.contains("happening-now")), true);
-    assert.match((await look(card)).shadow, /255, 45, 120/, `${tag}: pink ring on the live card`);
+    assert.match((await look(card)).shadow, ringPink(scheme), `${tag}: pink ring on the live card`);
   }
   const quiet: Locator[] = [page.locator(`.card-plan[data-plan="${ids.plan.id}"]`)];
   if (ids.later) {
@@ -118,20 +121,20 @@ async function checkCards(page: Page, tag: string, ids: Awaited<ReturnType<typeo
   for (const card of quiet) {
     assert.equal(await card.getAttribute("data-happening-now"), null, `${tag}: upcoming card has no marker`);
     assert.equal(await card.evaluate((el) => el.classList.contains("happening-now")), false);
-    assert.doesNotMatch((await look(card)).shadow, /255, 45, 120/, `${tag}: no pink ring on an upcoming card`);
+    assert.doesNotMatch((await look(card)).shadow, ringPink(scheme), `${tag}: no pink ring on an upcoming card`);
   }
   assert.equal(await page.locator("[data-happening-now]").count(), 2, `${tag}: exactly the two live socials`);
   assert.equal(await page.locator(".card-now").count(), ids.later ? 3 : 2, `${tag}: .card-now still means every social card`);
 }
 
-async function checkCompact(page: Page, tag: string, ids: Awaited<ReturnType<typeof seed>>) {
+async function checkCompact(page: Page, tag: string, ids: Awaited<ReturnType<typeof seed>>, scheme: "dark" | "light" = "dark") {
   const live = page.locator(`.compact-row[data-social="${ids.coffee.id}"]`);
   const long = page.locator(`.compact-row[data-social="${ids.long.id}"]`);
   await live.waitFor();
   for (const row of [live, long]) {
     assert.equal(await row.getAttribute("data-happening-now"), "1", `${tag}: live row marker`);
     const seen = await look(row);
-    assert.match(seen.shadow, /255, 45, 120/, `${tag}: pink edge on the live row`);
+    assert.match(seen.shadow, ringPink(scheme), `${tag}: pink edge on the live row`);
     assert.notEqual(seen.dotContent, "none", `${tag}: the live dot`);
   }
   const quiet: Locator[] = [page.locator(`.compact-row[data-plan="${ids.plan.id}"]`)];
@@ -139,8 +142,9 @@ async function checkCompact(page: Page, tag: string, ids: Awaited<ReturnType<typ
   for (const row of quiet) {
     assert.equal(await row.getAttribute("data-happening-now"), null, `${tag}: upcoming row has no marker`);
     const seen = await look(row);
-    assert.doesNotMatch(seen.shadow, /255, 45, 120/, `${tag}: no pink on an upcoming row`);
-    assert.equal(seen.dotContent === "none" || seen.dotContent === "normal", true, `${tag}: no dot on an upcoming row`);
+    assert.doesNotMatch(seen.shadow, ringPink(scheme), `${tag}: no pink on an upcoming row`);
+    // In light every row carries its colour chip, so only the live row is told apart by its pink ring.
+    if (scheme === "dark") assert.equal(seen.dotContent === "none" || seen.dotContent === "normal", true, `${tag}: no dot on an upcoming row`);
   }
   // The long name still takes the ellipsis, and the row stays on one line inside the screen.
   const title = long.locator(".compact-title");
@@ -216,11 +220,11 @@ test("the highlight reads in the light scheme", { timeout: 180_000 }, async () =
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await page.locator(".card-plan").first().waitFor();
-    await checkCards(page, "light", ids);
+    await checkCards(page, "light", ids, "light");
     await shot(page, "cards-light-360x640");
     await toggle(page).getByRole("button", { name: "Compact" }).click();
     await page.locator(".compact-row").first().waitFor();
-    await checkCompact(page, "light", ids);
+    await checkCompact(page, "light", ids, "light");
     await shot(page, "compact-light-360x640");
     await checkMap(page, "light", ids);
     await shot(page, "map-light-360x640");
