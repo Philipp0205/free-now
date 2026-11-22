@@ -11,7 +11,6 @@ import { busyAtBlock, endBlock, endSocial, enterPlanMode, friendsSummary, laterT
 import { circleNameSheet, joinLinkSheet } from "./circles.js";
 import { sheetLeaving } from "./sheet-out.js";
 import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.js";
-import { cardColorField } from "./plans/card-color-ui.js";
 import { endFromItem } from "./plans/event-end.js";
 import { emptyInvites, invitePeople, invitesFromItem } from "./plans/private-event.js";
 import { inviteField } from "./plans/private-event-ui.js";
@@ -81,7 +80,6 @@ export function sheet() {
             maxlength: "80",
           }),
           planning ? descriptionField(state.planDraft, "sheet-description") : null,
-          planning ? cardColorField(state.planDraft) : null,
           photoField(state.photoDraft, planning ? null : mySocial(), planning ? "plan" : "social"),
           planning ? planDateField() : null,
           planning ? el("label", { class: "sheet-group" }, [
