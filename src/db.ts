@@ -410,6 +410,14 @@ CREATE TABLE IF NOT EXISTS event_payments (
   set_at INTEGER NOT NULL,
   PRIMARY KEY (kind, event_id, user_id)
 );
+
+-- Who a private event is for. No rows means everyone in the circle. Polymorphic on kind, so no FK on the event; sweep() drops orphans.
+CREATE TABLE IF NOT EXISTS event_invitees (
+  kind TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (kind, event_id, user_id)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -949,7 +957,9 @@ export function listVisibleBusyHours(db: DatabaseSync, viewerId: string): Map<st
   return map;
 }
 
-const LIVE_SOCIAL = "s.expires_at > ? AND (s.starts_at IS NULL OR s.starts_at <= ?)";
+// A private social does not make its host look free to the whole circle, so it is left out here.
+const LIVE_SOCIAL = `s.expires_at > ? AND (s.starts_at IS NULL OR s.starts_at <= ?)
+  AND NOT EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'social' AND vi.event_id = s.id)`;
 
 /** True when the person has an "I'm free" that is on now, in any circle. */
 export function hasLiveSocial(db: DatabaseSync, userId: string, now: number): boolean {
@@ -1633,17 +1643,6 @@ export function listPricedPlans(db: DatabaseSync, circleId: string): PlanRow[] {
     `${PLAN_SELECT} WHERE ${IN_CIRCLE} AND p.price_cents IS NOT NULL ORDER BY p.for_date DESC, p.created_at DESC`,
     circleId,
   );
-}
-
-export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string, now?: number): number {
-  const row = one<{ n: number | bigint }>(
-    db,
-    `SELECT COUNT(*) AS n FROM plans p WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ? AND (p.ends_at IS NULL OR p.ends_at > ?)`,
-    circleId,
-    today,
-    now ?? 0,
-  );
-  return Number(row?.n ?? 0);
 }
 
 /** A plan shows in every circle it is linked to. plans.circle_id is its home. */
@@ -2332,6 +2331,8 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   db.prepare(`DELETE FROM plans WHERE ${oldPlan}`).run(planDay, socialCutoff);
   db.prepare("DELETE FROM event_payments WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
   db.prepare("DELETE FROM event_payments WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
+  db.prepare("DELETE FROM event_invitees WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
+  db.prepare("DELETE FROM event_invitees WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM auth_links WHERE expires_at < ?").run(now);

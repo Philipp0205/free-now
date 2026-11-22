@@ -13,6 +13,8 @@ import { sheetLeaving } from "./sheet-out.js";
 import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.js";
 import { cardColorField } from "./plans/card-color-ui.js";
 import { endFromItem } from "./plans/event-end.js";
+import { emptyInvites, invitePeople, invitesFromItem } from "./plans/private-event.js";
+import { inviteField } from "./plans/private-event-ui.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -95,6 +97,7 @@ export function sheet() {
           ]) : null,
           planning ? busyAtBlock() : null,
           endBlock(),
+          inviteField(state.inviteDraft, invitePeople(state.me?.circle?.members, mySocial(), state.me?.user?.id)),
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
         ]),
@@ -137,6 +140,7 @@ export function openSheet(name, { planDate = "" } = {}) {
     state.placeDraft = "";
     state.planTime = "";
     state.endDraft = endFromItem(name === "free" ? mySocial() : null, appTz());
+    state.inviteDraft = name === "free" ? invitesFromItem(mySocial()) : emptyInvites();
     state.planDraft = { description: "" };
     state.planDay = "pick";
     state.planDate = name === "plan" ? planDate : "";

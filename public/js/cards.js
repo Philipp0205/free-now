@@ -15,6 +15,8 @@ import { eventIsNow } from "./map-pin.js";
 import { eventRange } from "./plans/event-end.js";
 import { priceLine } from "./event-pay.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
+import { privateMarker } from "./plans/private-event-ui.js";
+import { PRIVATE_COPY } from "./plans/private-event-copy.js";
 
 /** Card menu opened by the latest ⋯ tap; the render that draws it pops it in once. */
 let menuJustOpened = null;
@@ -101,6 +103,7 @@ export function socialCard(social) {
         avatarStack(social),
         el("h3", { text: social.note || (upcoming ? "Free later" : "Free now") }),
         el("p", { text: `${social.creator.name} · ${socialWhen(social)}` }),
+        privateMarker(social),
         replySummary(social),
         priceLine(social),
         placeLine(social.location, social.place, { kind: "social", id: social.id }),
@@ -140,6 +143,7 @@ export function planCard(plan) {
         el("h3", { text: plan.note }),
         el("p", { text: `${plan.whenLabel}${planTime(plan) ? ` · ${planTime(plan)}` : ""} · ${plan.creator.name}` }),
         planCirclesLine(plan),
+        privateMarker(plan),
         planDescription(plan),
         planReplySummary(plan),
         priceLine(plan),
@@ -173,6 +177,7 @@ export function compactRow(kind, item) {
     onclick: () => openEventDetail(kind, item, "compact"),
   }, [
     el("strong", { class: "compact-title", text: title }),
+    item.private ? el("span", { class: "compact-private", text: PRIVATE_COPY.marker }) : null,
     el("span", { class: "compact-who" }, [
       el("span", { class: "compact-faces", "aria-hidden": "true" }, [
         ...who.shown.map((person) => avatar(person, 22)),

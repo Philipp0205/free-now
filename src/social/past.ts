@@ -5,6 +5,7 @@ import { visiblePaymentUrls, visibleWeroEmails } from "../lib/payment-url.js";
 import { addDays, clockLabel, isoDate } from "../lib/time.js";
 import { isInReply } from "./events.js";
 import { type PersonStatus, visibleStatuses } from "./status.js";
+import { visibleEvents } from "./visibility.js";
 
 type PastEvent = {
   kind: "social" | "plan";
@@ -25,7 +26,7 @@ export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
   const payments = visiblePaymentUrls(deps.db, viewerId);
   const weroEmails = visibleWeroEmails(deps.db, viewerId);
   const events: PastEvent[] = [];
-  for (const social of listPastSocials(deps.db, circleId, now)) {
+  for (const social of visibleEvents(deps.db, "social", listPastSocials(deps.db, circleId, now), viewerId)) {
     if (getSocialReply(deps.db, social.id, viewerId)?.blocked) continue;
     const at = social.starts_at ?? social.created_at;
     events.push({
@@ -42,7 +43,7 @@ export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
         .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, paymentUrl: payments.get(join.id) ?? null, weroEmail: weroEmails.get(join.id) ?? null, arriveAt: join.arrive_at })),
     });
   }
-  for (const plan of listPastPlans(deps.db, circleId, today, now)) {
+  for (const plan of visibleEvents(deps.db, "plan", listPastPlans(deps.db, circleId, today, now), viewerId)) {
     if (getPlanReply(deps.db, plan.id, viewerId)?.blocked) continue;
     const at = plan.ended_at ?? plan.created_at;
     // A plan that ran past its end time (no manual end) belongs on its own day.

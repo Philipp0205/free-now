@@ -20,6 +20,7 @@ import { cleanPoll, pollBody, pollsFor, pollText, readPollBody, type PollSummary
 import { notifyUsers } from "../push/notify.js";
 import type { PushSender } from "../push/push.js";
 import { isoDate } from "../lib/time.js";
+import { canSeeEventId, inviteeIds } from "../social/visibility.js";
 
 export class ChatError extends Error {
   constructor(
@@ -179,7 +180,7 @@ export function chatSummary(deps: ChatDeps, userId: string, circleId: string) {
     `SELECT id, kind, ref_id FROM chats WHERE ${EVENT_CHATS_IN_CIRCLE}`,
     circleId,
     circleId,
-  );
+  ).filter((row) => canSeeEventId(deps.db, row.kind === "plan" ? "plan" : "social", row.ref_id, userId));
   return {
     circle: { unread: circle ? unreadCount(deps.db, circle.id, userId) : 0, muted: circle ? isMuted(deps.db, circle.id, userId) : false },
     events: rows.map((row) => {
@@ -214,13 +215,13 @@ function unreadTotals(deps: ChatDeps, userId: string): Record<string, number> {
   const circles = all<{ circle_id: string }>(deps.db, "SELECT circle_id FROM memberships WHERE user_id = ?", userId);
   const totals: Record<string, number> = {};
   for (const circle of circles) {
-    const chats = all<{ id: string }>(
+    const chats = all<{ id: string; kind: string; ref_id: string }>(
       deps.db,
-      `SELECT id FROM chats WHERE (circle_id = ? AND kind = 'circle') OR ${EVENT_CHATS_IN_CIRCLE}`,
+      `SELECT id, kind, ref_id FROM chats WHERE (circle_id = ? AND kind = 'circle') OR ${EVENT_CHATS_IN_CIRCLE}`,
       circle.circle_id,
       circle.circle_id,
       circle.circle_id,
-    );
+    ).filter((chat) => chat.kind === "circle" || canSeeEventId(deps.db, chat.kind === "plan" ? "plan" : "social", chat.ref_id, userId));
     let total = 0;
     for (const chat of chats) total += unreadCount(deps.db, chat.id, userId);
     totals[circle.circle_id] = total;
@@ -739,8 +740,11 @@ function recipientStillEligible(db: DatabaseSync, chat: ChatRow, userId: string)
 /** Who may read and write a chat: the circle, or for an event the host, people coming, and earlier writers. Never blocked people. */
 export function chatAudience(db: DatabaseSync, chat: ChatRow): MemberRow[] {
   const linked = chat.kind === "plan" ? listPlanAudience(db, chat.ref_id) : [];
-  const members = linked.length ? linked : listMembers(db, chat.circle_id);
-  if (chat.kind === "circle") return members;
+  const everyone = linked.length ? linked : listMembers(db, chat.circle_id);
+  if (chat.kind === "circle") return everyone;
+  // A private event's chat is only its invitees and host, whatever the circle looks like.
+  const invited = inviteeIds(db, chat.kind === "social" ? "social" : "plan", chat.ref_id);
+  const members = invited ? everyone.filter((member) => invited.has(member.id) || member.id === chat.host_id) : everyone;
   const memberIds = new Set(members.map((member) => member.id));
   const blocked = new Set(
     all<{ user_id: string }>(
@@ -865,6 +869,7 @@ function quotesFor(db: DatabaseSync, chatId: string, messages: MessageRow[], use
 type Access = { chat: ChatRow; title: string; closed: boolean; blocked: boolean };
 
 function accessThread(deps: ChatDeps, userId: string, kind: "circle" | "social" | "plan", refId: string, writing: boolean, requestedCircle: string | null): Access {
+  if (kind !== "circle" && !canSeeEventId(deps.db, kind, refId, userId)) throw new ChatError(404, "chat not found");
   if (kind === "plan") return accessPlanThread(deps, userId, refId, writing, requestedCircle);
   const resourceCircle = kind === "social" ? getSocial(deps.db, refId)?.circle_id ?? null : null;
   const circleId = pickCircle(deps, userId, requestedCircle, resourceCircle);
@@ -946,8 +951,9 @@ function lookEvent(deps: ChatDeps, circleId: string, userId: string, kind: strin
   };
 }
 
-/** A plan chat is open to members of any circle the plan is linked to. */
+/** A plan chat is open to members of any circle the plan is linked to. A private event's chat is for its people only. */
 function canSeeChat(deps: ChatDeps, userId: string, chat: ChatRow): boolean {
+  if ((chat.kind === "social" || chat.kind === "plan") && !canSeeEventId(deps.db, chat.kind, chat.ref_id, userId)) return false;
   if (inCircle(deps, userId, chat.circle_id)) return true;
   if (chat.kind !== "plan") return false;
   return Boolean(one(

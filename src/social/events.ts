@@ -49,12 +49,13 @@ import { planPayload, socialPayload } from "./payload.js";
 import { canBeCollector, canSetPaid, effectiveCollectorId, goingPeople, type PayEvent } from "./payments.js";
 import { assertPlanClock, newPlanNotice, readPlanDate } from "./plans.js";
 import { isOpenPlan } from "./plan-share.js";
+import { canSeeEvent, readInvitees, setInvitees, visibleMembers } from "./visibility.js";
 
 export async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
   const now = deps.now();
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");
@@ -82,7 +83,7 @@ export function leaveSocial(deps: AppDeps, user: UserRow, rawId: string, request
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "that social has ended");
   removeSocialJoin(deps.db, social.id, user.id);
   return socialPayload(deps.db, social, user.id, deps.now());
@@ -92,7 +93,7 @@ export function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   removePlanJoin(deps.db, plan.id, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
@@ -104,7 +105,7 @@ export async function removeSocialGuest(deps: AppDeps, user: UserRow, rawSocialI
   const guestId = parseId(rawUserId);
   const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, socialId);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
   if (guestId === social.creator_id) throw new HttpError(400, "you started this one");
   assertEventHost(deps, user, circle.id, social.creator_id);
   const guest = listMembers(deps.db, circle.id).find((member) => member.id === guestId);
@@ -138,7 +139,7 @@ export async function removePlanGuest(deps: AppDeps, user: UserRow, rawPlanId: s
   const guestId = parseId(rawUserId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, planId);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   if (guestId === plan.creator_id) throw new HttpError(400, "you made this plan");
   assertEventHost(deps, user, plan.circle_id, plan.creator_id);
   const guest = listPlanAudience(deps.db, plan.id).find((member) => member.id === guestId);
@@ -181,7 +182,7 @@ export async function endSocial(deps: AppDeps, user: UserRow, rawId: string, req
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
   assertEventHost(deps, user, circle.id, social.creator_id);
   closeEventChat(deps.db, circle.id, "social", social.id, deps.now());
   if (!finishSocial(deps.db, social.id, deps.now())) throw new HttpError(404, "social not found");
@@ -267,12 +268,13 @@ export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, bo
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
   if (social.expires_at <= deps.now()) throw new HttpError(410, "That post has ended.");
   assertEventHost(deps, user, circle.id, social.creator_id);
   // Only plans can live in more than one circle. Say so instead of silently dropping it.
   if (body.circleIds !== undefined) throw new HttpError(400, "Only plans can be shared with other circles.");
   const savePayment = readPaymentEdit(deps, user, "social", social, listSocialJoins(deps.db, social.id), body);
+  const saveInvitees = readInviteeEdit(deps, user, "social", social, [social.circle_id], body);
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
   const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (social.place ?? "");
   let lat = social.lat;
@@ -288,6 +290,7 @@ export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, bo
   const timeChanged = startsAt !== social.starts_at;
   patchSocialDetails(deps.db, social.id, note, place, lat, lng, startsAt, remindedAt, expiresAt, endsAt);
   savePayment?.();
+  saveInvitees?.();
   const changes = [];
   if (noteChanged) changes.push({ name: "Note", next: note });
   if (timeChanged) changes.push({ name: "Time", next: startsAt == null ? "" : clockLabel(startsAt, deps.config.tz) });
@@ -328,7 +331,7 @@ export async function endPlan(deps: AppDeps, user: UserRow, rawId: string, reque
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, plan.circle_id, plan.creator_id);
   closeEventChat(deps.db, plan.circle_id, "plan", plan.id, deps.now());
   if (!finishPlan(deps.db, plan.id, deps.now())) throw new HttpError(404, "plan not found");
@@ -365,7 +368,7 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   assertEventHost(deps, user, plan.circle_id, plan.creator_id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
@@ -392,10 +395,12 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
   const wantedCircles = body.circleIds === undefined ? null : readPlanCircles(deps, user, plan, body.circleIds);
   const savePayment = withColorEdit(readPaymentEdit(deps, user, "plan", plan, listPlanJoins(deps.db, plan.id), body), deps, plan.id, body);
   const endsAt = planEnd(plan, body, { forDate, atTime }, now, deps.config.tz);
+  const saveInvitees = readInviteeEdit(deps, user, "plan", plan, wantedCircles ?? listPlanCircleIds(deps.db, plan.id), body);
   const contentChanged = dateChanged || timeChanged || endsAt !== plan.ends_at || note !== plan.note || place !== (plan.place ?? "")
     || (description || null) !== (plan.description || null);
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null, endsAt);
   savePayment?.();
+  saveInvitees?.();
   // Unlinked circles go first, so a move in the same save does not ping them.
   const kept = wantedCircles ? unlinkDropped(deps, plan.id, wantedCircles) : [];
   // Only a move (day, time, or place) pings people. Note or description edits stay quiet.
@@ -405,7 +410,7 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
     const when = `${shortDate(forDate, today)}${atTime ? ` · ${atTime}` : ""}`;
     const title = moved ? `${note} moved to ${when}` : spot ? `${note} moved to ${spot}` : `${note}: place removed`;
     // Every linked circle, once each. People who said they can't come are left out.
-    const others = listPlanAudience(deps.db, plan.id).filter((member) =>
+    const others = visibleMembers(deps.db, "plan", plan, listPlanAudience(deps.db, plan.id)).filter((member) =>
       member.id !== user.id && getPlanReply(deps.db, plan.id, member.id)?.reply !== "declined");
     await pushEdit(
       deps,
@@ -425,6 +430,24 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
 }
 
 const has = (body: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(body, key);
+
+/**
+ * Reads invitees from an edit body. Host only, never circle admins. Validates now and returns the write
+ * to run later, so a 400 or 403 happens before any other change is saved.
+ */
+function readInviteeEdit(
+  deps: AppDeps,
+  user: UserRow,
+  kind: EventKind,
+  event: { id: string; creator_id: string },
+  circleIds: string[],
+  body: Record<string, unknown>,
+): (() => void) | null {
+  if (!has(body, "invitees")) return null;
+  if (user.id !== event.creator_id) throw new HttpError(403, "Only the host can change who it is for.");
+  const ids = readInvitees(deps.db, body.invitees, event.creator_id, circleIds) ?? [];
+  return () => setInvitees(deps.db, kind, event.id, ids);
+}
 
 /**
  * Adds the cardColor write (0..13, or null to go back to the id hash) to the payment write. It is read now, so a 400
@@ -494,6 +517,7 @@ export function markPaid(
   if (kind === "plan" ? !planInCircle(deps.db, event.id, circle.id) : (event as { circle_id: string }).circle_id !== circle.id) {
     throw new HttpError(404, `${kind} not found`);
   }
+  if (!canSeeEvent(deps.db, kind, event, user.id)) throw new HttpError(404, `${kind} not found`);
   if (typeof body.paid !== "boolean") throw new HttpError(400, "paid must be true or false");
   const targetId = body.userId === undefined || body.userId === null ? user.id : parseId(String(body.userId));
   if (event.price_cents == null) throw new HttpError(400, "This has no price.");
@@ -551,7 +575,7 @@ async function linkAdded(deps: AppDeps, user: UserRow, plan: PlanRow, kept: stri
     linkPlanCircle(deps.db, plan.id, id, now);
     const target = getCircleById(deps.db, id);
     if (!target) continue;
-    const fresh = listMembers(deps.db, id).filter((member) => !told.has(member.id));
+    const fresh = visibleMembers(deps.db, "plan", plan, listMembers(deps.db, id)).filter((member) => !told.has(member.id));
     for (const member of fresh) told.add(member.id);
     await notifyUsers(deps.db, deps.push, now, fresh.map((member) => ({
       userId: member.id,

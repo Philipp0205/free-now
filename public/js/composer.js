@@ -9,6 +9,7 @@ import { wherePayload } from "./where.js";
 import { sharedPoint } from "./map-card.js";
 import { emptyEnd, endError, endPayload } from "./plans/event-end.js";
 import { endField } from "./plans/event-end-ui.js";
+import { emptyInvites, inviteBody } from "./plans/private-event.js";
 
 /** Now and Later make you free. Plan for another day, a quieter link, makes a plan on a date. */
 export function whenBlock() {
@@ -376,7 +377,7 @@ export async function onFree(event) {
   const end = endBody(start, false);
   if (!end) return;
   await run(async () => {
-    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload(), ...end } });
+    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload(), ...end, invitees: inviteBody(state.inviteDraft) } });
     state.sheet = null;
     state.whereMap = false;
     await refresh({ initial: true });
@@ -411,8 +412,9 @@ export async function onCreatePlan(event) {
   if (locationNote) render();
   await run(async () => {
     const description = document.getElementById("sheet-description")?.value ?? state.planDraft.description;
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, cardColor: state.planDraft.cardColor ?? null, ...end } });
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, cardColor: state.planDraft.cardColor ?? null, ...end, invitees: inviteBody(state.inviteDraft) } });
     state.sheet = null;
+    state.inviteDraft = emptyInvites();
     state.placeDraft = "";
     state.planTime = "";
     state.endDraft = emptyEnd();
