@@ -1,6 +1,7 @@
 import type http from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import type { AppDeps } from "../app.js";
+import { sweepOrphanChatPhotos } from "../chat/chat-photo.js";
 import { type UserRow, bumpEventPhotoRev, clearEventPhotoRev, listEventsWithPhoto } from "../db.js";
 import { readAvatarBody } from "../lib/avatar.js";
 import {
@@ -35,13 +36,14 @@ function findTarget(deps: AppDeps, pathname: string, me: UserRow): Target {
   return { kind, id: event.id, hostId: event.creator_id, rev: event.photo_rev ?? null };
 }
 
-/** Drops photo files whose event row is gone or lost its photo. Best effort: a failure is retried by the next sweep. */
+/** Drops photo files whose event row is gone or lost its photo, and chat photos whose message is gone. Best effort: a failure is retried by the next sweep. */
 export async function sweepOrphanPhotos(db: DatabaseSync, dir: string): Promise<void> {
   try {
     await sweepEventPhotos(dir, { social: listEventsWithPhoto(db, "social"), plan: listEventsWithPhoto(db, "plan") });
   } catch {
     /* the hourly sweep tries again */
   }
+  await sweepOrphanChatPhotos(db, dir);
 }
 
 /** Upload, replace, serve or remove an event's cover photo. Read before the JSON body parser, like avatars. */

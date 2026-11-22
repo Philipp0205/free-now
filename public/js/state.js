@@ -136,6 +136,8 @@ export const state = {
   chatPoll: null,
   /** The message being edited in place: { id, text, busy }. Null when none. */
   chatEdit: null,
+  /** The photo staged in the composer: { blob, url, sending }. Null when none. It sends alone, the draft stays. */
+  chatPhoto: null,
   chatSummary: { circle: { unread: 0, muted: false }, events: [], unreadByCircle: {} },
   past: false,
   pastDays: null,

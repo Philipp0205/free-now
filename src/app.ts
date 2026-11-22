@@ -16,6 +16,7 @@ import {
   serveFeed,
 } from "./calendar/routes.js";
 import { ChatError } from "./chat/chat.js";
+import { handleChatPhoto, isChatPhotoPath } from "./chat/chat-photo.js";
 import { handleChatRoutes } from "./chat/routes.js";
 import type { GiphyFetch } from "./chat/giphy.js";
 import { GIPHY_LIMIT_PER_MIN, handleGiphyRoutes } from "./chat/giphy-routes.js";
@@ -205,6 +206,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const caller = requireUser(user);
     requireEmail(caller, method, pathname);
     await handleEventPhoto(req, res, deps, method, pathname, caller);
+    return;
+  }
+  if (isChatPhotoPath(pathname)) {
+    const caller = requireUser(user);
+    requireEmail(caller, method, pathname);
+    await handleChatPhoto(req, res, deps, method, url, caller);
     return;
   }
   const body =

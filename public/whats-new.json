@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-chat-photos",
+    "date": "2026-11-22",
+    "title": "Send a photo in chat",
+    "bullets": [
+      "Tap the photo button next to the message box to send a picture in any chat.",
+      "Tap a photo in the chat to open it large.",
+      "Only people in that chat can see the photo."
+    ]
+  },
+  {
     "id": "2026-11-22-no-card-color",
     "date": "2026-11-22",
     "title": "The card color picker is gone",

@@ -47,9 +47,11 @@ export const chatGifOn = signal(false);
 export const chatPoll = signal(null);
 /** The message being edited in place: { id, text, busy }. Null when none. The draft lives in the box, not here. */
 export const chatEdit = signal(null);
+/** The photo staged in the composer: { blob, url, sending }. Null when none. */
+export const chatPhoto = signal(null);
 
 /** The signal behind each chat field of `state`, by the same name. */
-export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chatReplyTo, chatGif, chatPoll, chatEdit };
+export const CHAT_FIELDS = { chatDraft, chatMention, chatReactFor, chatWho, chatReplyTo, chatGif, chatPoll, chatEdit, chatPhoto };
 
 /** Writes chat fields to the signals only. Callers write `state` first. Only the views that read a changed field repaint. */
 export function setChat(patch) {

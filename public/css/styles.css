@@ -1663,6 +1663,56 @@ input[type="text"], input[type="email"], input[type="url"], input[type="time"], 
 }
 .chat-poll-btn .icon, .chat-poll-btn .icon svg { display: block; width: 22px; height: 22px; margin: auto; }
 @media (hover: hover) { .chat-poll-btn:hover { background: var(--hover); } }
+/* Photos: a composer button after the input, the staged preview above it, and a sent photo in the log. */
+.chat-photo-btn {
+  align-self: flex-end;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: var(--lift);
+  color: var(--text);
+}
+.chat-photo-btn .icon, .chat-photo-btn .icon svg { display: block; width: 22px; height: 22px; margin: auto; }
+@media (hover: hover) { .chat-photo-btn:hover { background: var(--hover); } }
+/* Five controls share a 320px row, so the round buttons give up a few pixels there. */
+@media (max-width: 360px) {
+  .chat-compose { gap: 6px; }
+  .chat-photo-btn, .chat-poll-btn { width: 42px; }
+  .chat-gif-btn { min-width: 42px; padding: 0 6px; }
+  .chat-compose .chat-send { min-width: 56px; padding: 0 12px; }
+}
+.photo-preview {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 0 0 8px;
+  border-radius: 12px;
+  background: var(--lift);
+}
+.photo-preview img, .photo-preview-blank { flex: none; width: 44px; height: 44px; margin: 4px 0; border-radius: 8px; object-fit: cover; background: var(--hover); }
+.photo-preview-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
+.photo-preview[data-state="sending"] img { opacity: 0.6; }
+.chat-photo { display: block; margin: 4px 0 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; }
+button.chat-photo { cursor: zoom-in; border-radius: 12px; }
+.chat-photo img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 260px);
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: var(--lift);
+  -webkit-user-drag: none;
+}
+/* A reserved box while it loads, so the log does not jump when the picture lands. */
+.chat-photo.loading { width: 160px; height: 160px; border-radius: 12px; background: var(--lift); }
+.chat-photo.missing { margin: 4px 0 0; font-size: 13px; }
 .poll-sheet .sheet-scroll { display: flex; flex-direction: column; gap: 8px; }
 .poll-option-row { display: flex; align-items: center; gap: 8px; }
 .poll-option-input { flex: 1 1 0; min-width: 0; }

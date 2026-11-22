@@ -23,12 +23,15 @@ export function eventPhotoKind(data: Buffer): EventPhotoKind | null {
   return null;
 }
 
-function fileFor(dir: string, kind: EventKind, id: string, type: EventPhotoKind): string {
+/** The file name prefix: an event's kind, or "chat" for a chat photo (named by message id, never matched by FILE_RE). */
+export type PhotoPrefix = EventKind | "chat";
+
+function fileFor(dir: string, kind: PhotoPrefix, id: string, type: EventPhotoKind): string {
   return path.join(dir, `${kind}-${id}${type.ext}`);
 }
 
 /** Temp file, then rename, so a reader never sees half a photo. The other formats are removed after. */
-export async function writeEventPhoto(dir: string, kind: EventKind, id: string, data: Buffer): Promise<void> {
+export async function writeEventPhoto(dir: string, kind: PhotoPrefix, id: string, data: Buffer): Promise<void> {
   const type = eventPhotoKind(data);
   if (!type) throw new Error("not a JPEG, PNG or WebP");
   await fs.promises.mkdir(dir, { recursive: true });
@@ -43,11 +46,11 @@ export async function writeEventPhoto(dir: string, kind: EventKind, id: string, 
   for (const other of KINDS) if (other !== type) await fs.promises.rm(fileFor(dir, kind, id, other), { force: true });
 }
 
-export async function removeEventPhoto(dir: string, kind: EventKind, id: string): Promise<void> {
+export async function removeEventPhoto(dir: string, kind: PhotoPrefix, id: string): Promise<void> {
   for (const type of KINDS) await fs.promises.rm(fileFor(dir, kind, id, type), { force: true });
 }
 
-export async function readEventPhoto(dir: string, kind: EventKind, id: string): Promise<{ data: Buffer; mime: string } | null> {
+export async function readEventPhoto(dir: string, kind: PhotoPrefix, id: string): Promise<{ data: Buffer; mime: string } | null> {
   for (const type of KINDS) {
     try {
       return { data: await fs.promises.readFile(fileFor(dir, kind, id, type)), mime: type.mime };
@@ -84,3 +87,32 @@ export async function sweepEventPhotos(dir: string, keep: Record<EventKind, Set<
   }
   return removed;
 }
+
+const CHAT_FILE_RE = /^chat-([0-9a-f-]{36})\.(jpg|png|webp)$/;
+
+/**
+ * Deletes chat photo files whose message is gone or deleted. The directory is listed before `liveIds`
+ * is read, so a photo saved in between is never swept (its row is inserted before its file is written).
+ */
+export async function sweepChatPhotos(dir: string, liveIds: () => Set<string>): Promise<number> {
+  let names: string[] = [];
+  try {
+    names = await fs.promises.readdir(dir);
+  } catch {
+    return 0;
+  }
+  const live = liveIds();
+  let removed = 0;
+  for (const name of names) {
+    const match = CHAT_FILE_RE.exec(name);
+    if (!match || live.has(match[1])) continue;
+    try {
+      await fs.promises.rm(path.join(dir, name), { force: true });
+      removed += 1;
+    } catch {
+      /* the next sweep tries again */
+    }
+  }
+  return removed;
+}
+

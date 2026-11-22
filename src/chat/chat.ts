@@ -12,6 +12,7 @@ import {
   planInCircle,
   type MemberRow,
 } from "../db.js";
+import { readEventPhoto, removeEventPhoto, writeEventPhoto } from "../lib/event-photo.js";
 import { colorHex } from "./chat-color.js";
 import { isSingleEmoji } from "./emoji.js";
 import { cleanGif, gifBody, readGifBody } from "./giphy.js";
@@ -35,7 +36,7 @@ export type ChatDeps = {
   db: DatabaseSync;
   push: PushSender;
   /** `giphyApiKey` only says whether GIFs are on. It is never read for its value here. */
-  config: { tz: string; giphyApiKey?: string | null };
+  config: { tz: string; giphyApiKey?: string | null; eventPhotosDir?: string };
   now: () => number;
 };
 
@@ -66,9 +67,11 @@ type MessageRow = {
 const TEXT_MAX = 1000;
 /** What a GIF is called wherever only words fit: previews, quotes, notices. Never its stored JSON. */
 export const GIF_LABEL = "GIF";
-/** A message a person wrote: words, a GIF or a poll. The others are the Goblin and system lines. */
+/** What a photo is called wherever only words fit. The picture itself is served by /api/messages/:id/photo. */
+export const PHOTO_LABEL = "Photo";
+/** A message a person wrote: words, a GIF, a photo or a poll. The others are the Goblin and system lines. */
 function isPersonKind(kind: string): boolean {
-  return kind === "text" || kind === "gif" || kind === "poll";
+  return kind === "text" || kind === "gif" || kind === "poll" || kind === "photo";
 }
 /** What takes a reaction: a person's message, or a system line such as "X is in". Never the Goblin. */
 function isReactableKind(kind: string): boolean {
@@ -77,6 +80,7 @@ function isReactableKind(kind: string): boolean {
 /** The words for a message in a preview, quote or notice. A GIF is its label, not its JSON. A poll is its question. */
 function plainText(kind: string, body: string): string {
   if (kind === "poll") return pollText(body);
+  if (kind === "photo") return PHOTO_LABEL;
   return kind === "gif" ? GIF_LABEL : body;
 }
 /** Quick reactions, in the order the bar and the pills show them. */
@@ -150,7 +154,7 @@ export async function routeChat(
   }
   const message = /^\/api\/messages\/([^/]+)$/.exec(pathname);
   if (message && method === "DELETE") {
-    deleteMessage(deps, user.id, decodeURIComponent(message[1]));
+    await deleteMessage(deps, user.id, decodeURIComponent(message[1]));
     return { status: 204, body: null };
   }
   if (message && method === "PATCH") {
@@ -262,9 +266,7 @@ export async function postThread(
   markChatAlertsRead(deps.db, access.chat, userId, now);
   if (gif) {
     // A GIF names nobody and talks to nobody but the thread: no mentions, no Goblin. A reply still pings its author.
-    const pinged = new Set<string>();
-    if (parent) for (const author of await notifyReply(deps, access.chat, id, userId, userName, `sent a ${GIF_LABEL}`, parent.user_id, pinged)) pinged.add(author);
-    scheduleChatNotice(deps, access.chat.id, userId, userName, `sent a ${GIF_LABEL}`, pinged);
+    await noticeMedia(deps, access.chat, id, userId, userName, `sent a ${GIF_LABEL}`, parent?.user_id ?? null);
     return threadPayload(deps, access, userId);
   }
   const pinged = await notifyMentions(deps, access.chat, id, userId, userName, text);
@@ -281,6 +283,63 @@ export async function postThread(
     ).run(crypto.randomUUID(), access.chat.id, userId, reply, now);
   }
   return threadPayload(deps, access, userId);
+}
+
+/** The pings for a message with no words (a GIF or a photo): its reply author, then the batched thread notice. */
+async function noticeMedia(deps: ChatDeps, chat: ChatRow, id: string, userId: string, userName: string, what: string, parentUserId: string | null): Promise<void> {
+  const pinged = new Set<string>();
+  if (parentUserId) for (const author of await notifyReply(deps, chat, id, userId, userName, what, parentUserId, pinged)) pinged.add(author);
+  scheduleChatNotice(deps, chat.id, userId, userName, what, pinged);
+}
+
+/**
+ * Posts a photo. The row goes in first and the file second, so a row never lacks its file for long and the
+ * orphan sweep never sees a file whose row is missing. If the file cannot be saved the row is dropped again.
+ */
+export async function postPhoto(
+  deps: ChatDeps,
+  userId: string,
+  userName: string,
+  kind: "circle" | "social" | "plan",
+  refId: string,
+  data: Buffer,
+  requestedCircle: string | null,
+  replyRaw: unknown,
+): Promise<ReturnType<typeof threadPayload>> {
+  const dir = deps.config.eventPhotosDir;
+  if (!dir) throw new ChatError(404, "not found");
+  const access = accessThread(deps, userId, kind, refId, true, requestedCircle);
+  const parent = replyTarget(deps.db, access.chat.id, replyRaw);
+  const now = deps.now();
+  const id = crypto.randomUUID();
+  deps.db.prepare(
+    "INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, reply_to) VALUES (?, ?, ?, ?, 'photo', ?, ?)",
+  ).run(id, access.chat.id, userId, PHOTO_LABEL, now, parent?.id ?? null);
+  try {
+    await writeEventPhoto(dir, "chat", id, data);
+  } catch (error) {
+    deps.db.prepare("DELETE FROM messages WHERE id = ?").run(id);
+    throw error;
+  }
+  markRead(deps.db, access.chat.id, userId, now);
+  markChatAlertsRead(deps.db, access.chat, userId, now);
+  await noticeMedia(deps, access.chat, id, userId, userName, "sent a photo", parent?.user_id ?? null);
+  return threadPayload(deps, access, userId);
+}
+
+/** The stored file for a chat photo, only if this person can see its chat. Anything else is the same 404. */
+export async function readChatPhoto(deps: ChatDeps, userId: string, messageId: string): Promise<{ data: Buffer; mime: string }> {
+  const row = one<{ chat_id: string; kind: string; deleted_at: number | null }>(
+    deps.db,
+    "SELECT chat_id, kind, deleted_at FROM messages WHERE id = ?",
+    messageId,
+  );
+  const chat = row && row.kind === "photo" && row.deleted_at == null ? one<ChatRow>(deps.db, "SELECT * FROM chats WHERE id = ?", row.chat_id) : undefined;
+  const dir = deps.config.eventPhotosDir;
+  if (!chat || !dir || !canSeeChat(deps, userId, chat)) throw new ChatError(404, "not found");
+  const file = await readEventPhoto(dir, "chat", messageId);
+  if (!file) throw new ChatError(404, "not found");
+  return file;
 }
 
 /** Posts a poll to an event chat. Only people already in the event's chat audience may start one. */
@@ -522,7 +581,8 @@ function reactionsFor(db: DatabaseSync, messageIds: string[], userId: string): M
   return out;
 }
 
-export function deleteMessage(deps: ChatDeps, userId: string, messageId: string): void {
+/** Deletes a message you may delete. A photo's file goes with it (best effort: the sweep catches a miss). */
+export async function deleteMessage(deps: ChatDeps, userId: string, messageId: string): Promise<void> {
   const row = one<{ id: string; chat_id: string; user_id: string; kind: string; deleted_at: number | null }>(
     deps.db,
     "SELECT id, chat_id, user_id, kind, deleted_at FROM messages WHERE id = ?",
@@ -537,6 +597,8 @@ export function deleteMessage(deps: ChatDeps, userId: string, messageId: string)
   const ownText = row.user_id === userId;
   if (!ownText && !host && !admin) throw new ChatError(403, "You can't delete that.");
   deps.db.prepare("UPDATE messages SET deleted_at = ? WHERE id = ?").run(deps.now(), row.id);
+  const dir = deps.config.eventPhotosDir;
+  if (row.kind === "photo" && dir) await removeEventPhoto(dir, "chat", row.id).catch(() => undefined);
 }
 
 /** Changes the words of your own text message and stamps edited_at. Hosts and admins can delete others' messages, never edit them. */
@@ -773,7 +835,7 @@ export function chatAudience(db: DatabaseSync, chat: ChatRow): MemberRow[] {
   }
   const writers = all<{ user_id: string }>(
     db,
-    "SELECT DISTINCT user_id FROM messages WHERE chat_id = ? AND kind IN ('text', 'gif') AND deleted_at IS NULL",
+    "SELECT DISTINCT user_id FROM messages WHERE chat_id = ? AND kind IN ('text', 'gif', 'photo') AND deleted_at IS NULL",
     chat.id,
   );
   for (const row of writers) {
@@ -812,6 +874,7 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
       // A GIF's words are just "GIF", so a client that does not know GIFs never shows raw JSON.
       text: plainText(message.kind, message.body),
       gif: message.kind === "gif" ? readGifBody(message.body) : null,
+      photo: message.kind === "photo",
       poll: polls.get(message.id) ?? null,
       at: message.created_at,
       system: message.kind === "system",
