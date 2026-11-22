@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-live-location",
+    "date": "2026-11-22",
+    "title": "Share your live location with friends",
+    "bullets": [
+      "Say you are in on an event with a pin, then turn on Share my live location.",
+      "Friends who are in see you on the map with a last seen time, and you stop sharing when you arrive.",
+      "It only works while Spontaco is open on your phone. Close the app and it stops."
+    ]
+  },
+  {
     "id": "2026-11-22-event-photos",
     "date": "2026-11-22",
     "title": "Add a photo to your event",

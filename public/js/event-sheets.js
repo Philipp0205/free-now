@@ -27,6 +27,7 @@ import { inviteField, privateMarker } from "./plans/private-event-ui.js";
 import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
 import { savePhotoDraft } from "./plans/event-photo.js";
 import { eventPhoto, photoField } from "./plans/event-photo-ui.js";
+import { liveToggle } from "./map-places/live-ui.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -123,6 +124,7 @@ export function eventDetailSheet() {
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,
         deliveryLine(kind, item),
+        over ? null : liveToggle(kind, item),
         detailActions(kind, item, { calendar, compact: detail.from === "compact", over, mine, bills: detail.from === "bills" }),
         el("h3", { class: "members-title", text: "Who's in" }),
         el("div", { class: "list" }, crowd.people.map((person) => personRow(

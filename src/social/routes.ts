@@ -45,6 +45,7 @@ import {
   removePlanGuest,
   removeSocialGuest,
 } from "./events.js";
+import { handleLive } from "./live.js";
 import { planPayload, socialPayload } from "./payload.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta } from "./plan-share.js";
 import { PLAN_DAYS_AHEAD, joinPlan, publishPlan, remindPlan, replyPlan } from "./plans.js";
@@ -67,7 +68,7 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
     }
     const socials = [...merged.values()]
       .sort((a, b) => b.created_at - a.created_at)
-      .map((row) => socialPayload(deps.db, row, me.id));
+      .map((row) => socialPayload(deps.db, row, me.id, now));
     sendJson(res, 200, { socials });
     return true;
   }
@@ -118,6 +119,9 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
     return true;
   }
 
+  const socialLive = matchPath(pathname, /^\/api\/socials\/([^/]+)\/live$/);
+  if (socialLive && (await handleLive(ctx, "social", socialLive[1]))) return true;
+
   const socialId = matchPath(pathname, /^\/api\/socials\/([^/]+)$/);
   if (socialId && method === "PATCH") {
     sendJson(res, 200, { social: await editSocial(deps, me, socialId[1], body, requested) });
@@ -147,7 +151,7 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
         (a.at_time ?? "").localeCompare(b.at_time ?? "") ||
         a.created_at - b.created_at,
       )
-      .map((row) => planPayload(deps.db, row, today, me.id));
+      .map((row) => planPayload(deps.db, row, today, me.id, deps.now()));
     sendJson(res, 200, { plans });
     return true;
   }
@@ -204,6 +208,9 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     sendJson(res, 200, { plan: leavePlan(deps, me, planLeave[1], requested) });
     return true;
   }
+
+  const planLive = matchPath(pathname, /^\/api\/plans\/([^/]+)\/live$/);
+  if (planLive && (await handleLive(ctx, "plan", planLive[1]))) return true;
 
   const planRemind = matchPath(pathname, /^\/api\/plans\/([^/]+)\/remind$/);
   if (planRemind && method === "POST") {

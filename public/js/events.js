@@ -4,6 +4,7 @@ import { audiencePlace } from "./place.js";
 import { activeStatus } from "./status.js";
 import { socialPinState, pinLabel, goingCrowd, eventIsNow } from "./map-pin.js";
 import { eventRange } from "./plans/event-end.js";
+import { freshLive, seenShort } from "./map-places/live-logic.js";
 import { EVENTS_VIEW_KEY, MAP_ALL_KEY, state } from "./state.js";
 import { destroyLiveMap, refreshPins } from "./map-card.js";
 import { api, isNetworkFailure, noteConnectionProblem } from "./session.js";
@@ -500,7 +501,28 @@ export function collectPins() {
       more: crowd.more,
     });
   }
+  for (const social of events.socials) pins.push(...livePins("social", social));
+  for (const plan of events.plans) pins.push(...livePins("plan", plan));
   return pins;
+}
+
+/** One pin per friend who is sharing live on this event. Never the viewer's own point. */
+function livePins(kind, item) {
+  const now = Date.now();
+  return freshLive(item.live, state.me.user.id, now).map((point) => ({
+    kind: "live",
+    id: `${kind}:${item.id}:${point.id}`,
+    lat: point.lat,
+    lng: point.lng,
+    title: point.name,
+    initial: initial(point.name),
+    color: point.color || "#636366",
+    personId: point.id,
+    photo: pinPhoto(point),
+    note: item.note || (kind === "plan" ? "Plan" : "Free now"),
+    updatedAt: point.updatedAt,
+    label: seenShort(point.updatedAt, now),
+  }));
 }
 
 /** A photo already fetched for this person, or "". Fetches once, then repaints the pins. */

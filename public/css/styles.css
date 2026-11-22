@@ -2335,6 +2335,10 @@ html.kb-open .sheet .help { margin-top: 0; }
   font-size: 15px;
 }
 .share-toggle input { width: 18px; height: 18px; accent-color: #ff2d78; }
+.live-share { margin-top: 12px; }
+.live-share .share-toggle { margin-top: 0; min-height: 44px; }
+.live-share .live-note { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.map-card .live-seen { color: var(--text); font-weight: 600; }
 .place-line {
   display: inline-flex;
   align-items: center;
@@ -2623,6 +2627,10 @@ html.kb-open .sheet .help { margin-top: 0; }
 }
 .leaflet-marker-icon.pin-plan.pin-styled .pin-body {
   box-shadow: inset 0 0 0 1px rgba(255, 214, 10, 0.5), 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+/* A friend sharing live: a green rim, so it reads apart from a pinned event. */
+.leaflet-marker-icon.pin-live.pin-styled .pin-body {
+  box-shadow: inset 0 0 0 1px rgba(48, 209, 88, 0.7), 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 .leaflet-marker-icon.pin.pin-styled .pin-letter {
   flex: none;
