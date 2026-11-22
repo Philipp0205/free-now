@@ -13,6 +13,7 @@ import { resolveShareLink } from "./plan-share.js";
 import { showOnMap } from "./map-card.js";
 import { forgetAvatars } from "./avatars.js";
 import { forgetEventPhotos } from "./plans/event-photo.js";
+import { forgetChatPhotos } from "./chat/photo-cache.js";
 
 /**
  * Every refresh() is numbered when it starts. The 3s poll, a switch and an action can overlap, and their
@@ -361,9 +362,17 @@ function mapEventCircle(path) {
   return item ? actingCircle(item) : "";
 }
 
+/** The request's content type and body: a raw Blob (a chat photo) as is, else JSON, else none. */
+function requestBody(options) {
+  if (options.raw) return { type: options.raw.type || "application/octet-stream", body: options.raw };
+  if (options.body === undefined) return { type: "", body: undefined };
+  return { type: "application/json", body: JSON.stringify(options.body) };
+}
+
 export async function api(path, options = {}) {
   const token = options.token === undefined ? state.token : options.token;
   const method = options.method ?? "GET";
+  const sent = requestBody(options);
   // Only reads time out. Aborting a write that already reached the server could send it twice.
   const controller = method === "GET" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), API_GET_TIMEOUT_MS) : 0;
@@ -373,11 +382,11 @@ export async function api(path, options = {}) {
     response = await fetch(path, {
       method,
       headers: {
-        ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(sent.type ? { "content-type": sent.type } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...circleHeader(path, options),
       },
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: sent.body,
       signal: controller?.signal,
     });
     text = await response.text();
@@ -420,6 +429,7 @@ export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   forgetAvatars();
   forgetEventPhotos();
+  forgetChatPhotos();
   // What's new is per person. The next account on this phone starts from its own server value.
   localStorage.removeItem(SEEN_KEY);
   state.whatsNewChecked = false;

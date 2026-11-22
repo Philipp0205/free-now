@@ -19,6 +19,7 @@ export const ICONS = {
   reply: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.5 7 5 11.5 9.5 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 11.5h8a5 5 0 0 1 5 5v1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   poll: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 6.5h9M5 12h14M5 17.5h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  photo: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="m5.5 17 4-4 3 3 2-2 4 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 export function isTyping() {

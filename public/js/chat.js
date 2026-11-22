@@ -13,6 +13,7 @@ import { copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { batch } from "@preact/signals";
 import { EDIT_FAILED, EDIT_GONE, EDIT_OFFLINE } from "./chat/chat-copy.js";
 import { addOption, closePoll, editOption, editQuestion, openPoll, removeOption, submitPoll, voteFor } from "./chat/poll-actions.js";
+import { cancelPhoto, discardPhoto, dropPhotos, onPhotoPicked, pickPhoto, sendStagedPhoto } from "./chat/photo-actions.js";
 import {
   bumpThread,
   chatFlash,
@@ -62,6 +63,7 @@ export function closeChat() {
   state.chatGif = null;
   state.chatPoll = null;
   state.chatEdit = null;
+  discardPhoto();
   state.tab = state.chatReturn || "home";
   void navigate(() => {
     // The Preact host is dropped with the screen, so the old chat stays on screen until the slide has captured it.
@@ -120,6 +122,7 @@ export function dropChatScreen() {
   state.chatGif = null;
   state.chatPoll = null;
   state.chatEdit = null;
+  dropPhotos();
   unmountChatView(host);
   host = null;
   hostKey = "";
@@ -144,6 +147,7 @@ function syncChatSignals() {
       chatGif: state.chatGif,
       chatPoll: state.chatPoll,
       chatEdit: state.chatEdit,
+      chatPhoto: state.chatPhoto,
     });
   });
 }
@@ -616,6 +620,11 @@ export function stickChatLog() {
   chatLogTop = log.scrollTop;
 }
 
+/** A photo finished loading and grew its row: keep the log on the newest message if it was there. */
+function photoLoaded() {
+  stickChatLog();
+}
+
 function unsentTail(typed, sent) {
   if (!sent || typed === sent) return typed === sent ? "" : typed;
   if (typed.startsWith(sent)) return typed.slice(sent.length).replace(/^\s+/, "");
@@ -630,6 +639,11 @@ function chatBody(text, replyTo) {
 async function sendChat(event) {
   event.preventDefault();
   if (!state.chat || state.chatQueue) return;
+  // A staged photo goes alone, as its own message. Whatever is typed stays in the box.
+  if (state.chatPhoto) {
+    await sendStagedPhoto();
+    return;
+  }
   const text = state.chatDraft.trim();
   if (!text) return;
   tick();
@@ -814,6 +828,10 @@ const ACTIONS = {
   removeOption,
   submitPoll,
   voteFor,
+  pickPhoto,
+  photoLoaded,
+  onPhotoPicked,
+  cancelPhoto,
   confirmDelete: confirmDeleteMessage,
   startEdit,
   cancelEdit,

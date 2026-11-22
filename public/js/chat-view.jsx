@@ -3,9 +3,25 @@ import { findMentions, GOBLIN, REACTIONS } from "./mentions.js";
 import { messageParts } from "./links.js";
 import { clockText, zonedParts } from "./when.js";
 import { ICONS } from "./lib.js";
-import { EDIT_CANCEL, EDIT_FIELD_LABEL, EDIT_LABEL, EDIT_SAVE, EDITED_LABEL, REACT_LABEL } from "./chat/chat-copy.js";
+import {
+  EDIT_CANCEL,
+  EDIT_FIELD_LABEL,
+  EDIT_LABEL,
+  EDIT_SAVE,
+  EDITED_LABEL,
+  PHOTO_LOADING,
+  PHOTO_PICK_LABEL,
+  PHOTO_REMOVE_LABEL,
+  PHOTO_SENDING,
+  PHOTO_STAGED,
+  PHOTO_UNAVAILABLE,
+  REACT_LABEL,
+} from "./chat/chat-copy.js";
 import { PollSheet, PollBody } from "./chat/poll-view.jsx";
 import { POLL_START_LABEL } from "./chat/poll-copy.js";
+import { chatPhotoSignal } from "./chat/photo-cache.js";
+import { openLightbox } from "./plans/event-photo-ui.js";
+import { PHOTO_COPY } from "./plans/event-photo-copy.js";
 import {
   canReact,
   canReply,
@@ -17,6 +33,7 @@ import {
   chatMeId,
   chatMeName,
   chatMention,
+  chatPhoto,
   chatPicker,
   chatReactFor,
   chatReplyTo,
@@ -245,12 +262,14 @@ function ReactionBar({ message, replyable }) {
             onClick={() => { if (!A.pressConsumed()) A.startReply(message); }}
           >Reply</button>
         ) : null}
-        <button
-          class="react-copy"
-          type="button"
-          onMouseDown={keepFocus}
-          onClick={() => { if (!A.pressConsumed()) A.copyMessage(message); }}
-        >Copy</button>
+        {message.photo ? null : (
+          <button
+            class="react-copy"
+            type="button"
+            onMouseDown={keepFocus}
+            onClick={() => { if (!A.pressConsumed()) A.copyMessage(message); }}
+          >Copy</button>
+        )}
       </div>
     </div>
   );
@@ -340,7 +359,7 @@ function MessageRow({ message }) {
         </time>
       </header>
       <Quote quote={message.replyTo} />
-      {editing ? <EditBox /> : message.poll ? <PollBody message={message} live={live} A={A} /> : message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
+      {editing ? <EditBox /> : message.poll ? <PollBody message={message} live={live} A={A} /> : message.photo ? <PhotoBody message={message} /> : message.gif ? <GifBody gif={message.gif} /> : <MessageText text={message.text} />}
       {live && barOpen ? <ReactionBar message={message} replyable={replyable} /> : null}
       <ReactionPills message={message} live={live} />
       <OwnActions message={message} editing={editing} />
@@ -400,6 +419,16 @@ function Composer() {
   return (
     <form class="chat-compose" onSubmit={(event) => A.send(event)}>
       <ReplyPreview />
+      <PhotoPreview />
+      <input
+        id="chat-photo-file"
+        class="visually-hidden"
+        type="file"
+        accept="image/*"
+        tabindex="-1"
+        aria-hidden="true"
+        onChange={(event) => { void A.onPhotoPicked(event); }}
+      />
       {chatGifOn.value ? (
         <button class="chat-gif-btn" type="button" aria-label="Choose a GIF" onMouseDown={keepFocus} onClick={() => A.openGif(null)}>GIF</button>
       ) : null}
@@ -418,6 +447,9 @@ function Composer() {
         onKeyDown={(event) => A.onKey(event)}
         onBlur={(event) => A.onBlur(event)}
       />
+      <button class="chat-photo-btn" type="button" aria-label={PHOTO_PICK_LABEL} onMouseDown={keepFocus} onClick={() => A.pickPhoto()}>
+        <Icon name="photo" />
+      </button>
       {eventChat ? (
         <button class="chat-poll-btn" type="button" aria-label={POLL_START_LABEL} onMouseDown={keepFocus} onClick={() => A.openPoll()}>
           <Icon name="poll" />
@@ -426,6 +458,35 @@ function Composer() {
       <button class="btn chat-send" type="submit">Send</button>
       <MentionList />
     </form>
+  );
+}
+
+/** The staged photo above the input: a small thumbnail, a line saying what happens next, and an X. */
+function PhotoPreview() {
+  const photo = chatPhoto.value;
+  if (!photo) return null;
+  const note = photo.message || (photo.sending ? PHOTO_SENDING : PHOTO_STAGED);
+  return (
+    <div class="photo-preview" data-state={photo.sending ? "sending" : photo.busy ? "busy" : "ready"}>
+      {photo.url ? <img src={photo.url} alt={PHOTO_COPY.previewAlt} width="44" height="44" /> : <span class="photo-preview-blank" aria-hidden="true" />}
+      <span class="photo-preview-note" role="status">{note}</span>
+      <button class="reply-cancel" type="button" aria-label={PHOTO_REMOVE_LABEL} disabled={photo.sending} onMouseDown={keepFocus} onClick={() => A.cancelPhoto()}>
+        <Icon name="close" />
+      </button>
+    </div>
+  );
+}
+
+/** A sent photo: a button around the picture that opens it large. Its box is reserved, so the log does not jump as it loads. */
+function PhotoBody({ message }) {
+  const src = chatPhotoSignal(message.id).value;
+  const alt = PHOTO_COPY.alt(message.mine ? "you" : message.name);
+  if (src === undefined) return <div class="chat-photo loading" role="img" aria-label={PHOTO_LOADING} />;
+  if (src === null) return <p class="chat-photo missing">{PHOTO_UNAVAILABLE}</p>;
+  return (
+    <button class="chat-photo" type="button" aria-label={PHOTO_COPY.open} onClick={() => { if (!A.pressConsumed()) openLightbox(src, alt); }}>
+      <img src={src} alt={alt} loading="lazy" decoding="async" draggable="false" onLoad={() => A.photoLoaded()} />
+    </button>
   );
 }
 
