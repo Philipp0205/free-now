@@ -23,8 +23,9 @@ const BUZZ_FUTURE_MS = 60000;
 /** Seconds of canvas animation, including the fade out at the end. */
 export const BUZZ_SECONDS = 3.2;
 export const BUZZ_NAME_MAX = 24;
-const REDUCED_MS = 1800;
-const REDUCED_FADE_OUT_AT = 1300;
+const REDUCED_MS = 2500;
+/** The still overlay holds full opacity until here, then fades out over 500ms. */
+const REDUCED_FADE_OUT_AT = 2000;
 const DISMISS_MS = 180;
 
 /* ---------- pure rules ---------- */
