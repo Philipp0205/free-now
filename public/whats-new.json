@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-maybe-rsvp",
+    "date": "2026-11-22",
+    "title": "A Maybe button on every event",
+    "bullets": [
+      "Open an event and tap Maybe next to I'm in when you are not sure yet.",
+      "Maybe people get their own list, and they no longer count as in.",
+      "Compact rows show how many are maybe. The chat line can take reactions."
+    ]
+  },
+  {
     "id": "2026-11-21-compact-open",
     "date": "2026-11-21",
     "title": "Open a compact row to reply",

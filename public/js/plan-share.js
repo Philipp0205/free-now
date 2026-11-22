@@ -5,7 +5,7 @@ import { render } from "./render.js";
 import { copyWithSelection } from "./calendar-sync.js";
 import { openInstallGuide } from "./push-install.js";
 import { appTz, clock, copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
-import { inToggle } from "./replies.js";
+import { inToggle, maybeToggle } from "./replies.js";
 
 export async function shareInvite() {
   const circle = state.me?.circle;
@@ -278,12 +278,20 @@ function shareButton(kind, item) {
   }, [icon("share"), el("span", { text })]);
 }
 
-/** In toggle, and Share on an open plan, side by side under the chat row. */
+/**
+ * In toggle, and Share on an open plan, side by side under the chat row. With `maybe` (the event
+ * sheet), a non-host also gets a Maybe button next to In, and Share moves to its own row below.
+ */
 export function cardActions(kind, item, opts) {
-  const toggle = item.removedBy ? null : inToggle(kind, item, opts);
-  const share = shareButton(kind, item);
-  if (!share) return toggle;
-  return el("div", { class: "card-cta" }, [toggle, share]);
+  if (item.removedBy) return null;
+  const toggle = inToggle(kind, item, opts);
+  const share = opts?.share === false ? null : shareButton(kind, item);
+  const hostLocked = opts?.locked || item.creator?.id === state.me.user.id;
+  if (opts?.maybe && !hostLocked) {
+    const row = el("div", { class: "card-cta" }, [toggle, maybeToggle(kind, item)]);
+    return share ? el("div", { class: "rsvp-stack" }, [row, share]) : row;
+  }
+  return share ? el("div", { class: "card-cta" }, [toggle, share]) : toggle;
 }
 
 /** A /p/ link: a member lands on the plan. Anyone else gets the small preview. */

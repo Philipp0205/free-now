@@ -9,6 +9,7 @@ import { appTz, clock, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { inReply } from "./composer.js";
 import { guestLine } from "./map-card.js";
 import { avatar } from "./avatars.js";
+import { MAYBE_COPY } from "./plans/maybe-copy.js";
 
 export function arriveClock(person) {
   return person?.arriveAt ? clock(person.arriveAt) : "";
@@ -30,7 +31,7 @@ export function maybeLine(person, mine) {
   return mine ? "You're maybe" : `${person.name} is maybe`;
 }
 
-/** The card's faces: host first, then everyone In or Maybe. Can't stays in the details. */
+/** The card's faces: host first, then everyone In. Maybe and Can't stay out of the stack. */
 export function avatarStack(item) {
   const crowd = cardCrowd(item.creator, item.joined);
   return el("div", { class: "avatars" }, [
@@ -39,9 +40,15 @@ export function avatarStack(item) {
   ]);
 }
 
-/** Shown in the who-row: in and maybe. Can't is only in the details. */
+/** The who-row's people: everyone In, then the Maybe group as its own lines. Can't is only in the details. */
+export function whoRowPeople(host, joined) {
+  const crowd = cardCrowd(host, joined);
+  return [...crowd.listed, ...crowd.maybe];
+}
+
+/** Shown in the who-row: in, then maybe. Can't is only in the details. */
 export function replySummary(social) {
-  const people = cardCrowd(social.creator, social.joined).listed;
+  const people = whoRowPeople(social.creator, social.joined);
   return whoRow("social", social, people.map((person) => guestLine(replyLine(person, social), person, "social", social)));
 }
 
@@ -93,6 +100,27 @@ export function inToggle(kind, item, { locked = false } = {}) {
     if (state.inPop?.key === `${kind}:${item.id}`) state.inPop = null;
   }, { once: true });
   return node;
+}
+
+/** The Maybe button: tap to say maybe, tap again to take it back. Not for the host, who stays In. */
+export function maybeToggle(kind, item) {
+  const mine = item.joined?.find((person) => person.id === state.me.user.id);
+  const on = mine?.reply === "maybe";
+  return el("button", {
+    class: ["maybe-toggle", on ? "on" : ""].filter(Boolean).join(" "),
+    type: "button",
+    text: on ? MAYBE_COPY.buttonOn : MAYBE_COPY.button,
+    "aria-pressed": String(on),
+    "aria-label": MAYBE_COPY.button,
+    title: on ? MAYBE_COPY.titleOn : MAYBE_COPY.titleOff,
+    onclick: (event) => {
+      event.stopPropagation();
+      state.cardMenu = null;
+      tick();
+      if (on) void leaveEvent(kind, item);
+      else void sendReply(kind, item, "maybe");
+    },
+  });
 }
 
 const IN_POP_MS = 250;

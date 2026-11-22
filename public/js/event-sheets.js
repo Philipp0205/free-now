@@ -19,6 +19,7 @@ import { guestDetailRow, planReplyLine } from "./map-card.js";
 import { avatar } from "./avatars.js";
 import { closeSheet } from "./sheets.js";
 import { euro, paidList, paySection, paymentBody, paymentEditState, paymentFields } from "./event-pay.js";
+import { MAYBE_COPY } from "./plans/maybe-copy.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -45,6 +46,19 @@ function findEvent(kind, id) {
     if (found) return found;
   }
   return null;
+}
+
+/**
+ * The sheet's reply buttons (In and Maybe). The calendar and the compact list also get the chat row
+ * and Share, as before; a card already has those behind the sheet. None on an ended event or in Bills.
+ */
+function detailActions(kind, item, { calendar, compact, over, mine, bills }) {
+  const full = calendar || compact;
+  const chat = full ? chatRow(kind, item) : null;
+  const skip = over || bills || (mine && !full);
+  const reply = skip ? null : cardActions(kind, item, { locked: mine, maybe: true, share: full });
+  if (!chat && !reply) return null;
+  return el("div", { class: "detail-actions" }, [chat, reply]);
 }
 
 export function eventDetailSheet() {
@@ -91,14 +105,15 @@ export function eventDetailSheet() {
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,
         deliveryLine(kind, item),
-        calendar || detail.from === "compact" ? el("div", { class: "detail-actions" }, [
-          chatRow(kind, item),
-          over ? null : cardActions(kind, item, { locked: mine }),
-        ]) : null,
+        detailActions(kind, item, { calendar, compact: detail.from === "compact", over, mine, bills: detail.from === "bills" }),
         el("h3", { class: "members-title", text: "Who's in" }),
         el("div", { class: "list" }, crowd.people.map((person) => personRow(
           person.id === item.creator.id ? `${person.name} · host` : line(person), person,
         ))),
+        crowd.maybe.length ? el("h3", { class: "members-title", text: MAYBE_COPY.group }) : null,
+        crowd.maybe.length ? el("div", { class: "list maybe-list" }, crowd.maybe.map((person) => (
+          personRow(line(person), person)
+        ))) : null,
         crowd.cant.length ? el("h3", { class: "members-title", text: "Can't make it" }) : null,
         crowd.cant.length ? el("div", { class: "list cant-list" }, crowd.cant.map((person) => (
           personRow(line(person), person)

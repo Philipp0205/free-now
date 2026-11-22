@@ -13,6 +13,7 @@ import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends 
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
 import { eventIsNow } from "./map-pin.js";
 import { priceLine } from "./event-pay.js";
+import { MAYBE_COPY } from "./plans/maybe-copy.js";
 
 /** Card menu opened by the latest ⋯ tap; the render that draws it pops it in once. */
 let menuJustOpened = null;
@@ -162,6 +163,7 @@ export function compactRow(kind, item) {
         who.more ? el("span", { class: "compact-more", text: `+${who.more}` }) : null,
       ]),
       el("span", { class: "visually-hidden", text: who.text }),
+      who.maybe ? el("span", { class: "compact-maybe", "aria-hidden": "true", text: MAYBE_COPY.count(who.maybe) }) : null,
     ]),
     el("span", { class: "compact-when", text: when }),
   ]);

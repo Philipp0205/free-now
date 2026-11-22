@@ -4,6 +4,7 @@
  */
 import { cardCrowd } from "./map-pin.js";
 import { clockText, dayLabel, zonedParts } from "./when.js";
+import { MAYBE_COPY } from "./plans/maybe-copy.js";
 
 /** "1" when this device shows the Now list as one line per event; anything else, or nothing, is the cards. */
 export const COMPACT_HOME_KEY = "fn_compact_home";
@@ -38,17 +39,20 @@ export function writeCompactHome(on, storage = deviceStorage()) {
 }
 
 /**
- * Who is going, for one line: the host, then everyone In or Maybe (same people as the card's faces).
+ * Who is going, for one line: the host, then everyone In (same people as the card's faces).
  * `shown` is the first few people, `names` their names, `more` how many are left, and `text` reads
- * as "Hana, Alex, Bea and 2 more". A person without a name shows as "Someone".
+ * as "Hana, Alex, Bea and 2 more". A person without a name shows as "Someone". `maybe` counts the
+ * Maybe replies on their own; they are never in `shown`, and `text` ends with ", 2 maybe" for them.
  */
 export function compactWho(host, joined = [], cap = COMPACT_WHO_CAP) {
-  const people = cardCrowd(host, joined).people;
-  const shown = people.slice(0, cap);
+  const crowd = cardCrowd(host, joined);
+  const shown = crowd.people.slice(0, cap);
   const names = shown.map((person) => String(person?.name ?? "").trim() || "Someone");
-  const more = people.length - shown.length;
-  const text = more > 0 ? `${names.join(", ")} and ${more} more` : names.join(", ");
-  return { shown, names, more, text };
+  const more = crowd.people.length - shown.length;
+  const maybe = crowd.maybe.length;
+  const going = more > 0 ? `${names.join(", ")} and ${more} more` : names.join(", ");
+  const text = maybe > 0 ? [going, MAYBE_COPY.count(maybe)].filter(Boolean).join(", ") : going;
+  return { shown, names, more, maybe, text };
 }
 
 /** The line's title, same words as the card's heading. */

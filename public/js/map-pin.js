@@ -61,26 +61,26 @@ export function goingCrowd(host, joined = [], cap = 3) {
 }
 
 /**
- * Who an event card shows versus the details. The card is about who's in: `stack` is the
- * host, then everyone In or Maybe, each once, capped at `cap` faces with `more` for the rest.
- * `listed` is the replies the card lists (In and Maybe). `cant` is who said Can't, for the
- * details only.
+ * Who an event card shows versus the details. `people` is the host and everyone In, each once,
+ * and `stack` is the first `cap` of them with `more` for the rest. `listed` is the In replies the
+ * card lists. `maybe` and `cant` are their own groups, never counted as In.
  */
 export function cardCrowd(host, joined = [], cap = 6) {
   const people = [];
   const listed = [];
+  const maybe = [];
   const cant = [];
   const seen = new Set();
   for (const person of [host, ...(joined || [])]) {
     if (!person?.id || seen.has(person.id)) continue;
     seen.add(person.id);
-    if (person !== host && person.reply === "declined") {
-      cant.push(person);
-      continue;
+    if (person !== host && person.reply === "declined") cant.push(person);
+    else if (person !== host && person.reply === "maybe") maybe.push(person);
+    else {
+      people.push(person);
+      if (person !== host && isGoing(person)) listed.push(person);
     }
-    people.push(person);
-    if (person !== host && (isGoing(person) || person.reply === "maybe")) listed.push(person);
   }
   const stack = people.slice(0, cap);
-  return { people, stack, more: people.length - stack.length, listed, cant };
+  return { people, stack, more: people.length - stack.length, listed, maybe, cant };
 }

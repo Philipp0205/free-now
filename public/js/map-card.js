@@ -1,7 +1,6 @@
 import { bindMap } from "./map.js";
 import { formatDistance, haversine, audiencePlace } from "./place.js";
 import { planGradientClass } from "./card-grad.js";
-import { cardCrowd } from "./map-pin.js";
 import { statusLine } from "./status.js";
 import { availabilityText } from "./freebusy.js";
 import { FINDING_PLACE, SHARE_KEY, state } from "./state.js";
@@ -15,7 +14,7 @@ import { collectPins, mapCircleLine, mapEvents } from "./events.js";
 import { recentPlace, scheduleReverse, whereBag } from "./where.js";
 import { el, icon, payLink, run, viewerTz, weroEntry } from "./lib.js";
 import { inReply, paintSummary } from "./composer.js";
-import { arriveClock, maybeLine, replySummary, whoRow } from "./replies.js";
+import { arriveClock, maybeLine, replySummary, whoRow, whoRowPeople } from "./replies.js";
 import { cardActions } from "./plan-share.js";
 import { avatar } from "./avatars.js";
 import { tapClosedMenu } from "./nav.js";
@@ -108,7 +107,7 @@ export function planReplyLine(person) {
 }
 
 export function planReplySummary(plan) {
-  const people = cardCrowd(plan.creator, plan.joined).listed;
+  const people = whoRowPeople(plan.creator, plan.joined);
   return whoRow("plan", plan, people.map((person) => guestLine(planReplyLine(person), person, "plan", plan)));
 }
 
