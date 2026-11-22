@@ -957,25 +957,35 @@ export function listVisibleBusyHours(db: DatabaseSync, viewerId: string): Map<st
   return map;
 }
 
-// A private social does not make its host look free to the whole circle, so it is left out here.
-const LIVE_SOCIAL = `s.expires_at > ? AND (s.starts_at IS NULL OR s.starts_at <= ?)
-  AND NOT EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'social' AND vi.event_id = s.id)`;
+const LIVE_SOCIAL = "s.expires_at > ? AND (s.starts_at IS NULL OR s.starts_at <= ?)";
+// Public, or this viewer is the host or on the invite list.
+const LIVE_SOCIAL_VISIBLE = `${LIVE_SOCIAL}
+  AND (
+    NOT EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'social' AND vi.event_id = s.id)
+    OR s.creator_id = ?
+    OR EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'social' AND vi.event_id = s.id AND vi.user_id = ?)
+  )`;
 
-/** True when the person has an "I'm free" that is on now, in any circle. */
+/** True when the person has an "I'm free" that is on now, in any circle, including a private one. */
 export function hasLiveSocial(db: DatabaseSync, userId: string, now: number): boolean {
   return one(db, `SELECT 1 AS found FROM socials s WHERE s.creator_id = ? AND ${LIVE_SOCIAL} LIMIT 1`, userId, now, now) !== undefined;
 }
 
-/** Which of these people have a live "I'm free" in any circle. One query. */
-export function liveSocialUsers(db: DatabaseSync, userIds: string[], now: number): Set<string> {
+/**
+ * Which of these people have a live "I'm free" this viewer may see. A public one counts for everyone.
+ * A private one only counts for its host and the people it is for.
+ */
+export function liveSocialUsers(db: DatabaseSync, userIds: string[], now: number, viewerId: string): Set<string> {
   if (!userIds.length) return new Set();
   const marks = userIds.map(() => "?").join(", ");
   const rows = all<{ creator_id: string }>(
     db,
-    `SELECT DISTINCT s.creator_id FROM socials s WHERE s.creator_id IN (${marks}) AND ${LIVE_SOCIAL}`,
+    `SELECT DISTINCT s.creator_id FROM socials s WHERE s.creator_id IN (${marks}) AND ${LIVE_SOCIAL_VISIBLE}`,
     ...userIds,
     now,
     now,
+    viewerId,
+    viewerId,
   );
   return new Set(rows.map((row) => row.creator_id));
 }

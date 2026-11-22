@@ -153,7 +153,7 @@ export function visibleStatuses(db: DatabaseSync, viewerId: string | null, now: 
     if (status) fromHours.set(id, status);
   }
   if (fromHours.size) {
-    const free = liveSocialUsers(db, [...fromHours.keys()], now);
+    const free = liveSocialUsers(db, [...fromHours.keys()], now, viewerId);
     for (const [id, status] of fromHours) if (!free.has(id)) map.set(id, status);
   }
   return map;

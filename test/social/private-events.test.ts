@@ -203,3 +203,26 @@ test("without invitees an event stays open to the circle", async () => {
     assert.equal((await api(ctx, "GET", `/api/socials?circle=${a.id}`, { token: cam.token, status: 200 })).json.socials.length, 1);
   }, ENV);
 });
+
+test("a private I'm free only hides the host's busy hours from the people it is for", async () => {
+  await withApp(async (ctx) => {
+    const wedMorning = Date.parse("2026-11-11T09:00:00Z");
+    ctx.at(wedMorning);
+    const { alex, bea, cam, a } = await seed(ctx.port);
+    await api(ctx.port, "PUT", "/api/me/busy-hours", {
+      token: alex.token,
+      body: { timezone: "Europe/Berlin", blocks: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }] },
+      status: 200,
+    });
+    const seen = async (viewer: Person) => {
+      const got = await api(ctx.port, "GET", `/api/me?circle=${a.id}`, { token: viewer.token, status: 200 });
+      return (got.circle.members as Array<{ id: string; status: { source?: string } | null }>).find((member) => member.id === alex.user.id)?.status ?? null;
+    };
+    assert.equal((await seen(cam))?.source, "schedule", "Cam sees Alex as busy before the post");
+    await makeSocial(ctx.port, alex, a.id, { invitees: ids(bea) });
+    assert.equal((await api(ctx.port, "GET", "/api/me", { token: alex.token, status: 200 })).user.status, null, "Alex is free to himself");
+    assert.equal(await seen(bea), null, "Bea, who was picked, sees Alex as free");
+    assert.equal((await seen(cam))?.source, "schedule", "Cam, who was not picked, still sees the busy hours");
+  }, { ...ENV, tz: "Europe/Berlin" });
+});
+
