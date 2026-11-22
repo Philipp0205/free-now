@@ -16,6 +16,7 @@ import { eventRange } from "./plans/event-end.js";
 import { priceLine } from "./event-pay.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
 import { privateMarker } from "./plans/private-event-ui.js";
+import { eventPhoto, photoThumb } from "./plans/event-photo-ui.js";
 import { PRIVATE_COPY } from "./plans/private-event-copy.js";
 
 /** Card menu opened by the latest ⋯ tap; the render that draws it pops it in once. */
@@ -109,6 +110,7 @@ export function socialCard(social) {
         placeLine(social.location, social.place, { kind: "social", id: social.id }),
         removedNote(social),
       ]),
+      eventPhoto("social", social),
       chatRow("social", social),
       social.removedBy ? null : inToggle("social", social, { locked: mine }),
     ]),
@@ -150,6 +152,7 @@ export function planCard(plan) {
         placeLine(plan.location, plan.place, { kind: "plan", id: plan.id }),
         removedNote(plan),
       ]),
+      eventPhoto("plan", plan),
       chatRow("plan", plan),
       cardActions("plan", plan, { locked: mine }),
     ]),
@@ -177,6 +180,7 @@ export function compactRow(kind, item) {
     onclick: () => openEventDetail(kind, item, "compact"),
   }, [
     el("strong", { class: "compact-title", text: title }),
+    photoThumb(kind, item),
     item.private ? el("span", { class: "compact-private", text: PRIVATE_COPY.marker }) : null,
     el("span", { class: "compact-who" }, [
       el("span", { class: "compact-faces", "aria-hidden": "true" }, [

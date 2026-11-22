@@ -29,6 +29,7 @@ import {
   requireLiveInvite,
 } from "./circles.js";
 import { pastDays } from "./past.js";
+import { sweepOrphanPhotos } from "./event-photo.js";
 
 export async function handleCircleRoutes(ctx: AuthedRouteContext): Promise<boolean> {
   const { req, res, deps, method, pathname, body, requested, me, agent } = ctx;
@@ -91,6 +92,7 @@ export async function handleCircleRoutes(ctx: AuthedRouteContext): Promise<boole
     const members = listMembers(deps.db, circle.id);
     const removed = deleteCircle(deps.db, circle.id);
     if (!removed) throw new HttpError(404, "not found");
+    await sweepOrphanPhotos(deps.db, deps.config.eventPhotosDir);
     await notifyCircleDeleted(deps, removed.circle, me, members);
     sendJson(res, 200, mePayload(deps, req, me, null, agent));
     return true;
@@ -99,6 +101,7 @@ export async function handleCircleRoutes(ctx: AuthedRouteContext): Promise<boole
   if (method === "POST" && pathname === "/api/circles/leave") {
     const circle = requireCircle(deps, me.id, requested);
     removeMember(deps.db, circle.id, me.id);
+    await sweepOrphanPhotos(deps.db, deps.config.eventPhotosDir);
     sendJson(res, 200, mePayload(deps, req, me, null, agent));
     return true;
   }
@@ -112,6 +115,7 @@ export async function handleCircleRoutes(ctx: AuthedRouteContext): Promise<boole
       const result = kickMember(deps.db, circle.id, memberId);
       if (result === "missing") throw new HttpError(404, "member not found");
       if (result === "last") throw new HttpError(409, "A circle needs an admin.");
+      await sweepOrphanPhotos(deps.db, deps.config.eventPhotosDir);
       sendEmpty(res, 204);
       return true;
     }

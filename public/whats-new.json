@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-event-photos",
+    "date": "2026-11-22",
+    "title": "Add a photo to your event",
+    "bullets": [
+      "When you post free or add a plan, tap Add photo to put a picture on it.",
+      "The photo shows on the card and in the event sheet. Tap it to see it bigger.",
+      "Only friends who can see the event can see the photo. Change or remove it in Edit."
+    ]
+  },
+  {
     "id": "2026-11-22-private-events",
     "date": "2026-11-22",
     "title": "Plan something for just a few friends",

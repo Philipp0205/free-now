@@ -92,6 +92,7 @@ The token is a bearer secret. Anyone with it can start a social as that user. It
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port. Railway sets this; the server binds `0.0.0.0`. |
 | `DB_PATH` | `./data/free-now.sqlite` | SQLite file. Point it at the volume in production. |
+| `EVENT_PHOTOS_DIR` | `event-photos` next to `DB_PATH` | Where event cover photos are stored as files. Keep it on the same volume as the database. |
 | `PUBLIC_BASE_URL` | request host | Public origin for invite links. Set this to the custom domain once it exists, for example `https://hangry.example`. No trailing slash needed. |
 | `VAPID_PUBLIC_KEY` | unset | Web Push public key. Unset means in-app alerts only. |
 | `VAPID_PRIVATE_KEY` | unset | Web Push private key. Set both, or neither. |

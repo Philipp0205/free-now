@@ -1,5 +1,6 @@
 import { readCompactHome } from "./compact-home.js";
 import { emptyEnd } from "./plans/event-end.js";
+import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
 import { emptyInvites } from "./plans/private-event.js";
 
 export const TOKEN_KEY = "fn_token";
@@ -90,6 +91,8 @@ export const state = {
   endDraft: emptyEnd(),
   /** The friends picked in the create sheet. Empty means everyone. See plans/private-event.js. */
   inviteDraft: emptyInvites(),
+  /** The cover photo picked in the create sheet. See plans/event-photo-draft.js. */
+  photoDraft: emptyPhotoDraft(),
   viewerLocation: null,
   mapCenter: null,
   mapCard: null,

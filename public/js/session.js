@@ -12,6 +12,7 @@ import { actingCircle, forgetMapAll, loadCalendar, refreshMapAll } from "./event
 import { resolveShareLink } from "./plan-share.js";
 import { showOnMap } from "./map-card.js";
 import { forgetAvatars } from "./avatars.js";
+import { forgetEventPhotos } from "./plans/event-photo.js";
 
 /**
  * Every refresh() is numbered when it starts. The 3s poll, a switch and an action can overlap, and their
@@ -418,6 +419,7 @@ export async function api(path, options = {}) {
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   forgetAvatars();
+  forgetEventPhotos();
   // What's new is per person. The next account on this phone starts from its own server value.
   localStorage.removeItem(SEEN_KEY);
   state.whatsNewChecked = false;

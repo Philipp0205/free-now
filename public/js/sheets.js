@@ -15,6 +15,8 @@ import { cardColorField } from "./plans/card-color-ui.js";
 import { endFromItem } from "./plans/event-end.js";
 import { emptyInvites, invitePeople, invitesFromItem } from "./plans/private-event.js";
 import { inviteField } from "./plans/private-event-ui.js";
+import { releaseDraft, resetPhotoDraft } from "./plans/event-photo-draft.js";
+import { photoField } from "./plans/event-photo-ui.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -80,6 +82,7 @@ export function sheet() {
           }),
           planning ? descriptionField(state.planDraft, "sheet-description") : null,
           planning ? cardColorField(state.planDraft) : null,
+          photoField(state.photoDraft, planning ? null : mySocial(), planning ? "plan" : "social"),
           planning ? planDateField() : null,
           planning ? el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: "Time (optional)" }),
@@ -142,6 +145,7 @@ export function openSheet(name, { planDate = "" } = {}) {
     state.endDraft = endFromItem(name === "free" ? mySocial() : null, appTz());
     state.inviteDraft = name === "free" ? invitesFromItem(mySocial()) : emptyInvites();
     state.planDraft = { description: "" };
+    state.photoDraft = resetPhotoDraft(state.photoDraft);
     state.planDay = "pick";
     state.planDate = name === "plan" ? planDate : "";
     state.planWhere = emptyWhereSession();
@@ -164,6 +168,7 @@ export function closeSheet() {
   if (state.sheet === "arrival") state.arrivalPick = null;
   if (state.sheet === "share-circles") state.shareCircles = null;
   if (state.sheet === "payment-reminder") noteReminderClosed();
+  if (state.sheet === "admin-edit" && state.adminEdit?.photo) releaseDraft(state.adminEdit.photo);
   state.cardMenu = null;
   state.sheet = null;
   state.whereMap = false;

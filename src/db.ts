@@ -60,6 +60,8 @@ export type SocialRow = {
   collector_id: string | null;
   /** The end the host picked. Null means none; expires_at then falls back to the default window. */
   ends_at: number | null;
+  /** Revision of the host's cover photo. Null means no photo. */
+  photo_rev: number | null;
 };
 
 export type DueStartReminder = {
@@ -108,6 +110,8 @@ export type PlanRow = {
   card_color: number | null;
   /** Optional end instant on the plan's day. Null means open ended. ended_at stays the manual end. */
   ends_at: number | null;
+  /** Revision of the host's cover photo. Null means no photo. */
+  photo_rev: number | null;
 };
 
 export type PushSubRow = {
@@ -513,6 +517,8 @@ export function openDb(dbPath: string): DatabaseSync {
   ensureColumn(db, "plans", "collector_id", "collector_id TEXT");
   ensureColumn(db, "plans", "card_color", "card_color INTEGER");
   ensureColumn(db, "plans", "ends_at", "ends_at INTEGER");
+  ensureColumn(db, "socials", "photo_rev", "photo_rev INTEGER");
+  ensureColumn(db, "plans", "photo_rev", "photo_rev INTEGER");
   ensureColumn(db, "plan_joins", "reply", "reply TEXT NOT NULL DEFAULT 'coming'");
   // Every plan is linked to its home circle. Safe on every boot.
   db.exec("INSERT OR IGNORE INTO plan_circles (plan_id, circle_id, added_at) SELECT id, circle_id, created_at FROM plans");
@@ -845,6 +851,25 @@ export function bumpAvatarRev(db: DatabaseSync, id: string, now: number): number
 
 export function clearAvatarRev(db: DatabaseSync, id: string): void {
   db.prepare("UPDATE users SET avatar_rev = NULL WHERE id = ?").run(id);
+}
+
+const PHOTO_TABLE = { social: "socials", plan: "plans" } as const;
+
+/** Bumps an event's cover photo revision and returns it. Same floor as avatars, so a new photo is never a cached URL. */
+export function bumpEventPhotoRev(db: DatabaseSync, kind: EventKind, id: string, now: number): number {
+  const table = PHOTO_TABLE[kind];
+  db.prepare(`UPDATE ${table} SET photo_rev = MAX(COALESCE(photo_rev, 0) + 1, ?) WHERE id = ?`).run(Math.floor(now / 1000), id);
+  return Number(one<{ photo_rev: number }>(db, `SELECT photo_rev FROM ${table} WHERE id = ?`, id)?.photo_rev ?? 0);
+}
+
+export function clearEventPhotoRev(db: DatabaseSync, kind: EventKind, id: string): void {
+  db.prepare(`UPDATE ${PHOTO_TABLE[kind]} SET photo_rev = NULL WHERE id = ?`).run(id);
+}
+
+/** Ids of events of this kind that still have a cover photo. Used to drop files whose event is gone. */
+export function listEventsWithPhoto(db: DatabaseSync, kind: EventKind): Set<string> {
+  const rows = db.prepare(`SELECT id FROM ${PHOTO_TABLE[kind]} WHERE photo_rev IS NOT NULL`).all() as Array<{ id: string }>;
+  return new Set(rows.map((row) => row.id));
 }
 
 export type StatusRow = {
@@ -2358,7 +2383,7 @@ const SOCIAL_SELECT = `
   SELECT s.id, s.circle_id, s.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev,
          u.buzz_animation AS creator_buzz_animation, s.note,
          s.created_at, s.expires_at, s.last_notified_at, s.lat, s.lng, s.place, s.starts_at, s.reminded_at, s.buzzed_at,
-         s.price_cents, s.collector_id, s.ends_at
+         s.price_cents, s.collector_id, s.ends_at, s.photo_rev
   FROM socials s
   JOIN users u ON u.id = s.creator_id
 `;
@@ -2366,7 +2391,7 @@ const SOCIAL_SELECT = `
 const PLAN_SELECT = `
   SELECT p.id, p.circle_id, p.creator_id, u.name AS creator_name, u.color AS creator_color, u.avatar_rev AS creator_avatar_rev, p.note, p.for_date, p.created_at,
          p.lat, p.lng, p.place, p.at_time, p.ended_at, p.share_id, p.description, p.reminded_at, p.updated_at,
-         p.price_cents, p.collector_id, p.card_color, p.ends_at
+         p.price_cents, p.collector_id, p.card_color, p.ends_at, p.photo_rev
   FROM plans p
   JOIN users u ON u.id = p.creator_id
 `;
