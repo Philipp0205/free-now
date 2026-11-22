@@ -18,10 +18,11 @@ import {
 } from "../db.js";
 import { audiencePlace, eventTitle, notifyUsers, planRemindTitle, planReplyBody, replyPushBody, type Notice } from "../push/notify.js";
 import { addDays, clockLabel, isCalendarDate, isoDate, noticeDay, zonedDateTime } from "../lib/time.js";
+import { resolvePlanEnd, type EndSpec } from "../lib/end-time.js";
 import { recordEventLine, replyLogText } from "../chat/chat.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "../app.js";
 import { normalizeReply, readArriveAt, type Reply } from "./socials.js";
-import { ensureShareId } from "./plan-share.js";
+import { ensureShareId, isOpenPlan } from "./plan-share.js";
 
 /** How far ahead a plan can go, in calendar days in APP_TZ. */
 export const PLAN_DAYS_AHEAD = 365;
@@ -56,6 +57,7 @@ export async function publishPlan(
   date: unknown = undefined,
   description = "",
   cardColor: number | null = null,
+  end: EndSpec | undefined = undefined,
 ) {
   const circle = requireCircle(deps, user.id, requested);
   const now = deps.now();
@@ -63,7 +65,8 @@ export async function publishPlan(
   // No date is the original request shape, which always meant tomorrow.
   const forDate = date == null ? addDays(today, 1) : readPlanDate(date, today);
   assertPlanClock(forDate, time, now, deps.config.tz);
-  if (countUpcomingPlans(deps.db, circle.id, today) >= 30) {
+  const endsAt = end ? resolvePlanEnd(end, forDate, time, now, deps.config.tz) : null;
+  if (countUpcomingPlans(deps.db, circle.id, today, now) >= 30) {
     throw new HttpError(409, "too many plans");
   }
   const id = crypto.randomUUID();
@@ -80,6 +83,7 @@ export async function publishPlan(
     atTime: time,
     description,
     cardColor,
+    endsAt,
   });
   // Made now so the first Share tap needs no round trip. Old plans get one on first share.
   ensureShareId(deps.db, id);
@@ -117,7 +121,7 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requ
   if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  assertPlanOpen(plan, today);
+  assertPlanOpen(plan, today, now);
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const planBlock = getPlanReply(deps.db, plan.id, user.id);
   if (planBlock?.blocked) throw new HttpError(403, removedMessage(planBlock.removed_by));
@@ -156,7 +160,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  assertPlanOpen(plan, today);
+  assertPlanOpen(plan, today, now);
   if (plan.creator_id === user.id) throw new HttpError(400, "you made this plan");
   const reply = normalizeReply(body.reply);
   const planReplyBlock = getPlanReply(deps.db, plan.id, user.id);
@@ -286,7 +290,7 @@ export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, re
   if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  assertPlanOpen(plan, today);
+  assertPlanOpen(plan, today, now);
   const block = getPlanReply(deps.db, plan.id, user.id);
   if (block?.blocked) throw new HttpError(403, removedMessage(block.removed_by));
   const retryAt = plan.reminded_at == null ? null : plan.reminded_at + REMIND_COOLDOWN_MS;
@@ -344,8 +348,8 @@ export function planRemindNotice(plan: PlanRow, senderName: string, today: strin
   };
 }
 
-function assertPlanOpen(plan: PlanRow, today: string): void {
-  if (plan.ended_at != null || plan.for_date < today) throw new HttpError(410, "That plan has ended.");
+function assertPlanOpen(plan: PlanRow, today: string, now: number): void {
+  if (!isOpenPlan(plan, today, now)) throw new HttpError(410, "That plan has ended.");
 }
 
 function readPlanArrive(value: unknown, day: string, now: number, tz: string): number {

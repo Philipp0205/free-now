@@ -5,6 +5,7 @@
 import { cardCrowd } from "./map-pin.js";
 import { clockText, dayLabel, zonedParts } from "./when.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
+import { eventRange } from "./plans/event-end.js";
 
 /** "1" when this device shows the Now list as one line per event; anything else, or nothing, is the cards. */
 export const COMPACT_HOME_KEY = "fn_compact_home";
@@ -64,13 +65,15 @@ export function compactTitle(kind, item, now = Date.now()) {
 /**
  * The line's date: "Today 19:00", "Tomorrow", "Sat 14 Nov 19:00" for a plan; "Now" for a live
  * free post and "Today 19:00" for one that starts later. Days follow the app timezone.
+ * With an end the clock part is the range: "Today 19:00 - 22:00", "Now - 22:00".
  */
 export function compactWhen(kind, item, now = Date.now(), tz = "Europe/Berlin") {
   const today = zonedParts(now, tz).day;
+  const range = eventRange(kind, item, now, tz);
   if (kind === "plan") {
-    return [dayLabel(item?.forDate, today) || item?.whenLabel || "", item?.time || ""].filter(Boolean).join(" ");
+    return [dayLabel(item?.forDate, today) || item?.whenLabel || "", range || item?.time || ""].filter(Boolean).join(" ");
   }
-  if (!(item?.startsAt && item.startsAt > now)) return "Now";
+  if (!(item?.startsAt && item.startsAt > now)) return range || "Now";
   const start = zonedParts(item.startsAt, tz);
-  return `${dayLabel(start.day, today)} ${clockText(start.hour, start.minute)}`;
+  return `${dayLabel(start.day, today)} ${range || clockText(start.hour, start.minute)}`;
 }

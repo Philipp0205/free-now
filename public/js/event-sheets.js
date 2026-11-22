@@ -20,6 +20,8 @@ import { avatar } from "./avatars.js";
 import { closeSheet } from "./sheets.js";
 import { euro, paidList, paySection, paymentBody, paymentEditState, paymentFields } from "./event-pay.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
+import { endFromItem, endError, endPayload, eventRange } from "./plans/event-end.js";
+import { endField } from "./plans/event-end-ui.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -61,6 +63,18 @@ function detailActions(kind, item, { calendar, compact, over, mine, bills }) {
   return el("div", { class: "detail-actions" }, [chat, reply]);
 }
 
+/** The sheet's when line. An event with an end shows its range ("19:00 - 22:00"). */
+function detailWhen(kind, item, over) {
+  const range = eventRange(kind, item, Date.now(), appTz());
+  if (kind === "plan") {
+    const time = range || item.time;
+    return `${item.whenLabel}${time ? ` · ${time}` : ""}${over ? " · Ended" : ""}`;
+  }
+  if (over) return `${shortDate(calSocialDay(item), calToday())} · ${range || clock(item.startsAt ?? item.createdAt)} · Ended`;
+  if (range) return range;
+  return item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt);
+}
+
 export function eventDetailSheet() {
   const detail = state.eventDetail;
   const item = eventDetailItem();
@@ -81,10 +95,7 @@ export function eventDetailSheet() {
   const calendar = detail.from === "calendar";
   const over = (calendar || detail.from === "bills") && (kind === "plan" ? calPlanOver(item) : calSocialOver(item));
   const mine = item.creator?.id === state.me.user.id;
-  let when;
-  if (kind === "plan") when = `${item.whenLabel}${item.time ? ` · ${item.time}` : ""}${over ? " · Ended" : ""}`;
-  else if (over) when = `${shortDate(calSocialDay(item), calToday())} · ${clock(item.startsAt ?? item.createdAt)} · Ended`;
-  else when = item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt);
+  const when = detailWhen(kind, item, over);
   const crowd = cardCrowd(item.creator, item.joined);
   const line = (person) => (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
   const personRow = (text, person) => over
@@ -211,6 +222,8 @@ export function openAdminEdit(kind, item) {
     note: item.note || "",
     description: item.description || "", cardColor: item.cardColor ?? null,
     time,
+    startTime: time,
+    end: endFromItem(item, appTz()),
     day,
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
@@ -250,6 +263,7 @@ export function adminEditSheet() {
             }),
             edit.kind === "plan" ? planTimeError() : null,
           ]),
+          endField(edit.end, render, "admin-end"),
           whereBlock(edit),
           paymentItem && paymentItem.creator?.id === state.me.user.id ? paymentFields(edit, paymentItem) : null,
           edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
@@ -408,10 +422,19 @@ async function saveAdminEdit(event) {
     render();
     return;
   }
+  const endProblem = endError(edit.end, time || "", edit.kind === "plan");
+  if (endProblem) {
+    edit.end.error = endProblem;
+    render();
+    return;
+  }
   await run(async () => {
     const body = edit.kind === "social"
-      ? { note, place: picked.place, startsAt: time, lat: picked.lat, lng: picked.lng }
+      ? { note, place: picked.place, lat: picked.lat, lng: picked.lng }
       : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng, cardColor: edit.cardColor ?? null };
+    // A start that has not moved is not resent: once it has passed, the server would refuse it as "not later today".
+    if (edit.kind === "social" && time !== edit.startTime) body.startsAt = time;
+    Object.assign(body, endPayload(edit.end));
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     const paymentItem = findEvent(edit.kind, edit.id);
     if (paymentItem) Object.assign(body, paymentBody(edit, paymentItem));

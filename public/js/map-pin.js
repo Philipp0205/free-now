@@ -3,18 +3,30 @@
  * pin for later, and who is in the crowd on a plan pin. No DOM, no app state, so the
  * rules can be tested with a frozen clock.
  */
-import { clockText, dayLabel, shortDate, zonedParts } from "./when.js";
+import { clockText, dayLabel, shortDate, zonedInstant, zonedParts } from "./when.js";
+
+/** When a social stops being live: its expiry, or its end when that comes first. */
+function socialLiveEnd(social) {
+  const ends = [social?.expiresAt, social?.endsAt].map(Number).filter((ms) => Number.isFinite(ms) && ms > 0);
+  return ends.length ? Math.min(...ends) : 0;
+}
 
 /** "now" while a free-now social runs, "later" before it starts, "ended" once it is past. */
 export function socialPinState(social, now = Date.now()) {
-  if (!social || !(Number(social.expiresAt) > now)) return "ended";
+  if (!social || !(socialLiveEnd(social) > now)) return "ended";
   if (social.startsAt && social.startsAt > now) return "later";
   return "now";
 }
 
-/** The map's now rule for any event: a live social is now, a plan never is. Cards and compact rows use this. */
-export function eventIsNow(kind, item, now = Date.now()) {
-  return kind === "social" && socialPinState(item, now) === "now";
+/**
+ * The map's now rule for any event. A live social is now. A plan is now only between its start
+ * and its end, so a plan without an end is never now. Cards and compact rows use this.
+ */
+export function eventIsNow(kind, item, now = Date.now(), tz = "Europe/Berlin") {
+  if (kind === "social") return socialPinState(item, now) === "now";
+  if (!item?.endsAt || !item.time) return false;
+  const start = zonedInstant(item.forDate, item.time, tz);
+  return start <= now && now < item.endsAt;
 }
 
 /**

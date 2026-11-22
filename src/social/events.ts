@@ -4,6 +4,7 @@ import {
   type CircleRow,
   type EventKind,
   type PlanRow,
+  type SocialRow,
   type UserRow,
   listEventPaid,
   addSocialJoin,
@@ -41,11 +42,13 @@ import { HttpError } from "../lib/http.js";
 import { readPriceCents } from "../lib/payment-url.js";
 import { clockLabel, isoDate, shortDate } from "../lib/time.js";
 import { cleanDescription, cleanNote, cleanPlace, parseId, readCardColor, readClock, readPoint, readStart } from "../lib/validate.js";
+import { readEnd, resolveEnd, resolvePlanEnd, shiftPlanEnd } from "../lib/end-time.js";
 import { audiencePlace, eventTitle, notifyUsers } from "../push/notify.js";
 import { requireCircle } from "./circles.js";
 import { planPayload, socialPayload } from "./payload.js";
 import { canBeCollector, canSetPaid, effectiveCollectorId, goingPeople, type PayEvent } from "./payments.js";
 import { assertPlanClock, newPlanNotice, readPlanDate } from "./plans.js";
+import { isOpenPlan } from "./plan-share.js";
 
 export async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
   const id = parseId(rawId);
@@ -236,6 +239,30 @@ async function pushEdit(
   })), circle);
 }
 
+/**
+ * The start, reminder, expiry and end for a social edit. An untouched start and end change nothing.
+ * A new start moves the window; a saved end that the new start passes is refused. A cleared end restores the default window.
+ */
+function socialSchedule(deps: AppDeps, social: SocialRow, body: Record<string, unknown>) {
+  const kept = { startsAt: social.starts_at, remindedAt: social.reminded_at, expiresAt: social.expires_at, endsAt: social.ends_at };
+  const startGiven = has(body, "startsAt") || has(body, "time");
+  const end = readEnd(body);
+  if (!startGiven && end === undefined) return kept;
+  const now = deps.now();
+  let { startsAt, remindedAt } = kept;
+  if (startGiven) {
+    const start = readStart({ startsAt: has(body, "startsAt") ? body.startsAt : body.time }, now, deps.config.tz);
+    startsAt = start === undefined ? social.starts_at : start;
+    remindedAt = startsAt != null && startsAt > now ? null : now;
+  }
+  const anchor = startsAt != null && startsAt > now ? startsAt : now;
+  let endsAt: number | null = social.ends_at;
+  if (end === null) endsAt = null;
+  else if (end) endsAt = resolveEnd(end, anchor, now, deps.config.tz);
+  else if (endsAt != null && endsAt <= anchor) throw new HttpError(400, "The end must be after the start.");
+  return { startsAt, remindedAt, expiresAt: endsAt ?? anchor + deps.config.socialTtlMs, endsAt };
+}
+
 export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
@@ -255,26 +282,16 @@ export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, bo
     lat = point?.lat ?? null;
     lng = point?.lng ?? null;
   }
-  let startsAt = social.starts_at;
-  let remindedAt = social.reminded_at;
-  let expiresAt = social.expires_at;
-  if (Object.prototype.hasOwnProperty.call(body, "startsAt") || Object.prototype.hasOwnProperty.call(body, "time")) {
-    const raw = Object.prototype.hasOwnProperty.call(body, "startsAt") ? body.startsAt : body.time;
-    const start = readStart({ startsAt: raw }, deps.now(), deps.config.tz);
-    startsAt = start === undefined ? social.starts_at : start;
-    const now = deps.now();
-    const anchor = startsAt != null && startsAt > now ? startsAt : now;
-    expiresAt = anchor + deps.config.socialTtlMs;
-    remindedAt = startsAt != null && startsAt > now ? null : now;
-  }
+  const { startsAt, remindedAt, expiresAt, endsAt } = socialSchedule(deps, social, body);
   const noteChanged = note !== social.note;
   const placeChanged = place !== (social.place ?? "") || lat !== social.lat || lng !== social.lng;
   const timeChanged = startsAt !== social.starts_at;
-  patchSocialDetails(deps.db, social.id, note, place, lat, lng, startsAt, remindedAt, expiresAt);
+  patchSocialDetails(deps.db, social.id, note, place, lat, lng, startsAt, remindedAt, expiresAt, endsAt);
   savePayment?.();
   const changes = [];
   if (noteChanged) changes.push({ name: "Note", next: note });
   if (timeChanged) changes.push({ name: "Time", next: startsAt == null ? "" : clockLabel(startsAt, deps.config.tz) });
+  if (endsAt !== social.ends_at) changes.push({ name: "End", next: endsAt == null ? "" : clockLabel(endsAt, deps.config.tz) });
   if (placeChanged) changes.push({ name: "Place", next: place ? audiencePlace(place) : "" });
   if (changes.length) {
     const label = note.trim() || "Free now";
@@ -323,6 +340,27 @@ export async function endPlan(deps: AppDeps, user: UserRow, rawId: string, reque
   await notifyUsers(deps.db, deps.push, deps.now(), notices, getCircleById(deps.db, plan.circle_id) ?? circle);
 }
 
+/**
+ * The end a plan edit leaves behind. An end in the body is checked against the new start. Otherwise a saved end
+ * keeps its length when the day or time moves, and the edit is refused if it would lose its time or cross midnight.
+ */
+function planEnd(
+  plan: PlanRow,
+  body: Record<string, unknown>,
+  next: { forDate: string; atTime: string | null },
+  now: number,
+  tz: string,
+): number | null {
+  const end = readEnd(body);
+  if (end === null) return null;
+  if (end) return resolvePlanEnd(end, next.forDate, next.atTime, now, tz);
+  if (plan.ends_at == null || !plan.at_time) return null;
+  if (next.forDate === plan.for_date && next.atTime === plan.at_time) return plan.ends_at;
+  const moved = shiftPlanEnd(plan.ends_at, { forDate: plan.for_date, atTime: plan.at_time }, next, tz);
+  if (moved == null) throw new HttpError(400, "Clear the end first, or keep a start time that ends the same day.");
+  return moved;
+}
+
 export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body: Record<string, unknown>, requested: string | null = null) {
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
@@ -331,7 +369,7 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
   assertEventHost(deps, user, plan.circle_id, plan.creator_id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
-  if (plan.ended_at != null || plan.for_date < today) throw new HttpError(410, "That plan has ended.");
+  if (!isOpenPlan(plan, today, now)) throw new HttpError(410, "That plan has ended.");
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, true) : plan.note;
   const place = Object.prototype.hasOwnProperty.call(body, "place") ? cleanPlace(body.place) : (plan.place ?? "");
   let lat = plan.lat;
@@ -353,9 +391,10 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
     : (plan.description ?? "");
   const wantedCircles = body.circleIds === undefined ? null : readPlanCircles(deps, user, plan, body.circleIds);
   const savePayment = withColorEdit(readPaymentEdit(deps, user, "plan", plan, listPlanJoins(deps.db, plan.id), body), deps, plan.id, body);
-  const contentChanged = dateChanged || timeChanged || note !== plan.note || place !== (plan.place ?? "")
+  const endsAt = planEnd(plan, body, { forDate, atTime }, now, deps.config.tz);
+  const contentChanged = dateChanged || timeChanged || endsAt !== plan.ends_at || note !== plan.note || place !== (plan.place ?? "")
     || (description || null) !== (plan.description || null);
-  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null);
+  patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null, endsAt);
   savePayment?.();
   // Unlinked circles go first, so a move in the same save does not ping them.
   const kept = wantedCircles ? unlinkDropped(deps, plan.id, wantedCircles) : [];

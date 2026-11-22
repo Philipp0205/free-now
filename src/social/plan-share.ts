@@ -27,8 +27,10 @@ export function newShareId(): string {
   return crypto.randomBytes(18).toString("base64url");
 }
 
-export function isOpenPlan(plan: PlanRow, today: string): boolean {
-  return plan.ended_at == null && plan.for_date >= today;
+/** Open means not ended by hand, not on a past day and, when `now` is given, not past its end time. */
+export function isOpenPlan(plan: PlanRow, today: string, now?: number): boolean {
+  if (plan.ended_at != null || plan.for_date < today) return false;
+  return now === undefined || plan.ends_at == null || plan.ends_at > now;
 }
 
 /** Gives the plan a share id on first use and keeps it after that. */
@@ -47,15 +49,15 @@ export function ensureShareId(db: DatabaseSync, planId: string): string {
 }
 
 /** The open plan behind a link, or nothing for a bad, unknown or ended one. */
-export function openSharedPlan(db: DatabaseSync, shareId: string, today: string): PlanRow | undefined {
+export function openSharedPlan(db: DatabaseSync, shareId: string, today: string, now?: number): PlanRow | undefined {
   if (!SHARE_ID_RE.test(shareId)) return undefined;
   const plan = getPlanByShareId(db, shareId);
-  if (!plan || !isOpenPlan(plan, today)) return undefined;
+  if (!plan || !isOpenPlan(plan, today, now)) return undefined;
   return plan;
 }
 
-export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string | null, today: string): SharePreview {
-  const plan = openSharedPlan(db, shareId, today);
+export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string | null, today: string, now?: number): SharePreview {
+  const plan = openSharedPlan(db, shareId, today, now);
   if (!plan) return { ended: true };
   const base = {
     ended: false as const,

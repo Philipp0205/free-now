@@ -7,6 +7,8 @@ import { appTz, el, run, viewerTz } from "./lib.js";
 import { clockInstant } from "./replies.js";
 import { wherePayload } from "./where.js";
 import { sharedPoint } from "./map-card.js";
+import { emptyEnd, endError, endPayload } from "./plans/event-end.js";
+import { endField } from "./plans/event-end-ui.js";
 
 /** Now and Later make you free. Plan for another day, a quieter link, makes a plan on a date. */
 export function whenBlock() {
@@ -345,6 +347,20 @@ function startPayload() {
   return { later: true };
 }
 
+/** The end row of the create sheets. A render after a pick repaints the chips. */
+export function endBlock() {
+  return endField(state.endDraft, render);
+}
+
+/** The body fields for the end, or null (with the error shown) when the pick cannot work. `start` is "HH:MM" or "". */
+function endBody(start, needsStart) {
+  const error = endError(state.endDraft, start, needsStart);
+  if (!error) return endPayload(state.endDraft);
+  state.endDraft.error = error;
+  render();
+  return null;
+}
+
 export function inReply(person) {
   return person.reply === "coming" || person.reply === "join" || person.reply === "in";
 }
@@ -356,8 +372,11 @@ export async function onFree(event) {
     render();
     return;
   }
+  const start = state.whenMode === "later" && /^\d{2}:\d{2}$/.test(state.startChoice) ? state.startChoice : "";
+  const end = endBody(start, false);
+  if (!end) return;
   await run(async () => {
-    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload() } });
+    await api("/api/socials", { method: "POST", body: { note: state.noteDraft, ...wherePayload(), ...startPayload(), ...end } });
     state.sheet = null;
     state.whereMap = false;
     await refresh({ initial: true });
@@ -387,13 +406,16 @@ export async function onCreatePlan(event) {
     return;
   }
   const locationNote = state.error;
+  const end = endBody(time || "", true);
+  if (!end) return;
   if (locationNote) render();
   await run(async () => {
     const description = document.getElementById("sheet-description")?.value ?? state.planDraft.description;
-    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, cardColor: state.planDraft.cardColor ?? null } });
+    await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, cardColor: state.planDraft.cardColor ?? null, ...end } });
     state.sheet = null;
     state.placeDraft = "";
     state.planTime = "";
+    state.endDraft = emptyEnd();
     state.planDraft = { description: "" };
     state.planDay = "pick";
     state.planDate = "";

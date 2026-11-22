@@ -69,10 +69,10 @@ export function planStatus(plan: Pick<PlanRow, "ended_at" | "creator_id">, viewe
  * Uses the app's own zonedDateTime: a fall-back time is the first occurrence, a
  * spring-forward time that does not exist moves ahead by the gap (02:30 to 03:30).
  */
-export function planWhen(plan: Pick<PlanRow, "for_date" | "at_time">, tz: string): IcsWhen {
+export function planWhen(plan: Pick<PlanRow, "for_date" | "at_time"> & { ends_at?: number | null }, tz: string): IcsWhen {
   if (!plan.at_time) return { kind: "day", day: plan.for_date };
   const startMs = zonedDateTime(plan.for_date, plan.at_time, tz);
-  return { kind: "timed", startMs, endMs: startMs + DEFAULT_DURATION_MS };
+  return { kind: "timed", startMs, endMs: plan.ends_at ?? startMs + DEFAULT_DURATION_MS };
 }
 
 export function planAppUrl(origin: string, planId: string): string {
@@ -97,7 +97,7 @@ export function gapNote(plan: Pick<PlanRow, "at_time">, when: IcsWhen, tz: strin
  * No other names, chat, or share links.
  */
 export function planDescription(
-  plan: Pick<PlanRow, "creator_name" | "description" | "for_date" | "at_time">,
+  plan: Pick<PlanRow, "creator_name" | "description" | "for_date" | "at_time"> & { ends_at?: number | null },
   link: string,
   tz: string,
 ): string {
@@ -107,7 +107,9 @@ export function planDescription(
   const when = planWhen(plan, tz);
   if (when.kind === "timed") {
     const gap = gapNote(plan, when, tz);
-    parts.push(gap ? `${gap}\n${DURATION_NOTE}` : DURATION_NOTE);
+    const note = plan.ends_at == null ? DURATION_NOTE : "";
+    const lines = [gap, note].filter(Boolean).join("\n");
+    if (lines) parts.push(lines);
   }
   parts.push(`Spontaco: ${link}`);
   return parts.join("\n\n");
@@ -141,7 +143,7 @@ export function planCalendarFile(ctx: CalendarContext, viewer: UserRow, rawId: s
   const plan = getPlan(ctx.db, parseId(rawId));
   if (!plan || !planCircleForUser(ctx.db, plan.id, viewer.id)) throw new HttpError(404, "plan not found");
   if (getPlanReply(ctx.db, plan.id, viewer.id)?.blocked) throw new HttpError(404, "plan not found");
-  if (!isOpenPlan(plan, isoDate(ctx.now, ctx.tz))) throw new HttpError(410, "That plan has ended.");
+  if (!isOpenPlan(plan, isoDate(ctx.now, ctx.tz), ctx.now)) throw new HttpError(410, "That plan has ended.");
   const event = planEvent(ctx, plan, viewer.id, liveReply(ctx.db, plan.id, viewer.id));
   return { body: buildCalendar({ tz: ctx.tz, events: [event] }), plan };
 }

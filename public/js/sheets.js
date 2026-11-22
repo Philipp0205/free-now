@@ -6,12 +6,13 @@ import { memberSheet } from "./members.js";
 import { adminEditSheet, arrivalSheet, descriptionField, eventDetailSheet, shareCirclesSheet } from "./event-sheets.js";
 import { feedbackSheet, resetFeedback, whatsNewSheet } from "./whats-new-ui.js";
 import { defaultCurrentWhere, stopWhereSearch, whereBlock, whereFromSocial } from "./where.js";
-import { clock, copyText, el, mySocial, ttlLabel } from "./lib.js";
-import { busyAtBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen, offeringTomorrow, onCreatePlan, onFree, paintBusyAt, paintSummary, planDateField, planHeading, planThrough, planTimeError, saveOnlyFromButton, sheetField, timeBlock, whenBlock } from "./composer.js";
+import { clock, appTz, copyText, el, mySocial, ttlLabel } from "./lib.js";
+import { busyAtBlock, endBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen, offeringTomorrow, onCreatePlan, onFree, paintBusyAt, paintSummary, planDateField, planHeading, planThrough, planTimeError, saveOnlyFromButton, sheetField, timeBlock, whenBlock } from "./composer.js";
 import { circleNameSheet, joinLinkSheet } from "./circles.js";
 import { sheetLeaving } from "./sheet-out.js";
 import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.js";
 import { cardColorField } from "./plans/card-color-ui.js";
+import { endFromItem } from "./plans/event-end.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -93,6 +94,7 @@ export function sheet() {
             planTimeError(),
           ]) : null,
           planning ? busyAtBlock() : null,
+          endBlock(),
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
         ]),
@@ -134,6 +136,7 @@ export function openSheet(name, { planDate = "" } = {}) {
   if (name === "free" || name === "plan") {
     state.placeDraft = "";
     state.planTime = "";
+    state.endDraft = endFromItem(name === "free" ? mySocial() : null, appTz());
     state.planDraft = { description: "" };
     state.planDay = "pick";
     state.planDate = name === "plan" ? planDate : "";

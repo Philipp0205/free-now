@@ -22,8 +22,9 @@ export async function shareInvite() {
   await copyText(circle.inviteUrl, "Invite link copied");
 }
 
-/** Not on a past day. Ended plans leave the list, so a stale copy past midnight is the case to catch. */
+/** Not on a past day, and not past its end time. Ended plans leave the list, so a stale copy is the case to catch. */
 export function planOpen(plan) {
+  if (plan.endsAt && plan.endsAt <= Date.now()) return false;
   return Boolean(plan.forDate) && plan.forDate >= zonedParts(Date.now(), appTz()).day;
 }
 

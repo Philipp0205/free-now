@@ -42,10 +42,11 @@ export function pastDays(deps: AppDeps, circleId: string, viewerId: string) {
         .map((join) => ({ id: join.id, name: join.name, color: colorHex(join.id, join.color), avatarRev: join.avatar_rev || null, status: statuses.get(join.id) ?? null, paymentUrl: payments.get(join.id) ?? null, weroEmail: weroEmails.get(join.id) ?? null, arriveAt: join.arrive_at })),
     });
   }
-  for (const plan of listPastPlans(deps.db, circleId, today)) {
+  for (const plan of listPastPlans(deps.db, circleId, today, now)) {
     if (getPlanReply(deps.db, plan.id, viewerId)?.blocked) continue;
     const at = plan.ended_at ?? plan.created_at;
-    const day = plan.for_date < today ? plan.for_date : isoDate(at, deps.config.tz);
+    // A plan that ran past its end time (no manual end) belongs on its own day.
+    const day = plan.for_date < today || plan.ended_at == null ? plan.for_date : isoDate(at, deps.config.tz);
     events.push({
       kind: "plan",
       id: plan.id,

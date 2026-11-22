@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-event-end-time",
+    "date": "2026-11-22",
+    "title": "Say when an event ends",
+    "bullets": [
+      "When you post free or add a plan, pick an end: 1h, 2h, 3h, or an Until time.",
+      "Cards, rows and the event sheet show the range, like 19:00 - 22:00.",
+      "A plan counts as happening now until its end, then it drops off the list."
+    ]
+  },
+  {
     "id": "2026-11-22-light-cards",
     "date": "2026-11-22",
     "title": "Lighter event cards in Light",
