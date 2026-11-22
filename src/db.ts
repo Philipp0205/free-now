@@ -1979,22 +1979,28 @@ export function getUserByFeedHash(db: DatabaseSync, tokenHash: string): UserRow 
  * Upcoming first (soonest first), then recent past (newest first), within `limit`.
  */
 export function listFeedPlans(db: DatabaseSync, userId: string, fromDate: string, today: string, limit: number): PlanRow[] {
+  // Visibility is in SQL so a feed full of private plans does not eat the limit before the filter.
   const where = `p.for_date >= ? AND EXISTS (
       SELECT 1 FROM plan_circles pc JOIN memberships m ON m.circle_id = pc.circle_id
       WHERE pc.plan_id = p.id AND m.user_id = ?)
     AND (p.creator_id = ? OR EXISTS (
-      SELECT 1 FROM plan_joins j WHERE j.plan_id = p.id AND j.user_id = ? AND j.blocked = 0 AND j.reply IN ('coming', 'maybe')))`;
+      SELECT 1 FROM plan_joins j WHERE j.plan_id = p.id AND j.user_id = ? AND j.blocked = 0 AND j.reply IN ('coming', 'maybe')))
+    AND (
+      NOT EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'plan' AND vi.event_id = p.id)
+      OR p.creator_id = ?
+      OR EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'plan' AND vi.event_id = p.id AND vi.user_id = ?)
+    )`;
   const upcoming = all<PlanRow>(
     db,
     `${PLAN_SELECT} WHERE ${where} ORDER BY p.for_date ASC, COALESCE(p.at_time, '') ASC, p.created_at ASC LIMIT ?`,
-    today, userId, userId, userId, limit,
+    today, userId, userId, userId, userId, userId, limit,
   );
   const room = limit - upcoming.length;
   if (room <= 0) return upcoming;
   const past = all<PlanRow>(
     db,
     `${PLAN_SELECT} WHERE ${where} AND p.for_date < ? ORDER BY p.for_date DESC, p.created_at DESC LIMIT ?`,
-    fromDate, userId, userId, userId, today, room,
+    fromDate, userId, userId, userId, userId, userId, today, room,
   );
   return [...upcoming, ...past];
 }
