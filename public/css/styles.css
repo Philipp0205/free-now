@@ -447,6 +447,7 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
 .compact-faces > :first-child { margin-left: 0; }
 .compact-faces .avatar { font-size: 10px; border-width: 1.5px; }
 .compact-more { margin-left: 4px; color: var(--row-sub); font-size: 12px; font-weight: 650; }
+.compact-maybe { margin-left: 6px; color: var(--row-sub); font-size: 12px; font-weight: 650; white-space: nowrap; }
 .compact-when { flex: 0 1 auto; min-width: 0; max-width: 40%; color: var(--row-sub); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .card {
@@ -668,7 +669,8 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   place-items: center;
   flex: none;
 }
-.in-toggle {
+.in-toggle,
+.maybe-toggle {
   appearance: none;
   border: 0;
   width: 100%;
@@ -682,7 +684,8 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   font-size: 16px;
   font-weight: 650;
 }
-.in-toggle.on {
+.in-toggle.on,
+.maybe-toggle.on {
   background: var(--fill);
   color: var(--in-ink);
   box-shadow: none;
@@ -691,7 +694,8 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   opacity: 1;
   cursor: default;
 }
-.in-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.in-toggle:focus-visible,
+.maybe-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* In and Share on one row on open plans. In keeps the room, Share hugs its label. */
 .card-cta {
   display: flex;
@@ -701,7 +705,11 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   min-width: 0;
 }
 .card-cta > .in-toggle,
+.card-cta > .maybe-toggle,
 .map-card .card-cta > .in-toggle { flex: 1 1 auto; min-width: 0; width: auto; margin-top: 0; }
+/* The event sheet: In and Maybe on one row, Share on its own row under them. */
+.rsvp-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.rsvp-stack > .card-cta { margin-top: 0; }
 .card-share {
   appearance: none;
   border: 0;

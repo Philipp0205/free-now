@@ -54,14 +54,15 @@ async function faces(card: Locator) {
   return card.locator(".avatars > .avatar").evaluateAll((nodes) => nodes.map((node) => (node.textContent || "").trim()));
 }
 
-/** The detail sheet, split into the Who's in list and the Can't make it list. */
+/** The detail sheet, split into the Who's in, Maybe and Can't make it lists. */
 async function sheetLists(page: Page) {
   const details = page.getByRole("dialog", { name: "Details" });
   await details.waitFor();
   const text = (selector: string) => details.locator(selector).evaluateAll((nodes) => nodes.map((node) => (node.textContent || "").trim()));
   return {
     titles: await text(".members-title"),
-    inLines: await text(".sheet-scroll > .list:not(.cant-list) .reply-line"),
+    inLines: await text(".sheet-scroll > .list:not(.cant-list):not(.maybe-list) .reply-line"),
+    maybeLines: await text(".sheet-scroll > .maybe-list .reply-line"),
     cantLines: await text(".sheet-scroll > .cant-list .reply-line"),
   };
 }
@@ -75,7 +76,7 @@ async function fitsWidth(page: Page, card: Locator) {
   assert.ok(stack && stack.x + stack.width <= box.x + box.width, "the avatar stack stays inside the card");
 }
 
-test("a plan card shows who's in and maybe; can't is only in the details", { timeout: 240_000 }, async () => {
+test("a plan card counts who's in; maybe has its own line and list, and can't is only in the details", { timeout: 240_000 }, async () => {
   const { host, alex, bea, cy } = await circle();
   const { plan } = await hangry.call("POST", "/api/plans", host.token, { note: "Pizza night", time: "19:00" });
   await hangry.call("POST", `/api/plans/${plan.id}/reply`, alex.token, { reply: "in" });
@@ -92,7 +93,7 @@ test("a plan card shows who's in and maybe; can't is only in the details", { tim
       const lines = await who.locator(".reply-line").allInnerTexts();
       assert.deepEqual(lines, ["Alex is in", "Cy is maybe"], `who-row at w${width}`);
       assert.equal(await body(card).getByText(/Bea can't/).count(), 0, "no can't line on the card");
-      assert.deepEqual(await faces(card), ["H", "A", "C"], "host, in and maybe in the stack; Bea is not");
+      assert.deepEqual(await faces(card), ["H", "A"], "host and in in the stack; maybe and Bea are not");
       await fitsWidth(page, card);
       await card.scrollIntoViewIfNeeded();
       await page.screenshot({ path: shot(`plan-card-w${width}.png`) });
@@ -101,8 +102,9 @@ test("a plan card shows who's in and maybe; can't is only in the details", { tim
 
       await who.click();
       const lists = await sheetLists(page);
-      assert.deepEqual(lists.titles, ["Who's in", "Can't make it"]);
-      assert.deepEqual(lists.inLines, ["Hana · host", "Alex is in", "Cy is maybe"]);
+      assert.deepEqual(lists.titles, ["Who's in", "Maybe", "Can't make it"]);
+      assert.deepEqual(lists.inLines, ["Hana · host", "Alex is in"]);
+      assert.deepEqual(lists.maybeLines, ["Cy is maybe"]);
       assert.deepEqual(lists.cantLines, ["Bea can't"]);
       const details = page.getByRole("dialog", { name: "Details" });
       await details.getByRole("button", { name: "Remove Alex" }).waitFor();

@@ -76,6 +76,17 @@ test("the who-line has no +N when everyone fits, and leaves out people who can't
   assert.equal(who.text, "Hana, Alex");
 });
 
+test("maybe people are counted on their own, not named and not counted as in", () => {
+  const joined = [person("a", "Alex", "in"), person("b", "Bea", "maybe"), person("c", "Cy", "maybe")];
+  const who = compactWho(person("h", "Hana"), joined);
+  assert.deepEqual(who.names, ["Hana", "Alex"]);
+  assert.equal(who.more, 0);
+  assert.equal(who.maybe, 2);
+  assert.equal(who.text, "Hana, Alex, 2 maybe");
+  assert.equal(compactWho(person("h", "Hana"), [person("b", "Bea", "maybe")]).text, "Hana, 1 maybe");
+  assert.equal(compactWho(person("h", "Hana"), [person("a", "Alex", "in")]).maybe, 0);
+});
+
 test("empty, missing and unknown names do not blow up", () => {
   const who = compactWho(person("h", "  "), [{ id: "a" }, { id: "b", name: null }, null, undefined]);
   assert.deepEqual(who.names, ["Someone", "Someone", "Someone"]);

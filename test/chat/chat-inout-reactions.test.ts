@@ -41,7 +41,7 @@ const systemLine = (list: Line[], text: string) => list.find((item) => item.syst
 type Kind = "socials" | "plans";
 
 /** Alex hosts an event and the guest answers it ("in" or "cant"). Returns the chat path for that kind. */
-async function eventWithReply(port: number, kind: Kind, host: Person, guest: Person, reply: "in" | "cant", more: Person[] = []) {
+async function eventWithReply(port: number, kind: Kind, host: Person, guest: Person, reply: "in" | "cant" | "maybe", more: Person[] = []) {
   const made = await api(port, "POST", `/api/${kind}`, { token: host.token, body: { note: "Dinner" }, status: 201 });
   const id = kind === "socials" ? made.social.id : made.plan.id;
   for (const person of more) await api(port, "POST", `/api/${kind}/${id}/reply`, { token: person.token, body: { reply: "in" }, status: 200 });
@@ -95,6 +95,37 @@ for (const kind of ["socials", "plans"] as const) {
     });
   });
 }
+
+for (const kind of ["socials", "plans"] as const) {
+  test(`${kind}: the maybe line takes a reaction, and nothing else`, async () => {
+    await withChat(async ({ port }) => {
+      const [alex, ada] = await circleOf(port, ["Alex", "Ada"]);
+      const path = await eventWithReply(port, kind, alex, ada, "maybe");
+      const line = systemLine(await lines(port, alex, path), "Ada is maybe");
+      assert.equal(typeof line.id, "string");
+      assert.deepEqual(line.reactions, []);
+
+      const done = await react(port, alex, line.id, "🤞");
+      assert.deepEqual(done.reactions, [{ emoji: "🤞", count: 1, mine: true, names: ["Alex"] }]);
+      const seen = systemLine(await lines(port, ada, path), "Ada is maybe");
+      assert.deepEqual(seen.reactions, [{ emoji: "🤞", count: 1, mine: false, names: ["Alex"] }]);
+
+      await api(port, "POST", path, { token: alex.token, body: { text: "hi", replyTo: line.id }, status: 400 });
+      await api(port, "PATCH", `/api/messages/${line.id}`, { token: alex.token, body: { text: "x" }, status: 403 });
+      await api(port, "DELETE", `/api/messages/${line.id}`, { token: alex.token, status: 403 });
+    });
+  });
+}
+
+test("a circle member who is not in the event cannot react to its maybe line", async () => {
+  await withChat(async ({ port, db }) => {
+    const [alex, ada, sam] = await circleOf(port, ["Alex", "Ada", "Sam"]);
+    const path = await eventWithReply(port, "plans", alex, ada, "maybe");
+    const line = systemLine(await lines(port, alex, path), "Ada is maybe");
+    await react(port, sam, line.id, "👍", 403);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM message_reactions").get() as { n: number }).n, 0);
+  });
+});
 
 test("a circle member who is not in the event cannot react to its in line, and nothing is stored", async () => {
   await withChat(async ({ port, db }) => {
