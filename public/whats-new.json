@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-recurring-events",
+    "date": "2026-11-22",
+    "title": "Plans can repeat",
+    "bullets": [
+      "Pick Repeats when you plan: weekly, every 2 weeks or monthly.",
+      "The next one appears after the current one ends, with the same details.",
+      "Hosts can tap Stop repeating when editing a plan."
+    ]
+  },
+  {
     "id": "2026-11-22-chat-photos",
     "date": "2026-11-22",
     "title": "Send a photo in chat",

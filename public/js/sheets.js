@@ -7,7 +7,7 @@ import { adminEditSheet, arrivalSheet, descriptionField, eventDetailSheet, share
 import { feedbackSheet, resetFeedback, whatsNewSheet } from "./whats-new-ui.js";
 import { defaultCurrentWhere, stopWhereSearch, whereBlock, whereFromSocial } from "./where.js";
 import { clock, appTz, copyText, el, mySocial, ttlLabel } from "./lib.js";
-import { busyAtBlock, endBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen, offeringTomorrow, onCreatePlan, onFree, paintBusyAt, paintSummary, planDateField, planHeading, planThrough, planTimeError, saveOnlyFromButton, sheetField, timeBlock, whenBlock } from "./composer.js";
+import { busyAtBlock, endBlock, endSocial, enterPlanMode, friendsSummary, laterTimeChosen, offeringTomorrow, onCreatePlan, onFree, paintBusyAt, paintSummary, planDateField, planHeading, planThrough, planTimeError, repeatBlock, saveOnlyFromButton, sheetField, timeBlock, whenBlock } from "./composer.js";
 import { circleNameSheet, joinLinkSheet } from "./circles.js";
 import { sheetLeaving } from "./sheet-out.js";
 import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.js";
@@ -98,6 +98,7 @@ export function sheet() {
           ]) : null,
           planning ? busyAtBlock() : null,
           endBlock(),
+          planning ? repeatBlock() : null,
           inviteField(state.inviteDraft, invitePeople(state.me?.circle?.members, mySocial(), state.me?.user?.id)),
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
@@ -142,6 +143,7 @@ export function openSheet(name, { planDate = "" } = {}) {
     state.planTime = "";
     state.endDraft = endFromItem(name === "free" ? mySocial() : null, appTz());
     state.inviteDraft = name === "free" ? invitesFromItem(mySocial()) : emptyInvites();
+    state.repeatDraft = "never";
     state.planDraft = { description: "" };
     state.photoDraft = resetPhotoDraft(state.photoDraft);
     state.planDay = "pick";

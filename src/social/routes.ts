@@ -49,6 +49,7 @@ import { handleLive } from "./live.js";
 import { planPayload, socialPayload } from "./payload.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta } from "./plan-share.js";
 import { PLAN_DAYS_AHEAD, joinPlan, publishPlan, remindPlan, replyPlan } from "./plans.js";
+import { readRecurrence, rejectSocialRecurrence } from "../lib/recurrence.js";
 import { publishSocial, replySocial } from "./socials.js";
 import { canSeeEvent, visibleEvents } from "./visibility.js";
 
@@ -83,6 +84,7 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
+    rejectSocialRecurrence(body.recurrence);
     const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested, readEnd(body), body.invitees);
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return true;
@@ -174,7 +176,8 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
     const description = cleanDescription(body.description);
     const cardColor = readCardColor(body.cardColor);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor, readEnd(body), body.invitees) });
+    const recurrence = readRecurrence(body.recurrence) ?? null;
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor, readEnd(body), body.invitees, recurrence) });
     return true;
   }
 

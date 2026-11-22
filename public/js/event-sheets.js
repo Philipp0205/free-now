@@ -21,6 +21,8 @@ import { euro, paidList, paySection, paymentBody, paymentEditState, paymentField
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
 import { endFromItem, endError, endPayload, eventRange } from "./plans/event-end.js";
 import { endField } from "./plans/event-end-ui.js";
+import { REPEAT_COPY, repeatToken } from "./plans/repeat-copy.js";
+import { repeatField, repeatMarker, stopRepeatButton } from "./plans/repeat-ui.js";
 import { invitePeople, invitesFromItem, inviteBody } from "./plans/private-event.js";
 import { inviteField, privateMarker } from "./plans/private-event-ui.js";
 import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
@@ -118,6 +120,7 @@ export function eventDetailSheet() {
         calendar ? mapCircleLine(item) : null,
         calendar && kind === "plan" ? planCirclesLine(item) : null,
         privateMarker(item, "detail-private"),
+        kind === "plan" ? repeatMarker(item, "detail-private repeat-line") : null,
         eventPhoto(kind, item, "event-photo detail-photo"),
         kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
@@ -236,6 +239,8 @@ export function openAdminEdit(kind, item) {
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
     invites: invitesFromItem(item),
+    repeat: item.recurrence || "never",
+    repeatWas: item.recurrence || "never",
     photo: emptyPhotoDraft(),
     ...paymentEditState(item),
     ...session,
@@ -273,6 +278,7 @@ export function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           endField(edit.end, render, "admin-end"),
+          repeatEditField(edit, paymentItem),
           paymentItem && paymentItem.creator?.id === state.me.user.id ? photoField(edit.photo, paymentItem, edit.kind) : null,
           paymentItem && paymentItem.creator?.id === state.me.user.id
             ? inviteField(edit.invites, invitePeople(state.me?.circle?.members, paymentItem, state.me.user.id))
@@ -394,6 +400,28 @@ export function planCirclesLine(plan) {
   return el("p", { class: "plan-circles", text: plan.circles.map((circle) => circle.name).join(" + ") });
 }
 
+/** The Repeats select and, when the plan already repeats, a Stop repeating button. Plans and their host only. */
+function repeatEditField(edit, item) {
+  if (edit.kind !== "plan" || !item || item.creator?.id !== state.me.user.id) return null;
+  return el("div", { class: "sheet-group repeat-edit" }, [
+    repeatField(edit.repeat, (value) => { edit.repeat = value; }, "admin-repeat"),
+    edit.repeatWas !== "never" ? stopRepeatButton(() => { void stopRepeating(edit); }) : null,
+  ]);
+}
+
+/** Clears the rule on this plan now, without a Save. The next one is never made. */
+async function stopRepeating(edit) {
+  await run(async () => {
+    await api(`/api/plans/${edit.id}`, { method: "PATCH", body: { recurrence: null } });
+    edit.repeat = "never";
+    edit.repeatWas = "never";
+    await refresh({ initial: true });
+    state.error = REPEAT_COPY.stopped;
+    render();
+    scheduleErrorClear();
+  });
+}
+
 async function stopSharing(edit) {
   await run(async () => {
     await api(`/api/plans/${edit.id}/share`, { method: "DELETE" });
@@ -452,6 +480,9 @@ async function saveAdminEdit(event) {
     const paymentItem = findEvent(edit.kind, edit.id);
     // Only the host may change who it is for; the server refuses anyone else.
     if (paymentItem?.creator?.id === state.me.user.id) body.invitees = inviteBody(edit.invites);
+    if (edit.kind === "plan" && paymentItem?.creator?.id === state.me.user.id && edit.repeat !== edit.repeatWas) {
+      body.recurrence = repeatToken(edit.repeat);
+    }
     if (paymentItem) Object.assign(body, paymentBody(edit, paymentItem));
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     const photoNote = paymentItem?.creator?.id === state.me.user.id ? await savePhotoDraft(edit.kind, edit.id, edit.photo) : "";

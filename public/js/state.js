@@ -91,6 +91,8 @@ export const state = {
   endDraft: emptyEnd(),
   /** The friends picked in the create sheet. Empty means everyone. See plans/private-event.js. */
   inviteDraft: emptyInvites(),
+  /** How the plan being created repeats: "never", "weekly", "biweekly" or "monthly". See plans/repeat-copy.js. */
+  repeatDraft: "never",
   /** The cover photo picked in the create sheet. See plans/event-photo-draft.js. */
   photoDraft: emptyPhotoDraft(),
   viewerLocation: null,

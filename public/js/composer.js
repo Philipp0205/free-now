@@ -9,6 +9,8 @@ import { wherePayload } from "./where.js";
 import { sharedPoint } from "./map-card.js";
 import { emptyEnd, endError, endPayload } from "./plans/event-end.js";
 import { endField } from "./plans/event-end-ui.js";
+import { repeatToken } from "./plans/repeat-copy.js";
+import { repeatField } from "./plans/repeat-ui.js";
 import { emptyInvites, inviteBody } from "./plans/private-event.js";
 import { savePhotoDraft } from "./plans/event-photo.js";
 
@@ -354,6 +356,11 @@ export function endBlock() {
   return endField(state.endDraft, render);
 }
 
+/** The "Repeats" select for the plan composer. */
+export function repeatBlock() {
+  return repeatField(state.repeatDraft, (value) => { state.repeatDraft = value; });
+}
+
 /** The body fields for the end, or null (with the error shown) when the pick cannot work. `start` is "HH:MM" or "". */
 function endBody(start, needsStart) {
   const error = endError(state.endDraft, start, needsStart);
@@ -415,10 +422,11 @@ export async function onCreatePlan(event) {
   if (locationNote) render();
   await run(async () => {
     const description = document.getElementById("sheet-description")?.value ?? state.planDraft.description;
-    const data = await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, ...end, invitees: inviteBody(state.inviteDraft) } });
+    const data = await api("/api/plans", { method: "POST", body: { note: state.noteDraft, place, lat, lng, precise, time, date, description, ...end, invitees: inviteBody(state.inviteDraft), recurrence: repeatToken(state.repeatDraft) } });
     const photoNote = await savePhotoDraft("plan", data?.plan?.id, state.photoDraft);
     state.sheet = null;
     state.inviteDraft = emptyInvites();
+    state.repeatDraft = "never";
     state.placeDraft = "";
     state.planTime = "";
     state.endDraft = emptyEnd();

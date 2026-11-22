@@ -43,12 +43,14 @@ import { readPriceCents } from "../lib/payment-url.js";
 import { clockLabel, isoDate, shortDate } from "../lib/time.js";
 import { cleanDescription, cleanNote, cleanPlace, parseId, readCardColor, readClock, readPoint, readStart } from "../lib/validate.js";
 import { readEnd, resolveEnd, resolvePlanEnd, shiftPlanEnd } from "../lib/end-time.js";
+import { rejectSocialRecurrence } from "../lib/recurrence.js";
 import { audiencePlace, eventTitle, notifyUsers } from "../push/notify.js";
 import { requireCircle } from "./circles.js";
 import { planPayload, socialPayload } from "./payload.js";
 import { canBeCollector, canSetPaid, effectiveCollectorId, goingPeople, type PayEvent } from "./payments.js";
 import { assertPlanClock, newPlanNotice, readPlanDate } from "./plans.js";
 import { isOpenPlan } from "./plan-share.js";
+import { materializeRecurringPlans, readRecurrenceEdit } from "./recurring-plans.js";
 import { canSeeEvent, readInvitees, setInvitees, visibleMembers } from "./visibility.js";
 
 export async function joinSocial(deps: AppDeps, user: UserRow, rawId: string, requested: string | null = null) {
@@ -273,6 +275,7 @@ export async function editSocial(deps: AppDeps, user: UserRow, rawId: string, bo
   assertEventHost(deps, user, circle.id, social.creator_id);
   // Only plans can live in more than one circle. Say so instead of silently dropping it.
   if (body.circleIds !== undefined) throw new HttpError(400, "Only plans can be shared with other circles.");
+  rejectSocialRecurrence(body.recurrence);
   const savePayment = readPaymentEdit(deps, user, "social", social, listSocialJoins(deps.db, social.id), body);
   const saveInvitees = readInviteeEdit(deps, user, "social", social, [social.circle_id], body);
   const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : social.note;
@@ -341,6 +344,8 @@ export async function endPlan(deps: AppDeps, user: UserRow, rawId: string, reque
     notices.push(endedNotice(id, `${user.name} ended ${plan.note}`, "plan", plan.id));
   }
   await notifyUsers(deps.db, deps.push, deps.now(), notices, getCircleById(deps.db, plan.circle_id) ?? circle);
+  // A repeating plan gets its next one now that this one is over. The hourly sweep is the backstop.
+  await materializeRecurringPlans(deps, plan.id);
 }
 
 /**
@@ -396,11 +401,13 @@ export async function editPlan(deps: AppDeps, user: UserRow, rawId: string, body
   const savePayment = withColorEdit(readPaymentEdit(deps, user, "plan", plan, listPlanJoins(deps.db, plan.id), body), deps, plan.id, body);
   const endsAt = planEnd(plan, body, { forDate, atTime }, now, deps.config.tz);
   const saveInvitees = readInviteeEdit(deps, user, "plan", plan, wantedCircles ?? listPlanCircleIds(deps.db, plan.id), body);
+  const saveRecurrence = readRecurrenceEdit(deps, user, plan, body, forDate);
   const contentChanged = dateChanged || timeChanged || endsAt !== plan.ends_at || note !== plan.note || place !== (plan.place ?? "")
     || (description || null) !== (plan.description || null);
   patchPlanDetails(deps.db, plan.id, note, place, lat, lng, atTime, forDate, description || null, contentChanged ? now : null, endsAt);
   savePayment?.();
   saveInvitees?.();
+  saveRecurrence?.();
   // Unlinked circles go first, so a move in the same save does not ping them.
   const kept = wantedCircles ? unlinkDropped(deps, plan.id, wantedCircles) : [];
   // Only a move (day, time, or place) pings people. Note or description edits stay quiet.
