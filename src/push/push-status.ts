@@ -10,6 +10,7 @@ import {
   type PushBatchRow,
   type ReachFlags,
 } from "../db.js";
+import { inviteeIds } from "../social/visibility.js";
 
 /** Active subscription, or why a push cannot land. "not_installed" only after a browser session and never a standalone one. */
 export type Reach = "on" | "off" | "not_installed";
@@ -64,7 +65,8 @@ export function summarizePush(
   refId: string,
   hostId: string,
 ): PushSummary {
-  const members = listMembers(db, circleId).filter((member) => member.id !== hostId);
+  const invited = kind === "social" || kind === "plan" ? inviteeIds(db, kind, refId) : null;
+  const members = listMembers(db, circleId).filter((member) => member.id !== hostId && (!invited || invited.has(member.id)));
   const reach = reachForCircle(db, circleId);
   const batch = latestPushBatch(db, circleId, kind, refId);
   const rows = batch ? listPushBatch(db, batch) : [];
@@ -117,6 +119,7 @@ export function pushSummaryForPlan(
     }
   }
   const people = new Map<string, PushPerson & { circleIds: string[] }>();
+  const invited = inviteeIds(db, "plan", planId);
   let visible = 0;
   for (const circleId of linked) {
     const members = listMembers(db, circleId);
@@ -125,7 +128,7 @@ export function pushSummaryForPlan(
     visible += 1;
     const reach = reachForCircle(db, circleId);
     for (const member of members) {
-      if (member.id === hostId) continue;
+      if (member.id === hostId || (invited && !invited.has(member.id))) continue;
       const seen = people.get(member.id);
       if (seen) {
         seen.circleIds.push(circleId);

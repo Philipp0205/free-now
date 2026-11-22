@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listComingUserIds, listDueStartReminders, markSocialReminded } from "../db.js";
+import { inviteeIds } from "../social/visibility.js";
 import { eventTitle, notifyUsers, startingNowBody } from "./notify.js";
 import type { PushSender } from "./push.js";
 
@@ -7,7 +8,9 @@ import type { PushSender } from "./push.js";
 export async function sendStartReminders(db: DatabaseSync, push: PushSender, now: number): Promise<number> {
   const due = listDueStartReminders(db, now);
   for (const social of due) {
-    const people = listComingUserIds(db, social.id);
+    // Coming people are already invitees of a private social, since a join needs to see it. The filter covers a later edit.
+    const invited = inviteeIds(db, "social", social.id);
+    const people = listComingUserIds(db, social.id).filter((userId) => !invited || invited.has(userId));
     if (people.length) {
       await notifyUsers(
         db,

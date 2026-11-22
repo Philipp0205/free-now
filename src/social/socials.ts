@@ -17,6 +17,7 @@ import { cancelReplyPush, scheduleReplyPush } from "../chat/reply-push.js";
 import { addDays, clockLabel, isoDate, zonedDateTime } from "../lib/time.js";
 import { resolveEnd, type EndSpec } from "../lib/end-time.js";
 import { activeStatus } from "./status.js";
+import { canSeeEvent, readInvitees, setInvitees, visibleMembers } from "./visibility.js";
 import { recordEventLine, replyLogText } from "../chat/chat.js";
 import { HttpError, parseId, requireCircle, socialPayload, type AppDeps } from "../app.js";
 
@@ -36,8 +37,11 @@ export async function publishSocial(
   start?: number | null,
   requested: string | null = null,
   end: EndSpec | undefined = undefined,
+  invitees: unknown = undefined,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id, requested);
+  // Read first, so a bad list is a 400 before anything is saved. Undefined keeps a live social's list.
+  const picked = readInvitees(deps.db, invitees, user.id, [circle.id]);
   const now = deps.now();
   const existing = getActiveSocialByCreator(deps.db, user.id, circle.id, now);
   let created = false;
@@ -99,6 +103,7 @@ export async function publishSocial(
     );
     if (endsAt !== existing.ends_at) setSocialEnd(deps.db, existing.id, endsAt, expiresAt);
   }
+  if (picked) setInvitees(deps.db, "social", socialId, picked);
   // Being free now ends a manual Busy. Away stays, and so does a later start.
   if (nextStart == null || nextStart <= now) {
     const row = getUserStatus(deps.db, user.id);
@@ -106,7 +111,8 @@ export async function publishSocial(
   }
   if (shouldNotify) {
     const title = shifted ? eventTitle("time") : fromTime ? eventTitle("later") : eventTitle("now");
-    const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
+    const recipients = visibleMembers(deps.db, "social", { id: socialId, creator_id: user.id }, listMembers(deps.db, circle.id))
+      .filter((member) => member.id !== user.id);
     await notifyUsers(
       deps.db,
       deps.push,
@@ -146,7 +152,7 @@ export async function replySocial(deps: AppDeps, user: UserRow, rawId: string, b
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const social = getSocial(deps.db, id);
-  if (!social || social.circle_id !== circle.id) throw new HttpError(404, "social not found");
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
   const now = deps.now();
   if (social.expires_at <= now) throw new HttpError(410, "that social has ended");
   if (social.creator_id === user.id) throw new HttpError(400, "you started this one");

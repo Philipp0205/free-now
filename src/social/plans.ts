@@ -3,12 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   claimLateReminders,
   claimPlanReminder,
-  countUpcomingPlans,
   getCircleById,
   getPlan,
   getPlanReply,
   insertPlan,
   listPlanCircleIds,
+  listVisiblePlans,
   planInCircle,
   listMembers,
   listPlanRemindedUserIds,
@@ -23,6 +23,7 @@ import { recordEventLine, replyLogText } from "../chat/chat.js";
 import { HttpError, parseId, planPayload, requireCircle, type AppDeps } from "../app.js";
 import { normalizeReply, readArriveAt, type Reply } from "./socials.js";
 import { ensureShareId, isOpenPlan } from "./plan-share.js";
+import { canSeeEvent, readInvitees, setInvitees, visibleEvents, visibleMembers } from "./visibility.js";
 
 /** How far ahead a plan can go, in calendar days in APP_TZ. */
 export const PLAN_DAYS_AHEAD = 365;
@@ -58,15 +59,18 @@ export async function publishPlan(
   description = "",
   cardColor: number | null = null,
   end: EndSpec | undefined = undefined,
+  invitees: unknown = undefined,
 ) {
   const circle = requireCircle(deps, user.id, requested);
+  // Read first, so a bad list is a 400 before anything is saved.
+  const picked = readInvitees(deps.db, invitees, user.id, [circle.id]);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   // No date is the original request shape, which always meant tomorrow.
   const forDate = date == null ? addDays(today, 1) : readPlanDate(date, today);
   assertPlanClock(forDate, time, now, deps.config.tz);
   const endsAt = end ? resolvePlanEnd(end, forDate, time, now, deps.config.tz) : null;
-  if (countUpcomingPlans(deps.db, circle.id, today, now) >= 30) {
+  if (countVisibleUpcoming(deps, circle.id, user.id, today, now) >= 30) {
     throw new HttpError(409, "too many plans");
   }
   const id = crypto.randomUUID();
@@ -87,9 +91,10 @@ export async function publishPlan(
   });
   // Made now so the first Share tap needs no round trip. Old plans get one on first share.
   ensureShareId(deps.db, id);
+  if (picked) setInvitees(deps.db, "plan", id, picked);
   const plan = getPlan(deps.db, id);
   if (!plan) throw new HttpError(500, "plan missing");
-  const recipients = listMembers(deps.db, circle.id).filter((member) => member.id !== user.id);
+  const recipients = visibleMembers(deps.db, "plan", plan, listMembers(deps.db, circle.id)).filter((member) => member.id !== user.id);
   await notifyUsers(
     deps.db,
     deps.push,
@@ -98,6 +103,12 @@ export async function publishPlan(
     circle,
   );
   return planPayload(deps.db, plan, today, user.id, deps.now());
+}
+
+/** The cap counts only plans the host can see, so a private plan of someone else never blocks or hints at itself. */
+function countVisibleUpcoming(deps: AppDeps, circleId: string, userId: string, today: string, now: number): number {
+  const upcoming = listVisiblePlans(deps.db, circleId, today, addDays(today, PLAN_DAYS_AHEAD), now);
+  return visibleEvents(deps.db, "plan", upcoming, userId).length;
 }
 
 /** The new-plan push. Also sent once to a circle the plan is shared with later. */
@@ -118,7 +129,7 @@ export async function joinPlan(deps: AppDeps, user: UserRow, rawId: string, requ
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   assertPlanOpen(plan, today, now);
@@ -157,7 +168,7 @@ export async function replyPlan(deps: AppDeps, user: UserRow, rawId: string, bod
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   assertPlanOpen(plan, today, now);
@@ -271,7 +282,7 @@ function remindTargets(db: DatabaseSync, plan: PlanRow, senderId: string, skip: 
   };
   const byCircle = new Map<string, string[]>();
   for (const circleId of listPlanCircleIds(db, plan.id)) {
-    const ids = listMembers(db, circleId)
+    const ids = visibleMembers(db, "plan", plan, listMembers(db, circleId))
       .map((member) => member.id)
       .filter((userId) => userId !== senderId && !skip.has(userId) && !answered(userId));
     if (ids.length) byCircle.set(circleId, ids);
@@ -287,7 +298,7 @@ export async function remindPlan(deps: AppDeps, user: UserRow, rawId: string, re
   const id = parseId(rawId);
   const circle = requireCircle(deps, user.id, requested);
   const plan = getPlan(deps.db, id);
-  if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
   assertPlanOpen(plan, today, now);

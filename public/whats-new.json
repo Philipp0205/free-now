@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-private-events",
+    "date": "2026-11-22",
+    "title": "Plan something for just a few friends",
+    "bullets": [
+      "When you post free or add a plan, pick the friends it is for. Only they see it.",
+      "Only the friends you pick get the push, and the chat is just for them.",
+      "Leave it on Everyone and nothing changes. You can change the list later in Edit."
+    ]
+  },
+  {
     "id": "2026-11-22-event-end-time",
     "date": "2026-11-22",
     "title": "Say when an event ends",

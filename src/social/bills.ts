@@ -11,6 +11,7 @@ import { formatCents } from "../lib/payment-url.js";
 import { isoDate } from "../lib/time.js";
 import { planPayload, socialPayload } from "./payload.js";
 import { type PaymentPayload, paymentPayload } from "./payments.js";
+import { visibleEvents } from "./visibility.js";
 
 /** What one priced event means for one viewer. Null when it does not touch them. */
 export type BillShare =
@@ -68,7 +69,7 @@ export function loadBills(db: DatabaseSync, viewerId: string, now: number, today
   const owed: BillItem[] = [];
   const seen = new Set<string>();
   for (const circle of listCirclesForUser(db, viewerId)) {
-    for (const row of listPricedSocials(db, circle.id)) {
+    for (const row of visibleEvents(db, "social", listPricedSocials(db, circle.id), viewerId)) {
       const key = `social:${row.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -78,7 +79,7 @@ export function loadBills(db: DatabaseSync, viewerId: string, now: number, today
       const candidate: Candidate = { kind: "social", id: row.id, day: isoDate(row.starts_at ?? row.created_at, tz), circleId: circle.id, circleName: circle.name };
       (share.side === "owe" ? owe : owed).push(item(candidate, row.note, "Free now", payment, share, socialPayload(db, row, viewerId, now)));
     }
-    for (const row of listPricedPlans(db, circle.id)) {
+    for (const row of visibleEvents(db, "plan", listPricedPlans(db, circle.id), viewerId)) {
       const key = `plan:${row.id}`;
       if (seen.has(key)) continue;
       seen.add(key);

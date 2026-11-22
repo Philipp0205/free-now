@@ -38,6 +38,7 @@ import { addDays, daysBetween, isCalendarDate, isoDate, zonedDateTime } from "..
 import { isAllCircles } from "../lib/validate.js";
 import { requireCircle } from "../social/circles.js";
 import { planPayload, socialPayload } from "../social/payload.js";
+import { visibleEvents } from "../social/visibility.js";
 
 export async function handleGoogleCallbackRoute(ctx: RouteContext): Promise<boolean> {
   const { req, res, deps, url, method, pathname } = ctx;
@@ -135,8 +136,8 @@ function calendarMonth(deps: AppDeps, circles: CircleRow[], range: { from: strin
   const fromMs = zonedDateTime(addDays(range.from, -1), "00:00", tz);
   const toMs = zonedDateTime(addDays(range.to, 2), "00:00", tz);
   for (const circle of circles) {
-    for (const row of listPlansOnDays(deps.db, circle.id, range.from, range.to)) if (!plans.has(row.id)) plans.set(row.id, row);
-    for (const row of listSocialsStartedBetween(deps.db, circle.id, fromMs, toMs)) {
+    for (const row of visibleEvents(deps.db, "plan", listPlansOnDays(deps.db, circle.id, range.from, range.to), viewerId)) if (!plans.has(row.id)) plans.set(row.id, row);
+    for (const row of visibleEvents(deps.db, "social", listSocialsStartedBetween(deps.db, circle.id, fromMs, toMs), viewerId)) {
       const day = isoDate(row.starts_at ?? row.created_at, tz);
       if (day >= range.from && day <= range.to && !socials.has(row.id)) socials.set(row.id, row);
     }

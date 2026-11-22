@@ -16,6 +16,7 @@ import { buildCalendar, type IcsEvent, type IcsStatus, type IcsWhen } from "./ic
 import { addDays, clockLabel, isoDate, zonedDateTime } from "../lib/time.js";
 import { HttpError, parseId } from "../app.js";
 import { isOpenPlan } from "../social/plan-share.js";
+import { canSeeEvent, visibleEvents } from "../social/visibility.js";
 
 /** A plan with a time lasts this long in a calendar. Spontaco has no end time. */
 export const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000;
@@ -141,7 +142,7 @@ function liveReply(db: DatabaseSync, planId: string, userId: string): string | n
 /** One plan as a file. Only someone who can see it now. A removed guest gets 404 like a stranger. */
 export function planCalendarFile(ctx: CalendarContext, viewer: UserRow, rawId: string): { body: string; plan: PlanRow } {
   const plan = getPlan(ctx.db, parseId(rawId));
-  if (!plan || !planCircleForUser(ctx.db, plan.id, viewer.id)) throw new HttpError(404, "plan not found");
+  if (!plan || !planCircleForUser(ctx.db, plan.id, viewer.id) || !canSeeEvent(ctx.db, "plan", plan, viewer.id)) throw new HttpError(404, "plan not found");
   if (getPlanReply(ctx.db, plan.id, viewer.id)?.blocked) throw new HttpError(404, "plan not found");
   if (!isOpenPlan(plan, isoDate(ctx.now, ctx.tz), ctx.now)) throw new HttpError(410, "That plan has ended.");
   const event = planEvent(ctx, plan, viewer.id, liveReply(ctx.db, plan.id, viewer.id));
@@ -151,7 +152,7 @@ export function planCalendarFile(ctx: CalendarContext, viewer: UserRow, rawId: s
 /** The subscribed feed: 30 days back, everything ahead, at most 200 events. */
 export function feedCalendar(ctx: CalendarContext, viewer: UserRow): string {
   const today = isoDate(ctx.now, ctx.tz);
-  const plans = listFeedPlans(ctx.db, viewer.id, addDays(today, -FEED_PAST_DAYS), today, FEED_MAX_EVENTS);
+  const plans = visibleEvents(ctx.db, "plan", listFeedPlans(ctx.db, viewer.id, addDays(today, -FEED_PAST_DAYS), today, FEED_MAX_EVENTS), viewer.id);
   const events = plans.map((plan) => planEvent(ctx, plan, viewer.id, liveReply(ctx.db, plan.id, viewer.id)));
   return buildCalendar({ name: FEED_NAME, tz: ctx.tz, events });
 }

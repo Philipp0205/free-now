@@ -410,6 +410,14 @@ CREATE TABLE IF NOT EXISTS event_payments (
   set_at INTEGER NOT NULL,
   PRIMARY KEY (kind, event_id, user_id)
 );
+
+-- Who a private event is for. No rows means everyone in the circle. Polymorphic on kind, so no FK on the event; sweep() drops orphans.
+CREATE TABLE IF NOT EXISTS event_invitees (
+  kind TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (kind, event_id, user_id)
+);
 `;
 
 let sqliteWarningPatched = false;
@@ -950,22 +958,34 @@ export function listVisibleBusyHours(db: DatabaseSync, viewerId: string): Map<st
 }
 
 const LIVE_SOCIAL = "s.expires_at > ? AND (s.starts_at IS NULL OR s.starts_at <= ?)";
+// Public, or this viewer is the host or on the invite list.
+const LIVE_SOCIAL_VISIBLE = `${LIVE_SOCIAL}
+  AND (
+    NOT EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'social' AND vi.event_id = s.id)
+    OR s.creator_id = ?
+    OR EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'social' AND vi.event_id = s.id AND vi.user_id = ?)
+  )`;
 
-/** True when the person has an "I'm free" that is on now, in any circle. */
+/** True when the person has an "I'm free" that is on now, in any circle, including a private one. */
 export function hasLiveSocial(db: DatabaseSync, userId: string, now: number): boolean {
   return one(db, `SELECT 1 AS found FROM socials s WHERE s.creator_id = ? AND ${LIVE_SOCIAL} LIMIT 1`, userId, now, now) !== undefined;
 }
 
-/** Which of these people have a live "I'm free" in any circle. One query. */
-export function liveSocialUsers(db: DatabaseSync, userIds: string[], now: number): Set<string> {
+/**
+ * Which of these people have a live "I'm free" this viewer may see. A public one counts for everyone.
+ * A private one only counts for its host and the people it is for.
+ */
+export function liveSocialUsers(db: DatabaseSync, userIds: string[], now: number, viewerId: string): Set<string> {
   if (!userIds.length) return new Set();
   const marks = userIds.map(() => "?").join(", ");
   const rows = all<{ creator_id: string }>(
     db,
-    `SELECT DISTINCT s.creator_id FROM socials s WHERE s.creator_id IN (${marks}) AND ${LIVE_SOCIAL}`,
+    `SELECT DISTINCT s.creator_id FROM socials s WHERE s.creator_id IN (${marks}) AND ${LIVE_SOCIAL_VISIBLE}`,
     ...userIds,
     now,
     now,
+    viewerId,
+    viewerId,
   );
   return new Set(rows.map((row) => row.creator_id));
 }
@@ -1635,17 +1655,6 @@ export function listPricedPlans(db: DatabaseSync, circleId: string): PlanRow[] {
   );
 }
 
-export function countUpcomingPlans(db: DatabaseSync, circleId: string, today: string, now?: number): number {
-  const row = one<{ n: number | bigint }>(
-    db,
-    `SELECT COUNT(*) AS n FROM plans p WHERE ${IN_CIRCLE} AND p.ended_at IS NULL AND p.for_date >= ? AND (p.ends_at IS NULL OR p.ends_at > ?)`,
-    circleId,
-    today,
-    now ?? 0,
-  );
-  return Number(row?.n ?? 0);
-}
-
 /** A plan shows in every circle it is linked to. plans.circle_id is its home. */
 const IN_CIRCLE = "p.id IN (SELECT plan_id FROM plan_circles WHERE circle_id = ?)";
 
@@ -1970,22 +1979,28 @@ export function getUserByFeedHash(db: DatabaseSync, tokenHash: string): UserRow 
  * Upcoming first (soonest first), then recent past (newest first), within `limit`.
  */
 export function listFeedPlans(db: DatabaseSync, userId: string, fromDate: string, today: string, limit: number): PlanRow[] {
+  // Visibility is in SQL so a feed full of private plans does not eat the limit before the filter.
   const where = `p.for_date >= ? AND EXISTS (
       SELECT 1 FROM plan_circles pc JOIN memberships m ON m.circle_id = pc.circle_id
       WHERE pc.plan_id = p.id AND m.user_id = ?)
     AND (p.creator_id = ? OR EXISTS (
-      SELECT 1 FROM plan_joins j WHERE j.plan_id = p.id AND j.user_id = ? AND j.blocked = 0 AND j.reply IN ('coming', 'maybe')))`;
+      SELECT 1 FROM plan_joins j WHERE j.plan_id = p.id AND j.user_id = ? AND j.blocked = 0 AND j.reply IN ('coming', 'maybe')))
+    AND (
+      NOT EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'plan' AND vi.event_id = p.id)
+      OR p.creator_id = ?
+      OR EXISTS (SELECT 1 FROM event_invitees vi WHERE vi.kind = 'plan' AND vi.event_id = p.id AND vi.user_id = ?)
+    )`;
   const upcoming = all<PlanRow>(
     db,
     `${PLAN_SELECT} WHERE ${where} ORDER BY p.for_date ASC, COALESCE(p.at_time, '') ASC, p.created_at ASC LIMIT ?`,
-    today, userId, userId, userId, limit,
+    today, userId, userId, userId, userId, userId, limit,
   );
   const room = limit - upcoming.length;
   if (room <= 0) return upcoming;
   const past = all<PlanRow>(
     db,
     `${PLAN_SELECT} WHERE ${where} AND p.for_date < ? ORDER BY p.for_date DESC, p.created_at DESC LIMIT ?`,
-    fromDate, userId, userId, userId, today, room,
+    fromDate, userId, userId, userId, userId, userId, today, room,
   );
   return [...upcoming, ...past];
 }
@@ -2332,6 +2347,8 @@ export function sweep(db: DatabaseSync, now: number, planCutoff: string, today =
   db.prepare(`DELETE FROM plans WHERE ${oldPlan}`).run(planDay, socialCutoff);
   db.prepare("DELETE FROM event_payments WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
   db.prepare("DELETE FROM event_payments WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
+  db.prepare("DELETE FROM event_invitees WHERE kind = 'plan' AND event_id NOT IN (SELECT id FROM plans)").run();
+  db.prepare("DELETE FROM event_invitees WHERE kind = 'social' AND event_id NOT IN (SELECT id FROM socials)").run();
   db.prepare("DELETE FROM notifications WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM push_deliveries WHERE created_at < ?").run(monthAgo);
   db.prepare("DELETE FROM auth_links WHERE expires_at < ?").run(now);

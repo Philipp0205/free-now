@@ -1,5 +1,6 @@
 import { readCompactHome } from "./compact-home.js";
 import { emptyEnd } from "./plans/event-end.js";
+import { emptyInvites } from "./plans/private-event.js";
 
 export const TOKEN_KEY = "fn_token";
 export const CIRCLE_KEY = "fn_circle";
@@ -87,6 +88,8 @@ export const state = {
   planWhere: emptyWhereSession(),
   /** The end time picked in the create sheet. See plans/event-end.js. */
   endDraft: emptyEnd(),
+  /** The friends picked in the create sheet. Empty means everyone. See plans/private-event.js. */
+  inviteDraft: emptyInvites(),
   viewerLocation: null,
   mapCenter: null,
   mapCard: null,

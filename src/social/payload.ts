@@ -17,6 +17,7 @@ import { buzzAnimationField } from "./buzz-animation.js";
 import { remindAgainAt } from "./plans.js";
 import { paymentPayload } from "./payments.js";
 import { type PersonStatus, visibleStatuses } from "./status.js";
+import { type EventKind, canSeeEvent, isPrivateEvent, listInvitees } from "./visibility.js";
 
 function pointPayload(lat: number | null, lng: number | null): { lat: number; lng: number } | null {
   if (lat == null || lng == null) return null;
@@ -26,6 +27,18 @@ function pointPayload(lat: number | null, lng: number | null): { lat: number; ln
 function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {
   if (!reply?.blocked) return null;
   return reply.removed_by?.trim() || "Someone";
+}
+
+/** `private` and `invitees` for a private event the viewer may see. Public events add nothing. */
+function privateField(db: DatabaseSync, kind: EventKind, event: { id: string; creator_id: string }, viewerId: string | null) {
+  if (!isPrivateEvent(db, kind, event.id) || !canSeeEvent(db, kind, event, viewerId)) return {};
+  const invitees = listInvitees(db, kind, event.id, event.creator_id).map((person) => ({
+    id: person.id,
+    name: person.name,
+    color: colorHex(person.id, person.color),
+    avatarRev: person.avatar_rev || null,
+  }));
+  return { private: true, invitees };
 }
 
 export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: string | null = null, now: number = Date.now()) {
@@ -47,6 +60,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     circleName: getCircleById(db, social.circle_id)?.name ?? "",
     creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null, weroEmail: weroEmails.get(social.creator_id) ?? null, ...buzzAnimationField(social.creator_buzz_animation) },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
+    ...privateField(db, "social", social, viewerId),
     joined: joins.map((join) => ({
       id: join.id,
       name: join.name,
@@ -94,6 +108,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
+    ...privateField(db, "plan", plan, viewerId),
     joined: joins.map((join) => ({
       id: join.id,
       name: join.name,

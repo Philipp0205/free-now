@@ -22,6 +22,8 @@ import { euro, paidList, paySection, paymentBody, paymentEditState, paymentField
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
 import { endFromItem, endError, endPayload, eventRange } from "./plans/event-end.js";
 import { endField } from "./plans/event-end-ui.js";
+import { invitePeople, invitesFromItem, inviteBody } from "./plans/private-event.js";
+import { inviteField, privateMarker } from "./plans/private-event-ui.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -112,6 +114,7 @@ export function eventDetailSheet() {
       el("div", { class: "sheet-scroll" }, [
         calendar ? mapCircleLine(item) : null,
         calendar && kind === "plan" ? planCirclesLine(item) : null,
+        privateMarker(item, "detail-private"),
         kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,
@@ -227,6 +230,7 @@ export function openAdminEdit(kind, item) {
     day,
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
+    invites: invitesFromItem(item),
     ...paymentEditState(item),
     ...session,
   };
@@ -264,6 +268,9 @@ export function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           endField(edit.end, render, "admin-end"),
+          paymentItem && paymentItem.creator?.id === state.me.user.id
+            ? inviteField(edit.invites, invitePeople(state.me?.circle?.members, paymentItem, state.me.user.id))
+            : null,
           whereBlock(edit),
           paymentItem && paymentItem.creator?.id === state.me.user.id ? paymentFields(edit, paymentItem) : null,
           edit.shared ? el("button", { class: "btn ghost stop-sharing", type: "button", text: "Stop sharing", onclick: () => { void stopSharing(edit); } }) : null,
@@ -437,6 +444,8 @@ async function saveAdminEdit(event) {
     Object.assign(body, endPayload(edit.end));
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     const paymentItem = findEvent(edit.kind, edit.id);
+    // Only the host may change who it is for; the server refuses anyone else.
+    if (paymentItem?.creator?.id === state.me.user.id) body.invitees = inviteBody(edit.invites);
     if (paymentItem) Object.assign(body, paymentBody(edit, paymentItem));
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
     state.sheet = null;

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getPlan, getPlanByShareId, planCircleForUser, setPlanShareId, type PlanRow } from "../db.js";
 import { shortDate } from "../lib/time.js";
+import { canSeeEvent } from "./visibility.js";
 
 /** Same copy for an ended, a deleted, a revoked and an unknown link, so a guess learns nothing. */
 export const ENDED_COPY = "This link no longer works";
@@ -48,16 +49,20 @@ export function ensureShareId(db: DatabaseSync, planId: string): string {
   throw new Error("could not make a share link");
 }
 
-/** The open plan behind a link, or nothing for a bad, unknown or ended one. */
-export function openSharedPlan(db: DatabaseSync, shareId: string, today: string, now?: number): PlanRow | undefined {
+/**
+ * The open plan behind a link, or nothing for a bad, unknown or ended one. A private plan also counts as nothing
+ * unless the viewer is its host or an invitee, so it reads exactly like an ended link. No viewer sees no private plan.
+ */
+export function openSharedPlan(db: DatabaseSync, shareId: string, today: string, now?: number, viewerId: string | null = null): PlanRow | undefined {
   if (!SHARE_ID_RE.test(shareId)) return undefined;
   const plan = getPlanByShareId(db, shareId);
   if (!plan || !isOpenPlan(plan, today, now)) return undefined;
+  if (!canSeeEvent(db, "plan", plan, viewerId)) return undefined;
   return plan;
 }
 
 export function sharePreview(db: DatabaseSync, shareId: string, viewerId: string | null, today: string, now?: number): SharePreview {
-  const plan = openSharedPlan(db, shareId, today, now);
+  const plan = openSharedPlan(db, shareId, today, now, viewerId);
   if (!plan) return { ended: true };
   const base = {
     ended: false as const,

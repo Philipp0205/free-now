@@ -49,6 +49,7 @@ import { planPayload, socialPayload } from "./payload.js";
 import { ensureShareId, isOpenPlan, openSharedPlan, shareHtml, shareMeta } from "./plan-share.js";
 import { PLAN_DAYS_AHEAD, joinPlan, publishPlan, remindPlan, replyPlan } from "./plans.js";
 import { publishSocial, replySocial } from "./socials.js";
+import { canSeeEvent, visibleEvents } from "./visibility.js";
 
 export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boolean> {
   const { res, deps, url, method, pathname, body, requested, me } = ctx;
@@ -62,7 +63,7 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
     const now = deps.now();
     const merged = new Map<string, SocialRow>();
     for (const circle of listCirclesForUser(deps.db, me.id)) {
-      for (const row of listActiveSocials(deps.db, circle.id, now)) merged.set(row.id, row);
+      for (const row of visibleEvents(deps.db, "social", listActiveSocials(deps.db, circle.id, now), me.id)) merged.set(row.id, row);
     }
     const socials = [...merged.values()]
       .sort((a, b) => b.created_at - a.created_at)
@@ -73,14 +74,15 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
 
   if (method === "GET" && pathname === "/api/socials") {
     const circle = requireCircle(deps, me.id, requested);
-    const socials = listActiveSocials(deps.db, circle.id, deps.now()).map((row) => socialPayload(deps.db, row, me.id, deps.now()));
+    const socials = visibleEvents(deps.db, "social", listActiveSocials(deps.db, circle.id, deps.now()), me.id)
+      .map((row) => socialPayload(deps.db, row, me.id, deps.now()));
     sendJson(res, 200, { socials });
     return true;
   }
 
   if (method === "POST" && pathname === "/api/socials") {
     const note = cleanNote(body.note, false);
-    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested, readEnd(body));
+    const result = await publishSocial(deps, me, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), requested, readEnd(body), body.invitees);
     sendJson(res, result.created ? 201 : 200, { social: result.social });
     return true;
   }
@@ -136,7 +138,7 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const through = addDays(today, PLAN_DAYS_AHEAD);
     const merged = new Map<string, PlanRow>();
     for (const circle of listCirclesForUser(deps.db, me.id)) {
-      for (const row of listVisiblePlans(deps.db, circle.id, today, through, deps.now())) if (!merged.has(row.id)) merged.set(row.id, row);
+      for (const row of visibleEvents(deps.db, "plan", listVisiblePlans(deps.db, circle.id, today, through, deps.now()), me.id)) if (!merged.has(row.id)) merged.set(row.id, row);
     }
     const plans = [...merged.values()]
       .sort((a, b) =>
@@ -154,7 +156,8 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const circle = requireCircle(deps, me.id, requested);
     const now = deps.now();
     const today = isoDate(now, deps.config.tz);
-    const plans = listVisiblePlans(deps.db, circle.id, today, addDays(today, PLAN_DAYS_AHEAD), now).map((row) =>
+    const visible = listVisiblePlans(deps.db, circle.id, today, addDays(today, PLAN_DAYS_AHEAD), now);
+    const plans = visibleEvents(deps.db, "plan", visible, me.id).map((row) =>
       planPayload(deps.db, row, today, me.id, deps.now()),
     );
     sendJson(res, 200, { plans });
@@ -167,7 +170,7 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
     const time = Object.prototype.hasOwnProperty.call(body, "time") ? readClock(body.time) : null;
     const description = cleanDescription(body.description);
     const cardColor = readCardColor(body.cardColor);
-    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor, readEnd(body)) });
+    sendJson(res, 201, { plan: await publishPlan(deps, me, note, place, readPoint(body), time, requested, body.date, description, cardColor, readEnd(body), body.invitees) });
     return true;
   }
 
@@ -223,7 +226,7 @@ export async function handlePlanShareRoutes(ctx: AuthedRouteContext): Promise<bo
   if (planShare && method === "POST") {
     const circle = requireCircle(deps, me.id, requested);
     const plan = getPlan(deps.db, parseId(planShare[1]));
-    if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+    if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, me.id)) throw new HttpError(404, "plan not found");
     if (!isOpenPlan(plan, isoDate(deps.now(), deps.config.tz), deps.now())) throw new HttpError(410, "That plan has ended.");
     const shareId = ensureShareId(deps.db, plan.id);
     sendJson(res, 200, { shareId, url: `${requestOrigin(req, deps.config)}/p/${shareId}` });
@@ -233,7 +236,7 @@ export async function handlePlanShareRoutes(ctx: AuthedRouteContext): Promise<bo
   if (planShare && method === "DELETE") {
     const circle = requireCircle(deps, me.id, requested);
     const plan = getPlan(deps.db, parseId(planShare[1]));
-    if (!plan || !planInCircle(deps.db, plan.id, circle.id)) throw new HttpError(404, "plan not found");
+    if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, me.id)) throw new HttpError(404, "plan not found");
     if (plan.creator_id !== me.id) throw new HttpError(403, "Only the host can stop sharing.");
     clearPlanShareId(deps.db, plan.id);
     sendJson(res, 200, { ok: true });
