@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-22-no-card-color",
+    "date": "2026-11-22",
+    "title": "The card color picker is gone",
+    "bullets": [
+      "The card color picker is gone from Plan and Edit.",
+      "New events use the automatic gradient, so every card still gets its own color.",
+      "Events that already have a picked color keep it."
+    ]
+  },
+  {
     "id": "2026-11-22-live-location",
     "date": "2026-11-22",
     "title": "Share your live location with friends",

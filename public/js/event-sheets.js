@@ -1,7 +1,6 @@
 import { shortDate, planDayChoice, planDayDate } from "./when.js";
 import { cardCrowd } from "./map-pin.js";
 import { planGradientClass } from "./card-grad.js";
-import { cardColorField } from "./plans/card-color-ui.js";
 import { audiencePlace } from "./place.js";
 import { emptyWhereSession, state } from "./state.js";
 import { api, isNetworkFailure, refresh } from "./session.js";
@@ -229,7 +228,7 @@ export function openAdminEdit(kind, item) {
     kind,
     id: item.id,
     note: item.note || "",
-    description: item.description || "", cardColor: item.cardColor ?? null,
+    description: item.description || "",
     time,
     startTime: time,
     end: endFromItem(item, appTz()),
@@ -261,7 +260,6 @@ export function adminEditSheet() {
         el("div", { class: "sheet-form" }, [
           sheetField("Note", "admin-note", edit.note, (value) => { edit.note = value; }, { maxlength: "80" }),
           edit.kind === "plan" ? descriptionField(edit) : null,
-          edit.kind === "plan" ? cardColorField(edit) : null,
           edit.kind === "plan" ? planDayBlock(edit, "admin") : null,
           el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: edit.kind === "plan" ? "Time" : "Time (empty means now)" }),
@@ -446,7 +444,7 @@ async function saveAdminEdit(event) {
   await run(async () => {
     const body = edit.kind === "social"
       ? { note, place: picked.place, lat: picked.lat, lng: picked.lng }
-      : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng, cardColor: edit.cardColor ?? null };
+      : { note, description, place: picked.place, time, date, lat: picked.lat, lng: picked.lng };
     // A start that has not moved is not resent: once it has passed, the server would refuse it as "not later today".
     if (edit.kind === "social" && time !== edit.startTime) body.startsAt = time;
     Object.assign(body, endPayload(edit.end));
