@@ -17,6 +17,8 @@ export type Config = {
   dbPath: string;
   /** Profile photos, one file per person, next to the database (same volume). */
   avatarDir: string;
+  /** Host cover photos for socials and plans, `{kind}-{id}.ext`. Next to the database unless EVENT_PHOTOS_DIR is set. */
+  eventPhotosDir: string;
   publicBaseUrl: string;
   vapid: VapidConfig | null;
   socialTtlMs: number;
@@ -86,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     port,
     dbPath,
     avatarDir: avatarDirFor(rawDb === ":memory:" ? ":memory:" : dbPath),
+    eventPhotosDir: readEventPhotosDir(env.EVENT_PHOTOS_DIR, cwd, rawDb === ":memory:" ? ":memory:" : dbPath),
     publicBaseUrl,
     vapid: readVapid(env),
     socialTtlMs,
@@ -129,6 +132,19 @@ export function avatarDirFor(dbPath: string): string {
     return path.join(os.tmpdir(), `hangry-avatars-${process.pid}`);
   }
   return path.join(path.dirname(dbPath), "avatars");
+}
+
+/** `{dir of the db}/event-photos`. An in-memory db (tests) gets a per-process temp dir, never the cwd or /data. */
+export function eventPhotosDirFor(dbPath: string): string {
+  if (dbPath === ":memory:" || path.basename(dbPath) === ":memory:") {
+    return path.join(os.tmpdir(), `hangry-event-photos-${process.pid}`);
+  }
+  return path.join(path.dirname(dbPath), "event-photos");
+}
+
+function readEventPhotosDir(value: string | undefined, cwd: string, dbPath: string): string {
+  const raw = value?.trim() ?? "";
+  return raw ? path.resolve(cwd, raw) : eventPhotosDirFor(dbPath);
 }
 
 function readPort(value: string | undefined): number {

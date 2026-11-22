@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v149 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v150 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v149");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v150");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,9 +665,24 @@ test("the build label is hangry-v149 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the private events entry is the newest, in plain words without an em dash, and the end time entry follows it", () => {
+test("the event photos entry is the newest, in plain words without an em dash, and the private events entry follows it", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-22-private-events");
+  assert.equal(top.id, "2026-11-22-event-photos");
+  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
+  assert.equal(top.date, "2026-11-22");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(top.bullets.join(" "), /Add photo/);
+  assert.match(top.bullets.join(" "), /Only friends who can see the event/);
+  assert.equal(RAW[1].id, "2026-11-22-private-events", "the private events entry follows it");
+});
+
+test("the private events entry is kept, in plain words without an em dash, and the end time entry follows it", () => {
+  const index = RAW.findIndex((item) => item.id === "2026-11-22-private-events");
+  assert.ok(index >= 0, "the private events entry is kept");
+  const top = RAW[index];
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-22");
   assert.ok(top.title.length <= 60);
@@ -677,7 +692,7 @@ test("the private events entry is the newest, in plain words without an em dash,
   assert.match(top.bullets.join(" "), /pick the friends/);
   assert.match(top.bullets.join(" "), /Only they see it/);
   assert.match(top.bullets.join(" "), /Everyone/);
-  assert.equal(RAW[1].id, "2026-11-22-event-end-time", "the end time entry follows it");
+  assert.equal(RAW[index + 1].id, "2026-11-22-event-end-time", "the end time entry follows it");
 });
 
 test("the end time entry is kept, in plain words without an em dash, and the light cards entry follows it", () => {

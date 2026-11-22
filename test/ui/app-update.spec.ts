@@ -26,7 +26,7 @@ async function startBuilds() {
   const upstream = new URL(hangry.baseUrl);
   const appJs = readBuilt("js/app.js");
   const swJs = readBuilt("sw.js");
-  assert.ok(appJs.includes("hangry-v149"), "the built bundle carries the version label");
+  assert.ok(appJs.includes("hangry-v150"), "the built bundle carries the version label");
   let current = "A";
   const counts = { sw: 0 };
   const server = http.createServer((req, res) => {
@@ -34,7 +34,7 @@ async function startBuilds() {
     const headers = { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" };
     if (req.method === "GET" && pathname === "/js/app.js") {
       const label = current;
-      const body = `${appJs.replaceAll("hangry-v149", `hangry-v149-${label.toLowerCase()}`)}\nwindow.__HANGRY_BUILD__=${JSON.stringify(label)};\n`;
+      const body = `${appJs.replaceAll("hangry-v150", `hangry-v150-${label.toLowerCase()}`)}\nwindow.__HANGRY_BUILD__=${JSON.stringify(label)};\n`;
       res.writeHead(200, headers);
       res.end(body);
       return;

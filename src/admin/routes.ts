@@ -26,6 +26,7 @@ import type { RouteContext } from "../lib/context.js";
 import { sendJson } from "../lib/http.js";
 import { UUID_RE, parseId } from "../lib/validate.js";
 import { parseBuzzAnimation } from "../social/buzz-animation.js";
+import { sweepOrphanPhotos } from "../social/event-photo.js";
 
 export async function handleAdminRoutes(ctx: RouteContext): Promise<boolean> {
   const { req, res, deps, method, pathname, body } = ctx;
@@ -284,6 +285,7 @@ function deleteCircleAsOperator(res: http.ServerResponse, deps: AppDeps, pathnam
       return;
     }
     console.log(`admin circle delete ok id=${removed.circle.id}`);
+    void sweepOrphanPhotos(deps.db, deps.config.eventPhotosDir);
     sendJson(res, 200, { deleted: true, circle: removed.circle, counts: removed.counts });
   } catch {
     console.log("admin circle delete denied");

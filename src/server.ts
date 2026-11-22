@@ -7,6 +7,7 @@ import { installGracefulShutdown } from "./app-kit/shutdown.ts";
 import { syncCalendarFeeds } from "./calendar/freebusy.js";
 import { startPmtilesFetch } from "./map/pmtiles-fetch.js";
 import { createNoopPushSender, createWebPushSender } from "./push/push.js";
+import { sweepOrphanPhotos } from "./social/event-photo.js";
 import { sendStartReminders } from "./push/remind.js";
 import { addDays, isoDate } from "./lib/time.js";
 
@@ -18,6 +19,7 @@ function sweepNow(): void {
   const now = Date.now();
   const today = isoDate(now, config.tz);
   sweep(db, now, addDays(today, -HISTORY_DAYS), today);
+  void sweepOrphanPhotos(db, config.eventPhotosDir);
 }
 
 function clearLocationsNow(): void {

@@ -24,6 +24,9 @@ import { endFromItem, endError, endPayload, eventRange } from "./plans/event-end
 import { endField } from "./plans/event-end-ui.js";
 import { invitePeople, invitesFromItem, inviteBody } from "./plans/private-event.js";
 import { inviteField, privateMarker } from "./plans/private-event-ui.js";
+import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
+import { savePhotoDraft } from "./plans/event-photo.js";
+import { eventPhoto, photoField } from "./plans/event-photo-ui.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -115,6 +118,7 @@ export function eventDetailSheet() {
         calendar ? mapCircleLine(item) : null,
         calendar && kind === "plan" ? planCirclesLine(item) : null,
         privateMarker(item, "detail-private"),
+        eventPhoto(kind, item, "event-photo detail-photo"),
         kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,
@@ -231,6 +235,7 @@ export function openAdminEdit(kind, item) {
     date: item.forDate || "",
     shared: kind === "plan" && Boolean(item.shareId) && item.creator?.id === state.me.user.id,
     invites: invitesFromItem(item),
+    photo: emptyPhotoDraft(),
     ...paymentEditState(item),
     ...session,
   };
@@ -268,6 +273,7 @@ export function adminEditSheet() {
             edit.kind === "plan" ? planTimeError() : null,
           ]),
           endField(edit.end, render, "admin-end"),
+          paymentItem && paymentItem.creator?.id === state.me.user.id ? photoField(edit.photo, paymentItem, edit.kind) : null,
           paymentItem && paymentItem.creator?.id === state.me.user.id
             ? inviteField(edit.invites, invitePeople(state.me?.circle?.members, paymentItem, state.me.user.id))
             : null,
@@ -448,8 +454,10 @@ async function saveAdminEdit(event) {
     if (paymentItem?.creator?.id === state.me.user.id) body.invitees = inviteBody(edit.invites);
     if (paymentItem) Object.assign(body, paymentBody(edit, paymentItem));
     await api(`/api/${edit.kind}s/${edit.id}`, { method: "PATCH", body });
+    const photoNote = paymentItem?.creator?.id === state.me.user.id ? await savePhotoDraft(edit.kind, edit.id, edit.photo) : "";
     state.sheet = null;
     await refresh({ initial: true });
+    if (photoNote) state.error = photoNote;
   });
 }
 

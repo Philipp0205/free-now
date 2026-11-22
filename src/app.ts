@@ -37,6 +37,7 @@ import { archiveCheckFor, handleMapRoutes } from "./map/routes.js";
 import type { PushSender } from "./push/push.js";
 import { handlePushAckRoute, handlePushRoutes } from "./push/routes.js";
 import { handleAuthRoutes } from "./social/auth-routes.js";
+import { handleEventPhoto, isEventPhotoPath } from "./social/event-photo.js";
 import { handleCircleRoutes } from "./social/circle-routes.js";
 import { handleAvatar, handleMeRoutes } from "./social/me-routes.js";
 import { handlePlanRoutes, handlePlanShareRoutes, handleSocialRoutes, serveSharePage } from "./social/routes.js";
@@ -194,6 +195,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, deps:
     const caller = requireUser(user);
     requireEmail(caller, method, pathname);
     await handleAvatar(req, res, deps, method, pathname, caller);
+    return;
+  }
+  if (isEventPhotoPath(pathname)) {
+    const caller = requireUser(user);
+    requireEmail(caller, method, pathname);
+    await handleEventPhoto(req, res, deps, method, pathname, caller);
     return;
   }
   const body =
