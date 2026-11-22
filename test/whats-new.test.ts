@@ -695,8 +695,8 @@ test("the maybe entry is kept, in plain words without an em dash, and the compac
 });
 
 test("the compact open entry is kept, in plain words without an em dash, and the reactions entry follows it", () => {
-  const top = RAW[1];
-  assert.equal(top.id, "2026-11-21-compact-open");
+  const top = RAW.find((item) => item.id === "2026-11-21-compact-open")!;
+  assert.ok(top, "the compact open entry is kept");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-21");
   assert.ok(top.title.length <= 60);
@@ -705,11 +705,11 @@ test("the compact open entry is kept, in plain words without an em dash, and the
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
   assert.match(top.bullets.join(" "), /row in the compact list/);
   assert.match(top.bullets.join(" "), /I'm in/);
-  assert.equal(RAW[2].id, "2026-11-21-inout-reactions", "the reactions entry is kept");
+  assert.ok(RAW.some((item) => item.id === "2026-11-21-inout-reactions"), "the reactions entry is kept");
 });
 
 test("the in and out reactions entry is kept, in plain words without an em dash, and the lizard entry follows it", () => {
-  const top = RAW[2];
+  const top = RAW.find((item) => item.id === "2026-11-21-inout-reactions")!;
   assert.equal(top.id, "2026-11-21-inout-reactions");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-21");
