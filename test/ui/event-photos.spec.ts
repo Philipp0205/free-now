@@ -5,7 +5,7 @@ import zlib from "node:zlib";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { openPlanSheet } from "./plan-sheet.js";
+import { openMoreOptions, openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, dismissPaymentReminder, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
@@ -124,6 +124,7 @@ test("a free post made with a photo shows it on the card, opens it large, and le
     try {
       await page.getByRole("button", { name: "Let friends know you're free now" }).click();
       const sheet = page.locator("form.sheet");
+      await openMoreOptions(page);
       const field = sheet.locator(".event-photo-field");
       await field.scrollIntoViewIfNeeded();
       await field.getByRole("button", { name: "Add photo" }).waitFor();
@@ -176,6 +177,7 @@ test("a plan made with a photo shows it on the card and the details sheet, and E
     await sheet.locator("#sheet-note").fill("Lantern night");
     await sheet.locator("#plan-date").fill(daysAhead(1));
     await sheet.locator("#plan-time").fill("19:00");
+    await openMoreOptions(page);
     await choosePhoto(page, "Add photo");
     await sheet.locator(".event-photo-preview img").waitFor();
     await shot(page, "plan-sheet-picked");

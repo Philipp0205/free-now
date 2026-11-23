@@ -14,8 +14,10 @@ import { noteReminderClosed, paymentReminderSheet } from "./payment-reminder-ui.
 import { endFromItem } from "./plans/event-end.js";
 import { emptyInvites, invitePeople, invitesFromItem } from "./plans/private-event.js";
 import { inviteField } from "./plans/private-event-ui.js";
-import { releaseDraft, resetPhotoDraft } from "./plans/event-photo-draft.js";
+import { draftHasPhoto, releaseDraft, resetPhotoDraft } from "./plans/event-photo-draft.js";
 import { photoField } from "./plans/event-photo-ui.js";
+import { foldedSummary, hasFoldedValue } from "./plans/more-options.js";
+import { moreOptions } from "./plans/more-options-ui.js";
 
 export function sheet() {
   if (state.sheet === "new-circle") return circleNameSheet();
@@ -79,8 +81,6 @@ export function sheet() {
             placeholder: planning ? "Amanda's inviting everyone for free tacos" : "Rooftop coffee??",
             maxlength: "80",
           }),
-          planning ? descriptionField(state.planDraft, "sheet-description") : null,
-          photoField(state.photoDraft, planning ? null : mySocial(), planning ? "plan" : "social"),
           planning ? planDateField() : null,
           planning ? el("label", { class: "sheet-group" }, [
             el("span", { class: "sheet-label", text: "Time (optional)" }),
@@ -97,11 +97,9 @@ export function sheet() {
             planTimeError(),
           ]) : null,
           planning ? busyAtBlock() : null,
-          endBlock(),
-          planning ? repeatBlock() : null,
-          inviteField(state.inviteDraft, invitePeople(state.me?.circle?.members, mySocial(), state.me?.user?.id)),
           whereBlock(planning ? state.planWhere : state),
           planning ? shareToggle("Use my location") : null,
+          foldedOptions(planning),
         ]),
       ]),
       el("div", { class: "sheet-dock stack" }, [
@@ -118,6 +116,32 @@ export function sheet() {
       ]),
     ]),
   ]);
+}
+
+/** What the folded fields hold right now, for the More options summary and the open-on-its-own check. */
+function foldedValues(planning) {
+  const mine = planning ? null : mySocial();
+  return {
+    description: planning ? state.planDraft.description : "",
+    hasPhoto: draftHasPhoto(state.photoDraft, mine),
+    end: state.endDraft,
+    repeat: planning ? state.repeatDraft : "never",
+    invites: state.inviteDraft,
+    people: invitePeople(state.me?.circle?.members, mine, state.me?.user?.id),
+  };
+}
+
+/** The More options row of the create sheets: description, photo, end, repeat and who it is for. */
+function foldedOptions(planning) {
+  const mine = planning ? null : mySocial();
+  const values = foldedValues(planning);
+  return moreOptions([
+    planning ? descriptionField(state.planDraft, "sheet-description") : null,
+    photoField(state.photoDraft, mine, planning ? "plan" : "social"),
+    endBlock(),
+    planning ? repeatBlock() : null,
+    inviteField(state.inviteDraft, values.people),
+  ], foldedSummary(values));
 }
 
 export function openSheet(name, { planDate = "" } = {}) {
@@ -149,6 +173,7 @@ export function openSheet(name, { planDate = "" } = {}) {
     state.planDay = "pick";
     state.planDate = name === "plan" ? planDate : "";
     state.planWhere = emptyWhereSession();
+    state.moreOpen = hasFoldedValue(foldedValues(name === "plan"));
   }
   if (name === "plan") {
     state.noteDraft = "";

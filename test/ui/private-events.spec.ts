@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { openPlanSheet } from "./plan-sheet.js";
+import { openMoreOptions, openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, dismissPaymentReminder, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
@@ -61,6 +61,7 @@ test("the free sheet offers the picker, and one friend picked makes a private po
     page.on("pageerror", (error) => errors.push(error.message));
     try {
       await openFree(page);
+      await openMoreOptions(page);
       const sheet = page.locator("form.sheet");
       const field = sheet.locator(".invite-field");
       await field.scrollIntoViewIfNeeded();
@@ -107,6 +108,7 @@ test("a private plan shows its marker on the card, the compact row and the sheet
     await sheet.locator("#sheet-note").fill("Secret ramen");
     await sheet.locator("#plan-date").fill(daysAhead(1));
     await sheet.locator("#plan-time").fill("19:00");
+    await openMoreOptions(page);
     await sheet.locator(".invite-field").getByRole("button", { name: "Bea", exact: true }).click();
     await shot(page, "plan-sheet-picked");
     await sheet.getByRole("button", { name: "Add plan", exact: true }).click();

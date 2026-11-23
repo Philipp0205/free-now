@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { openPlanSheet } from "./plan-sheet.js";
+import { openMoreOptions, openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, dismissPaymentReminder, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
@@ -58,6 +58,7 @@ test("the plan sheet offers Repeats, and a weekly plan shows its line on the car
     const note = `Climbing ${width}`;
     try {
       await openPlanSheet(page);
+      await openMoreOptions(page);
       const sheet = page.locator("form.sheet");
       const repeats = sheet.locator("#plan-repeat");
       await sheet.getByText("Repeats", { exact: true }).waitFor();
