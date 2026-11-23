@@ -190,6 +190,36 @@ test("circle members can chat on an event, and a removed person cannot post", as
   });
 });
 
+test("every chat kind returns its newest 200 live messages, oldest first, in GET and POST", async () => {
+  await withApp(async ({ port, db, at }) => {
+    const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
+    await api(port, "POST", "/api/circles", { token: alex.token, body: { name: "friends" }, status: 201 });
+    const social = await api(port, "POST", "/api/socials", { token: alex.token, body: { note: "Coffee" }, status: 201 });
+    const plan = await api(port, "POST", "/api/plans", { token: alex.token, body: { note: "Dinner" }, status: 201 });
+    const paths = ["/api/circles/chat", `/api/socials/${social.social.id}/chat`, `/api/plans/${plan.plan.id}/chat`];
+    for (const path of paths) {
+      const chatId = (await api(port, "GET", path, { token: alex.token })).chat.id as string;
+      const insert = db.prepare("INSERT INTO messages (id, chat_id, user_id, body, kind, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      const seed = (body: string, kind: string, ms: number, deleted: number | null = null) =>
+        insert.run(crypto.randomUUID(), chatId, alex.user.id, body, kind, START + ms, deleted);
+      for (let i = 1; i <= 200; i++) seed(`line ${i}`, "text", i * 10);
+      seed("the goblin line", "goblin", 2_010);
+      seed("deleted newest", "text", 2_020, START);
+      const texts = (chat: { messages: Array<{ text: string }> }) => chat.messages.map((message) => message.text);
+      const lines = (from: number) => Array.from({ length: 201 - from }, (_, i) => `line ${from + i}`);
+
+      // 201 live messages (200 lines plus the goblin): only the oldest one falls off. The deleted one never shows.
+      const got = await api(port, "GET", path, { token: alex.token });
+      assert.deepEqual(texts(got.chat), [...lines(2), "the goblin line"]);
+      assert.equal(got.chat.messages.at(-1).goblin, true);
+
+      at(START + 5_000);
+      const posted = await api(port, "POST", path, { token: alex.token, body: { text: "newest" }, status: 201 });
+      assert.deepEqual(texts(posted.chat), [...lines(3), "the goblin line", "newest"]);
+    }
+  });
+});
+
 test("unread totals follow each circle, and an open chat marks a new message read", async () => {
   await withApp(async ({ port }) => {
     const alex = await api(port, "POST", "/api/auth/start", { body: { email: testEmail(), name: "Alex" }, status: 201 });
