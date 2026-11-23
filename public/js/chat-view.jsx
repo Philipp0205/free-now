@@ -430,9 +430,6 @@ function Composer() {
         aria-hidden="true"
         onChange={(event) => { void A.onPhotoPicked(event); }}
       />
-      {chatGifOn.value ? (
-        <button class="chat-gif-btn" type="button" aria-label="Choose a GIF" onMouseDown={keepFocus} onClick={() => A.openGif(null)}>GIF</button>
-      ) : null}
       <textarea
         id="chat-input"
         class="sheet-control"
@@ -448,15 +445,20 @@ function Composer() {
         onKeyDown={(event) => A.onKey(event)}
         onBlur={(event) => A.onBlur(event)}
       />
-      <button class="chat-photo-btn" type="button" aria-label={PHOTO_PICK_LABEL} onMouseDown={keepFocus} onClick={() => A.pickPhoto()}>
-        <Icon name="photo" />
-      </button>
-      {eventChat ? (
-        <button class="chat-poll-btn" type="button" aria-label={POLL_START_LABEL} onMouseDown={keepFocus} onClick={() => A.openPoll()}>
-          <Icon name="poll" />
+      <div class="chat-compose-actions">
+        {chatGifOn.value ? (
+          <button class="chat-gif-btn" type="button" aria-label="Choose a GIF" onMouseDown={keepFocus} onClick={() => A.openGif(null)}>GIF</button>
+        ) : null}
+        <button class="chat-photo-btn" type="button" aria-label={PHOTO_PICK_LABEL} onMouseDown={keepFocus} onClick={() => A.pickPhoto()}>
+          <Icon name="photo" />
         </button>
-      ) : null}
-      <button class="btn chat-send" type="submit">Send</button>
+        {eventChat ? (
+          <button class="chat-poll-btn" type="button" aria-label={POLL_START_LABEL} onMouseDown={keepFocus} onClick={() => A.openPoll()}>
+            <Icon name="poll" />
+          </button>
+        ) : null}
+        <button class="btn chat-send" type="submit">Send</button>
+      </div>
       <MentionList />
     </form>
   );
