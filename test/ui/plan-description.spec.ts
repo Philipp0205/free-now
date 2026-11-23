@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { FIELD_REVEAL_MS } from "../../public/js/keyboard.js";
-import { openPlanSheet } from "./plan-sheet.js";
+import { openMoreOptions, openPlanSheet } from "./plan-sheet.js";
 import { UA as CHROME_UA, openEventsMap, testEmail, useHangry } from "./harness.js";
 
 const LONG = "Meet at the side door, not the front. Bring a jacket because we sit outside until late. "
@@ -54,6 +54,8 @@ test("host adds a description in Edit, the card clamps it to two lines, and a ta
     // The create sheet has the same field, empty to start with.
     await openPlanSheet(page);
     await page.locator("#sheet-note").waitFor();
+    assert.equal(await page.locator("#sheet-description").count(), 0, "the description is folded away");
+    await openMoreOptions(page);
     assert.equal(await page.locator(".sheet textarea").count(), 1);
     assert.equal(await page.locator("#sheet-description").inputValue(), "");
     // The palette makes this sheet tall enough to cover the scrim's corner, so close it with the scrim's own click.
@@ -161,6 +163,7 @@ test("a plan added with a description shows it on the card, the details and the 
     try {
       await signIn(page, "Alex");
       await openPlanSheet(page);
+      await openMoreOptions(page);
       const area = page.locator("#sheet-description");
       await area.waitFor();
       assert.equal(await page.locator(".sheet-group", { hasText: "Description" }).count(), 1);
