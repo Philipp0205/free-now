@@ -12,7 +12,7 @@ import { memberAvailability } from "./members.js";
 import { mapsUrl, openEventDetail, planCirclesLine } from "./event-sheets.js";
 import { collectPins, mapCircleLine, mapEvents } from "./events.js";
 import { recentPlace, scheduleReverse, whereBag } from "./where.js";
-import { el, icon, payLink, run, viewerTz, weroEntry } from "./lib.js";
+import { el, icon, paypalEntry, run, viewerTz, weroEntry } from "./lib.js";
 import { inReply, paintSummary } from "./composer.js";
 import { arriveClock, maybeLine, replySummary, whoRow, whoRowPeople } from "./replies.js";
 import { cardActions } from "./plan-share.js";
@@ -136,12 +136,11 @@ export function guestDetailRow(text, person, kind, event) {
     ? el("div", { class: "guest-text" }, [reply, el("p", { class: "guest-status", "data-status": person.status.type, text: status })])
     : reply;
   if (!canRemoveGuest(event) || !inReply(person) || person.id === state.me.user.id) {
-    return el("div", { class: "guest-row" }, [avatar(person), line, payLink(person), weroEntry(person)]);
+    return el("div", { class: "guest-row" }, [avatar(person), line, paypalEntry(person), weroEntry(person)]);
   }
   return el("div", { class: "guest-row" }, [
     avatar(person),
     line,
-    payLink(person),
     el("button", {
       class: "text-btn",
       type: "button",
@@ -149,6 +148,7 @@ export function guestDetailRow(text, person, kind, event) {
       "aria-label": `Remove ${person.name}`,
       onclick: () => confirmRemoveGuest(kind, event, person),
     }),
+    paypalEntry(person),
     weroEntry(person),
   ]);
 }

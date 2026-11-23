@@ -137,11 +137,21 @@ export function paymentUrlError(value) {
   return url.username || url.password || url.port || hasPort || !host || !path.test(url.pathname) ? bad : "";
 }
 
-/** A "Pay" link to another member's payment link. Nothing for yourself or without an https link. */
-export function payLink(person, cls = "text-btn pay-link") {
+/** Short display form of a paypal.me link, like "paypal.me/beafriend". */
+function paypalHandle(url) {
+  const path = new URL(url).pathname.replace(/^\/paypalme\//i, "/").replace(/\/+$/, "");
+  return `paypal.me${path}`;
+}
+
+/** Another member's PayPal row: tag, short handle and a Pay link. Nothing for yourself or without an https link. */
+export function paypalEntry(person, cls = "wero-entry") {
   const url = person?.paymentUrl;
   if (!person || person.id === state.me?.user?.id || typeof url !== "string" || !url.startsWith("https://")) return null;
-  return el("a", { class: cls, href: url, target: "_blank", rel: "noopener noreferrer", text: "Pay", "aria-label": `Pay ${person.name}` });
+  return el("div", { class: `${cls} paypal-entry` }, [
+    el("span", { class: "wero-tag", text: "PayPal" }),
+    el("span", { class: "wero-email", text: paypalHandle(url) }),
+    el("a", { class: "text-btn", href: url, target: "_blank", rel: "noopener noreferrer", text: "Pay", "aria-label": `Pay ${person.name}` }),
+  ]);
 }
 
 /** Same rules as the server's cleanWeroEmail. Returns the error text, or "" when the address is fine or empty. */
