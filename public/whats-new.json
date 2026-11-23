@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-23-chat-composer-rows",
+    "date": "2026-11-23",
+    "title": "A bigger chat text box",
+    "bullets": [
+      "The chat text box now uses the full width, with the GIF, photo, poll and Send buttons below it.",
+      "It still grows as you type more lines."
+    ]
+  },
+  {
     "id": "2026-11-22-recurring-events",
     "date": "2026-11-22",
     "title": "Plans can repeat",
