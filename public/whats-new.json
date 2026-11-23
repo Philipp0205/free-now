@@ -10,6 +10,27 @@
     ]
   },
   {
+    "id": "2026-11-23-circle-pay-rows",
+    "date": "2026-11-23",
+    "title": "PayPal and Wero look the same on the circle",
+    "bullets": [
+      "PayPal now shows like Wero: a PayPal tag, the paypal.me handle and a Pay button.",
+      "Wero keeps its tag, email and Copy button, so both payment rows line up.",
+      "Join with link and New circle now live on the Circle screen, not in the switcher."
+    ]
+  },
+  {
+    "id": "2026-11-23-add-event-more-options",
+    "date": "2026-11-23",
+    "title": "A calmer sheet for new plans",
+    "bullets": [
+      "Creating a plan, or saying you're free, now keeps title, when and where up front.",
+      "Description, photo, end, repeat and who it's for sit behind one More options row.",
+      "More options opens by itself when one of them is already set."
+
+    ]
+  },
+  {
     "id": "2026-11-23-chat-composer-rows",
     "date": "2026-11-23",
     "title": "A bigger chat text box",

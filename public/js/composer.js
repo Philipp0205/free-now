@@ -366,6 +366,7 @@ function endBody(start, needsStart) {
   const error = endError(state.endDraft, start, needsStart);
   if (!error) return endPayload(state.endDraft);
   state.endDraft.error = error;
+  state.moreOpen = true;
   render();
   return null;
 }

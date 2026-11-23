@@ -95,6 +95,8 @@ export const state = {
   repeatDraft: "never",
   /** The cover photo picked in the create sheet. See plans/event-photo-draft.js. */
   photoDraft: emptyPhotoDraft(),
+  /** Whether the More options row of the Plan and Free now sheets is open. Reset in openSheet. */
+  moreOpen: false,
   viewerLocation: null,
   mapCenter: null,
   mapCard: null,

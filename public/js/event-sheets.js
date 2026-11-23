@@ -9,7 +9,7 @@ import { canManageEvent, linkify } from "./cards.js";
 import { chatRow } from "./chat.js";
 import { deliveryLine } from "./push-install.js";
 import { calPlanOver, calSocialDay, calSocialOver, calToday, mapCircleLine, mapEvents } from "./events.js";
-import { appTz, clock, el, mapsHref, payLink, remaining, run, scheduleErrorClear, weroEntry } from "./lib.js";
+import { appTz, clock, el, mapsHref, paypalEntry, remaining, run, scheduleErrorClear, weroEntry } from "./lib.js";
 import { PICK_DATE_ERROR, planDayBlock, planTimeError, saveOnlyFromButton, sheetField } from "./composer.js";
 import { arrivalDefault, chooseArrival, replyLine } from "./replies.js";
 import { cardActions, planOpen } from "./plan-share.js";
@@ -106,7 +106,7 @@ export function eventDetailSheet() {
   const crowd = cardCrowd(item.creator, item.joined);
   const line = (person) => (kind === "plan" ? planReplyLine(person) : replyLine(person, item));
   const personRow = (text, person) => over
-    ? el("div", { class: "guest-row" }, [avatar(person), el("p", { class: "reply-line", text }), payLink(person), weroEntry(person)])
+    ? el("div", { class: "guest-row" }, [avatar(person), el("p", { class: "reply-line", text }), paypalEntry(person), weroEntry(person)])
     : guestDetailRow(text, person, kind, item);
   return el("div", {}, [
     el("button", { class: "scrim", type: "button", "aria-label": "Close", onclick: closeSheet }),

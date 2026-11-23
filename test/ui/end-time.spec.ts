@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 import type { Page } from "playwright-core";
 import { skipWhatsNew } from "./whats-new-seen.js";
-import { openPlanSheet } from "./plan-sheet.js";
+import { openMoreOptions, openPlanSheet } from "./plan-sheet.js";
 import { SIZES, UA, dismissPaymentReminder, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
@@ -54,6 +54,7 @@ test("the end row fits every phone and picks one option at a time", { timeout: 1
     const page = await phone(width, height, host.token, circle.id);
     try {
       await openFree(page);
+      await openMoreOptions(page);
       const sheet = page.locator("form.sheet");
       const row = sheet.locator(".end-picks");
       await row.scrollIntoViewIfNeeded();
@@ -85,6 +86,7 @@ test("free for 2 hours shows the range on the card and the event sheet", { timeo
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await openFree(page);
+    await openMoreOptions(page);
     await page.locator('form.sheet [data-end="120"]').click();
     await page.locator("form.sheet").getByRole("button", { name: "I'm free", exact: true }).click();
     const card = page.locator("[data-social]");
@@ -116,6 +118,7 @@ test("a plan with Until shows 19:00 - 22:00, Edit prefills it, and No end takes 
     await sheet.locator("#sheet-note").fill("Ramen night");
 
     // An end without a start time is refused before anything is sent.
+    await openMoreOptions(page);
     await sheet.locator('[data-end="120"]').click();
     await sheet.getByRole("button", { name: "Add plan", exact: true }).click();
     await sheet.getByText("Pick a start time to set an end.").waitFor();
