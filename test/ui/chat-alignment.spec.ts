@@ -80,8 +80,8 @@ async function checkAll(page: Page, name: string, count: number) {
     assert.equal(box.inputLeft, first.textLeft, `${label}: composer lines up with message text`);
     assert.equal(box.sendRight, first.timeRight, `${label}: Send lines up with timestamps`);
     assert.equal(box.muteRight, first.timeRight, `${label}: Mute lines up with timestamps`);
-    assert.equal(box.inputHeight, box.sendHeight, `${label}: composer input and Send are the same height`);
-    assert.equal(box.inputTop, box.sendTop, `${label}: composer input and Send share a top edge`);
+    assert.ok(box.inputTop + box.inputHeight <= box.sendTop, `${label}: Send sits in the row below the composer input`);
+    assert.equal(box.inputRight, box.sendRight, `${label}: composer input and Send share a right edge`);
     assert.ok(box.scrollWidth <= box.clientWidth, `${label}: no sideways scroll`);
     const long = box.rows.find((row) => row.text === LONG_TEXT);
     assert.ok(long && long.textLines > 1, `${label}: long text wraps`);
@@ -135,6 +135,7 @@ function measure(page: Page) {
       backLeft: Math.round(back.left),
       muteRight: Math.round(mute.right),
       inputLeft: Math.round(input.left),
+      inputRight: Math.round(input.right),
       inputTop: Math.round(input.top),
       inputHeight: Math.round(input.height),
       sendRight: Math.round(send.right),

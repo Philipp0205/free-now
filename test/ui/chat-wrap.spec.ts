@@ -42,7 +42,7 @@ for (const [width, height] of SIZES) {
         const send = await page.locator(".chat-send").boundingBox();
         const box = await input.boundingBox();
         assert.ok(send && box);
-        assert.ok(Math.abs(send.y + send.height - (box.y + box.height)) <= 1, `${label}: Send sits on the bottom row`);
+        assert.ok(send.y >= box.y + box.height - 1, `${label}: Send sits on the row below the input`);
         await shot(`composer-${label}`);
 
         await input.press("Enter");
