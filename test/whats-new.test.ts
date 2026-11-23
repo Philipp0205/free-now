@@ -665,7 +665,7 @@ test("the build label is hangry-v157 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the circle pay rows entry is the newest, in plain words without an em dash, and the chat newest-200 entry follows it", () => {
+test("the circle pay rows entry is the newest, in plain words without an em dash, and the chat composer rows entry follows it", () => {
   const top = RAW[0];
   assert.equal(top.id, "2026-11-23-circle-pay-rows");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
@@ -678,7 +678,7 @@ test("the circle pay rows entry is the newest, in plain words without an em dash
   assert.match(top.bullets.join(" "), /Wero/);
   assert.match(top.bullets.join(" "), /Join with link/);
   assert.match(top.bullets.join(" "), /New circle/);
-  assert.equal(RAW[1].id, "2026-11-23-chat-newest-200", "the chat newest-200 entry follows it");
+  assert.equal(RAW[1].id, "2026-11-23-chat-composer-rows", "the chat composer rows entry follows it");
 });
 
 test("the chat newest-200 entry is kept, in plain words without an em dash, and the recurring events entry follows it", () => {
@@ -696,6 +696,21 @@ test("the chat newest-200 entry is kept, in plain words without an em dash, and 
   assert.match(top.bullets.join(" "), /Goblin/i);
   assert.match(top.bullets.join(" "), /Older messages/i);
   assert.equal(RAW[index + 1].id, "2026-11-22-recurring-events", "the recurring events entry follows it");
+});
+
+test("the chat composer rows entry is kept, in plain words without an em dash, and the chat newest-200 entry follows it", () => {
+  const index = RAW.findIndex((item) => item.id === "2026-11-23-chat-composer-rows");
+  assert.ok(index >= 0, "the chat composer rows entry is still there");
+  const top = RAW[index];
+  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
+  assert.equal(top.date, "2026-11-23");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length === 2);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
+  assert.match(top.bullets.join(" "), /full width/i);
+  assert.match(top.bullets.join(" "), /below it/i);
+  assert.equal(RAW[index + 1].id, "2026-11-23-chat-newest-200", "the chat newest-200 entry follows it");
 });
 
 test("the recurring events entry is kept, in plain words without an em dash, and the chat photos entry follows it", () => {
