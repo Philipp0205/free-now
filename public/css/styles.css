@@ -2177,6 +2177,37 @@ form.sheet,
 .sheet .help { margin: 6px 0 0; }
 .sheet-form { display: flex; flex-direction: column; gap: 16px; }
 .sheet-group { display: flex; flex-direction: column; gap: 6px; }
+/* One quiet row that folds the optional fields of the create sheets. */
+.more-options { display: flex; flex-direction: column; gap: 16px; }
+.more-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--control);
+  color: var(--text);
+  text-align: left;
+  font-size: 16px;
+}
+.more-options-text { display: flex; flex-direction: column; min-width: 0; padding: 6px 0; }
+.more-options-label { font-weight: 600; }
+.more-options-summary { color: var(--muted); font-size: 13px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more-options-chevron {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-2px) rotate(45deg);
+}
+.more-options.open .more-options-chevron { transform: translateY(2px) rotate(-135deg); }
+.more-options-body { display: flex; flex-direction: column; gap: 16px; }
+.more-options-body > * { flex-shrink: 0; }
 /* Fields keep their own height. Only .sheet-scroll gives way when the keyboard is up. */
 .sheet-form > *,
 .sheet-group > *,

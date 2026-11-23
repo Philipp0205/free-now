@@ -10,6 +10,16 @@
     ]
   },
   {
+    "id": "2026-11-23-add-event-more-options",
+    "date": "2026-11-23",
+    "title": "A calmer sheet for new plans",
+    "bullets": [
+      "Creating a plan, or saying you're free, now keeps title, when and where up front.",
+      "Description, photo, end, repeat and who it's for sit behind one More options row.",
+      "More options opens by itself when one of them is already set."
+    ]
+  },
+  {
     "id": "2026-11-23-chat-composer-rows",
     "date": "2026-11-23",
     "title": "A bigger chat text box",
