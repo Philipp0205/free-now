@@ -11,6 +11,7 @@ import {
   markChatNotificationsRead,
   planInCircle,
   type MemberRow,
+  type PlanRow,
 } from "../db.js";
 import { readEventPhoto, removeEventPhoto, writeEventPhoto } from "../lib/event-photo.js";
 import { colorHex } from "./chat-color.js";
@@ -627,6 +628,24 @@ export function setMuted(deps: ChatDeps, userId: string, chatId: string, muted: 
   } else {
     deps.db.prepare("DELETE FROM chat_mutes WHERE user_id = ? AND chat_id = ?").run(userId, chatId);
   }
+}
+
+/** Mutes or unmutes an event for one viewer from its card. Makes the event chat first, so it works before anyone chats. */
+export function muteEvent(deps: ChatDeps, userId: string, kind: "social" | "plan", refId: string, muted: boolean, requestedCircle: string | null): void {
+  const access = accessThread(deps, userId, kind, refId, false, requestedCircle);
+  setMuted(deps, userId, access.chat.id, muted);
+}
+
+/** Gives a new plan's chat the same mutes as the occurrence before it, so a mute covers the whole series. */
+export function copyEventMutes(db: DatabaseSync, from: PlanRow, to: PlanRow, now: number): void {
+  const muted = db.prepare(
+    `SELECT m.user_id FROM chat_mutes m JOIN chats c ON c.id = m.chat_id
+     WHERE c.circle_id = ? AND c.kind = 'plan' AND c.ref_id = ?`,
+  ).all(from.circle_id, from.id) as Array<{ user_id: string }>;
+  if (muted.length === 0) return;
+  const chat = ensureChat(db, to.circle_id, "plan", to.id, to.creator_id, to.note.trim() || "Plan", now);
+  const insert = db.prepare(`INSERT INTO chat_mutes (user_id, chat_id) VALUES (?, ?) ON CONFLICT DO NOTHING`);
+  for (const row of muted) insert.run(row.user_id, chat.id);
 }
 
 export function recordEventLine(

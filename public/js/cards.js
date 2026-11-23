@@ -19,6 +19,7 @@ import { privateMarker } from "./plans/private-event-ui.js";
 import { repeatMarker } from "./plans/repeat-ui.js";
 import { eventPhoto, photoThumb } from "./plans/event-photo-ui.js";
 import { PRIVATE_COPY } from "./plans/private-event-copy.js";
+import { muteRow } from "./plans/mute-event.js";
 
 /** Card menu opened by the latest ⋯ tap; the render that draws it pops it in once. */
 let menuJustOpened = null;
@@ -333,6 +334,7 @@ export function cardOverflow(kind, item, { onMap = false } = {}) {
       on: declined,
     });
   }
+  if (!item.removedBy && (kind === "social" || planOpen(item))) items.push(muteRow(kind, item));
   /* Map card already has a quiet Open in Maps link; keep the menu item on plan cards only. */
   if (!onMap && kind === "plan" && item.location) {
     items.push({

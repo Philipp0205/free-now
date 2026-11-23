@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-23-mute-events",
+    "date": "2026-11-23",
+    "title": "Mute an event",
+    "bullets": [
+      "You can mute an event from its menu to silence its chat and updates, just for you.",
+      "Unmute is on the same menu and in the chat header.",
+      "A repeating plan keeps your mute on the next occurrence."
+    ]
+  },
+  {
     "id": "2026-11-23-chat-newest-200",
     "date": "2026-11-23",
     "title": "Long chats show the latest messages",
