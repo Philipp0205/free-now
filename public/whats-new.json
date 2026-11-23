@@ -9,6 +9,16 @@
     ]
   },
   {
+    "id": "2026-11-23-chat-newest-200",
+    "date": "2026-11-23",
+    "title": "Long chats show the latest messages",
+    "bullets": [
+      "A long chat now shows the latest 200 messages, not the oldest 200.",
+      "New messages and Goblin replies stay visible once a chat goes past 200.",
+      "Older messages past that window stay hidden until you can scroll further back."
+    ]
+  },
+  {
     "id": "2026-11-22-recurring-events",
     "date": "2026-11-22",
     "title": "Plans can repeat",

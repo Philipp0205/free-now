@@ -850,9 +850,11 @@ function threadPayload(deps: ChatDeps, access: Access, userId: string) {
     deps.db,
     `SELECT m.id, m.user_id, m.body, m.kind, m.created_at, u.name, u.color, m.reply_to, m.edited_at
      FROM messages m JOIN users u ON u.id = m.user_id
-     WHERE m.chat_id = ? AND m.deleted_at IS NULL
-     ORDER BY m.created_at ASC, m.rowid ASC
-     LIMIT 200`,
+     WHERE m.chat_id = ? AND m.deleted_at IS NULL AND m.rowid IN (
+       SELECT rowid FROM messages WHERE chat_id = ? AND deleted_at IS NULL
+       ORDER BY created_at DESC, rowid DESC LIMIT 200)
+     ORDER BY m.created_at ASC, m.rowid ASC`,
+    access.chat.id,
     access.chat.id,
   );
   const admin = isCircleAdmin(deps.db, access.chat.circle_id, userId);
