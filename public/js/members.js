@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import { api, refresh } from "./session.js";
 import { render } from "./render.js";
 import { onDeleteCircle, onRenameCircle, openCircleSheet, rotateInvite, screenHeader } from "./circles.js";
-import { el, field, payLink, run, viewerTz, weroEntry } from "./lib.js";
+import { el, field, paypalEntry, run, viewerTz, weroEntry } from "./lib.js";
 import { shareInvite } from "./plan-share.js";
 import { avatar } from "./avatars.js";
 import { closeSheet } from "./sheets.js";
@@ -117,7 +117,6 @@ function memberRow(member) {
         self ? null : availabilityLine(member.availability),
       ]),
     ]),
-    payLink(member),
     youAreAdmin() && !self
       ? el("button", {
           class: "text-btn",
@@ -127,6 +126,7 @@ function memberRow(member) {
           onclick: () => openMemberMenu(member),
         })
       : null,
+    paypalEntry(member),
     weroEntry(member),
   ]);
 }
@@ -168,7 +168,7 @@ export function memberSheet() {
       statusCard(member),
       manage
         ? el("div", { class: "actions" }, [
-            payLink(member, "action"),
+            paypalEntry(member, "wero-entry full"),
             weroEntry(member, "wero-entry full"),
             member.admin
               ? el("button", { class: "action", type: "button", text: "Remove admin", onclick: () => setMemberAdmin(member, false) })
@@ -181,7 +181,7 @@ export function memberSheet() {
             }),
           ])
         : el("div", { class: "actions" }, [
-            payLink(member, "action"),
+            paypalEntry(member, "wero-entry full"),
             weroEntry(member, "wero-entry full"),
             el("button", { class: "action", type: "button", text: "Close", onclick: closeSheet }),
           ]),

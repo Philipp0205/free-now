@@ -55,7 +55,7 @@ test("set a payment link, circle mates get a Pay link, bad links are refused, cl
     // Her own row never offers to pay herself.
     await circleTab(own.page);
     await own.page.locator(".member-row", { hasText: "Philipp" }).waitFor();
-    assert.equal(await own.page.locator("a.pay-link").count(), 0);
+    assert.equal(await own.page.locator(".paypal-entry").count(), 0);
   } finally {
     await own.context.close();
   }
@@ -66,12 +66,15 @@ test("set a payment link, circle mates get a Pay link, bad links are refused, cl
     try {
       await circleTab(friend.page);
       const row = friend.page.locator(".member-row", { hasText: "Bea" });
-      const pay = row.locator("a.pay-link");
+      const entry = row.locator(".paypal-entry");
+      const pay = entry.getByRole("link", { name: "Pay Bea" });
       await pay.waitFor();
+      assert.equal(await entry.locator(".wero-tag").textContent(), "PayPal");
+      assert.equal(await entry.locator(".wero-email").textContent(), "paypal.me/beafriend");
       assert.equal(await pay.getAttribute("href"), LINK);
       assert.equal(await pay.getAttribute("target"), "_blank");
       assert.match((await pay.getAttribute("rel")) ?? "", /noopener/);
-      assert.equal(await friend.page.locator(".member-row", { hasText: "Philipp" }).locator("a.pay-link").count(), 0);
+      assert.equal(await friend.page.locator(".member-row", { hasText: "Philipp" }).locator(".paypal-entry").count(), 0);
       const box = await row.boundingBox();
       const payBox = await pay.boundingBox();
       assert.ok(box && payBox && payBox.x >= box.x && payBox.x + payBox.width <= box.x + box.width + 1, `Pay stays inside the row at ${width}`);
@@ -82,9 +85,11 @@ test("set a payment link, circle mates get a Pay link, bad links are refused, cl
 
       await row.getByRole("button", { name: "Details for Bea" }).click();
       const sheet = friend.page.locator(".sheet[aria-label='Bea']");
-      await sheet.locator("a.action", { hasText: "Pay" }).waitFor();
+      const sheetPay = sheet.locator(".paypal-entry").getByRole("link", { name: "Pay Bea" });
+      await sheetPay.waitFor();
       await friend.page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {}))));
-      assert.equal(await sheet.locator("a.action", { hasText: "Pay" }).getAttribute("href"), LINK);
+      assert.equal(await sheetPay.getAttribute("href"), LINK);
+      assert.equal(await sheetPay.getAttribute("target"), "_blank");
       await shot(friend.page, "member-sheet", width, height);
     } finally {
       await friend.context.close();
@@ -98,7 +103,7 @@ test("set a payment link, circle mates get a Pay link, bad links are refused, cl
   try {
     await circleTab(outsider.page);
     await outsider.page.locator(".member-row").first().waitFor();
-    assert.equal(await outsider.page.locator("a.pay-link").count(), 0);
+    assert.equal(await outsider.page.locator(".paypal-entry").count(), 0);
     assert.equal(await outsider.page.getByText("Bea").count(), 0);
   } finally {
     await outsider.context.close();
@@ -119,7 +124,7 @@ test("set a payment link, circle mates get a Pay link, bad links are refused, cl
   try {
     await circleTab(after.page);
     await after.page.locator(".member-row", { hasText: "Bea" }).waitFor();
-    assert.equal(await after.page.locator("a.pay-link").count(), 0);
+    assert.equal(await after.page.locator(".paypal-entry").count(), 0);
   } finally {
     await after.context.close();
   }

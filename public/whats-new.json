@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-23-circle-pay-rows",
+    "date": "2026-11-23",
+    "title": "PayPal and Wero look the same on the circle",
+    "bullets": [
+      "PayPal now shows like Wero: a PayPal tag, the paypal.me handle and a Pay button.",
+      "Wero keeps its tag, email and Copy button, so both payment rows line up.",
+      "Join with link and New circle now live on the Circle screen, not in the switcher."
+    ]
+  },
+  {
     "id": "2026-11-23-chat-newest-200",
     "date": "2026-11-23",
     "title": "Long chats show the latest messages",

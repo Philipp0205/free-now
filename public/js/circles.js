@@ -57,8 +57,6 @@ function circleSwitcher() {
         el("span", { text: circle.name }),
         circleHasUnread(circle.id) ? el("span", { class: "unread-dot", "aria-hidden": "true" }) : null,
       ])),
-      el("button", { type: "button", text: "Join with link", onclick: () => openCircleSheet("join-circle") }),
-      el("button", { type: "button", text: "New circle", onclick: () => openCircleSheet("new-circle") }),
     ]) : null,
   ]);
 }
