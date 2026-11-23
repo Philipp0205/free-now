@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  isEventMuted,
   countCirclesForUser,
   deletePushSub,
   insertNotification,
@@ -12,6 +13,26 @@ import {
 import type { PushPayload, PushSender } from "./push.js";
 
 const TRACKED_KINDS = new Set(["social", "plan", "chat"]);
+
+/** Event updates a muted event goes quiet for. "removed" is left out on purpose, so a removal is always heard. */
+const MUTABLE_KINDS = new Set([
+  "plan-reply",
+  "reply",
+  "join",
+  "plan-change",
+  "social-start",
+  "arrived",
+  "ended",
+  "plan-remind",
+  "social",
+  "plan",
+]);
+
+/** True when the person muted the social or plan chat this notice is about. */
+function mutedEvent(db: DatabaseSync, notice: Notice): boolean {
+  if (!notice.refId || !MUTABLE_KINDS.has(notice.kind)) return false;
+  return isEventMuted(db, "social", notice.refId, notice.userId) || isEventMuted(db, "plan", notice.refId, notice.userId);
+}
 
 export type Notice = {
   userId: string;
@@ -105,9 +126,10 @@ export async function notifyUsers(
   db: DatabaseSync,
   push: PushSender,
   now: number,
-  notices: Notice[],
+  all: Notice[],
   circle?: { id: string; name: string } | null,
 ): Promise<void> {
+  const notices = all.filter((notice) => !mutedEvent(db, notice));
   if (notices.length === 0) return;
   const batchId = crypto.randomUUID();
   const deliveries: Array<{

@@ -1,5 +1,5 @@
 import type { AppDeps } from "../app.js";
-import { closeEventChat, recordEventLine } from "../chat/chat.js";
+import { closeEventChat, muteEvent, recordEventLine } from "../chat/chat.js";
 import {
   type CircleRow,
   type EventKind,
@@ -99,6 +99,25 @@ export function leavePlan(deps: AppDeps, user: UserRow, rawId: string, requested
   removePlanJoin(deps.db, plan.id, user.id);
   const now = deps.now();
   const today = isoDate(now, deps.config.tz);
+  return planPayload(deps.db, plan, today, user.id, deps.now());
+}
+
+/** Mutes or unmutes a social for the viewer. Writes the same chat_mutes row as the chat header. */
+export function muteSocial(deps: AppDeps, user: UserRow, rawId: string, muted: boolean, requested: string | null = null) {
+  const circle = requireCircle(deps, user.id, requested);
+  const social = getSocial(deps.db, parseId(rawId));
+  if (!social || social.circle_id !== circle.id || !canSeeEvent(deps.db, "social", social, user.id)) throw new HttpError(404, "social not found");
+  muteEvent(deps, user.id, "social", social.id, muted, circle.id);
+  return socialPayload(deps.db, social, user.id, deps.now());
+}
+
+/** Mutes or unmutes a plan for the viewer. Writes the same chat_mutes row as the chat header. */
+export function mutePlan(deps: AppDeps, user: UserRow, rawId: string, muted: boolean, requested: string | null = null) {
+  const circle = requireCircle(deps, user.id, requested);
+  const plan = getPlan(deps.db, parseId(rawId));
+  if (!plan || !planInCircle(deps.db, plan.id, circle.id) || !canSeeEvent(deps.db, "plan", plan, user.id)) throw new HttpError(404, "plan not found");
+  muteEvent(deps, user.id, "plan", plan.id, muted, circle.id);
+  const today = isoDate(deps.now(), deps.config.tz);
   return planPayload(deps.db, plan, today, user.id, deps.now());
 }
 

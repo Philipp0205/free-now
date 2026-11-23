@@ -2362,6 +2362,18 @@ export function markChatNotificationsRead(db: DatabaseSync, userId: string, ref:
     .run(readAt, userId, ref, circleId);
 }
 
+/** True when the person muted this event's chat, from its card or from the chat header. They are one row. */
+export function isEventMuted(db: DatabaseSync, kind: "social" | "plan", refId: string, userId: string): boolean {
+  return Boolean(one(
+    db,
+    `SELECT 1 AS ok FROM chat_mutes m JOIN chats c ON c.id = m.chat_id
+     WHERE m.user_id = ? AND c.kind = ? AND c.ref_id = ?`,
+    userId,
+    kind,
+    refId,
+  ));
+}
+
 function dropPlanLinks(db: DatabaseSync, whereSql: string, ...params: Array<string | number>): void {
   db.prepare(`DELETE FROM plan_circles WHERE plan_id IN (SELECT id FROM plans WHERE ${whereSql})`).run(...params);
 }

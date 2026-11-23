@@ -6,6 +6,7 @@ import {
   getCircleById,
   getPlanReply,
   getSocialReply,
+  isEventMuted,
   listPlanCircles,
   listPlanJoins,
   listSocialJoins,
@@ -30,6 +31,11 @@ function pointPayload(lat: number | null, lng: number | null): { lat: number; ln
 function removedByName(reply: { blocked: number; removed_by: string | null } | undefined): string | null {
   if (!reply?.blocked) return null;
   return reply.removed_by?.trim() || "Someone";
+}
+
+/** Whether the viewer muted this event. Same row as the chat header's Mute. */
+function mutedField(db: DatabaseSync, kind: "social" | "plan", id: string, viewerId: string | null): boolean {
+  return viewerId ? isEventMuted(db, kind, id, viewerId) : false;
 }
 
 /** `private` and `invitees` for a private event the viewer may see. Public events add nothing. */
@@ -63,6 +69,7 @@ export function socialPayload(db: DatabaseSync, social: SocialRow, viewerId: str
     circleName: getCircleById(db, social.circle_id)?.name ?? "",
     creator: { id: social.creator_id, name: social.creator_name, color: colorHex(social.creator_id, social.creator_color), avatarRev: social.creator_avatar_rev || null, status: statuses.get(social.creator_id) ?? null, paymentUrl: payments.get(social.creator_id) ?? null, weroEmail: weroEmails.get(social.creator_id) ?? null, ...buzzAnimationField(social.creator_buzz_animation) },
     removedBy: removedByName(viewerId ? getSocialReply(db, social.id, viewerId) : undefined),
+    muted: mutedField(db, "social", social.id, viewerId),
     ...privateField(db, "social", social, viewerId),
     ...photoField(db, "social", social, viewerId),
     ...liveField(db, "social", social, viewerId, now, social.lat != null && social.expires_at > now),
@@ -115,6 +122,7 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     // Names only. Same event, so other circles' names show, but never their members or codes.
     circles: listPlanCircles(db, plan.id),
     removedBy: removedByName(viewerId ? getPlanReply(db, plan.id, viewerId) : undefined),
+    muted: mutedField(db, "plan", plan.id, viewerId),
     ...privateField(db, "plan", plan, viewerId),
     ...photoField(db, "plan", plan, viewerId),
     ...liveField(db, "plan", plan, viewerId, now, plan.lat != null && isOpenPlan(plan, today, now)),

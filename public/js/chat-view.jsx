@@ -18,6 +18,7 @@ import {
   REACT_LABEL,
 } from "./chat/chat-copy.js";
 import { PollSheet, PollBody } from "./chat/poll-view.jsx";
+import { MUTE_COPY } from "./plans/mute-copy.js";
 import { POLL_START_LABEL } from "./chat/poll-copy.js";
 import { chatPhotoSignal } from "./chat/photo-cache.js";
 import { openLightbox } from "./plans/event-photo-ui.js";
@@ -88,7 +89,7 @@ function ChatScreen() {
           <h1>{thread?.title || "Chat"}</h1>
         )}
         {thread ? (
-          <button class="text-btn" type="button" onClick={() => { void A.toggleMute(); }}>{thread.muted ? "Unmute" : "Mute"}</button>
+          <button class="text-btn" type="button" onClick={() => { void A.toggleMute(); }}>{thread.muted ? MUTE_COPY.unmute : MUTE_COPY.mute}</button>
         ) : null}
       </header>
       <ChatLog />

@@ -16,6 +16,7 @@ import {
   type UserRow,
 } from "../db.js";
 import { HttpError } from "../lib/http.js";
+import { copyEventMutes } from "../chat/chat.js";
 import { readEventPhoto, removeEventPhoto, writeEventPhoto } from "../lib/event-photo.js";
 import { anchorDayOf, isRecurrence, nextEndsAt, nextOccurrenceDate, readRecurrence, type Recurrence } from "../lib/recurrence.js";
 import { isoDate } from "../lib/time.js";
@@ -129,7 +130,9 @@ async function materializeOne(deps: Deps, plan: PlanRow, now: number, today: str
   if (!id) return;
   await copyPhoto(deps, plan, id);
   const fresh = getPlan(deps.db, id);
-  if (fresh) await pushNew(deps, fresh, now, today);
+  if (!fresh) return;
+  copyEventMutes(deps.db, plan, fresh, now);
+  await pushNew(deps, fresh, now, today);
 }
 
 /**

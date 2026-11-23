@@ -42,6 +42,8 @@ import {
   leavePlan,
   leaveSocial,
   markPaid,
+  mutePlan,
+  muteSocial,
   removePlanGuest,
   removeSocialGuest,
 } from "./events.js";
@@ -124,6 +126,11 @@ export async function handleSocialRoutes(ctx: AuthedRouteContext): Promise<boole
   const socialLive = matchPath(pathname, /^\/api\/socials\/([^/]+)\/live$/);
   if (socialLive && (await handleLive(ctx, "social", socialLive[1]))) return true;
 
+  const socialMute = matchPath(pathname, /^\/api\/socials\/([^/]+)\/mute$/);
+  if (socialMute && method === "POST") {
+    sendJson(res, 200, { social: muteSocial(deps, me, socialMute[1], body.muted !== false, requested) });
+    return true;
+  }
   const socialId = matchPath(pathname, /^\/api\/socials\/([^/]+)$/);
   if (socialId && method === "PATCH") {
     sendJson(res, 200, { social: await editSocial(deps, me, socialId[1], body, requested) });
@@ -214,6 +221,12 @@ export async function handlePlanRoutes(ctx: AuthedRouteContext): Promise<boolean
 
   const planLive = matchPath(pathname, /^\/api\/plans\/([^/]+)\/live$/);
   if (planLive && (await handleLive(ctx, "plan", planLive[1]))) return true;
+
+  const planMute = matchPath(pathname, /^\/api\/plans\/([^/]+)\/mute$/);
+  if (planMute && method === "POST") {
+    sendJson(res, 200, { plan: mutePlan(deps, me, planMute[1], body.muted !== false, requested) });
+    return true;
+  }
 
   const planRemind = matchPath(pathname, /^\/api\/plans\/([^/]+)\/remind$/);
   if (planRemind && method === "POST") {

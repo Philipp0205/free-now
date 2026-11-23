@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-23-mute-events",
+    "date": "2026-11-23",
+    "title": "Mute an event",
+    "bullets": [
+      "You can mute an event from its menu to silence its chat and updates, just for you.",
+      "Unmute is on the same menu and in the chat header.",
+      "A repeating plan keeps your mute on the next occurrence."
+    ]
+  },
+  {
     "id": "2026-11-23-circle-pay-rows",
     "date": "2026-11-23",
     "title": "PayPal and Wero look the same on the circle",
@@ -17,6 +27,7 @@
       "Creating a plan, or saying you're free, now keeps title, when and where up front.",
       "Description, photo, end, repeat and who it's for sit behind one More options row.",
       "More options opens by itself when one of them is already set."
+
     ]
   },
   {
