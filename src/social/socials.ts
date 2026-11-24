@@ -12,7 +12,7 @@ import {
   updateSocial,
   type UserRow,
 } from "../db.js";
-import { eventTitle, freePushBody, notifyUsers, replyPushBody } from "../push/notify.js";
+import { eventTitle, freePushBody, notifyUsers, replyPushBody, type Notice } from "../push/notify.js";
 import { cancelReplyPush, scheduleReplyPush } from "../chat/reply-push.js";
 import { addDays, clockLabel, isoDate, zonedDateTime } from "../lib/time.js";
 import { resolveEnd, type EndSpec } from "../lib/end-time.js";
@@ -20,6 +20,9 @@ import { activeStatus } from "./status.js";
 import { canSeeEvent, readInvitees, setInvitees, visibleMembers } from "./visibility.js";
 import { recordEventLine, replyLogText } from "../chat/chat.js";
 import { HttpError, parseId, requireCircle, socialPayload, type AppDeps } from "../app.js";
+
+/** Shortest wait before a changed note or place, or a Flic press, notifies again. */
+const FLOOR_MS = 15_000;
 
 /** The host's end for this buzz. Undefined keeps a saved end that is still after the start; null clears it. */
 function socialEnd(end: EndSpec | undefined, kept: number | null, anchor: number, now: number, tz: string): number | null {
@@ -38,6 +41,7 @@ export async function publishSocial(
   requested: string | null = null,
   end: EndSpec | undefined = undefined,
   invitees: unknown = undefined,
+  flic = false,
 ): Promise<{ created: boolean; social: ReturnType<typeof socialPayload> }> {
   const circle = requireCircle(deps, user.id, requested);
   // Read first, so a bad list is a 400 before anything is saved. Undefined keeps a live social's list.
@@ -91,7 +95,9 @@ export async function publishSocial(
     const whereChanged = !keepWhere && (existing.place !== nextPlace || existing.lat !== (nextPoint?.lat ?? null) || existing.lng !== (nextPoint?.lng ?? null));
     const startChanged = (existing.starts_at ?? null) !== nextStart;
     shifted = startChanged;
-    shouldNotify = startChanged || (noteChanged || whereChanged ? gap >= 15_000 : gap >= deps.config.renotifyMs);
+    // A Flic press skips the renotify wait but keeps the short floor, so a bouncing press sends once.
+    const quick = flic || noteChanged || whereChanged;
+    shouldNotify = startChanged || (quick ? gap >= FLOOR_MS : gap >= deps.config.renotifyMs);
     updateSocial(
       deps.db,
       existing.id,
@@ -110,28 +116,40 @@ export async function publishSocial(
     if (activeStatus(row, now)?.type === "busy") clearUserStatus(deps.db, user.id);
   }
   if (shouldNotify) {
-    const title = shifted ? eventTitle("time") : fromTime ? eventTitle("later") : eventTitle("now");
     const recipients = visibleMembers(deps.db, "social", { id: socialId, creator_id: user.id }, listMembers(deps.db, circle.id))
       .filter((member) => member.id !== user.id);
-    await notifyUsers(
-      deps.db,
-      deps.push,
-      now,
-      recipients.map((member) => ({
-        userId: member.id,
-        title,
-        body: freePushBody(user.name, nextPlace, fromTime, shifted, nextNote),
-        url: `/?social=${socialId}`,
-        kind: "social",
-        refId: socialId,
-        tag: `social:${socialId}`,
-      })),
-      circle,
-    );
+    const notices = flic
+      ? flicNotices(user, circle.name, socialId, recipients, nextNote)
+      : freeNotices(user, socialId, recipients, { shifted, fromTime, place: nextPlace, note: nextNote });
+    await notifyUsers(deps.db, deps.push, now, notices, circle);
   }
   const social = getSocial(deps.db, socialId);
   if (!social) throw new HttpError(500, "social missing");
   return { created, social: socialPayload(deps.db, social, user.id, deps.now()) };
+}
+
+/** The usual "Free now" push to the other members. */
+function freeNotices(user: UserRow, socialId: string, recipients: Array<{ id: string }>, what: { shifted: boolean; fromTime: string; place: string; note: string }): Notice[] {
+  const title = what.shifted ? eventTitle("time") : what.fromTime ? eventTitle("later") : eventTitle("now");
+  return recipients.map((member) => ({
+    userId: member.id,
+    title,
+    body: freePushBody(user.name, what.place, what.fromTime, what.shifted, what.note),
+    url: `/?social=${socialId}`,
+    kind: "social",
+    refId: socialId,
+    tag: `social:${socialId}`,
+  }));
+}
+
+/** A Flic press: "pressed the button" for the others (same tag, so it replaces the older push) and a confirmation for the presser. */
+function flicNotices(user: UserRow, circleName: string, socialId: string, recipients: Array<{ id: string }>, note: string): Notice[] {
+  const base = { title: "Buzz", url: `/?social=${socialId}`, kind: "social", refId: socialId };
+  const pressed = note.trim() ? `${user.name} pressed the button – ${note.trim()}` : `${user.name} pressed the button`;
+  return [
+    ...recipients.map((member) => ({ ...base, userId: member.id, body: pressed, tag: `social:${socialId}` })),
+    { ...base, userId: user.id, body: `Your button press went out to ${circleName}`, tag: `social-self:${socialId}`, namesCircle: true },
+  ];
 }
 
 function removedMessage(actor: string | null | undefined): string {

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-11-24-flic-press",
+    "date": "2026-11-24",
+    "title": "Better Flic button presses",
+    "bullets": [
+      "The lizard now plays on your own phone too when you press your button.",
+      "Everyone in the circle gets a Buzz notification, and you get a note that your press went out.",
+      "If your Flic sends its location, it now shows on the event."
+    ]
+  },
+  {
     "id": "2026-11-23-mute-events",
     "date": "2026-11-23",
     "title": "Mute an event",

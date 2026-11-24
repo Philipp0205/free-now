@@ -12,6 +12,7 @@ import { footMassageEgg } from "./easter-egg.js";
 import { endSocial } from "./events.js";
 import { sharePreview } from "./plan-share.js";
 import { publishSocial } from "./socials.js";
+import { describeBuzzRequest, readBuzzPoint } from "./buzz-location.js";
 
 export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
   const { req, res, deps, limits, url, method, pathname, user, body, requested } = ctx;
@@ -162,7 +163,8 @@ export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
     }
     // A bare buzz keeps the live note. Only a note field in the body replaces it.
     const note = Object.prototype.hasOwnProperty.call(body, "note") ? cleanNote(body.note, false) : undefined;
-    const result = await publishSocial(deps, buzzer, note, readPoint(body), readPlace(body), readStart(body, deps.now(), deps.config.tz), target);
+    const point = buzzPoint(ctx);
+    const result = await publishSocial(deps, buzzer, note, point, readPlace(body), readStart(body, deps.now(), deps.config.tz), target, undefined, undefined, true);
     // Marks the social as Flic-driven on every press, a re-notify of a live one included.
     const buzzedAt = deps.now();
     markSocialBuzzed(deps.db, result.social.id, buzzedAt);
@@ -170,6 +172,15 @@ export async function handleAuthRoutes(ctx: RouteContext): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+/** The press location: an explicit lat/lng in the body as before, else whatever Flic sent. Undefined keeps the saved one. */
+function buzzPoint({ req, url, body }: RouteContext): { lat: number; lng: number } | null | undefined {
+  const sent = readPoint(body);
+  if (sent !== undefined) return sent;
+  const found = readBuzzPoint(body, url.searchParams, req.headers);
+  if (!found) console.log(describeBuzzRequest(body, req.headers));
+  return found ?? undefined;
 }
 
 /** A buzz with no circle posts to the circle joined last, so the bare link still works. */

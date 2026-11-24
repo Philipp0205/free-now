@@ -3,7 +3,6 @@ import fs from "node:fs";
 import test from "node:test";
 import { staticHeaders } from "../src/lib/static.js";
 import { LIZARD_SRC, createLizard, installLizardUnlock, playLizard } from "../public/js/buzzer/lizard-sound.js";
-import { isFromOtherMember } from "../public/js/buzzer/lizard-rules.js";
 import { withApp } from "./http.js";
 
 type Clip = { play: () => unknown; pause?: () => void; currentTime?: number; paused?: boolean };
@@ -144,18 +143,6 @@ test("playLizard survives a play() that throws, a play() with no promise, and a 
   assert.doesNotThrow(() => createLizard({ make: () => ({ play: () => { throw new Error("nope"); } }) as Clip, doc: null }).play());
   assert.doesNotThrow(() => createLizard({ make: () => ({ play: () => undefined }) as Clip, doc: null }).play());
   assert.doesNotThrow(() => createLizard({ make: () => { throw new Error("no Audio"); }, doc: null }).play());
-});
-
-test("isFromOtherMember is true for another member and false for the signed-in user", () => {
-  assert.equal(isFromOtherMember({ creator: { id: "u-mia" } }, "u-noa"), true);
-  assert.equal(isFromOtherMember({ creator: { id: "u-noa" } }, "u-noa"), false);
-});
-
-test("isFromOtherMember is false when an id is missing", () => {
-  assert.equal(isFromOtherMember({ creator: { id: "u-mia" } }, undefined), false);
-  assert.equal(isFromOtherMember({ creator: {} }, "u-noa"), false);
-  assert.equal(isFromOtherMember({}, "u-noa"), false);
-  assert.equal(isFromOtherMember(null, "u-noa"), false);
 });
 
 test("the clip is a small file the server labels audio/mp4", () => {
