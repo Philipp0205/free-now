@@ -85,7 +85,7 @@ test("a buzz from another member plays the lizard clip with the overlay, and the
   }
 });
 
-test("the presser's own open page shows the overlay for their own press and plays no sound", { timeout: 60_000 }, async () => {
+test("the presser's own open page shows the overlay and plays the lizard clip too", { timeout: 60_000 }, async () => {
   const { alex, link } = await seed();
   const { context, page, errors } = await phone(alex.token);
   try {
@@ -93,7 +93,7 @@ test("the presser's own open page shows the overlay for their own press and play
     await page.locator(".buzzer").waitFor({ timeout: 6000 });
     assert.equal(await page.locator(".buzzer .buzzer-sr").textContent(), "Alex is free now");
     await page.waitForTimeout(500);
-    assert.deepEqual(await plays(page), []);
+    assert.equal((await plays(page)).length, 1);
     await dismiss(page);
     assert.deepEqual(errors, []);
   } finally {

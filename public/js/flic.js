@@ -1,6 +1,5 @@
 import { consumeBuzz, buzzerPlaying, playBuzzer, nextBuzzIndex, nextTestBuzzAnimation } from "./buzzer.js";
 import { animationFor } from "./buzzer/birthday-rules.js";
-import { isFromOtherMember } from "./buzzer/lizard-rules.js";
 import { state } from "./state.js";
 import { api } from "./session.js";
 import { render } from "./render.js";
@@ -15,8 +14,7 @@ export function noteBuzz() {
   try {
     const buzz = consumeBuzz(state.socials, localStorage);
     if (!buzz || document.hidden || buzzerPlaying()) return;
-    const sound = isFromOtherMember(buzz.social, state.me?.user?.id);
-    playBuzzer({ name: buzz.name, animation: animationFor(buzz, () => nextBuzzIndex(localStorage)), sound });
+    playBuzzer({ name: buzz.name, animation: animationFor(buzz, () => nextBuzzIndex(localStorage)), sound: true });
   } catch {
     /* the overlay is a nicety */
   }
@@ -128,6 +126,10 @@ export function flicPanel(code) {
           el("p", {
             class: "help",
             style: "margin-top: 12px",
+            text: "Turn on Send location in the Flic Internet Request to put where you pressed on the event.",
+          }),
+          el("p", {
+            class: "help",
             text: state.me?.user?.recoveryIsFlic
               ? "Keep this link private. It contains your recovery code, and anyone with it can post as you or sign in as you. Make a new recovery code to separate the two."
               : "Keep this link private. Anyone with it can post as you. It does not sign anyone in.",

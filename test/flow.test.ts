@@ -154,8 +154,8 @@ test("buzz token starts a social and notifies the circle", async () => {
     assert.equal(buzzed.json.social.note, "Rooftop coffee??");
     assert.equal(ctx.sent.length, 1);
     assert.equal(ctx.sent[0].endpoint, "https://push.example/veit");
-    assert.equal(ctx.sent[0].payload.title, "Free now");
-    assert.equal(ctx.sent[0].payload.body, "Alex is free now – Rooftop coffee??");
+    assert.equal(ctx.sent[0].payload.title, "Buzz");
+    assert.equal(ctx.sent[0].payload.body, "Alex pressed the button – Rooftop coffee??");
 
     const bare = await fetch(`http://127.0.0.1:${ctx.port}/api/buzz/${alex.buzzToken}`, { method: "POST" });
     assert.equal(bare.status, 200);
