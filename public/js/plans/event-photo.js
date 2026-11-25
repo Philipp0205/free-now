@@ -55,6 +55,11 @@ async function sendRequest(kind, id, method, blob) {
 /** Uploads the staged photo or removes the current one, as the draft says. Returns "" or a message to show. */
 export async function savePhotoDraft(kind, id, draft) {
   if (!id) return "";
+  // A photo picked just before Save may still be compressing. Wait for it, so it is never dropped.
+  if (draft.pending) {
+    await draft.pending;
+    if (draft.error && !draft.blob) return draft.error;
+  }
   try {
     if (draft.blob) {
       const { photoRev } = await sendRequest(kind, id, "PUT", draft.blob);
@@ -68,6 +73,17 @@ export async function savePhotoDraft(kind, id, draft) {
   } finally {
     releaseDraft(draft);
     draft.remove = false;
+  }
+  return "";
+}
+
+/** Uploads a compressed photo for an existing event at once (the Details sheet). Returns "" or a message to show. */
+export async function uploadPhotoNow(kind, id, blob) {
+  try {
+    const { photoRev } = await sendRequest(kind, id, "PUT", blob);
+    if (photoRev) photoUrls.set(`${kind}:${id}:${photoRev}`, URL.createObjectURL(blob));
+  } catch {
+    return PHOTO_COPY.uploadNowFailed;
   }
   return "";
 }

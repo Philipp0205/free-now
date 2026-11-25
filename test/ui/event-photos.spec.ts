@@ -10,7 +10,7 @@ import { SIZES, UA, dismissPaymentReminder, useHangry } from "./harness.js";
 import { testEmail } from "../http.js";
 
 // Fake people and a generated picture only. Screenshots go to test/ui/screenshots (gitignored).
-const SHOT_DIR = path.resolve("test/ui/screenshots/event-photos");
+const SHOT_DIR = path.resolve("test/ui/screenshots/event-photo-fix");
 const hangry = useHangry({ tz: "UTC" });
 const { call } = hangry;
 
@@ -259,5 +259,142 @@ test("the photo looks right in Light and in Dark, and on a compact row", { timeo
     } finally {
       await compact.context().close();
     }
+  }
+});
+
+/** Makes decoding a picked photo take `ms`, like a big phone photo. */
+async function slowDecode(page: Page, ms: number): Promise<void> {
+  await page.evaluate((delay) => {
+    const real = window.createImageBitmap.bind(window);
+    window.createImageBitmap = (async (...args: Parameters<typeof real>) => {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return real(...args);
+    }) as typeof window.createImageBitmap;
+  }, ms);
+}
+
+const detailsDialog = (page: Page) => page.getByRole("dialog", { name: "Details", exact: true });
+
+test("a photo picked just before Add plan or I'm free is still uploaded", { timeout: 180_000 }, async () => {
+  const { host, circle } = await seed("race");
+  const page = await phone(360, 640, host.token, circle.id);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    await slowDecode(page, 2000);
+    await openPlanSheet(page);
+    const sheet = page.locator("form.sheet");
+    await sheet.locator("#sheet-note").fill("Race plan");
+    await sheet.locator("#plan-date").fill(daysAhead(1));
+    await sheet.locator("#plan-time").fill("19:00");
+    await openMoreOptions(page);
+    await choosePhoto(page, "Add photo");
+    assert.equal(await sheet.locator("#event-photo-pick").textContent(), "Preparing…");
+    await sheet.getByRole("button", { name: "Add plan", exact: true }).click();
+    await page.locator(".card-plan", { hasText: "Race plan" }).locator(".event-photo").waitFor();
+    await loaded(page, ".card-plan .event-photo");
+    assert.ok((await call("GET", "/api/plans", host.token)).plans[0].photoRev, "the plan has its photo");
+
+    await page.getByRole("button", { name: "Let friends know you're free now" }).click();
+    const free = page.locator("form.sheet");
+    await openMoreOptions(page);
+    await choosePhoto(page, "Add photo");
+    assert.equal(await free.locator("#event-photo-pick").textContent(), "Preparing…");
+    await free.getByRole("button", { name: "I'm free", exact: true }).click();
+    await page.locator("[data-social] .event-photo").waitFor();
+    assert.ok((await call("GET", "/api/socials", host.token)).socials[0].photoRev, "the free post has its photo");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("the host adds and changes a photo from the Details sheet, and a guest has no button", { timeout: 240_000 }, async () => {
+  const { host, bea, circle } = await seed("detail");
+  await call("POST", "/api/plans", host.token, { note: "Late photo", date: daysAhead(1), time: "18:00" });
+  for (const [width, height] of SIZES) {
+    const page = await phone(width, height, host.token, circle.id);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    try {
+      const card = page.locator(".card-plan", { hasText: "Late photo" });
+      await card.getByRole("button", { name: "Open details" }).click();
+      const details = detailsDialog(page);
+      await details.getByRole("button", { name: "Edit", exact: true }).waitFor();
+      await shot(page, "details-no-photo");
+      await choosePhoto(page, "Add photo");
+      await details.locator(".detail-photo").waitFor();
+      await loaded(page, ".detail-photo");
+      await details.getByRole("button", { name: "Change photo", exact: true }).waitFor();
+      await loaded(page, ".card-plan .event-photo");
+      const first = (await call("GET", "/api/plans", host.token)).plans[0].photoRev;
+      assert.ok(first, "the API has a photo revision");
+      await shot(page, "details-photo-added");
+      const row = await details.locator(".detail-photo-row").boundingBox();
+      assert.ok(row && row.x >= 0 && row.x + row.width <= width + 1, `the host row fits ${width}`);
+
+      await page.waitForTimeout(1100);
+      await choosePhoto(page, "Change photo");
+      let plan = (await call("GET", "/api/plans", host.token)).plans[0];
+      for (let wait = 0; wait < 50 && plan.photoRev === first; wait += 1) {
+        await page.waitForTimeout(100);
+        plan = (await call("GET", "/api/plans", host.token)).plans[0];
+      }
+      assert.notEqual(plan.photoRev, first, "Change photo changes the revision");
+      await loaded(page, ".detail-photo");
+      assert.deepEqual(errors, []);
+      await call("DELETE", `/api/plans/${plan.id}/photo`, host.token);
+    } finally {
+      await page.context().close();
+    }
+  }
+  const guest = await phone(360, 640, bea.token, circle.id);
+  try {
+    await call("DELETE", `/api/plans/${(await call("GET", "/api/plans", host.token)).plans[0].id}/photo`, host.token).catch(() => {});
+    await guest.locator(".card-plan", { hasText: "Late photo" }).getByRole("button", { name: "Open details" }).click();
+    const details = detailsDialog(guest);
+    await details.waitFor();
+    assert.equal(await details.getByRole("button", { name: "Add photo", exact: true }).count(), 0);
+    assert.equal(await details.getByRole("button", { name: "Change photo", exact: true }).count(), 0);
+    assert.equal(await details.getByRole("button", { name: "Edit", exact: true }).count(), 0);
+    await shot(guest, "details-guest");
+  } finally {
+    await guest.context().close();
+  }
+});
+
+test("a plan made with a photo can be closed and reopened, with the photo opening large", { timeout: 180_000 }, async () => {
+  const { host, circle } = await seed("reopen");
+  const page = await phone(360, 640, host.token, circle.id);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    await openPlanSheet(page);
+    const sheet = page.locator("form.sheet");
+    await sheet.locator("#sheet-note").fill("Reopen plan");
+    await sheet.locator("#plan-date").fill(daysAhead(1));
+    await sheet.locator("#plan-time").fill("19:00");
+    await openMoreOptions(page);
+    await choosePhoto(page, "Add photo");
+    await sheet.locator(".event-photo-preview img").waitFor();
+    await sheet.getByRole("button", { name: "Add plan", exact: true }).click();
+    const card = page.locator(".card-plan", { hasText: "Reopen plan" });
+    await card.locator(".event-photo").waitFor();
+    for (let round = 0; round < 3; round += 1) {
+      await card.getByRole("button", { name: "Open details" }).click();
+      const details = detailsDialog(page);
+      await details.locator(".detail-photo").waitFor();
+      await loaded(page, ".detail-photo");
+      if (round === 1) {
+        await details.locator(".detail-photo").click();
+        await page.getByRole("dialog", { name: "Photo from Hana" }).waitFor();
+        await page.getByRole("button", { name: "Close photo" }).click();
+      }
+      await page.keyboard.press("Escape");
+      await details.waitFor({ state: "detached" });
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.context().close();
   }
 });

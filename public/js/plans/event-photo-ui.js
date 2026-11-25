@@ -1,9 +1,10 @@
 import { el } from "../lib.js";
 import { render } from "../render.js";
+import { refresh } from "../session.js";
 import { PHOTO_COPY } from "./event-photo-copy.js";
-import { draftHasPhoto, stagePhoto, unstagePhoto } from "./event-photo-draft.js";
+import { beginPick, draftHasPhoto, finishPick, unstagePhoto } from "./event-photo-draft.js";
 import { compressPhoto } from "./event-photo-image.js";
-import { loadEventPhoto, photoKey, photoUrls } from "./event-photo.js";
+import { loadEventPhoto, photoKey, photoUrls, uploadPhotoNow } from "./event-photo.js";
 
 let inputNode = null;
 let target = null;
@@ -15,30 +16,75 @@ function picker() {
   inputNode.addEventListener("change", () => {
     const file = inputNode.files?.[0];
     inputNode.value = "";
-    if (file && target) void onPicked(target, file);
+    if (file && target) void target(file);
   });
   document.body.append(inputNode);
   return inputNode;
 }
 
-/** Compresses the pick and stages it on the draft. Shows "Preparing" meanwhile and any error under the slot. */
+/** Opens the picker and hands the chosen file to `onFile`. */
+function pickFile(onFile) {
+  target = onFile;
+  picker().click();
+}
+
+function errorText(error) {
+  return error?.message || PHOTO_COPY.unreadable;
+}
+
+/**
+ * Compresses the pick and stages it on the draft. Shows "Preparing" meanwhile and any error under the slot.
+ * The draft keeps the job in `pending`, so Save can wait for it. A pick finishing after a reset is dropped.
+ */
 async function onPicked(draft, file) {
-  draft.busy = true;
-  draft.error = "";
+  const token = beginPick(draft);
   render();
-  try {
-    stagePhoto(draft, await compressPhoto(file));
-  } catch (error) {
-    draft.error = error?.message || PHOTO_COPY.unreadable;
-  }
-  draft.busy = false;
+  const job = compressPhoto(file).then((blob) => ({ blob }), (error) => ({ error: errorText(error) }));
+  draft.pending = job.then((result) => { finishPick(draft, token, result); });
+  await draft.pending;
   render();
 }
 
 function pick(draft) {
   if (draft.busy) return;
-  target = draft;
-  picker().click();
+  pickFile((file) => onPicked(draft, file));
+}
+
+/** What the Details button is doing: "" idle, else the label of the step. Survives re-renders. */
+let quick = { id: "", step: "", error: "" };
+
+/** Compresses, uploads straight away, then refreshes so the new photo shows on the sheet and the card. */
+async function onQuickPicked(kind, item, file) {
+  const job = { id: item.id, step: PHOTO_COPY.busy, error: "" };
+  quick = job;
+  render();
+  try {
+    const blob = await compressPhoto(file);
+    job.step = PHOTO_COPY.uploading;
+    render();
+    job.error = await uploadPhotoNow(kind, item.id, blob);
+  } catch (error) {
+    job.error = errorText(error);
+  }
+  job.step = "";
+  if (!job.error) await refresh().catch(() => {});
+  render();
+}
+
+/** The host row of the Details sheet: Add or Change photo, which uploads at once, plus any `extra` buttons. */
+export function hostPhotoRow(kind, item, extra = []) {
+  const mine = quick.id === item.id ? quick : { step: "", error: "" };
+  const label = mine.step || (item.photoRev ? PHOTO_COPY.change : PHOTO_COPY.add);
+  return el("div", { class: "sheet-group event-photo-field detail-photo-row" }, [
+    el("div", { class: "event-photo-actions" }, [
+      el("button", {
+        class: "text-btn", type: "button", id: "detail-photo-pick", text: label, disabled: Boolean(mine.step),
+        onclick: () => pickFile((file) => onQuickPicked(kind, item, file)),
+      }),
+      ...extra,
+    ]),
+    mine.error ? el("p", { class: "time-error", role: "alert", text: mine.error }) : null,
+  ]);
 }
 
 /** An <img> for an event's photo. A cached blob URL is set at once; otherwise it loads and `onFail` runs if there is none. */

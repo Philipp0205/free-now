@@ -2,6 +2,9 @@
 export const PHOTO_COPY = {
   label: "Photo",
   add: "Add photo",
+  change: "Change photo",
+  uploading: "Uploading…",
+  uploadNowFailed: "The photo did not upload. Try again.",
   replace: "Replace",
   remove: "Remove",
   busy: "Preparing…",
