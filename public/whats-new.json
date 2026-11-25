@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-25-event-photo-fix",
+    "date": "2026-11-25",
+    "title": "Photos on events, fixed",
+    "bullets": [
+      "Add or change an event's photo from its details, any time before it ends.",
+      "A photo you pick just before saving is no longer dropped."
+    ]
+  },
+  {
     "id": "2026-11-24-flic-press",
     "date": "2026-11-24",
     "title": "Better Flic button presses",

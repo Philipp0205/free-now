@@ -27,7 +27,7 @@ import { invitePeople, invitesFromItem, inviteBody } from "./plans/private-event
 import { inviteField, privateMarker } from "./plans/private-event-ui.js";
 import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
 import { savePhotoDraft } from "./plans/event-photo.js";
-import { eventPhoto, photoField } from "./plans/event-photo-ui.js";
+import { eventPhoto, hostPhotoRow, photoField } from "./plans/event-photo-ui.js";
 import { liveToggle } from "./map-places/live-ui.js";
 
 export function openEventDetail(kind, item, from = "") {
@@ -82,6 +82,11 @@ function detailWhen(kind, item, over) {
   return item.startsAt && item.startsAt > Date.now() ? `from ${clock(item.startsAt)}` : remaining(item.expiresAt);
 }
 
+/** The host's Edit button in the Details sheet: closes the sheet, then opens the Edit sheet. */
+function editButton(kind, item) {
+  return el("button", { class: "text-btn", type: "button", text: "Edit", onclick: () => { closeSheet(); openAdminEdit(kind, item); } });
+}
+
 export function eventDetailSheet() {
   const detail = state.eventDetail;
   const item = eventDetailItem();
@@ -122,6 +127,7 @@ export function eventDetailSheet() {
         privateMarker(item, "detail-private"),
         kind === "plan" ? repeatMarker(item, "detail-private repeat-line") : null,
         eventPhoto(kind, item, "event-photo detail-photo"),
+        mine && !over ? hostPhotoRow(kind, item, [editButton(kind, item)]) : null,
         kind === "plan" && item.description ? el("p", { class: "detail-desc" }, linkify(item.description)) : null,
         item.place || item.location ? el("p", { class: "detail-place", text: audiencePlace(item.place) || "nearby" }) : null,
         item.payment ? el("p", { class: "detail-price", text: `${euro(item.payment.amount)} per person · ${item.payment.collector.name} collects` }) : null,

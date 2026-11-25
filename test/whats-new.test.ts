@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v160 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v161 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v160");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v161");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,10 +665,21 @@ test("the build label is hangry-v160 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the flic press entry is the newest, in plain words without an em dash, and the mute events entry follows it", () => {
+test("the photo details entry is the newest, in plain words without an em dash, and the flic press entry follows it", () => {
   const top = RAW[0];
-  assert.equal(top.id, "2026-11-24-flic-press");
-  assert.match(top.id, /^[a-z0-9-]{1,64}$/);
+  assert.equal(top.id, "2026-11-25-event-photo-fix");
+  assert.equal(top.date, "2026-11-25");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  assert.match(top.bullets.join(" "), /Add or change/);
+  assert.match(top.bullets.join(" "), /just before saving/);
+  assert.equal(RAW[1].id, "2026-11-24-flic-press", "the flic press entry follows it");
+});
+
+test("the flic press entry is kept, in plain words without an em dash, and the mute events entry follows it", () => {
+  const index = RAW.findIndex((item) => item.id === "2026-11-24-flic-press");
+  const top = RAW[index];
+  assert.ok(top, "the flic press entry is kept");
   assert.equal(top.date, "2026-11-24");
   assert.ok(top.title.length <= 60);
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
@@ -677,12 +688,13 @@ test("the flic press entry is the newest, in plain words without an em dash, and
   assert.match(top.bullets.join(" "), /lizard/i);
   assert.match(top.bullets.join(" "), /Buzz notification/);
   assert.match(top.bullets.join(" "), /location/i);
-  assert.equal(RAW[1].id, "2026-11-23-mute-events", "the mute events entry follows it");
+  assert.equal(RAW[index + 1].id, "2026-11-23-mute-events", "the mute events entry follows it");
 });
 
 test("the mute events entry is kept, in plain words without an em dash, and the circle pay rows entry follows it", () => {
-  const top = RAW[1];
-  assert.equal(top.id, "2026-11-23-mute-events");
+  const index = RAW.findIndex((item) => item.id === "2026-11-23-mute-events");
+  const top = RAW[index];
+  assert.ok(top, "the mute events entry is kept");
   assert.match(top.id, /^[a-z0-9-]{1,64}$/);
   assert.equal(top.date, "2026-11-23");
   assert.ok(top.title.length <= 60);
@@ -693,7 +705,7 @@ test("the mute events entry is kept, in plain words without an em dash, and the 
   assert.match(top.bullets.join(" "), /Unmute/);
   assert.match(top.bullets.join(" "), /chat header/i);
   assert.match(top.bullets.join(" "), /repeating plan/i);
-  assert.equal(RAW[2].id, "2026-11-23-circle-pay-rows", "the circle pay rows entry follows it");
+  assert.equal(RAW[index + 1].id, "2026-11-23-circle-pay-rows", "the circle pay rows entry follows it");
 });
 
 test("the circle pay rows entry is kept, in plain words without an em dash, and the add event more options entry follows it", () => {
