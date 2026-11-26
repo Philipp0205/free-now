@@ -2494,6 +2494,10 @@ html.kb-open .sheet .help { margin-top: 0; }
   left: 12px;
   right: 12px;
   bottom: var(--attr-h, 64px);
+  /* Leave a strip of map above so a tap can put the card away, even when it has more actions. */
+  max-height: calc(100% - var(--attr-h, 64px) - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: rgba(20, 20, 22, 0.96);
   border-radius: 18px;
   padding: 14px;
