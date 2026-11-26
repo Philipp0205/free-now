@@ -15,6 +15,9 @@ import { openSheet } from "./sheets.js";
 import { appTz, clock, colorFor, el, icon, initial, remaining, skeletonList } from "./lib.js";
 import { planOpen } from "./plan-share.js";
 import { avatar, avatarKey, avatarUrls, loadAvatar } from "./avatars.js";
+import { filterJoining } from "./plans/joining-filter.js";
+import { JOINING_COPY } from "./plans/joining-filter-copy.js";
+import { joiningChip } from "./plans/joining-chip.js";
 
 /** Faces on a plan pin: the host's own pin plus up to three in the crowd. Anyone past that is a +N chip. */
 const MAP_CROWD_FACES = 4;
@@ -133,13 +136,14 @@ function eventsControls() {
     "aria-label": name,
     onclick: () => void setEventsView(view),
   }, [icon(view), scope ? null : el("span", { class: "events-view-label", text: name, "aria-hidden": "true" })]);
-  return el("div", { class: scope ? "events-controls scoped" : "events-controls" }, [
+  const controls = el("div", { class: scope ? "events-controls scoped" : "events-controls" }, [
     el("div", { class: "events-view segment", role: "group", "aria-label": "Show" }, [
       viewButton("Map", "map", !calendar),
       viewButton("Calendar", "calendar", calendar),
     ]),
     scope,
   ]);
+  return el("div", { class: "events-bar" }, [controls, el("div", { class: "events-filter" }, [joiningChip()])]);
 }
 
 /** Set by a month or day change; the next render fades that part in once. */
@@ -207,16 +211,16 @@ export function calPlanOver(plan) {
 }
 
 /** Every loaded event, by day, in time order (a plan with no time comes last). */
-function calendarByDay() {
+function calendarByDay(joinFilter = state.joiningOnly) {
   const days = new Map();
   const add = (day, entry) => {
     if (!days.has(day)) days.set(day, []);
     days.get(day).push(entry);
   };
-  for (const plan of state.calendarPlans) {
+  for (const plan of filterJoining(state.calendarPlans, joinFilter, state.me.user.id)) {
     add(plan.forDate, { kind: "plan", item: plan, at: plan.time || "~", over: calPlanOver(plan) });
   }
-  for (const social of state.calendarSocials) {
+  for (const social of filterJoining(state.calendarSocials, joinFilter, state.me.user.id)) {
     add(calSocialDay(social), { kind: "social", item: social, at: clock(social.startsAt ?? social.createdAt), over: calSocialOver(social) });
   }
   for (const list of days.values()) list.sort((a, b) => a.at.localeCompare(b.at) || a.item.id.localeCompare(b.item.id));
@@ -252,16 +256,29 @@ function planForDay(day) {
   return el("button", { class: "btn cal-add", type: "button", text: "Plan for this day", onclick: () => openSheet("plan", { planDate: day }) });
 }
 
+/** The empty month: the generic note, or one that names the filter when it hid every event. */
+function monthEmpty(hidden) {
+  return el("div", { class: "cal-empty" }, [
+    el("h2", { text: hidden ? JOINING_COPY.monthEmpty : "Nothing planned this month." }),
+    planForDay(state.calDay),
+    el("p", { text: hidden ? JOINING_COPY.monthEmptyHelp : "Plans and hangouts from your circle show up here on their day." }),
+  ]);
+}
+
 function calendarScreen() {
   ensureCalendarMonth();
   const today = calToday();
   const { key } = calendarKeyFor();
   const ready = state.calendarKey === key;
-  const byDay = ready ? calendarByDay() : new Map();
+  const byDayAll = ready ? calendarByDay(false) : new Map();
+  const byDay = ready && state.joiningOnly ? calendarByDay(true) : byDayAll;
   const fade = calFade;
   calFade = "";
   const grid = monthGrid(state.calMonth);
   const monthCount = grid.reduce((sum, cell) => sum + (cell.inMonth ? (byDay.get(cell.day)?.length || 0) : 0), 0);
+  const monthCountAll = state.joiningOnly
+    ? grid.reduce((sum, cell) => sum + (cell.inMonth ? (byDayAll.get(cell.day)?.length || 0) : 0), 0)
+    : monthCount;
   const cells = grid.map((cell) => {
     const events = byDay.get(cell.day) || [];
     // Two events fit as two stacks; with more, the second slot says how many others there are.
@@ -293,18 +310,14 @@ function calendarScreen() {
   let below;
   if (!ready) below = skeletonList(3, "cal-skel");
   else if (!monthCount && monthStart(state.calDay) === state.calMonth) {
-    below = el("div", { class: "cal-empty" }, [
-      el("h2", { text: "Nothing planned this month." }),
-      planForDay(state.calDay),
-      el("p", { text: "Plans and hangouts from your circle show up here on their day." }),
-    ]);
+    below = monthEmpty(Boolean(state.joiningOnly && monthCountAll));
   } else {
     below = el("section", { class: "cal-day", "aria-label": shortDate(state.calDay, today) }, [
       el("h2", { class: "cal-day-title", text: state.calDay === today ? `Today · ${shortDate(state.calDay, today)}` : shortDate(state.calDay, today) }),
       planForDay(state.calDay),
       dayEvents.length
         ? el("div", { class: "cal-list" }, dayEvents.map(calendarRow))
-        : el("p", { class: "cal-quiet", text: "Nothing on this day." }),
+        : el("p", { class: "cal-quiet", text: state.joiningOnly && (byDayAll.get(state.calDay) || []).length ? JOINING_COPY.dayEmpty : "Nothing on this day." }),
       calFreeLine(state.calDay, dayEvents),
     ]);
   }
@@ -418,14 +431,15 @@ export function mapScreen() {
   }
   const pins = collectPins();
   if (!pins.length) {
+    const hidden = state.joiningOnly && collectPins(false).length > 0;
     destroyLiveMap();
     mapWrap = null;
     return el("div", { class: "map-screen" }, [
       screenHeader("Events"),
       eventsControls(),
       el("div", { class: "map-empty" }, [
-        el("h2", { text: "No places yet" }),
-        el("p", { text: "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
+        el("h2", { text: hidden ? JOINING_COPY.mapEmpty : "No places yet" }),
+        el("p", { text: hidden ? JOINING_COPY.monthEmptyHelp : "When a friend shares where they are, or a plan has a spot on the map, it shows up here." }),
       ]),
     ]);
   }
@@ -442,10 +456,12 @@ export function mapScreen() {
   ]);
 }
 
-export function collectPins() {
+export function collectPins(joinFilter = state.joiningOnly) {
   const pins = [];
   const events = mapEvents();
-  for (const social of events.socials) {
+  const socials = filterJoining(events.socials, joinFilter, state.me.user.id);
+  const plans = filterJoining(events.plans, joinFilter, state.me.user.id);
+  for (const social of socials) {
     if (!social.location) continue;
     const mine = social.creator.id === state.me.user.id;
     const place = audiencePlace(social.place);
@@ -469,7 +485,7 @@ export function collectPins() {
       label: pinLabel("social", social, Date.now(), appTz()),
     });
   }
-  for (const plan of events.plans) {
+  for (const plan of plans) {
     if (!plan.location) continue;
     const mine = plan.creator.id === state.me.user.id;
     const place = audiencePlace(plan.place);
@@ -501,8 +517,8 @@ export function collectPins() {
       more: crowd.more,
     });
   }
-  for (const social of events.socials) pins.push(...livePins("social", social));
-  for (const plan of events.plans) pins.push(...livePins("plan", plan));
+  for (const social of socials) pins.push(...livePins("social", social));
+  for (const plan of plans) pins.push(...livePins("plan", plan));
   return pins;
 }
 

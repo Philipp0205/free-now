@@ -1046,6 +1046,22 @@ img.avatar { object-fit: cover; display: block; flex: none; }
   padding: 6px 14px;
   font-size: 14px;
 }
+.list-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
+.list-tools .segment.home-list-toggle { margin: 0 0 0 auto; }
+.joining-chip {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.joining-chip.on { background: var(--fill); border-color: var(--fill); color: var(--ink); }
+.events-filter .joining-chip { min-height: 32px; }
+.joining-empty { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
 .invite-chip strong { color: var(--text); letter-spacing: 0.14em; font-weight: 700; }
 
 .install-pill {
@@ -2448,6 +2464,7 @@ html.kb-open .sheet .help { margin-top: 0; }
 .hangry-map.leaflet-container, .where-map.leaflet-container { background: #141416; }
 /* Map / Calendar and This circle / All circles share one short row, smaller than the 44px sheet segments. */
 .events-controls { display: flex; align-items: center; gap: 8px; margin: 2px 12px 4px; }
+.events-filter { margin: 0 12px 4px; }
 .events-controls .segment { flex: 1; min-width: 0; padding: 2px; gap: 2px; border-radius: 10px; }
 .events-controls .segment button {
   min-height: 32px;
