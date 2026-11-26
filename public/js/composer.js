@@ -351,9 +351,9 @@ function startPayload() {
   return { later: true };
 }
 
-/** The end row of the create sheets. A render after a pick repaints the chips. */
+/** The optional end time input of the create sheets. */
 export function endBlock() {
-  return endField(state.endDraft, render);
+  return endField(state.endDraft);
 }
 
 /** The "Repeats" select for the plan composer. */

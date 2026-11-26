@@ -6,11 +6,9 @@ import { MORE_OPTIONS_COPY } from "./more-options-copy.js";
 
 /** Pure rules for the folded fields of the create sheets. Nothing here touches the DOM. */
 
-/** "1h", "Until 21:00" or "" for the end draft. */
+/** "Until 21:00" or "" for the end draft. */
 function endPart(end) {
-  if (!end || end.mode === "none") return "";
-  if (end.mode === "duration") return END_COPY.pick(end.minutes);
-  return end.until ? `${END_COPY.until} ${end.until}` : END_COPY.until;
+  return end?.until ? `${END_COPY.until} ${end.until}` : "";
 }
 
 /** "Weekly", "Monthly" or "" for the repeat token. */

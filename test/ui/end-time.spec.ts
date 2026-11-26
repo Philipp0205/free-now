@@ -10,7 +10,7 @@ import { testEmail } from "../http.js";
 
 // Tue 10 Nov 2026, 12:00 in Berlin (UTC+1). Server and browser share this clock. Fake people only.
 const NOW = Date.parse("2026-11-10T11:00:00Z");
-const SHOT_DIR = path.resolve("test/ui/screenshots/end-time");
+const SHOT_DIR = path.resolve("test/ui/screenshots/time-picker");
 
 const hangry = useHangry({ tz: "Europe/Berlin", now: () => NOW });
 const { call } = hangry;
@@ -48,7 +48,7 @@ async function signUp(name: string) {
 
 const openFree = (page: Page) => page.getByRole("button", { name: "Let friends know you're free now" }).click();
 
-test("the end row fits every phone and picks one option at a time", { timeout: 120_000 }, async () => {
+test("the end time input fits every phone and starts empty", { timeout: 120_000 }, async () => {
   const { host, circle } = await signUp("Dana");
   for (const [width, height] of SIZES) {
     const page = await phone(width, height, host.token, circle.id);
@@ -56,30 +56,22 @@ test("the end row fits every phone and picks one option at a time", { timeout: 1
       await openFree(page);
       await openMoreOptions(page);
       const sheet = page.locator("form.sheet");
-      const row = sheet.locator(".end-picks");
-      await row.scrollIntoViewIfNeeded();
-      assert.deepEqual(await row.getByRole("button").allInnerTexts(), ["No end", "1h", "2h", "3h", "Until"]);
-      assert.equal(await row.locator('[data-end="none"]').getAttribute("aria-pressed"), "true", "starts on No end");
-      await row.locator('[data-end="120"]').click();
-      assert.equal(await row.locator('[data-end="120"]').getAttribute("aria-pressed"), "true");
-      assert.equal(await row.locator('[data-end="none"]').getAttribute("aria-pressed"), "false");
-      await row.locator('[data-end="until"]').click();
-      await sheet.locator("#free-end-until").waitFor();
-      await sheet.locator("#free-end-until").scrollIntoViewIfNeeded();
-      const box = await row.boundingBox();
-      assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, `the row fits ${width}: ${box?.x}+${box?.width}`);
-      for (const button of await row.getByRole("button").all()) {
-        const size = await button.boundingBox();
-        assert.ok(size && size.height >= 44, `a real tap target at ${width}`);
-      }
-      await shot(page, "free-sheet-until");
+      const end = sheet.getByLabel("End time", { exact: true });
+      await end.scrollIntoViewIfNeeded();
+      assert.equal(await end.inputValue(), "", "starts with no end");
+      assert.equal(await sheet.locator('[data-end]').count(), 0, "no length buttons");
+      await end.fill("14:00");
+      const box = await end.boundingBox();
+      assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, `the input fits ${width}: ${box?.x}+${box?.width}`);
+      assert.ok(box.height >= 44, `a real tap target at ${width}`);
+      await shot(page, "free-sheet-end");
     } finally {
       await page.context().close();
     }
   }
 });
 
-test("free for 2 hours shows the range on the card and the event sheet", { timeout: 120_000 }, async () => {
+test("free now with an end of 14:00 shows the range on the card and the event sheet", { timeout: 120_000 }, async () => {
   const { host, circle } = await signUp("Mira");
   const page = await phone(360, 640, host.token, circle.id);
   const errors: string[] = [];
@@ -87,7 +79,7 @@ test("free for 2 hours shows the range on the card and the event sheet", { timeo
   try {
     await openFree(page);
     await openMoreOptions(page);
-    await page.locator('form.sheet [data-end="120"]').click();
+    await page.locator("form.sheet").getByLabel("End time", { exact: true }).fill("14:00");
     await page.locator("form.sheet").getByRole("button", { name: "I'm free", exact: true }).click();
     const card = page.locator("[data-social]");
     await card.waitFor();
@@ -107,7 +99,7 @@ test("free for 2 hours shows the range on the card and the event sheet", { timeo
   }
 });
 
-test("a plan with Until shows 19:00 - 22:00, Edit prefills it, and No end takes it back", { timeout: 180_000 }, async () => {
+test("a plan with an end shows 19:00 - 22:00, Edit prefills it, and clearing it takes it back", { timeout: 180_000 }, async () => {
   const { host, circle } = await signUp("Lena");
   const page = await phone(360, 640, host.token, circle.id);
   const errors: string[] = [];
@@ -116,22 +108,22 @@ test("a plan with Until shows 19:00 - 22:00, Edit prefills it, and No end takes 
     await openPlanSheet(page);
     const sheet = page.locator("form.sheet");
     await sheet.locator("#sheet-note").fill("Ramen night");
+    await openMoreOptions(page);
+    const endInput = sheet.getByLabel("End time", { exact: true });
 
     // An end without a start time is refused before anything is sent.
-    await openMoreOptions(page);
-    await sheet.locator('[data-end="120"]').click();
+    await endInput.fill("22:00");
     await sheet.getByRole("button", { name: "Add plan", exact: true }).click();
     await sheet.getByText("Pick a start time to set an end.").waitFor();
     await shot(page, "plan-sheet-needs-start");
     assert.equal((await call("GET", "/api/plans", host.token)).plans.length, 0, "nothing was created");
 
     await sheet.locator("#plan-time").fill("19:00");
-    await sheet.locator('[data-end="until"]').click();
-    await sheet.locator("#free-end-until").fill("18:00");
+    await endInput.fill("18:00");
     await sheet.getByRole("button", { name: "Add plan", exact: true }).click();
     await sheet.getByText("The end must be after the start.").waitFor();
-    await sheet.locator("#free-end-until").fill("22:00");
-    await shot(page, "plan-sheet-until");
+    await endInput.fill("22:00");
+    await shot(page, "plan-sheet-end");
     await sheet.getByRole("button", { name: "Add plan", exact: true }).click();
 
     const card = page.locator(".card-plan", { hasText: "Ramen night" });
@@ -144,9 +136,9 @@ test("a plan with Until shows 19:00 - 22:00, Edit prefills it, and No end takes 
     await card.locator(".card-more").click();
     await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
     const edit = page.getByRole("dialog", { name: "Edit" });
-    assert.equal(await edit.locator('[data-end="until"]').getAttribute("aria-pressed"), "true");
-    assert.equal(await edit.locator("#admin-end-until").inputValue(), "22:00");
-    await edit.locator("#admin-end-until").scrollIntoViewIfNeeded();
+    const editEnd = edit.getByLabel("End time", { exact: true });
+    assert.equal(await editEnd.inputValue(), "22:00");
+    await editEnd.scrollIntoViewIfNeeded();
     await shot(page, "plan-edit-prefilled");
 
     // Moving the start alone keeps the length of the plan: the end moves with it.
@@ -156,10 +148,10 @@ test("a plan with Until shows 19:00 - 22:00, Edit prefills it, and No end takes 
     await card.getByText(/20:00 - 23:00 · Lena/).waitFor();
     assert.equal((await call("GET", "/api/plans", host.token)).plans[0].endsAt, Date.parse("2026-11-13T22:00:00Z"), "the same 3 hours, from 20:00");
 
-    // No end clears it and the card goes back to the plain time.
+    // Clearing the end input removes it and the card goes back to the plain time.
     await card.locator(".card-more").click();
     await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
-    await edit.locator('[data-end="none"]').click();
+    await editEnd.fill("");
     await edit.getByRole("button", { name: "Save", exact: true }).click();
     await edit.waitFor({ state: "detached" });
     await card.getByText(/20:00 · Lena/).waitFor();

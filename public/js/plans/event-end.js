@@ -1,31 +1,26 @@
 import { clockText, zonedParts } from "../when.js";
 import { END_COPY } from "./event-end-copy.js";
 
-/** Quick end picks, in minutes after the start. */
-export const END_PICKS = [60, 120, 180];
-
-/** A fresh end draft: no end, nothing touched yet. */
+/** A fresh end draft: no end clock, nothing touched yet. */
 export function emptyEnd() {
-  return { mode: "none", minutes: 0, until: "", touched: false, error: "" };
+  return { until: "", touched: false, error: "" };
 }
 
-/** The draft for an existing event: its end as an "until" clock in `tz`, untouched. */
+/** The draft for an existing event: its end as a clock in `tz`, untouched. */
 export function endFromItem(item, tz = "Europe/Berlin") {
   const draft = emptyEnd();
   if (!item?.endsAt) return draft;
   const part = zonedParts(item.endsAt, tz);
-  return { ...draft, mode: "until", until: clockText(part.hour, part.minute) };
+  return { ...draft, until: clockText(part.hour, part.minute) };
 }
 
 /**
  * What to send for the end. An untouched draft sends nothing, so the server keeps the end as it is.
- * No end sends null to clear it; a quick pick sends a duration; "until" sends the clock.
+ * An empty clock sends null to clear the end; a filled one sends the clock.
  */
 export function endPayload(draft) {
   if (!draft?.touched) return {};
-  if (draft.mode === "duration") return { durationMin: draft.minutes };
-  if (draft.mode === "until") return { endsAt: draft.until };
-  return { endsAt: null };
+  return { endsAt: draft.until || null };
 }
 
 /**
@@ -33,10 +28,9 @@ export function endPayload(draft) {
  * A plan needs a start for any end (`needsStart`); a social starts now when it has none.
  */
 export function endError(draft, start = "", needsStart = false) {
-  if (!draft || draft.mode === "none") return "";
+  if (!draft?.until) return "";
   if (needsStart && !start) return END_COPY.needsStart;
-  if (draft.mode !== "until") return "";
-  if (!/^\d{2}:\d{2}$/.test(draft.until || "")) return END_COPY.pickUntil;
+  if (!/^\d{2}:\d{2}$/.test(draft.until)) return END_COPY.pickEnd;
   return start && draft.until <= start ? END_COPY.afterStart : "";
 }
 

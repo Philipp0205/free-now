@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { compactWhen } from "../public/js/compact-home.js";
 import { eventIsNow, socialPinState } from "../public/js/map-pin.js";
-import { END_PICKS, emptyEnd, endError, endFromItem, endPayload, eventRange } from "../public/js/plans/event-end.js";
+import { emptyEnd, endError, endFromItem, endPayload, eventRange } from "../public/js/plans/event-end.js";
 import { END_COPY } from "../public/js/plans/event-end-copy.js";
 import { zonedInstant } from "../public/js/when.js";
 
@@ -27,46 +27,39 @@ test("zonedInstant is NaN for a bad day or clock", () => {
   assert.ok(Number.isNaN(zonedInstant("14.11.2026", "19:00", BERLIN)));
 });
 
-test("the quick picks are 1h, 2h and 3h", () => {
-  assert.deepEqual(END_PICKS, [60, 120, 180]);
-  assert.deepEqual(END_PICKS.map(END_COPY.pick), ["1h", "2h", "3h"]);
-});
-
 test("an untouched draft sends nothing, so the server keeps the end", () => {
   assert.deepEqual(endPayload(emptyEnd()), {});
   assert.deepEqual(endPayload(endFromItem({ endsAt: at("2026-11-14T21:00:00Z") }, BERLIN)), {});
 });
 
-test("a touched draft sends a clear, a duration or an until clock", () => {
-  assert.deepEqual(endPayload({ ...emptyEnd(), touched: true }), { endsAt: null }, "No end clears it");
-  assert.deepEqual(endPayload({ ...emptyEnd(), mode: "duration", minutes: 120, touched: true }), { durationMin: 120 });
-  assert.deepEqual(endPayload({ ...emptyEnd(), mode: "until", until: "22:00", touched: true }), { endsAt: "22:00" });
+test("a touched draft sends the end clock, or null when it is empty", () => {
+  assert.deepEqual(endPayload({ ...emptyEnd(), touched: true }), { endsAt: null }, "an empty end clears it");
+  assert.deepEqual(endPayload({ ...emptyEnd(), until: "22:00", touched: true }), { endsAt: "22:00" });
 });
 
-test("an event's end opens the edit sheet as an until clock in the app zone", () => {
+test("an event's end opens the edit sheet as a clock in the app zone", () => {
   assert.deepEqual(
     endFromItem({ endsAt: at("2026-11-14T21:00:00Z") }, BERLIN),
-    { mode: "until", minutes: 0, until: "22:00", touched: false, error: "" },
+    { until: "22:00", touched: false, error: "" },
   );
   assert.deepEqual(endFromItem({ endsAt: null }, BERLIN), emptyEnd());
   assert.deepEqual(endFromItem(null, BERLIN), emptyEnd());
 });
 
-test("endError: a plan needs a start, until needs a clock after the start", () => {
-  const until = (value: string) => ({ ...emptyEnd(), mode: "until", until: value, touched: true });
-  const duration = { ...emptyEnd(), mode: "duration", minutes: 60, touched: true };
+test("endError: a plan needs a start, the end must be a clock after the start", () => {
+  const end = (value: string) => ({ ...emptyEnd(), until: value, touched: true });
   assert.equal(endError(emptyEnd(), "", true), "", "no end is always fine");
-  assert.equal(endError(duration, "", true), END_COPY.needsStart, "a plan without a time cannot end");
-  assert.equal(endError(duration, "", false), "", "a social starts now, so a duration works");
-  assert.equal(endError(until(""), "19:00", true), END_COPY.pickUntil);
-  assert.equal(endError(until("18:00"), "19:00", true), END_COPY.afterStart);
-  assert.equal(endError(until("19:00"), "19:00", true), END_COPY.afterStart, "the same minute is not an end");
-  assert.equal(endError(until("22:00"), "19:00", true), "");
-  assert.equal(endError(until("22:00"), "", false), "", "a live social has no start clock to compare");
+  assert.equal(endError(end(""), "19:00", true), "", "a cleared end is fine");
+  assert.equal(endError(end("22:00"), "", true), END_COPY.needsStart, "a plan without a time cannot end");
+  assert.equal(endError(end("22:00"), "", false), "", "a live social has no start clock to compare");
+  assert.equal(endError(end("7pm"), "19:00", true), END_COPY.pickEnd, "not a clock");
+  assert.equal(endError(end("18:00"), "19:00", true), END_COPY.afterStart);
+  assert.equal(endError(end("19:00"), "19:00", true), END_COPY.afterStart, "the same minute is not an end");
+  assert.equal(endError(end("22:00"), "19:00", true), "");
 });
 
 test("the copy has no em dash", () => {
-  for (const text of [END_COPY.needsStart, END_COPY.pickUntil, END_COPY.afterStart, END_COPY.pickLabel(60), END_COPY.pickLabel(120)]) {
+  for (const text of [END_COPY.needsStart, END_COPY.pickEnd, END_COPY.afterStart, END_COPY.endLabel]) {
     assert.ok(!text.includes("\u2014"), text);
   }
 });
