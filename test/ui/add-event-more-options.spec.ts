@@ -49,7 +49,7 @@ const openFree = (page: Page) => page.getByRole("button", { name: "Let friends k
 const moreRow = (page: Page) => page.locator("form.sheet").getByRole("button", { name: "More options", exact: true });
 
 /** The folded fields, by the selector each one draws. */
-const FOLDED = { description: "#sheet-description", photo: ".event-photo-field", ends: ".end-picks", repeats: "#plan-repeat", who: ".invite-field" };
+const FOLDED = { description: "#sheet-description", photo: ".event-photo-field", ends: "#free-end-time", repeats: "#plan-repeat", who: ".invite-field" };
 
 async function folded(page: Page, key: keyof typeof FOLDED): Promise<number> {
   return page.locator(`form.sheet ${FOLDED[key]}`).count();
@@ -152,14 +152,14 @@ test("the Free now sheet folds photo, ends and who it is for, and opens on its o
     assert.equal(await folded(page, "repeats"), 0);
     await shot(page, "free-open");
 
-    await sheet.locator('[data-end="60"]').click();
+    await sheet.getByLabel("End time", { exact: true }).fill("21:00");
     await row.click();
-    assert.equal(await row.locator(".more-options-summary").innerText(), "1h");
+    assert.equal(await row.locator(".more-options-summary").innerText(), "Until 21:00");
     await shot(page, "free-summary");
     await row.click();
     await sheet.locator(".invite-field").getByRole("button", { name: "Bea", exact: true }).click();
     await row.click();
-    assert.equal(await row.locator(".more-options-summary").innerText(), "1h · Private · with Bea");
+    assert.equal(await row.locator(".more-options-summary").innerText(), "Until 21:00 · Private · with Bea");
 
     await sheet.getByRole("button", { name: "I'm free", exact: true }).click();
     await page.locator("[data-social]").waitFor();
