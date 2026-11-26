@@ -116,17 +116,19 @@ test("friend toggles I'm in and undoes; host stays In ✓; overflow actions work
       await card.locator(".in-toggle").click();
       await card.locator(".in-toggle.on").waitFor();
 
+      await card.getByRole("button", { name: "Can't make it", exact: true }).waitFor();
       await card.locator(".card-more").click();
       const menu = page.getByRole("menu");
       await menu.getByRole("menuitem", { name: "Pick arrival time" }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: "Share link" }).count(), 0);
-      await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: "Can't make it" }).count(), 0);
       await menu.getByRole("menuitem", { name: "Open in Maps" }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: "Edit" }).count(), 0);
       assert.equal(await menu.getByRole("menuitem", { name: "End plan" }).count(), 0);
       await page.screenshot({ path: shot("friend-menu-w360.png") });
       assert.deepEqual(await noOverlap(page, ".card-plan"), []);
-      await menu.getByRole("menuitem", { name: "Can't make it" }).click();
+      await page.keyboard.press("Escape");
+      await card.getByRole("button", { name: "Can't make it", exact: true }).click();
       await card.locator(".in-toggle:not(.on)").waitFor();
 
       await card.locator(".card-more").click();
@@ -264,9 +266,10 @@ test("map card has the In toggle and ⋯ menu, and the menu stays on screen", { 
       }
       await card.locator(".in-toggle.on").waitFor();
       await page.screenshot({ path: shot(`map-card-w${width}.png`) });
+      await card.getByRole("button", { name: "Can't make it", exact: true }).waitFor();
       await card.locator(".card-more").click();
       const menu = page.getByRole("menu");
-      await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: "Can't make it" }).count(), 0);
       assert.equal(await menu.getByRole("menuitem", { name: "Edit", exact: true }).count(), 0);
       assert.equal(await menu.getByRole("menuitem", { name: "Open in Maps" }).count(), 0, "map ⋯ has no duplicate Open in Maps");
       assert.equal(await card.getByRole("link", { name: "Open in Maps" }).count(), 1, "quiet Open in Maps stays on the map card");

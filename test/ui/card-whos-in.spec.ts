@@ -171,7 +171,7 @@ test("when the only reply is can't, the card still says Waiting for friends", { 
   }
 });
 
-test("saying Can't make it from the menu takes you off the card and into the details", { timeout: 120_000 }, async () => {
+test("saying Can't make it from the card takes you off the card and into the details", { timeout: 120_000 }, async () => {
   const { host, alex } = await circle();
   const { plan } = await hangry.call("POST", "/api/plans", host.token, { note: "Movie night", time: "20:00" });
   await hangry.call("POST", `/api/plans/${plan.id}/reply`, alex.token, { reply: "in" });
@@ -181,8 +181,7 @@ test("saying Can't make it from the menu takes you off the card and into the det
     const card = page.locator(`.card-plan[data-plan="${plan.id}"]`);
     await card.locator(".who-row", { hasText: "You're in" }).waitFor();
     assert.deepEqual(await faces(card), ["H", "A"]);
-    await card.locator(".card-more").click();
-    await page.getByRole("menuitem", { name: "Can't make it" }).click();
+    await card.locator(".cant-toggle").click();
     await card.locator(".who-row", { hasText: "Waiting for friends" }).waitFor();
     assert.equal(await body(card).getByText(/can't|You're in/).count(), 0);
     assert.deepEqual(await faces(card), ["H"]);

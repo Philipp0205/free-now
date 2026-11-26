@@ -220,9 +220,10 @@ test("the host stops sharing in Edit; the old link no longer works and Share mak
     const card = friendPage.locator(".card-plan", { hasText: "Board games" });
     await card.waitFor();
     await card.getByRole("button", { name: "Share Board games", exact: true }).waitFor();
+    await card.getByRole("button", { name: "Can't make it", exact: true }).waitFor();
     await card.getByRole("button", { name: /^More for / }).click();
     const menu = friendPage.getByRole("menu");
-    await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: "Can't make it" }).count(), 0);
     assert.equal(await menu.getByRole("menuitem", { name: "Share link" }).count(), 0, "Share lives on the card now");
     for (const name of ["Edit", "End plan", "Stop sharing"]) {
       assert.equal(await menu.getByRole("menuitem", { name, exact: true }).count(), 0, `friend should not see ${name}`);

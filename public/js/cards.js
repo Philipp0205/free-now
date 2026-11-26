@@ -5,8 +5,7 @@ import { chatRow } from "./chat.js";
 import { youAreAdmin } from "./members.js";
 import { canShareCircles, endManaged, mapsUrl, openAdminEdit, openArrivalPicker, openEventDetail, openShareCircles, planCirclesLine } from "./event-sheets.js";
 import { clock, appTz, el, icon, remaining } from "./lib.js";
-import { inReply } from "./composer.js";
-import { arrivalDefault, arriveClock, avatarStack, inToggle, replySummary, sendReply } from "./replies.js";
+import { arrivalDefault, arriveClock, avatarStack, replySummary, sendReply } from "./replies.js";
 import { avatar } from "./avatars.js";
 import { compactTitle, compactWhen, compactWho } from "./compact-home.js";
 import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
@@ -114,7 +113,7 @@ export function socialCard(social) {
       ]),
       eventPhoto("social", social),
       chatRow("social", social),
-      social.removedBy ? null : inToggle("social", social, { locked: mine }),
+      cardActions("social", social, { locked: mine, share: false }),
     ]),
   ]);
 }
@@ -288,8 +287,6 @@ export function cardOverflow(kind, item, { onMap = false } = {}) {
   const open = state.cardMenu === key;
   const hostish = canManageEvent(item);
   const mine = item.joined?.find((person) => person.id === state.me.user.id);
-  const inNow = Boolean(mine) && inReply(mine);
-  const declined = mine?.reply === "declined";
   const maybe = mine?.reply === "maybe";
   const isHost = item.creator?.id === state.me.user.id;
   const chosen = arriveClock(mine);
@@ -327,11 +324,6 @@ export function cardOverflow(kind, item, { onMap = false } = {}) {
       text: "Maybe",
       action: () => { state.cardMenu = null; void sendReply(kind, item, "maybe"); },
       on: maybe,
-    });
-    items.push({
-      text: "Can't make it",
-      action: () => { state.cardMenu = null; void sendReply(kind, item, "declined"); },
-      on: declined,
     });
   }
   if (!item.removedBy && (kind === "social" || planOpen(item))) items.push(muteRow(kind, item));
