@@ -4,6 +4,9 @@ import { render } from "./render.js";
 import { screenHeader } from "./circles.js";
 import { compactRow, planCard, socialCard } from "./cards.js";
 import { writeCompactHome } from "./compact-home.js";
+import { isJoining } from "./plans/joining-filter.js";
+import { JOINING_COPY } from "./plans/joining-filter-copy.js";
+import { joiningChip } from "./plans/joining-chip.js";
 import { awayLine } from "./members.js";
 import { homeChatBanner } from "./alerts.js";
 import { chatChip } from "./chat.js";
@@ -53,18 +56,23 @@ export function home() {
     ...later.map((social) => ["social", social]),
     ...sortedPlans(state.plans).map((plan) => ["plan", plan]),
   ];
-  if (events.length) {
-    parts.push(el("div", { class: "section" }, [
-      listToggle(),
-      state.compactHome
-        ? el("div", { class: "compact-list" }, events.map(([kind, item]) => compactRow(kind, item)))
-        : el("div", { class: "cards" }, events.map(([kind, item]) => (kind === "plan" ? planCard(item) : socialCard(item)))),
-    ]));
-  }
+  if (events.length) parts.push(eventsSection(events));
   parts.push(el("div", { class: "past-entry" }, [
     el("button", { class: "text-btn", type: "button", text: "Past events", onclick: () => { void openPast(); } }),
   ]));
   return el("div", {}, parts);
+}
+
+/** The tools row (Joining only, Cards / Compact) and the list, or the filter's empty note. */
+function eventsSection(events) {
+  const shown = state.joiningOnly ? events.filter(([, item]) => isJoining(item, state.me.user.id)) : events;
+  const list = state.compactHome
+    ? el("div", { class: "compact-list" }, shown.map(([kind, item]) => compactRow(kind, item)))
+    : el("div", { class: "cards" }, shown.map(([kind, item]) => (kind === "plan" ? planCard(item) : socialCard(item))));
+  return el("div", { class: "section" }, [
+    el("div", { class: "list-tools" }, [joiningChip(), listToggle()]),
+    shown.length ? list : el("p", { class: "joining-empty", text: JOINING_COPY.homeEmpty }),
+  ]);
 }
 
 function setCompactHome(on) {

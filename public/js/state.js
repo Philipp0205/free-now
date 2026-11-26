@@ -1,4 +1,5 @@
 import { readCompactHome } from "./compact-home.js";
+import { readJoiningOnly } from "./plans/joining-filter.js";
 import { emptyEnd } from "./plans/event-end.js";
 import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
 import { emptyInvites } from "./plans/private-event.js";
@@ -34,6 +35,8 @@ export const state = {
   mapPlans: [],
   /** Now tab: true lists events as one compact line each, false as cards. Saved per device. */
   compactHome: readCompactHome(),
+  /** Now and Events: true hides events the person is not joining. Saved per device. */
+  joiningOnly: readJoiningOnly(),
   /** Events tab: "calendar" or "map". Same circle scope (mapAllCircles) for both. */
   eventsView: readEventsView(),
   /** First of the month the calendar shows, and the picked day. Set on first show. */
