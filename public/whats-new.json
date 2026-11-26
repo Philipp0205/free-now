@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-26-joining-only",
+    "date": "2026-11-26",
+    "title": "Joining only filter",
+    "bullets": [
+      "A Joining only filter on Now and Events hides events you have not joined, and keeps ones you host, said yes to, or marked maybe.",
+      "The app remembers that filter on this device."
+    ]
+  },
+  {
     "id": "2026-11-26-time-picker",
     "date": "2026-11-26",
     "title": "Set a start and an end time",

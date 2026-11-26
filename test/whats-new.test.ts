@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v162 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v163 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v162");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v163");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,8 +665,19 @@ test("the build label is hangry-v162 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the time picker entry is the newest, in plain words without an em dash, and the photo details entry follows it", () => {
+test("the joining only entry is the newest, in plain words without an em dash, and the time picker entry follows it", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-26-joining-only");
+  assert.equal(top.date, "2026-11-26");
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  assert.match(top.bullets.join(" "), /Joining only/);
+  assert.match(top.bullets.join(" "), /remembers that filter/);
+  assert.equal(RAW[1].id, "2026-11-26-time-picker", "the time picker entry follows it");
+});
+
+test("the time picker entry is kept, in plain words without an em dash, and the photo details entry follows it", () => {
+  const top = RAW[1];
   assert.equal(top.id, "2026-11-26-time-picker");
   assert.equal(top.date, "2026-11-26");
   assert.ok(top.title.length <= 60);
@@ -675,7 +686,7 @@ test("the time picker entry is the newest, in plain words without an em dash, an
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
   assert.match(top.bullets.join(" "), /time picker/);
   assert.match(top.bullets.join(" "), /length buttons are gone/);
-  assert.equal(RAW[1].id, "2026-11-25-event-photo-fix", "the photo details entry follows it");
+  assert.equal(RAW[2].id, "2026-11-25-event-photo-fix", "the photo details entry follows it");
 });
 
 test("the photo details entry is kept, in plain words without an em dash, and the flic press entry follows it", () => {
