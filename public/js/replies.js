@@ -10,6 +10,7 @@ import { inReply } from "./composer.js";
 import { guestLine } from "./map-card.js";
 import { avatar } from "./avatars.js";
 import { MAYBE_COPY } from "./plans/maybe-copy.js";
+import { CANT_COPY } from "./plans/cant-copy.js";
 
 export function arriveClock(person) {
   return person?.arriveAt ? clock(person.arriveAt) : "";
@@ -119,6 +120,27 @@ export function maybeToggle(kind, item) {
       tick();
       if (on) void leaveEvent(kind, item);
       else void sendReply(kind, item, "maybe");
+    },
+  });
+}
+
+/** The Can't make it button: tap to decline, tap again to take it back. Not for the host, who stays In. */
+export function cantToggle(kind, item) {
+  const mine = item.joined?.find((person) => person.id === state.me.user.id);
+  const on = mine?.reply === "declined";
+  return el("button", {
+    class: ["cant-toggle", on ? "on" : ""].filter(Boolean).join(" "),
+    type: "button",
+    text: on ? CANT_COPY.buttonOn : CANT_COPY.button,
+    "aria-pressed": String(on),
+    "aria-label": CANT_COPY.button,
+    title: on ? CANT_COPY.titleOn : CANT_COPY.titleOff,
+    onclick: (event) => {
+      event.stopPropagation();
+      state.cardMenu = null;
+      tick();
+      if (on) void leaveEvent(kind, item);
+      else void sendReply(kind, item, "declined");
     },
   });
 }

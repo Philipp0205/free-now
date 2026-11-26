@@ -65,7 +65,8 @@ test("friend says maybe from ⋯, stays not In, then taps I'm in", { timeout: 18
     await card.locator(".card-more").click();
     const rows = await menuRows(page);
     const texts = rows.map((row) => row.text);
-    assert.equal(texts.indexOf("Maybe") + 1, texts.indexOf("Can't make it"), `Maybe sits right above Can't: ${texts}`);
+    assert.ok(texts.includes("Maybe"), `Maybe stays in the menu: ${texts}`);
+    assert.ok(!texts.includes("Can't make it"), `Can't make it is a card button now: ${texts}`);
     assert.equal(rows.find((row) => row.text === "Maybe")?.on, false);
     await page.getByRole("menuitem", { name: "Maybe" }).click();
 
@@ -74,7 +75,7 @@ test("friend says maybe from ⋯, stays not In, then taps I'm in", { timeout: 18
     assert.match(await card.locator(".in-toggle").innerText(), /I'm in/);
     await card.locator(".card-more").click();
     assert.equal((await menuRows(page)).find((row) => row.text === "Maybe")?.on, true);
-    assert.equal((await menuRows(page)).find((row) => row.text === "Can't make it")?.on, false);
+    assert.equal(await card.locator(".cant-toggle").getAttribute("aria-pressed"), "false");
     await card.locator(".card-more").click();
     await page.locator(".card-menu").waitFor({ state: "detached" });
 

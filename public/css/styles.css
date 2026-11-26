@@ -673,7 +673,8 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   flex: none;
 }
 .in-toggle,
-.maybe-toggle {
+.maybe-toggle,
+.cant-toggle {
   appearance: none;
   border: 0;
   width: 100%;
@@ -688,7 +689,8 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   font-weight: 650;
 }
 .in-toggle.on,
-.maybe-toggle.on {
+.maybe-toggle.on,
+.cant-toggle.on {
   background: var(--fill);
   color: var(--in-ink);
   box-shadow: none;
@@ -698,7 +700,8 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
   cursor: default;
 }
 .in-toggle:focus-visible,
-.maybe-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.maybe-toggle:focus-visible,
+.cant-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* In and Share on one row on open plans. In keeps the room, Share hugs its label. */
 .card-cta {
   display: flex;
@@ -709,8 +712,9 @@ html[data-ak-scheme="light"] .compact-row { --tint: 8%; --tint-social: 6%; }
 }
 .card-cta > .in-toggle,
 .card-cta > .maybe-toggle,
-.map-card .card-cta > .in-toggle { flex: 1 1 auto; min-width: 0; width: auto; margin-top: 0; }
-/* The event sheet: In and Maybe on one row, Share on its own row under them. */
+.card-cta > .cant-toggle,
+.map-card .card-cta > .in-toggle { flex: 1 1 0; min-width: 0; width: auto; margin-top: 0; }
+/* The event sheet: In, Maybe and Can't on one row, Share on its own row under them. */
 .rsvp-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .rsvp-stack > .card-cta { margin-top: 0; }
 .card-share {

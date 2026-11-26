@@ -119,7 +119,7 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(SHOT_DIR, `${name}-${size.width}x${size.height}.png`) });
 }
 
-/** Share and In sit on one row inside the card, both 44px+, label on one line, nothing scrolls sideways. */
+/** Non-hosts: In and Can't on one row; hosts: In and Share on one row. Share is 44px+, on one line, inside the card, nothing scrolls sideways. */
 async function checkLayout(page: Page, card: Locator, where: string) {
   const out = await card.evaluate((node) => {
     const box = node.getBoundingClientRect();
@@ -135,10 +135,18 @@ async function checkLayout(page: Page, card: Locator, where: string) {
     if (share.scrollWidth > share.clientWidth + 1) problems.push("label clipped");
     if (toggle) {
       const t = toggle.getBoundingClientRect();
+      const cant = node.querySelector(".cant-toggle")?.getBoundingClientRect();
       if (t.height < 44) problems.push(`toggle short ${t.height}`);
-      if (Math.abs(t.top - s.top) > 1) problems.push("share and In are not on one row");
-      if (t.right > s.left + 0.5) problems.push("share overlaps In");
-      if (t.width < 100) problems.push(`In squeezed to ${t.width}`);
+      if (cant) {
+        // A non-host: In and Can't on one row, Share on its own row below.
+        if (Math.abs(t.top - cant.top) > 1) problems.push("In and Can't are not on one row");
+        if (s.top < t.bottom - 0.5) problems.push("share is not below In");
+        if (t.width < 100) problems.push(`In squeezed to ${t.width}`);
+      } else {
+        if (Math.abs(t.top - s.top) > 1) problems.push("share and In are not on one row");
+        if (t.right > s.left + 0.5) problems.push("share overlaps In");
+        if (t.width < 100) problems.push(`In squeezed to ${t.width}`);
+      }
     }
     for (const other of node.querySelectorAll(".chat-row, .card-more")) {
       const r = other.getBoundingClientRect();

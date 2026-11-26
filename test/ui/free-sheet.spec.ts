@@ -332,9 +332,10 @@ test("later and tomorrow replies keep I'm in on the card and Can't in the menu",
         const card = viewer.locator("article", { has: viewer.getByRole("heading", { name: label, exact: true }) });
         await card.scrollIntoViewIfNeeded();
         await card.getByRole("button", { name: "I'm in" }).waitFor();
+        await card.getByRole("button", { name: "Can't make it", exact: true }).waitFor();
         await card.getByRole("button", { name: /^More for / }).click();
         const menu = viewer.getByRole("menu");
-        await menu.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+        assert.equal(await menu.getByRole("menuitem", { name: "Can't make it" }).count(), 0);
         await menu.getByRole("menuitem", { name: "Pick arrival time" }).waitFor();
         const clipped = await menu.evaluate((node) => {
           const r = node.getBoundingClientRect();
@@ -598,8 +599,7 @@ test("a 5xx while the app is open shows the retry banner and a toast", { timeout
     const later = page.locator(".sheet button", { hasText: "Not now" });
     if (await later.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) await later.click();
     await page.getByRole("button", { name: "I'm in" }).waitFor();
-    await page.getByRole("button", { name: /^More for / }).click();
-    await page.getByRole("menuitem", { name: "Can't make it" }).waitFor();
+    await page.getByRole("button", { name: "Can't make it", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     await page.route("**/api/**", (route) => route.fulfill({
       status: 500,
@@ -607,8 +607,7 @@ test("a 5xx while the app is open shows the retry banner and a toast", { timeout
       body: JSON.stringify({ error: "internal error" }),
     }));
     await page.getByText("Something went wrong. Retrying…").waitFor({ timeout: 8000 });
-    await page.getByRole("button", { name: /^More for / }).click();
-    await page.getByRole("menuitem", { name: "Can't make it" }).click();
+    await page.getByRole("button", { name: "Can't make it", exact: true }).click();
     await page.getByText("Something went wrong. Try again.").waitFor();
     const stacked = await page.evaluate(() => {
       const banner = document.querySelector(".status-banner")?.getBoundingClientRect();

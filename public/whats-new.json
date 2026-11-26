@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-26-cant-make-it-button",
+    "date": "2026-11-26",
+    "title": "Can't make it is now a button",
+    "bullets": [
+      "Can't make it is now a button on the event card, next to I'm in.",
+      "You can switch back to I'm in from the card, and the option is no longer only in the menu."
+    ]
+  },
+  {
     "id": "2026-11-25-event-photo-fix",
     "date": "2026-11-25",
     "title": "Photos on events, fixed",

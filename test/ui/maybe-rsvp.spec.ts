@@ -61,12 +61,12 @@ async function lists(details: Locator) {
 async function fitsSheet(page: Page, details: Locator) {
   const row = details.locator(".sheet-scroll .card-cta").first();
   const box = await row.boundingBox();
-  assert.ok(box, "the In and Maybe row has a box");
+  assert.ok(box, "the In, Maybe and Can't row has a box");
   const width = await page.evaluate(() => document.documentElement.clientWidth);
   assert.ok(box.x >= -1 && box.x + box.width <= width + 1, `the row fits: ${box.x}+${box.width} in ${width}`);
-  for (const name of ["I'm in", "Maybe"]) {
+  for (const name of ["I'm in", "Maybe", "Can't"]) {
     const button = await details.getByRole("button", { name: new RegExp(`^${name}`) }).first().boundingBox();
-    assert.ok(button && button.width >= 100 && button.height >= 44, `${name} is a real tap target (${button?.width}x${button?.height})`);
+    assert.ok(button && button.width >= 80 && button.height >= 44, `${name} is a real tap target (${button?.width}x${button?.height})`);
   }
 }
 
