@@ -9,6 +9,15 @@
     ]
   },
   {
+    "id": "2026-11-26-time-picker",
+    "date": "2026-11-26",
+    "title": "Set a start and an end time",
+    "bullets": [
+      "Set a start and an end with a time picker when you add or edit an event.",
+      "The 1, 2 and 3 hour length buttons are gone. Leave the end empty if there is no end."
+    ]
+  },
+  {
     "id": "2026-11-25-event-photo-fix",
     "date": "2026-11-25",
     "title": "Photos on events, fixed",

@@ -283,7 +283,7 @@ export function adminEditSheet() {
             }),
             edit.kind === "plan" ? planTimeError() : null,
           ]),
-          endField(edit.end, render, "admin-end"),
+          endField(edit.end, "admin-end"),
           repeatEditField(edit, paymentItem),
           paymentItem && paymentItem.creator?.id === state.me.user.id ? photoField(edit.photo, paymentItem, edit.kind) : null,
           paymentItem && paymentItem.creator?.id === state.me.user.id
