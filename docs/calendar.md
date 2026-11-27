@@ -13,8 +13,8 @@ Both use the same event shape and the same UID, so a plan does not show up twice
 - Endpoint: `GET /api/plans/:id/calendar.ics` with the normal `Authorization: Bearer` session.
 - Who: anyone who is currently a member of a circle the plan is shared with. A stranger, someone in an unlinked circle, or a guest the host removed gets `404`. An ended plan, or one on a past day, gets `410`.
 - The client fetches the file with the session header and saves it as a download named after the plan title (for example `sushi-night.ics`). The URL is never shared or opened directly.
-- Toast: "Saved to your calendar file. It will not update if the plan changes."
-- The file is a snapshot. Later edits, ends, or reply changes do not reach it. That is the main limitation, and why the feed exists.
+- Toast: "Saved to your calendar file. It will not update if the plan changes." On a re-save after the plan changed: "Saved again with the new time. Open the file to update your calendar."
+- The file is a snapshot (see Limitations).
 
 ## Calendar feed (subscription)
 
@@ -82,7 +82,7 @@ Never included: other guests' names, emails, attendees, chat, invite codes, shar
 
 ### Calendar wrapper
 
-`VERSION:2.0`, `PRODID:-//Spontaco//Calendar 1.0//EN`, `CALSCALE:GREGORIAN`, `METHOD:PUBLISH`, `X-WR-TIMEZONE:<APP_TZ>`. The feed also sets `X-WR-CALNAME:Spontaco`. Lines end in CRLF and are folded at 75 octets, counting UTF-8 bytes and never splitting a character. TEXT values escape `\`, `;`, `,` and newlines.
+`VERSION:2.0`, `PRODID:-//Spontaco//Calendar 1.0//EN`, `CALSCALE:GREGORIAN`, `METHOD:PUBLISH`, `X-WR-TIMEZONE:<APP_TZ>`. The feed also sets `X-WR-CALNAME:Spontaco`, `REFRESH-INTERVAL` and `X-PUBLISHED-TTL`. Lines end in CRLF and are folded at 75 octets, counting UTF-8 bytes and never splitting a character. TEXT values escape `\`, `;`, `,` and newlines.
 
 ## Time zones
 
@@ -95,11 +95,11 @@ Daylight saving edge cases follow RFC 5545 (section 3.3.5), and the app's own cl
 
 ## Limitations
 
-- **Refresh is up to the calendar app.** Your calendar app decides how often it checks for changes, which can take hours. Spontaco cannot push updates.
-- **The one-time file never updates.** Use the feed for that.
+- **Refresh is up to the calendar app.** The feed asks for a check every hour (`REFRESH-INTERVAL;VALUE=DURATION:PT1H` and `X-PUBLISHED-TTL:PT1H`, feed only, never in the one-time file). Apple Calendar honors this. Google Calendar ignores it and polls on its own schedule (about every 12 to 24 hours), so Google users may still wait. Spontaco cannot push updates.
+- **The one-time file is a snapshot.** Edits do not reach a file already in your calendar. After the host changes the day, time, end, place or title, the card menu item reads "Update calendar copy" (same action). The new file has the same UID and a higher `SEQUENCE`, so Apple Calendar and Google Calendar import replace the old event when it is opened. The client remembers what you saved in `localStorage` (`fn_calendar_saved`, plan id to the `SEQUENCE` of the saved file, at most 100 plans), using `calendarRev` from the plan payload (same number as `SEQUENCE`).
+- **Fixed length only without an end time.** A timed plan with no end shows 2 hours and says so in its description. A plan with an end time (`ends_at`) uses it.
 - **Revoking does not wipe copies.** After Reset link or Turn off, calendars keep showing what they last fetched until the subscription is removed there. The old link just returns 404.
 - **Removed plans just disappear.** A plan you lose access to is dropped, not sent as `CANCELLED`. Some clients only notice on their next full refresh.
-- **Fixed length.** Spontaco plans have no end time, so every timed plan shows 2 hours. Each timed event says so in its description.
 - **Anyone with the link can read the feed.** Treat it like a password. Reset it if it leaks.
 - **The token is in the URL path.** Calendar servers cannot send a header, so the secret is part of `/cal/<token>.ics`. That means the hosting platform's HTTP access logs (for example Railway's request logs) and the calendar provider that fetches the feed both see it. Spontaco itself never logs the feed URL: an error while serving `/cal/` is logged as "feed error" with the token replaced by `[token]`. If the link may have leaked, use Reset link (or Turn off). The old token stops working at once.
 - **Plans older than the 90-day history are deleted from Spontaco,** and they are already outside the 30-day window anyway.

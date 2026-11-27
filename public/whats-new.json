@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-27-calendar-copy-update",
+    "date": "2026-11-27",
+    "title": "Update your calendar copy after a change",
+    "bullets": [
+      "If you moved a plan after saving it to your calendar, the card menu now says Update calendar copy so you can refresh it.",
+      "Calendar feeds now ask your calendar app to check for changes every hour (Google Calendar still decides for itself)."
+    ]
+  },
+  {
     "id": "2026-11-27-map-card-menu",
     "date": "2026-11-27",
     "title": "Map card menu stays tappable",

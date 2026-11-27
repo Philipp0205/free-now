@@ -29,6 +29,8 @@ import { emptyPhotoDraft } from "./plans/event-photo-draft.js";
 import { savePhotoDraft } from "./plans/event-photo.js";
 import { eventPhoto, hostPhotoRow, photoField } from "./plans/event-photo-ui.js";
 import { liveToggle } from "./map-places/live-ui.js";
+import { calendarSavedState, planWhenWhere, readSaved } from "./calendar-saved.js";
+import { CALENDAR_OLD_TIME } from "./calendar-copy.js";
 
 export function openEventDetail(kind, item, from = "") {
   if (!item?.id) return;
@@ -484,6 +486,7 @@ async function saveAdminEdit(event) {
     Object.assign(body, endPayload(edit.end));
     if (picked.lat != null && picked.lng != null) body.precise = Boolean(picked.precise);
     const paymentItem = findEvent(edit.kind, edit.id);
+    const whenBefore = planWhenWhere(paymentItem);
     // Only the host may change who it is for; the server refuses anyone else.
     if (paymentItem?.creator?.id === state.me.user.id) body.invitees = inviteBody(edit.invites);
     if (edit.kind === "plan" && paymentItem?.creator?.id === state.me.user.id && edit.repeat !== edit.repeatWas) {
@@ -494,8 +497,15 @@ async function saveAdminEdit(event) {
     const photoNote = paymentItem?.creator?.id === state.me.user.id ? await savePhotoDraft(edit.kind, edit.id, edit.photo) : "";
     state.sheet = null;
     await refresh({ initial: true });
-    if (photoNote) state.error = photoNote;
+    state.error = photoNote || (edit.kind === "plan" ? staleCalendarNotice(edit.id, whenBefore) : "") || state.error;
   });
+}
+
+/** After a plan edit: the old-time notice, only when the when or where changed and a saved file is now stale. */
+function staleCalendarNotice(id, whenBefore) {
+  const plan = findEvent("plan", id);
+  if (!plan || planWhenWhere(plan) === whenBefore) return "";
+  return calendarSavedState(plan, readSaved()) === "stale" ? CALENDAR_OLD_TIME : "";
 }
 
 export function endManaged(kind, item) {

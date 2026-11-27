@@ -25,6 +25,8 @@ export type IcsCalendar = {
   name?: string;
   /** X-WR-TIMEZONE, a display hint. Times are UTC either way. */
   tz?: string;
+  /** Feed only: asks clients to poll this often (REFRESH-INTERVAL, X-PUBLISHED-TTL). */
+  refreshHours?: number;
   events: IcsEvent[];
 };
 
@@ -108,6 +110,13 @@ function eventLines(event: IcsEvent): string[] {
   ].filter(Boolean);
 }
 
+/** Polling hints. Apple Calendar honors them; Google Calendar ignores them and polls on its own. */
+function refreshLines(hours: number | undefined): string[] {
+  if (!hours || hours < 1) return [];
+  const duration = `PT${Math.floor(hours)}H`;
+  return [`REFRESH-INTERVAL;VALUE=DURATION:${duration}`, `X-PUBLISHED-TTL:${duration}`];
+}
+
 /** A whole VCALENDAR, CRLF line endings, folded, ending in CRLF. */
 export function buildCalendar(calendar: IcsCalendar): string {
   const lines = [
@@ -118,6 +127,7 @@ export function buildCalendar(calendar: IcsCalendar): string {
     "METHOD:PUBLISH",
     calendar.name ? `X-WR-CALNAME:${escapeText(calendar.name)}` : "",
     calendar.tz ? `X-WR-TIMEZONE:${escapeText(calendar.tz)}` : "",
+    ...refreshLines(calendar.refreshHours),
     ...calendar.events.flatMap(eventLines),
     "END:VCALENDAR",
   ].filter(Boolean);

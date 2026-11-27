@@ -9,6 +9,8 @@ import { arrivalDefault, arriveClock, avatarStack, replySummary, sendReply } fro
 import { avatar } from "./avatars.js";
 import { compactTitle, compactWhen, compactWho } from "./compact-home.js";
 import { addPlanToCalendar, cardActions, planOpen, remindCooling, remindFriends } from "./plan-share.js";
+import { calendarSavedState, readSaved } from "./calendar-saved.js";
+import { CALENDAR_ADD, CALENDAR_UPDATE } from "./calendar-copy.js";
 import { placeLine, planReplySummary, removedNote } from "./map-card.js";
 import { eventIsNow } from "./map-pin.js";
 import { eventRange } from "./plans/event-end.js";
@@ -309,7 +311,7 @@ export function cardOverflow(kind, item, { onMap = false } = {}) {
         action: () => { state.cardMenu = null; void remindFriends(item); },
       });
       items.push({
-        text: "Add to calendar",
+        text: calendarSavedState(item, readSaved()) === "stale" ? CALENDAR_UPDATE : CALENDAR_ADD,
         action: () => { state.cardMenu = null; void addPlanToCalendar(item); },
       });
     }

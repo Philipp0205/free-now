@@ -27,6 +27,8 @@ export const FEED_MAX_EVENTS = 200;
 /** Feed fetches per client. Calendar servers share addresses, so this is loose. */
 export const FEED_LIMIT = { limit: 120, windowMs: 60_000 };
 export const FEED_NAME = "Spontaco";
+/** How often the feed asks calendar apps to check for changes. */
+export const FEED_REFRESH_HOURS = 1;
 
 export type CalendarContext = {
   db: DatabaseSync;
@@ -154,7 +156,7 @@ export function feedCalendar(ctx: CalendarContext, viewer: UserRow): string {
   const today = isoDate(ctx.now, ctx.tz);
   const plans = visibleEvents(ctx.db, "plan", listFeedPlans(ctx.db, viewer.id, addDays(today, -FEED_PAST_DAYS), today, FEED_MAX_EVENTS), viewer.id);
   const events = plans.map((plan) => planEvent(ctx, plan, viewer.id, liveReply(ctx.db, plan.id, viewer.id)));
-  return buildCalendar({ name: FEED_NAME, tz: ctx.tz, events });
+  return buildCalendar({ name: FEED_NAME, tz: ctx.tz, refreshHours: FEED_REFRESH_HOURS, events });
 }
 
 /** A file name from the plan title: letters, digits, and dashes. */
