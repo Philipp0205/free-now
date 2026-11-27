@@ -643,9 +643,9 @@ test("entry dates read as a short day, month, and year", () => {
   assert.equal(SEEN_KEY, "fn_whats_new_seen");
 });
 
-test("the build label is hangry-v164 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
+test("the build label is hangry-v165 and the built worker precaches the changelog, the bundle, the kit and the vendor files", () => {
   const app = read("../public/js/app.js");
-  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v164");
+  assert.equal(/export const APP_VERSION = "([^"]+)"/.exec(app)?.[1], "hangry-v165");
   const paths = builtPrecache();
   assert.ok(paths.includes("/whats-new.json"));
   assert.ok(paths.includes("/js/app.js"));
@@ -665,28 +665,38 @@ test("the build label is hangry-v164 and the built worker precaches the changelo
   assert.doesNotMatch(read("../sw/sw.js"), /const (CACHE|SHELL) = /);
 });
 
-test("the Can't make it button entry is the newest, in plain words, and the joining only entry follows it", () => {
+test("the map card menu entry is the newest, in plain words", () => {
   const top = RAW[0];
+  assert.equal(top.id, "2026-11-27-map-card-menu");
+  assert.equal(top.date, "2026-11-27");
+  assert.ok(top.title.length <= 60);
+  assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
+  for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
+  assert.equal(RAW[1].id, "2026-11-26-cant-make-it-button", "the Can't make it entry follows it");
+});
+
+test("the Can't make it button entry is kept, in plain words, and the joining only entry follows it", () => {
+  const top = RAW[1];
   assert.equal(top.id, "2026-11-26-cant-make-it-button");
   assert.equal(top.date, "2026-11-26");
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
-  assert.equal(RAW[1].id, "2026-11-26-joining-only", "the joining only entry follows it");
+  assert.equal(RAW[2].id, "2026-11-26-joining-only", "the joining only entry follows it");
 });
 
 test("the joining only entry is kept, in plain words without an em dash, and the time picker entry follows it", () => {
-  const top = RAW[1];
+  const top = RAW[2];
   assert.equal(top.id, "2026-11-26-joining-only");
   assert.equal(top.date, "2026-11-26");
   assert.ok(top.bullets.length >= 2 && top.bullets.length <= 4);
   for (const text of [top.title, ...top.bullets]) assert.ok(!text.includes("\u2014"), text);
   assert.match(top.bullets.join(" "), /Joining only/);
   assert.match(top.bullets.join(" "), /remembers that filter/);
-  assert.equal(RAW[2].id, "2026-11-26-time-picker", "the time picker entry follows it");
+  assert.equal(RAW[3].id, "2026-11-26-time-picker", "the time picker entry follows it");
 });
 
 test("the time picker entry is kept, in plain words without an em dash, and the photo details entry follows it", () => {
-  const top = RAW[2];
+  const top = RAW[3];
   assert.equal(top.id, "2026-11-26-time-picker");
   assert.equal(top.date, "2026-11-26");
   assert.ok(top.title.length <= 60);
@@ -695,7 +705,7 @@ test("the time picker entry is kept, in plain words without an em dash, and the 
   for (const bullet of top.bullets) assert.ok(bullet.length <= 140, bullet);
   assert.match(top.bullets.join(" "), /time picker/);
   assert.match(top.bullets.join(" "), /length buttons are gone/);
-  assert.equal(RAW[3].id, "2026-11-25-event-photo-fix", "the photo details entry follows it");
+  assert.equal(RAW[4].id, "2026-11-25-event-photo-fix", "the photo details entry follows it");
 });
 
 test("the photo details entry is kept, in plain words without an em dash, and the flic press entry follows it", () => {
