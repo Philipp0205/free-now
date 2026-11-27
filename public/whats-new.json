@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-11-27-map-card-menu",
+    "date": "2026-11-27",
+    "title": "Map card menu stays tappable",
+    "bullets": [
+      "The ⋯ menu on a map card no longer slides under the top bar on small phones.",
+      "Every item in it, including Share with other circles, can be tapped again."
+    ]
+  },
+  {
     "id": "2026-11-26-cant-make-it-button",
     "date": "2026-11-26",
     "title": "Can't make it is now a button",
