@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { planSequence } from "../calendar/calendar.js";
 import { colorHex } from "../chat/chat-color.js";
 import {
   type PlanRow,
@@ -110,6 +111,8 @@ export function planPayload(db: DatabaseSync, plan: PlanRow, today: string, view
     // Only the rule, never the series id. The payload already goes only to people who can see the plan.
     recurrence: plan.recurrence ?? null,
     createdAt: plan.created_at,
+    // Same number as SEQUENCE in the calendar file. Rises when the day, time, end, title, place or description changes.
+    calendarRev: planSequence(plan),
     location: pointPayload(plan.lat, plan.lng),
     // Home circle. `circles` below still lists every linked circle.
     circleId: plan.circle_id,

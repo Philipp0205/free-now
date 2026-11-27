@@ -81,6 +81,15 @@ test("a calendar has the required header, CRLF everywhere, and a trailing CRLF",
   assert.equal(lines.some((line) => line.startsWith("DESCRIPTION") || line.startsWith("LOCATION") || line.startsWith("URL")), false, "empty fields are left out");
 });
 
+test("refreshHours adds polling hints for a feed, and a file without it has none", () => {
+  const feed = unfold(buildCalendar({ name: "Spontaco", refreshHours: 1, events: [BASE] }));
+  assert.ok(feed.includes("REFRESH-INTERVAL;VALUE=DURATION:PT1H\r\n"));
+  assert.ok(feed.includes("X-PUBLISHED-TTL:PT1H\r\n"));
+  const file = buildCalendar({ events: [BASE] });
+  assert.equal(file.includes("REFRESH-INTERVAL"), false);
+  assert.equal(file.includes("X-PUBLISHED-TTL"), false);
+});
+
 test("a single file has no calendar name", () => {
   const text = buildCalendar({ events: [{ ...BASE, when: { kind: "timed", startMs: Date.parse("2026-06-02T17:00:00Z"), endMs: Date.parse("2026-06-02T19:00:00Z") } }] });
   assert.equal(text.includes("X-WR-CALNAME"), false);

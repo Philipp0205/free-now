@@ -3,6 +3,8 @@ import { state } from "./state.js";
 import { api, friendlyMessage, isNetworkFailure, rememberCircle } from "./session.js";
 import { render } from "./render.js";
 import { copyWithSelection } from "./calendar-sync.js";
+import { calendarSavedState, readSaved, sequenceFromIcs, writeSaved } from "./calendar-saved.js";
+import { CALENDAR_SAVED, CALENDAR_SAVED_AGAIN } from "./calendar-copy.js";
 import { openInstallGuide } from "./push-install.js";
 import { appTz, clock, copyText, el, icon, run, scheduleErrorClear } from "./lib.js";
 import { cantToggle, inToggle, maybeToggle } from "./replies.js";
@@ -75,8 +77,6 @@ export async function remindFriends(plan) {
   }
 }
 
-const CALENDAR_SAVED = "Saved to your calendar file. It will not update if the plan changes.";
-
 /** A file name from the plan title, same rule as the server. */
 function calendarFileName(note) {
   const slug = String(note || "")
@@ -93,6 +93,7 @@ function calendarFileName(note) {
 /** Fetches the .ics with the session header, then saves it as a file. The link itself is never shared. */
 export async function addPlanToCalendar(plan) {
   let saved = false;
+  let resaved = false;
   await run(async () => {
     let response;
     try {
@@ -115,12 +116,16 @@ export async function addPlanToCalendar(plan) {
       error.status = response.status;
       throw error;
     }
-    const blob = new Blob([await response.text()], { type: "text/calendar;charset=utf-8" });
-    saveBlob(blob, calendarFileName(plan.note));
+    const text = await response.text();
+    saveBlob(new Blob([text], { type: "text/calendar;charset=utf-8" }), calendarFileName(plan.note));
+    // The file's own SEQUENCE is what the user got, so store that.
+    const rev = sequenceFromIcs(text) ?? plan.calendarRev ?? 0;
+    resaved = calendarSavedState(plan, readSaved()) === "stale";
+    writeSaved(plan.id, rev);
     saved = true;
   });
   if (saved) {
-    state.error = CALENDAR_SAVED;
+    state.error = resaved ? CALENDAR_SAVED_AGAIN : CALENDAR_SAVED;
     render();
     scheduleErrorClear();
   }
