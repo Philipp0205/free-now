@@ -261,6 +261,8 @@ export function placeOpenCardMenus() {
   const tabbar = document.querySelector(".tabbar");
   const tabTop = tabbar ? tabbar.getBoundingClientRect().top : window.innerHeight;
   const floor = Math.min(window.innerHeight, tabTop > 0 ? tabTop : window.innerHeight) - gap;
+  // The sticky top bar covers the top of the viewport like the tabbar covers the bottom.
+  const ceiling = Math.max(0, document.querySelector(".ak-navbar")?.getBoundingClientRect().bottom || 0);
   document.querySelectorAll(".card-menu").forEach((menu) => {
     const more = menu.parentElement?.querySelector(".card-more");
     if (!more) return;
@@ -270,7 +272,7 @@ export function placeOpenCardMenus() {
     const btn = more.getBoundingClientRect();
     const natural = menu.scrollHeight;
     const below = floor - btn.bottom - 4;
-    const above = btn.top - 4 - gap;
+    const above = btn.top - 4 - ceiling - gap;
     let room = below;
     if (natural > below && above > below) {
       menu.classList.add("drop-up");
